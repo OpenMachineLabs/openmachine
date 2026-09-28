@@ -1,0 +1,35 @@
+# Spec and Survey Index
+
+This is an index, not a second copy of Issue bodies or a product architecture.
+No product Spec is approved by the repository scaffold.
+
+## Spec Issues
+
+| Spec Issue | Binding | Current scope |
+| --- | --- | --- |
+
+No active Spec is registered. Add a real Issue link and approval reference only
+when a maintainer explicitly designates an implementable design. Use
+`direct_issue_contract` for that approved scope; unapproved proposals stay in
+Issues and do not acquire authority from being open or labeled `spec`.
+
+## Survey Issues
+
+| Survey Issue | Evidence or question | Current use |
+| --- | --- | --- |
+
+No Survey is registered. Research and experiments use the same `[SURVEY]`
+workflow. Record the real question while work is open; record supported findings
+and limitations when it concludes. A Survey is evidence, never design approval.
+
+## Maintenance
+
+Keep full bodies and results in their Issues. Do not create empty numbered
+folders, duplicate design documents, or prewritten acceptance receipts.
+Necessary machine-readable attachments may live in `spec/<issue-number>/`;
+product code must not load them. Completed Specs remain design history, while
+current code and tests describe accepted implementation.
+
+Programs are linked from the root README when one exists. Formal Benchmarks
+are found through their prefix and `benchmark` label rather than a second index.
+See [Contributing](../CONTRIBUTING.md) for the workflow and closure rules.
