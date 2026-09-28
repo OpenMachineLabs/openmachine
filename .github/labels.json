@@ -1,0 +1,42 @@
+[
+  {
+    "name": "spec",
+    "color": "5319e7",
+    "description": "A proposed or approved implementation design."
+  },
+  {
+    "name": "research",
+    "color": "0075ca",
+    "description": "Survey, research, experiment, or evidence synthesis."
+  },
+  {
+    "name": "benchmark",
+    "color": "1d76db",
+    "description": "A reproducible comparison under a frozen protocol."
+  },
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "An observed defect in existing behavior."
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "A new capability or a multi-stage program."
+  },
+  {
+    "name": "maintenance",
+    "color": "ededed",
+    "description": "Repository, tooling, or dependency maintenance."
+  },
+  {
+    "name": "documentation",
+    "color": "0052cc",
+    "description": "Documentation and explanation improvements."
+  },
+  {
+    "name": "security",
+    "color": "b60205",
+    "description": "Security hardening; report sensitive details privately."
+  }
+]
