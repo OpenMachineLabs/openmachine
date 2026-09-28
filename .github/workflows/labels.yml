@@ -1,0 +1,49 @@
+name: sync managed labels
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/labels.json, .github/workflows/labels.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: managed-labels
+  cancel-in-progress: false
+
+jobs:
+  labels:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create or update managed labels without deleting others
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from scripts.check_repository import label_errors
+
+          labels = json.loads(Path('.github/labels.json').read_text())
+          errors = label_errors(labels)
+          if errors:
+              raise SystemExit("Invalid managed labels: " + "; ".join(errors))
+          for label in labels:
+              subprocess.run([
+                  'gh', 'label', 'create', label['name'], '--force',
+                  '--repo', os.environ['GH_REPO'], '--color', label['color'],
+                  '--description', label['description'],
+              ], check=True)
+          PYTHON
