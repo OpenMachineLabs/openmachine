@@ -34,7 +34,8 @@ def excluded(path: Path) -> bool:
 
 
 def root_for(config: "Settings", machine: str, workspace: str) -> Path:
-    config.machine(machine)
+    if config.machine(machine).transport != "local":
+        raise Fault("remote_path", "Resolve this workspace through its SSH adapter, not the controller filesystem.")
     item = config.workspaces.get(workspace)
     if item is None or item.machine != machine:
         raise Fault("unknown_workspace", "Select a workspace configured on this machine.")
@@ -70,6 +71,10 @@ def context(cwd: Path) -> dict:
 def inspect(config: "Settings", machine: str, workspace: str, action: str,
             path: str = ".", offset: int = 0, limit: int = 100, *, query: str = "",
             staged: bool = False, expected_snapshot: str = "") -> dict:
+    if config.machine(machine).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, None, machine, "inspect_workspace", workspace=workspace, action=action, path=path,
+                    offset=offset, limit=limit, query=query, staged=staged, expected_snapshot=expected_snapshot)
     root = root_for(config, machine, workspace)
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts or excluded(relative):
@@ -399,6 +404,10 @@ def text_page(raw: bytes, offset: int = 0) -> dict:
 
 def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
                    offset: int = 0, expected_sha256: str = "") -> dict:
+    if config.machine(machine).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, None, machine, "read_workspace_file", workspace=workspace, path=path,
+                    offset=offset, expected_sha256=expected_sha256)
     parts = file_parts(path)
     root = root_for(config, machine, workspace)
     if not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256):
@@ -417,7 +426,10 @@ def write_text_file(config: "Settings", state: Path, machine: str, workspace: st
     # Import locally: execution owns its locks and imports workspace context.
     from openmachine.execution import _lease, private_directory
 
-    config.machine(machine, write=True)
+    if config.machine(machine, write=True).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, state, machine, "write_workspace_file", workspace=workspace, path=path, content=content,
+                    expected_head_sha=expected_head_sha, expected_sha256=expected_sha256)
     parts = file_parts(path)
     if (not re.fullmatch(r"(?:[0-9a-f]{40})?", expected_head_sha)
             or not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256)):

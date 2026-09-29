@@ -15,13 +15,13 @@ dependencies = ["mcp==1.30.0", "pydantic==2.13.5", "uvicorn==0.38.0"]
 openmachine = "openmachine.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["openmachine"]
+packages = ["openmachine", "integrations"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills/openmachine/SKILL.md" = "openmachine/_skills/SKILL.md"
 
 [tool.hatch.build.targets.sdist]
-include = ["/openmachine", "/skills/openmachine", "/pyproject.toml", "/README.md", "/LICENSE"]
+include = ["/openmachine", "/integrations", "/skills/openmachine", "/pyproject.toml", "/README.md", "/LICENSE"]
 
 [tool.hatch.version]
 path = "openmachine/__init__.py"

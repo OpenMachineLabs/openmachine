@@ -4,23 +4,17 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a4` adds explicit text edits, user Skills and durable task checkpoints for
-[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2). It retains the
-minimal GitHub attribution slice from [Spec #6](https://github.com/OpenMachineLabs/openmachine/issues/6).
-This is not a published v0.1.0 release. ChatGPT plans; the package executes explicit
-calls without model APIs, hidden agents, private Brain imports or another agent installation.
+`0.1.0a5` extends the accepted local coding, Skills and task workflow with
+configured Linux SSH machines for [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M3.
+The same workspace/file/execution tools use a thin SSH adapter and a versioned
+standard-library worker. Tasks and Skills stay on the controller; execution
+receipts, logs and locks stay on the target. No model calls, private controller,
+remote MCP daemon or public port is introduced.
 
-The local workflow includes bounded inspection and file editing, native commands,
-tests, original execution receipts, cancellation, rotating logs and cooperative
-workspace/resource locks. Users can configure their own Skill directories and
-save revision-checked task progress separately from process receipts. A checkpoint
-is evidence for deliberate continuation, not automatic recovery of a conversation.
-
-The existing optional GitHub tools create/update configured Issue/PR/comment/review
-bodies using the operator's `gh` identity and provenance rules. SSH, broader GitHub
-collaboration, managed services, update/rollback and release acceptance remain
-separate milestones. Actual refreshed ChatGPT and cross-conversation acceptance
-must be recorded in the PR/Spec; local SDK tests alone do not establish them.
+The optional GitHub body/provenance slice remains unchanged. Complete GitHub
+collaboration, managed services, update/rollback, production transition and
+v0.1.0 release acceptance remain separate. A source merge or local SDK pass does
+not establish actual ChatGPT/SSH acceptance; the PR/Spec records that evidence.
 
 ## Install
 
@@ -31,11 +25,11 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a4-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a5-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
-The wheel includes only the core package and bundled Skill, not tests, private
+The wheel includes the core, direct adapters and bundled Skill, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a
 source-checkout import. The baseline is MCP SDK 1.30.0, Pydantic 2.13.5, Uvicorn
 0.38.0 and Hatchling 1.27.0 for building. See [requirements.lock](requirements.lock)
@@ -55,11 +49,11 @@ Default configuration: `~/.config/openmachine/config.toml`. Private state:
 `~/.local/state/openmachine/`. Global `--config` and `--state-dir` options go
 before the subcommand. `init` creates mode-0600 configuration without overwriting
 files and leaves execution **disabled**. Explicitly set `execution_enabled = true`
-for a local machine only when native account access is intended. Restart this
+for a machine only when native account access is intended. Restart this
 service after changing configuration.
 
 Machine/workspace names are operator-owned; see [examples/config.toml](examples/config.toml).
-Only local machine transport is accepted here. Optional `[github]` configuration lists
+Local and explicitly configured SSH transports are supported. Optional `[github]` configuration lists
 exact repositories enabled for the dedicated collaboration tools. Omit `attribution` for
 the default policy (public repositories on, private repositories off), or set it explicitly
 to `true` / `false`. Open Machine uses the existing `gh` login and stores no GitHub token.
@@ -173,8 +167,8 @@ normal completion wins over a later cancellation. Cancellation/timeout clean up
 the owned process group, not arbitrary PIDs or independent services, and do not
 undo previous side effects. Graceful worker interruption is distinct from failed,
 timed-out and cancelled work. Intentionally detached processes, host reboot,
-sleep, disk loss and session teardown are not recovery promises. Linux user-scope
-and remote-session guarantees remain later SSH/service acceptance, not this slice.
+sleep, disk loss and session teardown are not recovery promises. Local execution retains this process-group contract; configured SSH execution uses
+the target user-scope lifecycle described below.
 
 Output rotates through **four 1 MiB segments** without stopping the command.
 Readers use absolute byte offsets across rotations; expired offsets report
@@ -223,6 +217,86 @@ mandatory editor fencing is promised by this increment.
 write/destructive/idempotence annotations describe actual effects; they do not
 replace platform approval or guarantee fewer OpenAI blocks. Never disguise or
 reroute a refused operation to evade its checks.
+
+## Configured SSH machines
+
+The first SSH target baseline is Linux, Python 3.12+ available as `python3`, Git,
+and a reachable systemd 255+ user manager. The controller uses system OpenSSH and
+the operator's existing SSH configuration, authentication and verified host keys.
+It requests no interactive password, forwards no agent, installs no OS service,
+and never changes host keys, privileges, user-session policy or network routes.
+A missing prerequisite is an error, not a local or privileged fallback.
+
+Prepare one immutable worker explicitly from the installed controller package:
+
+```sh
+openmachine worker-bundle --directory ./workers
+```
+
+The returned `<sha256>.pyz` contains only the existing execution, workspace, log
+and error owners plus the thin SSH entry, using Python's standard library. Copy
+that exact artifact to an operator-selected versioned directory on the target
+using your authorized provisioning workflow. Keep its checksum filename and
+verify the copied SHA256. Never overwrite a worker still used by an execution.
+There is no installation or upload hidden inside ordinary tools or `doctor`.
+
+Add a target with execution disabled, the existing SSH alias and the real archive
+path. The checksum below is synthetic; replace it with the returned filename:
+
+```toml
+[machines.build]
+transport = "ssh"
+ssh_alias = "my-build-host"
+ssh_worker = "/home/alex/.local/share/openmachine/workers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"
+execution_enabled = false
+
+[workspaces.remote-project]
+machine = "build"
+root = "/home/alex/project"
+```
+
+Run `openmachine doctor --machine build` to explicitly probe that host. It reports
+Python, user-manager availability, remote directory availability and a hashed
+`target_identity` derived from the host identity, account and canonical account
+home. Initial `identity_verified=false` and a nonzero diagnosis exit are expected.
+After verifying the intended existing SSH identity, explicitly copy the returned
+hash into that machine's `ssh_identity` and enable execution only when intended.
+An identity change rejects the operation before workspace access. Restart the
+controller after configuration changes. Default `doctor` never contacts remote
+hosts or checks remote paths against the controller filesystem.
+
+Use the same MCP tools with `machine="build"`; no second SSH tool family exists.
+File content and command arguments travel as bounded JSON on SSH stdin, not as
+interpolated business shell commands. File/HEAD/hash checks and Git inspection run
+on the target. Tool annotations disclose configured remote access; refresh
+ChatGPT metadata and exercise the affected tools after activation.
+
+Every alias to the same target account uses its canonical account home and one
+fixed remote `~/.local/state/openmachine/` store, not an alias-specific directory.
+Canonical target identities own execution IDs; canonical worktrees and resource
+names own locks. Alternate aliases cannot create a second cooperating writer.
+Controller checkpoints are not copied remotely: a new task-linked start verifies
+the checkpoint on the controller, then stores only its reference remotely.
+Original execution lookup does not depend on a surviving controller checkpoint.
+
+Each execution worker enters its own transient user scope and retains its exact
+archive version. SSH disconnects and controller restarts do not own its lifetime.
+Cancellation and normal completion clean the entire owned scope, including
+children that changed process groups. A durable process receipt is reported as
+`finishing` until scope cleanup is observed; a missing user manager is unknown,
+not success. Reads never stop units. Reissuing cancellation can request cleanup
+of a finishing owned scope. Scope lifetime is bounded by the command timeout
+plus 30 seconds, with a two-second systemd stop bound. These are owned scopes,
+not a scheduler or installed background agent.
+
+New remote receipts use format 3 so older runtimes reject rather than misread
+the scope-cleanup contract. Existing local format-1/2 receipts remain readable;
+local writes retain format 2. This is not managed update or downgrade support.
+Preserve original archives, receipts and target state. Account-session teardown,
+reboot, disk loss, arbitrary same-account tampering and deliberately moving a
+process out of its cgroup are not recovery guarantees. Native access and locks
+remain a trusted single-operator contract, not a sandbox or multi-controller
+security boundary.
 
 ## User Skills
 

@@ -72,6 +72,27 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with streamable_http_client("http://localhost/mcp", http_client=client) as streams:
                 yield streams
 
+    async def test_ssh_metadata_and_local_independence(self):
+        self.stop(self.processes[0])
+        with self.config.open("a") as output:
+            output.write('\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\n'
+                         'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n'
+                         '[workspaces.remote]\nmachine="build"\nroot="/remote/not-on-controller"\n')
+        self.launch()
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                tools = {item.name: item for item in (await session.list_tools()).tools}
+                self.assertTrue(tools["read_workspace_file"].annotations.openWorldHint)
+                self.assertTrue(tools["write_workspace_file"].annotations.openWorldHint)
+                self.assertFalse(tools["save_task"].annotations.openWorldHint)
+                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                self.assertIn("ssh", caps["integrations"])
+                denied = await session.call_tool("read_workspace_file", {"machine": "build", "workspace_name": "remote", "path": "x"})
+                self.assertEqual(denied.structuredContent["error"]["code"], "identity_required")
+                local = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example", "action": "read", "path": "AGENTS.md"})
+                self.assertFalse(local.isError)
+
     async def test_installed_package_discovery_and_socket_permissions(self):
         self.assertTrue(Path(openmachine.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()))
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)

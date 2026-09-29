@@ -50,6 +50,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     # The pinned FastMCP constructor does not expose the low-level version field.
     mcp._mcp_server.version = __version__
 
+    has_ssh = any(item.transport == "ssh" for item in config.machines.values())
+    machine_read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=has_ssh)
+    file_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=has_ssh)
+
     @mcp.tool(annotations=READ, structured_output=False)
     def get_capabilities() -> CallToolResult:
         """Report implemented limits and configured targets, not live health or future features."""
@@ -58,7 +62,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "machines": {name: {**item.model_dump(), "probe_status": "not_probed"} for name, item in config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": config.skills.roots, "task_continuity": True,
-            "integrations": ["github"] if config.github is not None else [],
+            "integrations": (["github"] if config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if config.github is None else {"repositories": config.github.repositories,
                                                            "attribution": config.github.attribution},
             "transport": "private_unix_socket",
@@ -72,7 +76,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         })
 
-    @mcp.tool(annotations=READ, structured_output=False)
+    @mcp.tool(annotations=machine_read, structured_output=False)
     def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
                           path: str = ".", offset: Annotated[int, Field(ge=0)] = 0,
                           limit: Annotated[int, Field(ge=1, le=200)] = 100, query: str = "",
@@ -88,19 +92,19 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         """Read the bundled Skill or explicit user sources. Select exact discovered identities, not names. Sources are a Skill directory or a collection of immediate Skill directories, including whole-directory links. Resource reads never execute scripts or escape the selected Skill. Follow pages/snapshots and warnings; empty skill with action=read selects the bundled operating Skill."""
         return _reply(lambda: skills.inspect(config, action, skill, path, query, offset, limit, expected_snapshot))
 
-    @mcp.tool(annotations=READ, structured_output=False)
+    @mcp.tool(annotations=machine_read, structured_output=False)
     def read_workspace_file(machine: str, workspace_name: str, path: str,
                             offset: Annotated[int, Field(ge=0, le=131072)] = 0,
                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
-        """Read one configured-workspace text file, including untracked source, with whole-file SHA256, Git context and explicit absence. Follow next_offset and echo expected_sha256 until has_more=false; never overwrite a file from partial/redacted text. Bounded UTF-8 pages; no writes, execution or external access."""
+        """Read one configured-workspace text file, including untracked source, with whole-file SHA256, Git context and explicit absence. Follow next_offset and echo expected_sha256 until has_more=false; never overwrite a file from partial/redacted text. Bounded UTF-8 pages; no writes or submitted-content execution. Configured SSH workspaces are read on their pinned remote target."""
         return _reply(lambda: workspace.read_text_file(config, machine, workspace_name, path, offset, expected_sha256))
 
-    @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
+    @mcp.tool(annotations=file_write, structured_output=False)
     def write_workspace_file(machine: str, workspace_name: str, path: str,
                              content: Annotated[str, Field(max_length=131072)],
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]) -> CallToolResult:
-        """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, script execution, deletion, parent creation, permission-change interface or network. Read back any unknown outcome; platform approval remains independent."""
+        """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, submitted-content execution, deletion, parent creation or permission-change interface. Configured SSH writes use the pinned target and its own preconditions and locks. Read back any unknown outcome; platform approval remains independent."""
         return _reply(lambda: workspace.write_text_file(config, state, machine, workspace_name, path, content,
                                                         expected_head_sha, expected_sha256))
 
@@ -135,13 +139,13 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         return _reply(lambda: execution.start(config, state, machine, execution_id, cwd, argv,
                                               timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id))
 
-    @mcp.tool(annotations=READ, structured_output=False)
+    @mcp.tool(annotations=machine_read, structured_output=False)
     def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
                        max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536) -> CallToolResult:
-        """Read the original receipt and bounded output. Missing worker evidence is unknown, never success or permission to retry."""
+        """Read the original local or remote receipt and bounded output. finishing means remote scope cleanup is pending. Unreachable targets or missing worker evidence are unknown, never success or permission to retry."""
         return _reply(lambda: execution.read(config, state, machine, execution_id, offset, max_bytes))
 
-    @mcp.tool(annotations=READ, structured_output=False)
+    @mcp.tool(annotations=machine_read, structured_output=False)
     def list_executions(machine: str, cursor: str = "",
                         limit: Annotated[int, Field(ge=1, le=100)] = 20) -> CallToolResult:
         """Find original execution IDs in stable ID order. Follow next_cursor and unreadable records; this is not task recovery."""

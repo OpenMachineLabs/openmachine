@@ -17,3 +17,14 @@ root = "/absolute/path/to/your/project"
 # Optional explicit Skill sources; the empty default does not scan user accounts.
 [skills]
 roots = []
+
+# Optional Linux SSH target. Prepare the worker explicitly and replace its checksum.
+# Probe with doctor --machine build, verify the target, then pin ssh_identity.
+# [machines.build]
+# transport = "ssh"
+# ssh_alias = "my-build-host"
+# ssh_worker = "/home/alex/.local/share/openmachine/workers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"
+# execution_enabled = false
+# [workspaces.remote-project]
+# machine = "build"
+# root = "/home/alex/project"

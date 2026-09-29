@@ -61,5 +61,20 @@ current facts and authority rather than claiming hidden-context recovery. Read
 updated user Skills on demand without reinstalling. Preserve old execution receipts
 and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
-through OpenAI and redaction is best effort. SSH, managed upgrades, autonomous
-resume and automatic recovery after worker/host loss remain outside this increment.
+through OpenAI and redaction is best effort. Managed upgrades, autonomous resume
+and automatic recovery after worker/host loss remain outside this increment.
+
+For SSH work, select only a configured, identity-pinned machine. Read remote
+instructions and files through the same tools; never resolve its paths on the
+controller or substitute a local command. Use the selected remote project's
+interpreter. Native account permissions remain explicit; unavailable SSH/Python/
+user scopes or changed identity require diagnosis, not a fallback or privilege
+change. Worker preparation is explicit, never hidden in reads or execution.
+
+Remote receipts/logs/locks belong to the target; checkpoints and user Skills stay
+on the controller. Preserve the original target identity, execution ID and worker
+archive when reconnecting. `finishing` means scope cleanup is not yet confirmed;
+an unreachable host or missing scope evidence is unknown. Read the same ID, never
+relaunch completed work. Alternate aliases share the target's canonical state and
+worktree locks. Do not install, update or remove another task's worker/runtime to
+make a check pass.
