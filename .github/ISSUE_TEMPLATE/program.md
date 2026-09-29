@@ -2,7 +2,7 @@
 name: "Program"
 about: "Organize a real multi-stage goal without approving architecture."
 title: "[Program] Name the program"
-labels: "enhancement"
+labels: "feature"
 ---
 
 ## Classification
@@ -21,7 +21,7 @@ Define the overall result without claiming unimplemented functionality.
 - Non-goals:
 
 ## Project metadata
-- Primary label: enhancement
+- Primary label: feature
 - Project: not configured, unless explicitly assigned
 
 ## Acceptance

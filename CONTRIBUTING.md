@@ -77,8 +77,9 @@ as part of an ordinary code change.
 
 [labels.json](.github/labels.json) defines the small managed label set. Use one
 primary type label per Issue or PR: `spec`, `research`, `benchmark`, `bug`,
-`enhancement`, `maintenance`, `documentation`, or `security`. Surveys, including
-experiments, use `research`; Programs use `enhancement`. Labels classify work;
+`implementation`, `feature`, `maintenance`, `documentation`, or `security`. Surveys,
+including experiments, use `research`; implementation increments use `implementation`;
+Programs and ordinary feature requests use `feature`. Labels classify work;
 they do not imply approval or completion. Check the live label during review.
 
 The label workflow creates or updates only these managed labels after the
