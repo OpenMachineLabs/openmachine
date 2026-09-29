@@ -364,7 +364,7 @@ def _gate(repository: str, number: int, head: str, base: str = "") -> dict:
 
 def _file(repository: str, ref: str, path: str, offset: int) -> dict:
     if (not re.fullmatch(SHA, ref) or not path or path.startswith("/") or "\\" in path or "\0" in path
-            or any(part in {"", ".", ".."} for part in path.split("/")) or excluded(Path(path))):
+            or any(part in {"", ".", ".."} for part in path.split("/")) or excluded(Path(path.casefold()))):
         raise Fault("invalid_github_request", "File reads require an exact commit SHA and relative non-credential text path.")
     commit = _object(_api("GET", f"repos/{repository}/commits/{ref}"))
     if commit.get("sha") != ref:
@@ -576,6 +576,8 @@ def issue(settings: Settings, action: Literal["create", "update"], repository: s
     if action != "update" or number < 1:
         raise Fault("invalid_github_request", "Updating an Issue requires its positive number.")
     current = _object(_api("GET", f"{root}/{number}"))
+    if "pull_request" in current:
+        raise Fault("github_wrong_object_type", "This number is a Pull Request; use github_pull_request with its candidate checks.")
     payload = _update_fields(current, title, body, state, expected_updated_at)
     return _mutate(repository, "PATCH", f"{root}/{number}", payload, lambda _: f"{root}/{number}", settings=settings, actor=actor)
 

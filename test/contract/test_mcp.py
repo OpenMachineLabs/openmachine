@@ -174,6 +174,39 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("local-still-usable", observed.structuredContent["output"])
             self.stop(process)
 
+    async def test_github_typed_boundaries_before_dispatch(self):
+        self.stop(self.processes[-1])
+        binaries = self.root / "synthetic-gh"
+        binaries.mkdir()
+        calls = self.root / "github-calls.jsonl"
+        responses = {"user": {"id": 1, "login": "Operator"},
+                     "repos/Example/repo": {"id": 1, "full_name": "Example/repo"},
+                     "repos/Example/repo/issues/2": {"id": 2, "number": 2, "pull_request": {}}}
+        command = binaries / "gh"
+        command.write_text(f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\n"
+                           "method = sys.argv[sys.argv.index('--method') + 1]\n"
+                           f"with Path({str(calls)!r}).open('a') as log:\n"
+                           "    log.write(json.dumps([method, sys.argv[-1]]) + '\\n')\n"
+                           "assert method == 'GET', 'Unexpected mutation'\n"
+                           f"print(json.dumps({responses!r}[sys.argv[-1]]))\n")
+        command.chmod(0o700)
+        self.launch(dict(os.environ, PATH=str(binaries)))
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("github_issue", {
+                    "action": "update", "repository": "Example/repo", "number": 2, "state": "closed"})
+                self.assertTrue(result.isError)
+                self.assertEqual(result.structuredContent["error"]["code"], "github_wrong_object_type")
+                for path in (".ENV", "Secrets.toml", "ID_RSA", "config/.EnV.local"):
+                    result = await session.call_tool("github_read", {
+                        "action": "file", "repository": "Example/repo", "ref": "a" * 40, "path": path})
+                    self.assertTrue(result.isError)
+                    self.assertEqual(result.structuredContent["error"]["code"], "invalid_github_request")
+        observed = [json.loads(line) for line in calls.read_text().splitlines()]
+        self.assertTrue(observed)
+        self.assertTrue(all(method == "GET" and endpoint in responses for method, endpoint in observed))
+
     async def test_real_write_survives_service_restart_and_is_not_replayed(self):
         execution_id = uuid.uuid4().hex
         request = {"machine": "desktop", "execution_id": execution_id, "cwd": str(self.work),

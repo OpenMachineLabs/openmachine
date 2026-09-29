@@ -192,6 +192,13 @@ class GitHubTests(unittest.TestCase):
             github.issue(settings(), "update", REPO, None, None, number=1, state="closed", expected_updated_at=STAMP)
             self.assertEqual(mutate.call_args.args[3], {"state": "closed"})
 
+    def test_issue_update_rejects_pull_request_before_mutation(self):
+        self.issue_value["pull_request"] = {"url": "https://api.github.com/repos/Owner/repo/pulls/1"}
+        with patch.object(github, "_mutate") as mutate:
+            self.assert_fault("github_wrong_object_type", github.issue, settings(), "update", REPO,
+                              None, None, number=1, state="closed", expected_updated_at=STAMP)
+            mutate.assert_not_called()
+
     def test_readback_verifies_all_fields_review_commit_and_actor(self):
         cases = [({"title": "new", "body": "same"}, {"title": "old", "body": "same"}),
                  ({"state": "closed"}, {"state": "open"}),
@@ -355,7 +362,8 @@ class GitHubTests(unittest.TestCase):
             self.assertEqual(api.call_count, 2)
         with patch.object(github, "_api") as api:
             self.assert_fault("invalid_github_request", github._file, REPO, HEAD, "../code.py", 0)
-            self.assert_fault("invalid_github_request", github._file, REPO, HEAD, ".env", 0)
+            for path in (".env", ".ENV", "Secrets.toml", "ID_RSA", "config/.EnV.local"):
+                self.assert_fault("invalid_github_request", github._file, REPO, HEAD, path, 0)
             api.assert_not_called()
 
     def test_transport_diagnostics_are_bounded_and_do_not_expose_credentials(self):
