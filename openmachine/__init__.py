@@ -1,3 +1,3 @@
-"""Open Machine's local coding runtime."""
+"""Open Machine runtime."""
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"

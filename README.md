@@ -4,9 +4,10 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a2` is the local coding workflow increment of [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2),
-not the completed or published v0.1.0 release. ChatGPT plans; this package executes
-explicit calls. There are no model API calls, hidden agents, private Brain imports,
+`0.1.0a3` adds the minimal GitHub attribution slice from [Spec #6](https://github.com/OpenMachineLabs/openmachine/issues/6)
+on top of the accepted local coding workflow in [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2).
+It is not the completed or published v0.1.0 release. ChatGPT plans; this package
+executes explicit calls. There are no model API calls, hidden agents, private Brain imports,
 Codex workers or organization-specific settings.
 
 Implemented: an independently installable Python package, safe configuration,
@@ -14,9 +15,15 @@ Implemented: an independently installable Python package, safe configuration,
 bounded local search and Git status/diff, durable local execution, cancellation,
 execution lookup, rotating logs, and cooperative workspace/resource locks.
 
-Deferred: task checkpoints, user Skill roots, SSH/GitHub adapters, and managed service
-installation/update/rollback. No empty adapter or future-feature modules are
-shipped. Real ChatGPT/Tunnel acceptance is a separate account-bound gate; local
+Implemented GitHub scope is deliberately narrow: configured repositories may create or
+update Issues, Pull Requests, top-level comments and review summaries through the
+operator's existing `gh` login. The adapter adds the minimal Open Machine provenance
+footer at this boundary and verifies the stored body by readback. Branch/commit/push/merge
+GitHub workflows remain deferred.
+
+Deferred: task checkpoints, user Skill roots, SSH, broader GitHub collaboration, and
+managed service installation/update/rollback. No empty adapter or future-feature modules
+are shipped. Real ChatGPT/Tunnel acceptance is a separate account-bound gate; local
 tests do not establish it.
 
 ## Install
@@ -28,7 +35,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a2-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a3-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -56,8 +63,11 @@ for a local machine only when native account access is intended. Restart this
 service after changing configuration.
 
 Machine/workspace names are operator-owned; see [examples/config.toml](examples/config.toml).
-Only local transport is accepted here. Unknown fields and future adapter
-settings are rejected, not ignored. `doctor` checks configuration and directory
+Only local machine transport is accepted here. Optional `[github]` configuration lists
+exact repositories enabled for the dedicated collaboration tools. Omit `attribution` for
+the default policy (public repositories on, private repositories off), or set it explicitly
+to `true` / `false`. Open Machine uses the existing `gh` login and stores no GitHub token.
+Unknown fields are rejected, not ignored. `doctor` checks configuration and directory
 existence, not effective file access, service readiness, tunnels or ChatGPT.
 Verify an actual file read through MCP before calling an environment ready.
 
@@ -100,6 +110,10 @@ change. A socket or a tool list does not prove that write tools work.
 | `read_execution` | Original machine/ID and absolute byte offset; observed state, exit code, context, bounded output and next offset. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
+| `github_issue` | Conditional on `[github]`; create/update an enabled Issue, preserving existing Open Machine attribution on edits. |
+| `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request with Created via attribution on eligible new artifacts. |
+| `github_comment` | Conditional on `[github]`; create/update a top-level Issue/PR comment with Posted via attribution on eligible new posts. |
+| `github_review` | Conditional on `[github]`; create an exact-HEAD review summary or update its body; inline review comments are not decorated. |
 
 From ChatGPT, read capabilities, the operating Skill and the disposable project's
 `AGENTS.md`. Inspect Git status, search and read the relevant source. Use an

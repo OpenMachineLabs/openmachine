@@ -16,7 +16,7 @@ from mcp.types import CallToolRequest, CallToolResult, TextContent, ToolAnnotati
 from pydantic import Field
 import uvicorn
 
-from openmachine import __version__, execution, workspace
+from openmachine import __version__, execution, github, workspace
 from openmachine.config import Settings
 from openmachine.sanitize import Fault
 
@@ -57,7 +57,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "version": __version__, "configuration_sha256": hashlib.sha256(config.model_dump_json().encode()).hexdigest(),
             "machines": {name: {**item.model_dump(), "probe_status": "not_probed"} for name, item in config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in config.workspaces.items()},
-            "skills": ["openmachine"], "integrations": [], "transport": "private_unix_socket",
+            "skills": ["openmachine"], "integrations": ["github"] if config.github is not None else [],
+            "github": None if config.github is None else {"repositories": config.github.repositories,
+                                                           "attribution": config.github.attribution},
+            "transport": "private_unix_socket",
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
@@ -114,6 +117,35 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
         return _reply(lambda: execution.cancel(config, state, machine, execution_id))
+
+    if config.github is not None:
+        @mcp.tool(annotations=WRITE, structured_output=False)
+        def github_issue(action: Literal["create", "update"], repository: str, title: str | None = None,
+                         body: str | None = None, number: Annotated[int, Field(ge=0)] = 0) -> CallToolResult:
+            """Create or update an enabled GitHub Issue. New public artifacts get the configured Open Machine provenance footer."""
+            return _reply(lambda: github.issue(config, action, repository, title, body, number))
+
+        @mcp.tool(annotations=WRITE, structured_output=False)
+        def github_pull_request(action: Literal["create", "update"], repository: str, title: str | None = None,
+                                body: str | None = None, number: Annotated[int, Field(ge=0)] = 0,
+                                head: str = "", base: str = "", draft: bool = False) -> CallToolResult:
+            """Create or update an enabled GitHub Pull Request with readback-verified body attribution."""
+            return _reply(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft))
+
+        @mcp.tool(annotations=WRITE, structured_output=False)
+        def github_comment(action: Literal["create", "update"], repository: str, body: str,
+                           number: Annotated[int, Field(ge=0)] = 0,
+                           comment_id: Annotated[int, Field(ge=0)] = 0) -> CallToolResult:
+            """Create or update a top-level GitHub conversation comment. Inline review comments are outside this tool."""
+            return _reply(lambda: github.comment(config, action, repository, body, number, comment_id))
+
+        @mcp.tool(annotations=WRITE, structured_output=False)
+        def github_review(action: Literal["create", "update"], repository: str, body: str,
+                          number: Annotated[int, Field(ge=0)] = 0, review_id: Annotated[int, Field(ge=0)] = 0,
+                          expected_head_sha: str = "",
+                          event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT") -> CallToolResult:
+            """Create a HEAD-bound review summary or update its body. Inline comments are never decorated here."""
+            return _reply(lambda: github.review(config, action, repository, body, number, review_id, expected_head_sha, event))
 
     sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
 
