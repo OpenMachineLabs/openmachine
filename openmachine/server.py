@@ -1,4 +1,4 @@
-"""Five explicit tools on a private Unix-socket Streamable HTTP service."""
+"""Seven explicit tools on a private Unix-socket Streamable HTTP service."""
 
 import hashlib
 from importlib.resources import files
@@ -58,17 +58,22 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "machines": {name: {**item.model_dump(), "probe_status": "not_probed"} for name, item in config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in config.workspaces.items()},
             "skills": ["openmachine"], "integrations": [], "transport": "private_unix_socket",
-            "limits": {"max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
-                       "log_bytes": execution.MAX_LOG, "log_retention": "prefix_only", "workspace_access": "exclusive"},
+            "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
+                       "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
+                       "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
+                       "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": workspace.MAX_SCAN_ENTRIES,
+                       "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         })
 
     @mcp.tool(annotations=READ, structured_output=False)
-    def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read"],
+    def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
                           path: str = ".", offset: Annotated[int, Field(ge=0)] = 0,
-                          limit: Annotated[int, Field(ge=1, le=200)] = 100) -> CallToolResult:
-        """List configured local files or read up to 64 KiB by byte offset; exclude credential paths."""
-        return _reply(lambda: workspace.inspect(config, machine, workspace_name, action, path, offset, limit))
+                          limit: Annotated[int, Field(ge=1, le=200)] = 100, query: str = "",
+                          staged: bool = False, expected_snapshot: str = "") -> CallToolResult:
+        """Read files, literal-search, or inspect Git status/diff. Echo snapshot between pages; heed skipped/truncated results."""
+        return _reply(lambda: workspace.inspect(config, machine, workspace_name, action, path, offset, limit,
+                                                 query=query, staged=staged, expected_snapshot=expected_snapshot))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def inspect_skills(action: Literal["list", "read"] = "list") -> CallToolResult:
@@ -86,17 +91,29 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     @mcp.tool(annotations=WRITE, structured_output=False)
     def start_execution(machine: str, execution_id: str, cwd: str,
                         argv: Annotated[list[str], Field(min_length=1, max_length=100)],
-                        timeout_seconds: Annotated[int, Field(ge=1, le=600)] = 600,
-                        expected_head_sha: str = "") -> CallToolResult:
+                        timeout_seconds: Annotated[int, Field(ge=1, le=execution.MAX_TIMEOUT)] = execution.DEFAULT_TIMEOUT,
+                        expected_head_sha: str = "", workspace_access: Literal["exclusive", "shared"] = "exclusive",
+                        resource_keys: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
         """Start one explicitly authorized native command. Retain its ID before launch and query that ID after uncertainty."""
         return _reply(lambda: execution.start(config, state, machine, execution_id, cwd, argv,
-                                              timeout_seconds, expected_head_sha))
+                                              timeout_seconds, expected_head_sha, workspace_access, resource_keys))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
                        max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536) -> CallToolResult:
         """Read the original receipt and bounded output. Missing worker evidence is unknown, never success or permission to retry."""
         return _reply(lambda: execution.read(config, state, machine, execution_id, offset, max_bytes))
+
+    @mcp.tool(annotations=READ, structured_output=False)
+    def list_executions(machine: str, cursor: str = "",
+                        limit: Annotated[int, Field(ge=1, le=100)] = 20) -> CallToolResult:
+        """Find original execution IDs in stable ID order. Follow next_cursor and unreadable records; this is not task recovery."""
+        return _reply(lambda: execution.list_records(config, state, machine, cursor, limit))
+
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
+        """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
+        return _reply(lambda: execution.cancel(config, state, machine, execution_id))
 
     sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
 
