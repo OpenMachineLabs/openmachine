@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import signal
 import sys
 from typing import Annotated, Literal
@@ -15,7 +16,7 @@ from mcp.types import CallToolRequest, CallToolResult, TextContent, ToolAnnotati
 from pydantic import Field
 import uvicorn
 
-from openmachine import __version__, execution, github, skills, tasks, workspace
+from openmachine import __version__, execution, github, service, skills, tasks, workspace
 from openmachine.config import Settings
 from openmachine.sanitize import Fault
 
@@ -52,6 +53,15 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     # The pinned FastMCP constructor does not expose the low-level version field.
     mcp._mcp_server.version = __version__
 
+    execution.private_directory(state / "locks")
+
+    def mutate(operation) -> CallToolResult:
+        def locked():
+            with execution._lease(state / "locks/lifecycle.lock", shared=True):
+                service.guard_writes(state)
+                return operation()
+        return _reply(locked)
+
     has_ssh = any(item.transport == "ssh" for item in config.machines.values())
     machine_read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=has_ssh)
     file_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=has_ssh)
@@ -68,6 +78,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "github": None if config.github is None else {**config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "transport": "private_unix_socket",
+            "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
@@ -107,7 +118,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]) -> CallToolResult:
         """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, submitted-content execution, deletion, parent creation or permission-change interface. Configured SSH writes use the pinned target and its own preconditions and locks. Read back any unknown outcome; platform approval remains independent."""
-        return _reply(lambda: workspace.write_text_file(config, state, machine, workspace_name, path, content,
+        return mutate(lambda: workspace.write_text_file(config, state, machine, workspace_name, path, content,
                                                         expected_head_sha, expected_sha256))
 
     @mcp.tool(annotations=READ, structured_output=False)
@@ -129,7 +140,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                   body: Annotated[str, Field(min_length=1, max_length=32768)],
                   anchors: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
         """Save one private material checkpoint and lookup metadata. Expected revision zero creates; updates compare the observed revision under a store lock. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Lookup anchors are additive; omitting them preserves prior references. Keep goals, authority references, original executions, evidence and next action, not credentials, transcripts or hidden reasoning. No code execution, external publication or automatic resume. Torn two-file saves are reported, not silently repaired."""
-        return _reply(lambda: tasks.save(state, task_id, expected_revision, title, body, anchors))
+        return mutate(lambda: tasks.save(state, task_id, expected_revision, title, body, anchors))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     def start_execution(machine: str, execution_id: str, cwd: str,
@@ -138,7 +149,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                         expected_head_sha: str = "", workspace_access: Literal["exclusive", "shared"] = "exclusive",
                         resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "") -> CallToolResult:
         """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return _reply(lambda: execution.start(config, state, machine, execution_id, cwd, argv,
+        return mutate(lambda: execution.start(config, state, machine, execution_id, cwd, argv,
                                               timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
@@ -156,7 +167,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     @mcp.tool(annotations=WRITE, structured_output=False)
     def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
-        return _reply(lambda: execution.cancel(config, state, machine, execution_id))
+        return mutate(lambda: execution.cancel(config, state, machine, execution_id))
 
     if config.github is not None:
         @mcp.tool(annotations=GITHUB_READ, structured_output=False)
@@ -176,7 +187,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                          number: Annotated[int, Field(ge=0)] = 0,
                          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "") -> CallToolResult:
             """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
-            return _reply(lambda: github.issue(config, action, repository, title, body, number, state, expected_updated_at))
+            return mutate(lambda: github.issue(config, action, repository, title, body, number, state, expected_updated_at))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_pull_request(action: Literal["create", "update"], repository: str,
@@ -187,7 +198,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                                 state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                                 expected_head_sha: str = "") -> CallToolResult:
             """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
-            return _reply(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft,
+            return mutate(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft,
                                                       state, expected_updated_at, expected_head_sha))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
@@ -195,7 +206,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                            body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
                            comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "") -> CallToolResult:
             """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. updated_at detects an observed edit conflict without promising atomic CAS."""
-            return _reply(lambda: github.comment(config, action, repository, body, number, comment_id, expected_updated_at))
+            return mutate(lambda: github.comment(config, action, repository, body, number, comment_id, expected_updated_at))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_review(action: Literal["create", "update"], repository: str,
@@ -204,7 +215,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                           expected_head_sha: str = "",
                           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT") -> CallToolResult:
             """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. Uncertain writes require original-review readback, never blind retry."""
-            return _reply(lambda: github.review(config, action, repository, body, number, review_id, expected_head_sha, event))
+            return mutate(lambda: github.review(config, action, repository, body, number, review_id, expected_head_sha, event))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_merge(repository: str, number: Annotated[int, Field(ge=1)],
@@ -213,7 +224,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                          commit_title: Annotated[str, Field(max_length=256)] = "",
                          commit_message: Annotated[str, Field(max_length=60000)] = "") -> CallToolResult:
             """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
-            return _reply(lambda: github.merge(config, repository, number, expected_head_sha, expected_base_sha,
+            return mutate(lambda: github.merge(config, repository, number, expected_head_sha, expected_base_sha,
                                                method, commit_title, commit_message))
 
     sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
@@ -233,11 +244,21 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     return mcp
 
 
-def serve(config: Settings, state: Path) -> None:
+def serve(config: Settings, state: Path, *, managed: bool = False) -> None:
     state = execution.private_directory(state)
     path = state / "mcp.sock"
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
-        # bind fails on an occupied/stale path; never unlink another listener.
+    locks = execution.private_directory(state / "locks")
+    with execution._lease(locks / "listener.lock"), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        if managed and os.path.lexists(path):
+            identity = path.lstat()
+            if (not stat.S_ISSOCK(identity.st_mode) or identity.st_uid != os.getuid()
+                    or identity.st_mode & 0o077 or service._live_socket(path)):
+                raise Fault("socket_in_use", "The existing socket is live or has unknown ownership; it was not replaced.")
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise Fault("socket_changed", "The listener changed during recovery; it was not removed.")
+            path.unlink()
+        # Manual serve still refuses stale paths. The lease coordinates current servers.
         listener.bind(str(path))
         identity = path.stat()
         os.chmod(path, 0o600)
