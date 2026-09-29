@@ -2,7 +2,7 @@
 
 ## Scope and authority
 
-Open Machine implements the approved PR1 local runtime slice indexed in
+Open Machine implements the approved local runtime increments indexed in
 `spec/README.md`. Do not expand architecture, integrations or deployment as a
 side effect of repository maintenance. Keep all tests under root `test/`; add
 only responsibility groups that contain real checks.

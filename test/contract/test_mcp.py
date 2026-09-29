@@ -79,10 +79,13 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 init = await session.initialize()
                 self.assertEqual(init.serverInfo.version, openmachine.__version__)
                 tools = {t.name: t for t in (await session.list_tools()).tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
+                self.assertFalse(tools["cancel_execution"].annotations.readOnlyHint)
+                timeout = tools["start_execution"].inputSchema["properties"]["timeout_seconds"]
+                self.assertEqual((timeout["default"], timeout["maximum"]), (600, 86400))
                 caps = (await session.call_tool("get_capabilities", {})).structuredContent
                 self.assertEqual(caps["machines"]["desktop"]["probe_status"], "not_probed")
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
@@ -169,6 +172,86 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 self.assertFalse((await session.call_tool("get_capabilities", {})).isError)
+
+
+    async def test_complete_coding_workflow_uses_real_mcp_tools(self):
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.work), *args], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        (self.work / "calculator.py").write_text("def add(a, b):\n    return a - b\n")
+        (self.work / "test_calculator.py").write_text(
+            "import unittest\nfrom calculator import add\nclass Addition(unittest.TestCase):\n"
+            "    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n")
+        git("add", "AGENTS.md", "calculator.py", "test_calculator.py")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+        head = git("rev-parse", "HEAD")
+        (self.work / "unrelated.txt").write_text("preserve this existing work\n")
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                scope = {"machine": "desktop", "workspace_name": "example"}
+                rules = await session.call_tool("inspect_workspace", {**scope, "action": "read", "path": "AGENTS.md"})
+                self.assertIn("disposable", rules.structuredContent["text"])
+                before = await session.call_tool("inspect_workspace", {**scope, "action": "status"})
+                self.assertEqual(before.structuredContent["context"]["head_sha"], head)
+                found = await session.call_tool("inspect_workspace", {**scope, "action": "search", "query": "return a - b"})
+                self.assertEqual(found.structuredContent["matches"][0]["path"], "calculator.py")
+                commands = [
+                    [sys.executable, "-c", 'from pathlib import Path; p=Path("calculator.py"); s=p.read_text(); assert s.count("return a - b")==1; p.write_text(s.replace("return a - b", "return a + b"))'],
+                    [sys.executable, "-m", "unittest", "discover", "-p", "test_calculator.py"],
+                ]
+                for argv in commands:
+                    execution_id = uuid.uuid4().hex
+                    request = {"machine": "desktop", "execution_id": execution_id, "cwd": str(self.work),
+                               "argv": argv, "expected_head_sha": head}
+                    started = await session.call_tool("start_execution", request)
+                    self.assertFalse(started.isError, started)
+                    for _ in range(100):
+                        result = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})
+                        self.assertFalse(result.isError, result)
+                        if result.structuredContent["status"] in ("succeeded", "failed", "outcome_unknown"):
+                            break
+                        await asyncio.sleep(0.03)
+                    self.assertEqual((result.structuredContent["status"], result.structuredContent["exit_code"]), ("succeeded", 0))
+                self.assertIn("OK", result.structuredContent["output"])
+                diff = await session.call_tool("inspect_workspace", {**scope, "action": "diff", "path": "calculator.py"})
+                self.assertFalse(diff.isError, diff)
+                self.assertIn("+    return a + b", diff.structuredContent["text"])
+                self.assertFalse(diff.structuredContent["truncated"])
+                readback = await session.call_tool("inspect_workspace", {**scope, "action": "read", "path": "calculator.py"})
+                self.assertEqual(readback.structuredContent["text"], "def add(a, b):\n    return a + b\n")
+                self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve this existing work\n")
+                self.assertEqual(git("rev-parse", "HEAD"), head)
+
+    async def test_reconnected_client_finds_and_cancels_original_execution(self):
+        execution_id = uuid.uuid4().hex
+        identity = {"machine": "desktop", "execution_id": execution_id}
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("start_execution", {**identity, "cwd": str(self.work),
+                        "argv": [sys.executable, "-c", 'import time; print("started", flush=True); time.sleep(20)'],
+                        "timeout_seconds": 86400})
+                self.assertFalse(result.isError, result)
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                listing = await session.call_tool("list_executions", {"machine": "desktop"})
+                self.assertEqual(listing.structuredContent["executions"][0]["execution_id"], execution_id)
+                requested = await session.call_tool("cancel_execution", identity)
+                self.assertFalse(requested.isError, requested)
+                self.assertTrue(requested.structuredContent["cancel_requested"])
+                for _ in range(100):
+                    result = await session.call_tool("read_execution", identity)
+                    self.assertFalse(result.isError, result)
+                    if result.structuredContent["status"] == "cancelled":
+                        break
+                    await asyncio.sleep(0.03)
+                self.assertEqual(result.structuredContent["status"], "cancelled")
+                repeated = await session.call_tool("cancel_execution", identity)
+                self.assertEqual(repeated.structuredContent["status"], "cancelled")
+
 
 
 if __name__ == "__main__":

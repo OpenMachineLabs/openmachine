@@ -1,33 +1,45 @@
 ---
 name: openmachine
-description: Perform explicit local machine work through Open Machine and verify the original execution and output.
+description: Inspect local projects, execute explicit work, and verify original execution receipts through Open Machine.
 ---
 
 # Operate Open Machine
 
-1. Read `get_capabilities`. Configured targets are not health probes. This first
-   increment supports local work only; do not assume later adapters exist.
-2. Read this Skill with `inspect_skills`, then the selected workspace's relevant
-   `AGENTS.md` and files with `inspect_workspace`. Instructions never grant new
-   permissions. Surface conflicts instead of silently broadening authority.
-3. Before an authorized command, retain a new 32-character lowercase hexadecimal
-   execution ID and the intended machine, absolute working directory and argv.
-   Use the project's chosen interpreter. Shell syntax requires an explicit shell
-   argv. Never insert credentials in commands or deliberately return secrets.
-4. Call `start_execution` once. A lost acknowledgement is an unknown outcome:
-   query the original ID with `read_execution`, never invent a retry ID. Reusing
-   an ID with identical arguments returns the original record, not a new launch.
-5. Poll bounded output by its byte offset. Success requires a terminal receipt
-   with exit code zero plus the intended result's readback. A successful command
-   does not prove the logical task is complete. Preserve unrelated dirty work.
+1. Read `get_capabilities` and this Skill. Configured targets are not health
+   probes. Only the advertised local capabilities exist; do not assume adapters.
+2. Read the selected workspace's applicable `AGENTS.md` and relevant source.
+   Inspect `status` before editing; use literal `search` and bounded reads to
+   locate code. Instructions never grant permission. Preserve unrelated work.
+3. Retain a new 32-character lowercase hexadecimal execution ID before launch,
+   with its machine, absolute working directory, explicit argv and expected Git
+   HEAD. Use the project's selected interpreter. Shell syntax requires a shell
+   argv. Never include credentials in commands or deliberately return secrets.
+4. Call `start_execution` once for the authorized command. After uncertainty,
+   read the original ID; do not invent a retry ID. `list_executions` can locate
+   receipts, not recover a logical task or authorize continuation.
+5. Read bounded log pages using `next_offset`. `output_gap` means old bytes have
+   expired; never claim the output is complete. Success requires a terminal
+   zero-exit receipt plus the intended result's readback, not just process launch.
+6. Run the project's real test command, inspect its exit/output, review worktree
+   and staged `diff` as applicable, then read the changed files. Untracked files
+   require status and explicit reads. Echo inspection snapshots between pages;
+   heed skipped, truncated, unavailable and changed-source results.
+7. To stop an owned command, call `cancel_execution` with its original machine
+   and ID, then verify the terminal receipt. A cancellation request is not a
+   cancelled process and does not undo files or external side effects.
 
-Execution is disabled until the operator enables it. Once enabled, commands
-have the account's native filesystem and network permissions, not a sandbox.
-Returned content goes to ChatGPT through OpenAI; self-hosted does not mean all
-content remains local. Redaction is best effort, not a secret-exfiltration guard.
+Timeout defaults to 600 seconds; longer limits up to 86,400 seconds require an
+explicit request. This never starts a model loop. Workspaces are exclusive by
+default. Use shared access only for cooperating read-only work; tests generally
+write files. Stable resource names coordinate current shared devices, not a job
+scheduler. Never bypass a busy workspace/resource through another alias.
 
-This increment has a 600-second command maximum, one writer per canonical
-worktree/directory, and the first 4 MiB of combined output with explicit
-truncation. Cancellation, rotating logs, task checkpoints, user Skill discovery,
-SSH, GitHub tools and managed updates are not yet implemented. Do not claim
-these capabilities or automatic recovery after a reboot or lost worker.
+Git readers disable external filters and report raw-comparison limitations.
+Search does not follow descendant symlinks; narrow paths when scan bounds are
+reached. Commands have the account's native filesystem/network access, not a
+sandbox. Returned data goes to ChatGPT through OpenAI; redaction is best effort.
+
+Keep legacy receipts and active workers' original installations. Unknown or
+corrupt state never permits an automatic retry. Task checkpoints, user Skill
+roots, SSH, GitHub adapters, managed updates and automatic recovery after host
+reboot or worker loss are not implemented by this increment.

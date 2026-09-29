@@ -10,7 +10,7 @@ import time
 import unittest
 import uuid
 
-from openmachine import execution, workspace
+from openmachine import execution, logs, workspace
 from openmachine.config import Settings, Workspace, load
 from openmachine.sanitize import Fault, redact
 
@@ -180,10 +180,12 @@ class RuntimeTests(unittest.TestCase):
         result = self.wait(self.start('import sys; sys.stdout.write("x" * (4*1024*1024+100))'))
         self.assertEqual(result["status"], "succeeded")
         self.assertTrue(result["log_truncated"])
-        self.assertEqual(result["retained_bytes"], execution.MAX_LOG)
+        self.assertLessEqual(result["retained_bytes"], execution.MAX_LOG)
+        self.assertEqual(result["log_start_offset"], logs.SEGMENT_BYTES)
+        self.assertTrue(result["output_gap"])
         self.assertEqual(len(result["output"]), execution.MAX_READ)
         page = execution.read(self.config, self.state, "my-laptop", result["execution_id"], offset=10, max_bytes=7)
-        self.assertEqual((page["output"], page["next_offset"]), ("xxxxxxx", 17))
+        self.assertEqual((page["output"], page["next_offset"]), ("xxxxxxx", logs.SEGMENT_BYTES + 7))
 
     def test_missing_worker_and_corrupt_receipt_never_become_success(self):
         result = self.wait(self.start('print("original")'))
@@ -248,6 +250,246 @@ class RuntimeTests(unittest.TestCase):
             self.start('print("no")')
         self.assertEqual(caught.exception.code, "unsafe_state")
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o755)
+
+
+    def _git(self, *args):
+        return subprocess.run(["git", "-C", str(self.work), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def _repository(self):
+        self._git("init", "-q")
+        (self.work / "code.py").write_text("value = 1\n")
+        self._git("add", "code.py")
+        self._git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+
+    def test_git_status_and_diff_preserve_index_and_distinguish_changes(self):
+        self._repository()
+        code = self.work / "code.py"
+        code.write_text("value = 2\n")
+        self._git("add", "code.py")
+        code.write_text("value = 3\n")
+        (self.work / "unrelated.txt").write_text("preserve me\n")
+        (self.work / ".env").write_text("private fixture\n")
+        index = (self.work / ".git/index").read_bytes()
+        result = workspace.inspect(self.config, "my-laptop", "project", "status")
+        items = {item["path"]: item for item in result["entries"]}
+        self.assertEqual((items["code.py"]["index"], items["code.py"]["worktree"]), ("M", "M"))
+        self.assertTrue(items["unrelated.txt"]["untracked"])
+        self.assertNotIn(".env", items)
+        unstaged = workspace.inspect(self.config, "my-laptop", "project", "diff")
+        staged = workspace.inspect(self.config, "my-laptop", "project", "diff", staged=True)
+        self.assertIn("+value = 3", unstaged["text"])
+        self.assertIn("+value = 2", staged["text"])
+        self.assertEqual((self.work / ".git/index").read_bytes(), index)
+        self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve me\n")
+
+    def test_staged_deletions_and_nested_workspace_scope(self):
+        self._repository()
+        sub = self.work / "sub"
+        sub.mkdir()
+        (sub / "deleted.txt").write_text("old content\n")
+        (sub / ".env").write_text("secret fixture\n")
+        self._git("add", "sub")
+        self._git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "nested")
+        self._git("rm", "sub/deleted.txt")
+        (sub / ".env").write_text("new secret fixture\n")
+        self._git("add", "sub/.env")
+        (self.work / "code.py").write_text("outside scope\n")
+        self.config.workspaces["nested"] = Workspace(machine="my-laptop", root=str(sub))
+        result = workspace.inspect(self.config, "my-laptop", "nested", "diff", staged=True)
+        self.assertIn("-old content", result["text"])
+        self.assertNotIn("secret fixture", result["text"])
+        self.assertEqual(result["skipped_paths"], 1)
+        direct = workspace.inspect(self.config, "my-laptop", "nested", "diff", "deleted.txt", staged=True)
+        self.assertIn("deleted file", direct["text"])
+        self.assertEqual(workspace.inspect(self.config, "my-laptop", "nested", "diff")["text"], "")
+        status = workspace.inspect(self.config, "my-laptop", "nested", "status")
+        self.assertEqual([entry["path"] for entry in status["entries"]], ["deleted.txt"])
+
+    def test_git_pages_reject_changed_snapshot_and_literal_paths_are_safe(self):
+        self._repository()
+        (self.work / "code.py").write_text("changed line\n" * 10000)
+        first = workspace.inspect(self.config, "my-laptop", "project", "diff")
+        self.assertTrue(first["has_more"])
+        second = workspace.inspect(self.config, "my-laptop", "project", "diff", offset=first["next_offset"],
+                                   expected_snapshot=first["snapshot"])
+        self.assertEqual(first["snapshot"], second["snapshot"])
+        (self.work / "code.py").write_text("different\n")
+        with self.assertRaises(Fault) as caught:
+            workspace.inspect(self.config, "my-laptop", "project", "diff", expected_snapshot=first["snapshot"])
+        self.assertEqual(caught.exception.code, "source_changed")
+        for path in ("../code.py", ".env", str(self.work / "code.py")):
+            with self.subTest(path=path), self.assertRaises(Fault):
+                workspace.inspect(self.config, "my-laptop", "project", "diff", path)
+
+    def test_git_readers_never_run_external_filters_or_fsmonitor(self):
+        self._repository()
+        hook = self.work / "reader-hook.sh"
+        hook.write_text('#!/bin/sh\ntouch "' + str(self.work / 'hook-ran') + '"\ncat\n')
+        hook.chmod(0o700)
+        (self.work / ".gitattributes").write_text("*.py diff=fixture filter=fixture\n")
+        for name in ("diff.fixture.command", "diff.fixture.textconv", "filter.fixture.clean", "filter.fixture.process", "core.fsmonitor"):
+            self._git("config", name, str(hook))
+        self._git("config", "filter.fixture.required", "true")
+        (self.work / "code.py").write_text("value = 5\n")
+        status = workspace.inspect(self.config, "my-laptop", "project", "status")
+        diff = workspace.inspect(self.config, "my-laptop", "project", "diff")
+        self.assertTrue(status["entries"])
+        self.assertIn("+value = 5", diff["text"])
+        self.assertTrue(any("filters" in warning for warning in diff["warnings"]))
+        self.assertFalse((self.work / "hook-ran").exists())
+
+    def test_literal_search_pages_skips_and_edit_detection(self):
+        (self.work / ".github").mkdir()
+        (self.work / ".github/AGENTS.md").write_text("needle instruction\n")
+        (self.work / "source.py").write_text("needle first\nneedle second\n")
+        (self.work / ".env").write_text("needle secret fixture\n")
+        (self.work / "binary").write_bytes(b"needle\0")
+        (self.work / "link").symlink_to(self.root / "outside")
+        (self.root / "outside").write_text("needle outside\n")
+        first = workspace.inspect(self.config, "my-laptop", "project", "search", query="needle", limit=1)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(first["matches"][0]["path"], ".github/AGENTS.md")
+        self.assertGreater(first["skipped"]["excluded"], 0)
+        self.assertEqual(first["skipped"]["binary"], 1)
+        second = workspace.inspect(self.config, "my-laptop", "project", "search", query="needle", offset=1,
+                                   expected_snapshot=first["snapshot"])
+        self.assertEqual(len(second["matches"]), 2)
+        (self.work / "source.py").write_text("needle changed\n")
+        with self.assertRaises(Fault) as caught:
+            workspace.inspect(self.config, "my-laptop", "project", "search", query="needle", expected_snapshot=first["snapshot"])
+        self.assertEqual(caught.exception.code, "source_changed")
+
+    def test_search_limits_and_non_git_failure_are_explicit(self):
+        (self.work / "large.txt").write_text("x" * (workspace.MAX_CAPTURE + 1) + "needle")
+        result = workspace.inspect(self.config, "my-laptop", "project", "search", query="needle")
+        self.assertTrue(result["truncated"])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["skipped"]["oversized"], 1)
+        with self.assertRaises(Fault) as caught:
+            workspace.inspect(self.config, "my-laptop", "project", "status")
+        self.assertEqual(caught.exception.code, "git_unavailable")
+
+    def test_timeout_default_and_explicit_day_limit_are_separate(self):
+        first = self.wait(self.start('print("default")'))
+        record = json.loads((self.state / "executions" / first["execution_id"] / "record.json").read_text())
+        self.assertEqual(record["request"]["timeout_seconds"], 600)
+        self.assertEqual(self.wait(self.start('print("long limit, short command")', timeout_seconds=86400))["status"], "succeeded")
+        for value in (0, 86401):
+            with self.subTest(value=value), self.assertRaises(Fault) as caught:
+                self.start('print("not started")', timeout_seconds=value)
+            self.assertEqual(caught.exception.code, "invalid_timeout")
+
+    def test_cancellation_cleans_owned_children_and_preserves_other_work(self):
+        other = self.root / "other"
+        other.mkdir()
+        self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
+        child = 'import signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1.5); Path("escaped").touch(); time.sleep(10)'
+        command = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(10)'
+        owned = self.start(command)
+        independent = self.start('import time; from pathlib import Path; time.sleep(0.7); Path("done").touch()', cwd=other)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if "child-ready" in execution.read(self.config, self.state, "my-laptop", owned["execution_id"])["output"]:
+                break
+            time.sleep(0.03)
+        requested = execution.cancel(self.config, self.state, "my-laptop", owned["execution_id"])
+        self.assertTrue(requested["cancel_requested"])
+        execution.cancel(self.config, self.state, "my-laptop", owned["execution_id"])
+        result = self.wait(owned)
+        self.assertEqual(result["status"], "cancelled")
+        self.assertNotEqual(result["exit_code"], 0)
+        self.assertEqual(self.wait(independent)["status"], "succeeded")
+        time.sleep(1.5)
+        self.assertFalse((self.work / "escaped").exists())
+        self.assertTrue((other / "done").exists())
+
+    def test_completed_execution_cancellation_is_a_noop(self):
+        result = self.wait(self.start('from pathlib import Path; Path("once").write_text("once")'))
+        path = self.state / "executions" / result["execution_id"] / "record.json"
+        original = path.read_bytes()
+        cancelled = execution.cancel(self.config, self.state, "my-laptop", result["execution_id"])
+        self.assertEqual(cancelled["status"], "succeeded")
+        self.assertFalse(cancelled["cancel_requested"])
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_shared_workspaces_and_exclusive_named_resources(self):
+        first = self.start('import time; time.sleep(0.7)', workspace_access="shared", resource_keys=["device:0"])
+        try:
+            self.assertEqual(self.wait(self.start('print("shared")', workspace_access="shared"))["status"], "succeeded")
+            with self.assertRaises(Fault) as caught:
+                self.start('print("writer")')
+            self.assertEqual(caught.exception.code, "resource_busy")
+            other = self.root / "other"
+            other.mkdir()
+            self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
+            with self.assertRaises(Fault) as caught:
+                self.start('print("resource conflict")', cwd=other, resource_keys=["device:0"])
+            self.assertEqual(caught.exception.code, "resource_busy")
+        finally:
+            self.wait(first)
+        result = self.wait(self.start('print("normalized")', resource_keys=["b", "a"]))
+        again = self.start('print("normalized")', execution_id=result["execution_id"], resource_keys=["a", "b", "a"])
+        self.assertEqual(again["status"], "succeeded")
+
+    def test_execution_listing_pages_and_reports_corruption_without_commands(self):
+        results = [self.wait(self.start('print("not in listing")', execution_id=f"{i:032x}")) for i in (1, 2, 3)]
+        damaged = self.state / "executions" / f"{2:032x}" / "record.json"
+        damaged.write_text("broken")
+        first = execution.list_records(self.config, self.state, "my-laptop", limit=2)
+        self.assertEqual(first["next_cursor"], f"{2:032x}")
+        self.assertEqual(len(first["unreadable"]), 1)
+        second = execution.list_records(self.config, self.state, "my-laptop", cursor=first["next_cursor"], limit=2)
+        self.assertEqual(second["executions"][0]["execution_id"], results[2]["execution_id"])
+        self.assertIsNone(second["next_cursor"])
+        self.assertNotIn("not in listing", json.dumps(first))
+
+    def test_legacy_receipts_and_prefix_logs_remain_readable_without_rewriting(self):
+        result = self.wait(self.start('print("legacy")'))
+        directory = self.state / "executions" / result["execution_id"]
+        record = json.loads((directory / "record.json").read_text())
+        del record["format_version"]
+        record["version"] = "0.1.0a1"
+        del record["request"]["workspace_access"]
+        del record["request"]["resource_keys"]
+        (directory / "record.json").write_text(json.dumps(record))
+        (directory / "output-00000000000000000000.log").rename(directory / "output.log")
+        (directory / "control.lock").unlink()
+        original = (directory / "record.json").read_bytes()
+        observed = execution.read(self.config, self.state, "my-laptop", result["execution_id"])
+        self.assertEqual((observed["output"], observed["log_retention"]), ("legacy\n", "prefix_only"))
+        self.assertEqual(self.start('print("legacy")', execution_id=result["execution_id"])["status"], "succeeded")
+        self.assertEqual((directory / "record.json").read_bytes(), original)
+
+    def test_malformed_log_segment_is_reported_as_corrupt_output(self):
+        directory = self.root / "bad-log-fixture"
+        directory.mkdir()
+        with logs.Writer(directory) as stream:
+            stream.write(b"original")
+        (directory / "output-invalid.log").write_text("broken")
+        with self.assertRaises(Fault) as caught:
+            logs.read(directory, 0, 100)
+        self.assertEqual(caught.exception.code, "corrupt_output")
+
+    def test_segment_crossing_tail_retention_and_absolute_offsets(self):
+        directory = self.root / "log-fixture"
+        directory.mkdir()
+        with logs.Writer(directory) as stream:
+            stream.write(b"a" * (logs.SEGMENT_BYTES - 3))
+            stream.write(b"boundary")
+            page = logs.read(directory, logs.SEGMENT_BYTES - 3, 8)
+            self.assertEqual(page["output"], "boundary")
+            stream.write(b"x" * logs.MAX_BYTES)
+            stream.write(b"final-message")
+        paths = list(directory.glob("output-*.log"))
+        self.assertLessEqual(len(paths), 4)
+        self.assertLessEqual(sum(path.stat().st_size for path in paths), logs.MAX_BYTES)
+        gap = logs.read(directory, 0, 7)
+        self.assertTrue(gap["output_gap"])
+        tail = logs.read(directory, gap["log_bytes"] - 13, 13)
+        self.assertEqual(tail["output"], "final-message")
+        self.assertEqual(tail["next_offset"], gap["log_bytes"])
+
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 """Per-execution workers and durable receipts, using only the standard library."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import fcntl
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path
@@ -17,17 +18,18 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from openmachine import __version__
-from openmachine.sanitize import Fault, redact
+from openmachine import __version__, logs
+from openmachine.sanitize import Fault
 from openmachine.workspace import context
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MAX_LOG = 4 * 1024 * 1024
-MAX_READ = 65536
-MAX_TIMEOUT = 600
-TERMINAL = {"succeeded", "failed", "timed_out"}
+MAX_LOG = logs.MAX_BYTES
+MAX_READ = logs.MAX_READ
+DEFAULT_TIMEOUT = 600
+MAX_TIMEOUT = 86400
+TERMINAL = {"succeeded", "failed", "timed_out", "cancelled", "interrupted"}
 
 
 def private_directory(path: Path) -> Path:
@@ -64,6 +66,8 @@ def _load(directory: Path) -> dict:
             record = json.load(stream)
         if record["status"] not in TERMINAL | {"accepted", "preparing", "running"}:
             raise ValueError("invalid state")
+        if record.get("format_version", 1) not in (1, 2):
+            raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
         code = record["exit_code"]
         if code is not None and type(code) is not int:
             raise ValueError("invalid exit code")
@@ -78,6 +82,8 @@ def _load(directory: Path) -> dict:
             raise ValueError("missing command")
         if type(request["timeout_seconds"]) is not int or not 1 <= request["timeout_seconds"] <= MAX_TIMEOUT:
             raise ValueError("invalid timeout")
+        if not isinstance(record["created_at"], (int, float)):
+            raise ValueError("missing creation time")
         if not isinstance(record["version"], str) or any(
             type(record[key]) is not bool for key in ("log_truncated", "output_incomplete")
         ):
@@ -90,11 +96,12 @@ def _load(directory: Path) -> dict:
 
 
 @contextmanager
-def _lease(path: Path):
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "r+b") as lease:
+def _lease(path: Path, *, shared: bool = False, wait: bool = False, create: bool = True):
+    flags = (os.O_RDWR | os.O_CREAT) if create else os.O_RDONLY
+    fd = os.open(path, flags | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "rb") as lease:
         try:
-            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lease, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError as error:
             raise Fault("resource_busy", "An owned operation already holds this execution or worktree.") from error
         # Close only: an inherited descriptor must keep its lock after launch.
@@ -108,12 +115,18 @@ def _directory(state: Path, execution_id: str) -> Path:
 
 
 def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
-          argv: list[str], timeout_seconds: int = MAX_TIMEOUT, expected_head_sha: str = "") -> dict:
+          argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
+          workspace_access: str = "exclusive", resource_keys: list[str] | None = None) -> dict:
     config.machine(machine, write=True)
     if not argv or not argv[0] or len(argv) > 100 or any("\0" in a or len(a) > 4096 for a in argv):
         raise Fault("invalid_command", "Supply a program and at most 99 arguments, each at most 4096 characters.")
-    if not 1 <= timeout_seconds <= MAX_TIMEOUT:
-        raise Fault("invalid_timeout", "This increment supports 1-600 seconds per command.")
+    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT:
+        raise Fault("invalid_timeout", "Use 1-86400 seconds; the default remains 600 seconds.")
+    if workspace_access not in ("exclusive", "shared"):
+        raise Fault("invalid_access", "Use exclusive, or shared only for cooperating read-only commands.")
+    keys = resource_keys or []
+    if len(keys) > 16 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", k) for k in keys):
+        raise Fault("invalid_resources", "Use at most 16 stable resource names of 1-128 letters, digits, _, ., :, or -.")
     if expected_head_sha and not re.fullmatch(r"[0-9a-f]{40}", expected_head_sha):
         raise Fault("invalid_head", "expected_head_sha must be a full lowercase Git commit SHA.")
     if not Path(cwd).is_absolute():
@@ -129,30 +142,39 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     locks = private_directory(state / "locks")
     directory = _directory(state, execution_id)
     request = {"machine": machine, "cwd": str(working), "argv": argv,
-               "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha}
+               "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha,
+               "workspace_access": workspace_access, "resource_keys": sorted(set(keys))}
     with _lease(locks / f"{execution_id}.lock"):
         if directory.exists():
-            if _load(directory)["request"] != request:
+            original = {"workspace_access": "exclusive", "resource_keys": [], **_load(directory)["request"]}
+            if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
         observed = context(working)
+        if observed["git_status"] == "unavailable":
+            raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
         key = hashlib.sha256(observed["worktree"].encode()).hexdigest()
-        with _lease(locks / f"workspace-{key}.lock") as workspace_lease:
+        with ExitStack() as leases:
+            owned = [leases.enter_context(_lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            for name in request["resource_keys"]:
+                digest = hashlib.sha256(name.encode()).hexdigest()
+                owned.append(leases.enter_context(_lease(locks / f"resource-{digest}.lock")))
             if expected_head_sha and observed["head_sha"] != expected_head_sha:
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
             private_directory(directory)
-            record = {"request": request, "context": observed, "version": __version__,
+            record = {"request": request, "context": observed, "version": __version__, "format_version": 2,
                       "status": "accepted", "exit_code": None, "created_at": time.time(),
                       "log_truncated": False, "output_incomplete": False}
-            _save(directory / "record.json", record)
-            with _lease(directory / "worker.lock") as worker_lease:
+            with _lease(directory / "control.lock"), _lease(directory / "worker.lock") as worker_lease:
+                _save(directory / "record.json", record)
+                fds = [lease.fileno() for lease in owned]
                 try:
                     process = subprocess.Popen(
                         [sys.executable, "-I", "-m", "openmachine.execution", str(directory),
-                         str(workspace_lease.fileno()), str(worker_lease.fileno())],
+                         str(worker_lease.fileno()), *(str(fd) for fd in fds)],
                         cwd=state, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL, start_new_session=True,
-                        pass_fds=(workspace_lease.fileno(), worker_lease.fileno()),
+                        pass_fds=(*fds, worker_lease.fileno()),
                     )
                     threading.Thread(target=process.wait, daemon=True).start()
                 except OSError as error:
@@ -162,51 +184,111 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     return read(config, state, machine, execution_id)
 
 
+def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
+    if not directory.exists():
+        raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
+    with ExitStack() as stack:
+        if (directory / "control.lock").exists():
+            stack.enter_context(_lease(directory / "control.lock", shared=True, wait=True, create=False))
+        record = _load(directory)
+        if record.get("format_version", 1) == 2 and not (directory / "control.lock").is_file():
+            raise Fault("corrupt_state", "Execution control state is missing; preserve the original record.")
+        if record["request"]["machine"] != machine:
+            raise Fault("context_mismatch", "Use the original machine identity for this execution.")
+        status = record["status"]
+        if status not in TERMINAL:
+            try:
+                with _lease(directory / "worker.lock", create=False):
+                    status = "outcome_unknown"
+            except Fault as error:
+                if error.code != "resource_busy":
+                    raise
+            except OSError:
+                status = "outcome_unknown"
+        return record, status
+
+
 def read(config: "Settings", state: Path, machine: str, execution_id: str,
          offset: int = 0, max_bytes: int = MAX_READ) -> dict:
     config.machine(machine)
     directory = _directory(state, execution_id)
-    if not directory.exists():
-        raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
-    record = _load(directory)
-    if record["request"]["machine"] != machine:
-        raise Fault("context_mismatch", "Read the execution using its original machine identity.")
-    status = record["status"]
-    if status not in TERMINAL:
-        try:
-            with (directory / "worker.lock").open("rb") as lease:
-                fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            status = "outcome_unknown"
-        except BlockingIOError:
-            pass
-        except OSError:
-            status = "outcome_unknown"
-    if offset < 0 or not 1 <= max_bytes <= MAX_READ:
-        raise Fault("invalid_range", "Use a nonnegative byte offset and at most 65536 bytes.")
-    output = directory / "output.log"
-    data, size = b"", 0
-    if output.exists():
-        with output.open("rb") as stream:
-            size = os.fstat(stream.fileno()).st_size
-            if offset > size:
-                raise Fault("invalid_range", "The offset is beyond retained output.")
-            stream.seek(offset)
-            data = stream.read(max_bytes)
-    elif offset:
-        raise Fault("invalid_range", "No output exists at that byte offset.")
+    record, status = _receipt(directory, machine)
+    output = logs.read(directory, offset, max_bytes, legacy=record.get("format_version", 1) == 1)
     return {"execution_id": execution_id, "machine": machine, "status": status,
             "exit_code": record["exit_code"], "context": record["context"], "version": record["version"],
-            "error": record.get("error"), "output": redact(data.decode("utf-8", errors="replace")),
-            "offset": offset, "next_offset": offset + len(data), "retained_bytes": size,
-            "has_more": offset + len(data) < size, "log_truncated": record["log_truncated"],
-            "output_incomplete": record["output_incomplete"],
-            "output_unavailable": not output.exists() and status in TERMINAL | {"running"}}
+            "created_at": record["created_at"], "finished_at": record.get("finished_at"),
+            "workspace_access": record["request"].get("workspace_access", "exclusive"),
+            "resource_keys": record["request"].get("resource_keys", []),
+            "cancel_requested": (directory / "cancel.request").is_file(),
+            "error": record.get("error"), **output,
+            "log_truncated": record["log_truncated"] or output["log_start_offset"] > 0,
+            "output_incomplete": record["output_incomplete"]}
+
+
+def list_records(config: "Settings", state: Path, machine: str, cursor: str = "", limit: int = 20) -> dict:
+    """Page stable IDs, not guessed logical tasks; inspect at most limit receipts."""
+    config.machine(machine)
+    if cursor:
+        _directory(state, cursor)
+    if not 1 <= limit <= 100:
+        raise Fault("invalid_range", "Use a page size from 1 to 100.")
+    root = state / "executions"
+    if not root.exists():
+        return {"machine": machine, "executions": [], "next_cursor": None, "unreadable": [], "ordering": "execution_id"}
+    with os.scandir(root) as entries:
+        names = heapq.nsmallest(limit + 1, (e.name for e in entries
+                               if re.fullmatch(r"[0-9a-f]{32}", e.name) and e.name > cursor))
+    items, unreadable = [], []
+    for name in names[:limit]:
+        try:
+            record, status = _receipt(root / name, machine)
+            items.append({"execution_id": name, "machine": machine, "status": status,
+                          "context": record["context"], "created_at": record["created_at"],
+                          "exit_code": record["exit_code"], "version": record["version"]})
+        except (Fault, OSError) as error:
+            if isinstance(error, Fault) and error.code == "context_mismatch":
+                continue
+            unreadable.append({"execution_id": name, "error": error.code if isinstance(error, Fault) else "source_unavailable"})
+    return {"machine": machine, "executions": items, "next_cursor": names[limit - 1] if len(names) > limit else None,
+            "unreadable": unreadable, "ordering": "execution_id"}
+
+
+def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
+    config.machine(machine)
+    directory = _directory(state, execution_id)
+    record, status = _receipt(directory, machine)
+    if status in TERMINAL:
+        return read(config, state, machine, execution_id)
+    if status == "outcome_unknown":
+        raise Fault("outcome_unknown", "Worker ownership is unverified; cancellation cannot claim termination.")
+    if record.get("format_version", 1) != 2:
+        raise Fault("unsupported_operation", "This legacy worker does not support cancellation; preserve its runtime.")
+    with _lease(directory / "control.lock", wait=True, create=False):
+        # Only the worker publishes execution status. A repeated request is a no-op.
+        record = _load(directory)
+        if record["status"] not in TERMINAL:
+            try:
+                fd = os.open(directory / "cancel.request", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(b"cancel\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+    return read(config, state, machine, execution_id)
 
 
 def _terminate(process: subprocess.Popen) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
+        process.wait()
         return
     try:
         process.wait(timeout=0.5)
@@ -219,56 +301,66 @@ def _terminate(process: subprocess.Popen) -> None:
     process.wait()
 
 
-def worker(directory: Path, workspace_fd: int, worker_fd: int) -> None:
-    os.fstat(workspace_fd)
-    os.fstat(worker_fd)
+def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
+    for fd in (worker_fd, *owned_fds):
+        os.fstat(fd)
     record = _load(directory)
     request = record["request"]
+    original_worktree = record["context"]["worktree"]
     process = None
     terminated = False
+    interrupted = False
+
+    def interrupt(*_):
+        nonlocal interrupted
+        interrupted = True
+
+    signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGINT, interrupt)
     try:
         record.update(status="preparing", context=context(Path(request["cwd"])))
         _save(directory / "record.json", record)
+        if record["context"]["git_status"] == "unavailable" or record["context"]["worktree"] != original_worktree:
+            raise Fault("context_mismatch", "The canonical worktree changed before launch.")
         if request["expected_head_sha"] and record["context"]["head_sha"] != request["expected_head_sha"]:
             raise Fault("context_mismatch", "Git HEAD changed before command launch.")
-        fd = os.open(directory / "output.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb", buffering=0) as output, selectors.DefaultSelector() as selector:
-            process = subprocess.Popen(request["argv"], cwd=request["cwd"], stdin=subprocess.DEVNULL,
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       start_new_session=True, pass_fds=(workspace_fd,))
-            record.update(status="running", started_at=time.time())
-            _save(directory / "record.json", record)
-            os.set_blocking(process.stdout.fileno(), False)
-            selector.register(process.stdout, selectors.EVENT_READ)
-            deadline = time.monotonic() + request["timeout_seconds"]
-            drain_deadline = None
-            retained = 0
-            timed_out = False
-            while selector.get_map() or process.poll() is None:
-                now = time.monotonic()
-                if drain_deadline is None and (process.poll() is not None or now >= deadline):
-                    timed_out = process.poll() is None
-                    _terminate(process)
-                    terminated = True
-                    drain_deadline = time.monotonic() + 1
-                if drain_deadline is not None and now >= drain_deadline:
-                    record["output_incomplete"] = bool(selector.get_map())
-                    break
-                for key, _ in selector.select(0.05):
-                    chunk = os.read(key.fd, MAX_READ)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    kept = chunk[:MAX_LOG - retained]
-                    output.write(kept)
-                    retained += len(kept)
-                    if len(kept) < len(chunk) and not record["log_truncated"]:
-                        record["log_truncated"] = True
-                        _save(directory / "record.json", record)
-            code = process.wait()
-            process.stdout.close()
-            os.fsync(output.fileno())
-        record.update(exit_code=code, status="timed_out" if timed_out else "succeeded" if code == 0 else "failed")
+        with logs.Writer(directory) as output, selectors.DefaultSelector() as selector:
+            if interrupted or (directory / "cancel.request").exists():
+                record["status"] = "interrupted" if interrupted else "cancelled"
+            else:
+                process = subprocess.Popen(request["argv"], cwd=request["cwd"], stdin=subprocess.DEVNULL,
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                           start_new_session=True, pass_fds=owned_fds)
+                record.update(status="running", started_at=time.time())
+                _save(directory / "record.json", record)
+                os.set_blocking(process.stdout.fileno(), False)
+                selector.register(process.stdout, selectors.EVENT_READ)
+                deadline = time.monotonic() + request["timeout_seconds"]
+                drain_deadline = None
+                reason = None
+                while selector.get_map() or process.poll() is None:
+                    now = time.monotonic()
+                    if drain_deadline is None:
+                        finished = process.poll() is not None
+                        if not finished:
+                            reason = ("interrupted" if interrupted else "cancelled" if (directory / "cancel.request").exists()
+                                      else "timed_out" if now >= deadline else None)
+                        if finished or reason:
+                            _terminate(process)
+                            terminated = True
+                            drain_deadline = time.monotonic() + 1
+                    if drain_deadline is not None and now >= drain_deadline:
+                        record["output_incomplete"] = bool(selector.get_map())
+                        break
+                    for key, _ in selector.select(0.05):
+                        chunk = os.read(key.fd, MAX_READ)
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                            continue
+                        output.write(chunk)
+                code = process.wait()
+                record.update(exit_code=code, status=reason or ("succeeded" if code == 0 else "failed"))
+            record["log_truncated"] = output.total > MAX_LOG
     except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
         record.update(status="failed", error=error.code if isinstance(error, Fault) else type(error).__name__)
     finally:
@@ -276,11 +368,13 @@ def worker(directory: Path, workspace_fd: int, worker_fd: int) -> None:
             if not terminated:
                 _terminate(process)
             process.stdout.close()
-    os.close(workspace_fd)
-    os.close(worker_fd)
-    record["finished_at"] = time.time()
-    _save(directory / "record.json", record)
+    # Readers cannot observe the lease-release/publication gap as a lost worker.
+    with _lease(directory / "control.lock", wait=True, create=False):
+        for fd in (*owned_fds, worker_fd):
+            os.close(fd)
+        record["finished_at"] = time.time()
+        _save(directory / "record.json", record)
 
 
 if __name__ == "__main__":
-    worker(Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]))
+    worker(Path(sys.argv[1]), *(int(fd) for fd in sys.argv[2:]))

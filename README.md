@@ -4,17 +4,17 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a1` is the first implementation slice of [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2),
+`0.1.0a2` is the local coding workflow increment of [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2),
 not the completed or published v0.1.0 release. ChatGPT plans; this package executes
 explicit calls. There are no model API calls, hidden agents, private Brain imports,
 Codex workers or organization-specific settings.
 
 Implemented: an independently installable Python package, safe configuration,
 `init`/`doctor`/`serve`, private Streamable HTTP MCP, a bundled operating Skill,
-bounded local readers, and durable local execution with result readback.
+bounded local search and Git status/diff, durable local execution, cancellation,
+execution lookup, rotating logs, and cooperative workspace/resource locks.
 
-Deferred: the full Git coding loop, cancellation and rotating logs, task
-checkpoints, user Skill roots, SSH/GitHub adapters, and managed service
+Deferred: task checkpoints, user Skill roots, SSH/GitHub adapters, and managed service
 installation/update/rollback. No empty adapter or future-feature modules are
 shipped. Real ChatGPT/Tunnel acceptance is a separate account-bound gate; local
 tests do not establish it.
@@ -28,7 +28,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a1-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a2-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -89,42 +89,90 @@ separately authorized private ChatGPT connection must initialize, list tools and
 perform one real harmless write. Refresh ChatGPT tool metadata when schemas
 change. A socket or a tool list does not prove that write tools work.
 
-## Tool contracts and first acceptance
+## Tool contracts and local coding acceptance
 
 | Tool | Current input and result |
 | --- | --- |
 | `get_capabilities` | Version, configuration hash, configured machines/workspaces and implemented limits; health remains `not_probed`. |
-| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read`, relative `path`, `offset`, `limit`; lists at most 200 entries or reads 64 KiB. Read offsets are raw bytes; list offsets are visible entries. |
+| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`. |
 | `inspect_skills` | `action=list/read`; bundled Skill identity/hash and optionally text. No user-directory scan. |
-| `start_execution` | `machine`, retained 32-hex `execution_id`, existing absolute `cwd`, explicit `argv`, optional `timeout_seconds` and `expected_head_sha`; durable identity and state. |
-| `read_execution` | Original `machine`/`execution_id`, byte `offset`, `max_bytes`; state, exit status, context, bounded output and next offset. |
+| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, and `resource_keys`. |
+| `read_execution` | Original machine/ID and absolute byte offset; observed state, exit code, context, bounded output and next offset. |
+| `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
+| `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
 
-From ChatGPT, read capabilities, the bundled Skill and the disposable project's
-`AGENTS.md`. Retain an execution ID, then explicitly authorize an argv such as
-`["/absolute/path/to/python", "-c", "from pathlib import Path; Path('hello.txt').write_text('hello')"]`.
-Poll the original ID until its terminal receipt reports exit zero, then read
-`hello.txt` through `inspect_workspace` and confirm its contents. No other bridge
-may perform the write claimed as Open Machine's live acceptance.
+From ChatGPT, read capabilities, the operating Skill and the disposable project's
+`AGENTS.md`. Inspect Git status, search and read the relevant source. Use an
+explicit execution to make the authorized change, then another to run the
+project's test command with its selected interpreter. Inspect the original
+receipts and actual exit/output, review both staged and unstaged diffs as needed,
+and read back the changed files. Preserve unrelated dirty work. Local SDK tests
+prove the protocol workflow, not this account-bound ChatGPT acceptance. Record
+the exact tested source and refresh changed tool metadata in a new conversation.
+
+### Workspace inspection bounds
+
+File/diff reads return at most 64 KiB. Listing/status/search pages contain up to
+200 entries; offsets count entries except file/diff offsets, which count raw
+bytes. Echo `snapshot` as `expected_snapshot` between search/status/diff pages;
+a changed snapshot rejects continuation. These inspections are not atomic source
+snapshots: recheck status when external writers may have changed the workspace.
+
+Literal search scans at most 2,000 entries and 8 MiB per call, at most 1 MiB per
+file and 1,000 matching lines. It does not follow descendant symlinks or build an
+index. Skipped credentials, binary, oversized and unreadable files are explicit;
+`complete=false` is not a complete negative search. Narrow the path when limits
+are reached. Git commands have a five-second/1 MiB capture bound; a captured
+prefix may be paged, but `truncated=true` requires a narrower path for completeness.
+
+Git status distinguishes staged, unstaged and untracked changes. Diff defaults
+to the worktree; `staged=true` compares the index, including staged deletions.
+Untracked files require status plus explicit reads. Submodule contents are not
+inspected. Git readers disable optional index writes, fsmonitor, external diff,
+textconv and clean/process filters. Configured filters produce a warning that
+this is a raw worktree comparison. Credential-path exclusions apply to all reader
+actions; these scopes are not an operating-system sandbox.
+
+### Execution lifecycle and compatibility
 
 Commands return promptly and run under a separate worker. Reusing an execution
 ID with an identical normalized request returns its original record; changed
-arguments are rejected. After a lost acknowledgement, query the original ID.
-A missing worker or invalid receipt is unknown/corrupt, never success or an
-automatic relaunch. Service restart does not itself terminate the worker.
+arguments are rejected. Resource names are normalized as a set. After a lost
+acknowledgement, query the original ID rather than launch again. Missing worker
+evidence is `outcome_unknown`; corrupt receipts are errors, never success or
+permission to relaunch. Service restart does not itself terminate the worker.
 
-This PR caps commands at 600 seconds, also the default. Cooperating writes lock
-the canonical Git worktree or non-Git directory; an expected Git HEAD is checked
-before launch. No dependency installation, branch reset or environment selection
-occurs implicitly. Locks do not control manual edits or other runtimes. Commands
-receive no stdin and must not require prompts. Timeout cleanup covers the owned
-process group; intentionally detached processes, sleep, session teardown and host
-reboot are not recovery promises.
+The default timeout remains **600 seconds**. A caller may explicitly request up
+to **86,400 seconds**; this does not schedule model reasoning or autonomous work.
+The default exclusive lease coordinates a canonical Git worktree or non-Git
+directory. Explicit `shared` mode is only a cooperating read-only declaration,
+not enforced filesystem isolation. Tests remain exclusive unless genuinely
+read-only. Up to 16 stable resource names acquire exclusive leases across
+workspaces. Busy resources are reported, never bypassed. Git must be available
+for trustworthy workspace identity; no environment selection or installation is
+implicit. Locks do not coordinate manual edits or another runtime/state store.
 
-Console retention keeps the **first 4 MiB**, drains later output without killing
-the command and reports `log_truncated`. This is not PR2's rotating-log contract.
-Reads return at most 64 KiB; explicit artifacts should hold durable full output.
-A zero command exit does not mark a logical task complete. Cancellation, 24-hour
-commands and automatic resumption are not claimed for this increment.
+Only the worker writes lifecycle receipts. Cancellation writes a separate durable
+request; completed executions keep their original terminal result. An observed
+normal completion wins over a later cancellation. Cancellation/timeout clean up
+the owned process group, not arbitrary PIDs or independent services, and do not
+undo previous side effects. Graceful worker interruption is distinct from failed,
+timed-out and cancelled work. Intentionally detached processes, host reboot,
+sleep, disk loss and session teardown are not recovery promises. Linux user-scope
+and remote-session guarantees remain later SSH/service acceptance, not this slice.
+
+Output rotates through **four 1 MiB segments** without stopping the command.
+Readers use absolute byte offsets across rotations; expired offsets report
+`output_gap` and resume at the oldest retained byte. Follow `next_offset` even
+when a UTF-8 character is split. Full durable output belongs in an explicit
+artifact, not this bounded console cache. A zero process exit alone does not mark
+a logical task complete.
+
+Format-1 (`0.1.0a1`) receipts and prefix-only logs remain readable without rewriting
+history. New receipts identify format 2. Legacy active workers cannot acquire the
+new cancellation protocol; their original installed runtime and records must be
+preserved. This is read compatibility, not managed upgrade/rollback or permission
+to downgrade a format-2 state store. Tasks and automatic resumption remain deferred.
 
 ## Trust boundary
 
