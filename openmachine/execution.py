@@ -76,6 +76,9 @@ def _load(directory: Path) -> dict:
         if not isinstance(record["request"], dict) or not isinstance(record["context"], dict):
             raise ValueError("invalid receipt")
         request = record["request"]
+        linked_task = request.get("task_id", "")
+        if not isinstance(linked_task, str) or (linked_task and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", linked_task)):
+            raise ValueError("invalid task reference")
         if not all(isinstance(request[key], str) for key in ("machine", "cwd", "expected_head_sha")):
             raise ValueError("invalid request identity")
         if not isinstance(request["argv"], list) or not request["argv"] or not all(isinstance(a, str) for a in request["argv"]):
@@ -116,8 +119,10 @@ def _directory(state: Path, execution_id: str) -> Path:
 
 def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
-          workspace_access: str = "exclusive", resource_keys: list[str] | None = None) -> dict:
+          workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "") -> dict:
     config.machine(machine, write=True)
+    if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
+        raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
     if not argv or not argv[0] or len(argv) > 100 or any("\0" in a or len(a) > 4096 for a in argv):
         raise Fault("invalid_command", "Supply a program and at most 99 arguments, each at most 4096 characters.")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MAX_TIMEOUT:
@@ -143,13 +148,16 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     directory = _directory(state, execution_id)
     request = {"machine": machine, "cwd": str(working), "argv": argv,
                "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha,
-               "workspace_access": workspace_access, "resource_keys": sorted(set(keys))}
+               "workspace_access": workspace_access, "resource_keys": sorted(set(keys)), "task_id": task_id}
     with _lease(locks / f"{execution_id}.lock"):
         if directory.exists():
-            original = {"workspace_access": "exclusive", "resource_keys": [], **_load(directory)["request"]}
+            original = {"workspace_access": "exclusive", "resource_keys": [], "task_id": "", **_load(directory)["request"]}
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
+        if task_id:
+            from openmachine.tasks import read as read_task
+            read_task(state, task_id)  # Verify a reference, not permission or task completion.
         observed = context(working)
         if observed["git_status"] == "unavailable":
             raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
@@ -217,6 +225,7 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
     return {"execution_id": execution_id, "machine": machine, "status": status,
             "exit_code": record["exit_code"], "context": record["context"], "version": record["version"],
             "created_at": record["created_at"], "finished_at": record.get("finished_at"),
+            "task_id": record["request"].get("task_id", ""),
             "workspace_access": record["request"].get("workspace_access", "exclusive"),
             "resource_keys": record["request"].get("resource_keys", []),
             "cancel_requested": (directory / "cancel.request").is_file(),
@@ -244,7 +253,8 @@ def list_records(config: "Settings", state: Path, machine: str, cursor: str = ""
             record, status = _receipt(root / name, machine)
             items.append({"execution_id": name, "machine": machine, "status": status,
                           "context": record["context"], "created_at": record["created_at"],
-                          "exit_code": record["exit_code"], "version": record["version"]})
+                          "exit_code": record["exit_code"], "version": record["version"],
+                          "task_id": record["request"].get("task_id", "")})
         except (Fault, OSError) as error:
             if isinstance(error, Fault) and error.code == "context_mismatch":
                 continue

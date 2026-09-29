@@ -34,3 +34,11 @@ do not add placeholder suites or a second test framework.
 The local workflow checks use small disposable Git projects, short owned process
 groups and a few MiB of output. The 24-hour upper bound is validated with a short
 command, not a 24-hour wait. No GPU or production canary is required.
+
+Skills, task persistence and explicit edits use small private fixtures in the
+existing unit/contract groups. Tests distinguish never-initialized state from
+missing history, cover stale/torn saves and original execution links, and use
+separate SDK sessions to verify no duplicate file/test execution. Worst-case
+JSON escaping is exercised with one bounded text file. This is local protocol
+evidence, not actual cross-conversation ChatGPT acceptance; record that separately
+on the refreshed candidate connection before marking M2 accepted.

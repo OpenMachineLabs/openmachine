@@ -13,3 +13,7 @@ root = "/absolute/path/to/your/project"
 # [github]
 # repositories = ["owner/repository"]
 # attribution = true
+
+# Optional explicit Skill sources; the empty default does not scan user accounts.
+[skills]
+roots = []

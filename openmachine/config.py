@@ -39,12 +39,25 @@ class GitHubConfig(BaseModel):
     attribution: bool | None = None
 
 
+class SkillSources(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    roots: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("roots")
+    @classmethod
+    def absolute_roots(cls, values: list[str]) -> list[str]:
+        if any(not Path(value).is_absolute() or Path(value) == Path("/") or "\0" in value for value in values):
+            raise ValueError("Skill sources must be explicit absolute non-root directories")
+        return list(dict.fromkeys(values))
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     machines: dict[Name, Machine]
     workspaces: dict[Name, Workspace] = Field(default_factory=dict)
     github: GitHubConfig | None = None
+    skills: SkillSources = Field(default_factory=SkillSources)
 
     @model_validator(mode="after")
     def configured_machines(self):

@@ -7,7 +7,7 @@ No product Spec is approved by the repository scaffold.
 
 | Spec Issue | Binding | Current scope |
 | --- | --- | --- |
-| [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Local MCP foundation and reliable local coding workflow only. The maintainer authorized the second increment, self-review and merge. Real-account acceptance is recorded separately; later milestones, release and Spec closure remain separate. |
+| [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Accepted local foundation/coding workflow plus the maintainer-approved M2 user Skills, durable task continuity and explicit text-editing increment. Self-review and merge are authorized only after scoped acceptance. Later milestones, release and Spec closure remain separate. |
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [implementation authorization and acceptance](https://github.com/OpenMachineLabs/openmachine/issues/6) | Minimal GitHub provenance footers for configured Issue/PR/comment/review body writes; broader GitHub collaboration remains in #2 M4. |
 
 ## Survey Issues
