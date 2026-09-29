@@ -1,14 +1,17 @@
 """Small, bounded readers; configured paths are routing, not a sandbox."""
 
+from contextlib import contextmanager, ExitStack
 import hashlib
 import itertools
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import stat
 import subprocess
 import time
+import uuid
 from typing import TYPE_CHECKING
 
 from openmachine.sanitize import Fault, redact
@@ -330,3 +333,155 @@ def _search(root: Path, machine: str, workspace: str, relative: Path, query: str
             "truncated": truncated, "source_changed": changed, "scanned_entries": seen, "scanned_bytes": total,
             "skipped": warnings, "credential_paths_excluded": True,
             "complete": not (truncated or changed or any(warnings.values()))}
+
+
+MAX_TEXT_FILE = 131072
+TEXT_PAGE = 32768
+
+
+def file_parts(path: str) -> tuple[str, ...]:
+    """Validate a single reader/editor resource without broadening workspace scope."""
+    parts = path.split("/")
+    if (not path or "\\" in path or any(ord(c) < 32 for c in path)
+            or any(p in {"", ".", ".."} for p in parts)
+            or excluded(Path(*(p.casefold() for p in parts)))
+            or any(p.casefold() == ".git" for p in parts)):
+        raise Fault("path_denied", "Use a relative non-credential file path without traversal or Git control files.")
+    return tuple(parts)
+
+
+@contextmanager
+def file_parent(root: Path, parts: tuple[str, ...]):
+    """Keep parent directories open and refuse every descendant filesystem link."""
+    with ExitStack() as stack:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        for part in parts[:-1]:
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, fd)
+        yield fd
+
+
+def file_bytes(parent: int, name: str) -> tuple[bytes | None, os.stat_result | None]:
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    except FileNotFoundError:
+        return None, None
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_TEXT_FILE:
+            raise Fault("invalid_file", "Expected a bounded regular text file without hardlinks.")
+        raw = stream.read(MAX_TEXT_FILE + 1)
+        after = os.fstat(stream.fileno())
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise Fault("source_changed", "The file changed while reading; inspect its current version.")
+    if len(raw) > MAX_TEXT_FILE or b"\0" in raw:
+        raise Fault("invalid_file", "Expected at most 128 KiB of UTF-8 text without NUL bytes.")
+    try:
+        raw.decode("utf-8")
+    except UnicodeError as error:
+        raise Fault("invalid_file", "The selected file is not UTF-8 text.") from error
+    return raw, after
+
+
+def text_page(raw: bytes, offset: int = 0) -> dict:
+    if (type(offset) is not int or not 0 <= offset <= len(raw)
+            or (offset < len(raw) and raw[offset] & 0xC0 == 0x80)):
+        raise Fault("invalid_range", "Use the returned next_offset at a UTF-8 character boundary.")
+    end = min(offset + TEXT_PAGE, len(raw))
+    while end < len(raw) and raw[end] & 0xC0 == 0x80:
+        end -= 1
+    text = raw[offset:end].decode("utf-8")
+    clean = redact(text)
+    return {"text": clean, "content_redacted": clean != text, "offset": offset,
+            "next_offset": end, "has_more": end < len(raw), "size_bytes": len(raw)}
+
+
+def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
+                   offset: int = 0, expected_sha256: str = "") -> dict:
+    parts = file_parts(path)
+    root = root_for(config, machine, workspace)
+    if not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256):
+        raise Fault("invalid_hash", "Use the complete raw-byte SHA256 returned by the original read.")
+    with file_parent(root, parts) as parent:
+        raw, _ = file_bytes(parent, parts[-1])
+    digest = hashlib.sha256(raw).hexdigest() if raw is not None else ""
+    if expected_sha256 and digest != expected_sha256:
+        raise Fault("source_changed", "The file changed between pages; inspect its current version.")
+    return {"machine": machine, "workspace": workspace, "path": path, "context": context(root),
+            "exists": raw is not None, "sha256": digest, **text_page(raw or b"", offset)}
+
+
+def write_text_file(config: "Settings", state: Path, machine: str, workspace: str, path: str,
+                    content: str, expected_head_sha: str, expected_sha256: str) -> dict:
+    # Import locally: execution owns its locks and imports workspace context.
+    from openmachine.execution import _lease, private_directory
+
+    config.machine(machine, write=True)
+    parts = file_parts(path)
+    if (not re.fullmatch(r"(?:[0-9a-f]{40})?", expected_head_sha)
+            or not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256)):
+        raise Fault("invalid_precondition", "Supply the observed HEAD and SHA256; empty values explicitly mean absent.")
+    desired = content.encode("utf-8")
+    if len(desired) > MAX_TEXT_FILE or b"\0" in desired:
+        raise Fault("invalid_content", "Supply at most 128 KiB of UTF-8 text without NUL bytes.")
+    root = root_for(config, machine, workspace)
+    observed = context(root)
+    if observed["git_status"] == "unavailable":
+        raise Fault("context_unavailable", "Git/worktree identity could not be checked.")
+    state = private_directory(state)
+    locks = private_directory(state / "locks")
+    key = hashlib.sha256(observed["worktree"].encode()).hexdigest()
+    with _lease(locks / f"workspace-{key}.lock"):
+        current = context(root)
+        if (root_for(config, machine, workspace) != root or current["git_status"] == "unavailable"
+                or current["worktree"] != observed["worktree"]
+                or (current["head_sha"] or "") != expected_head_sha):
+            raise Fault("context_mismatch", "Workspace or Git HEAD changed; inspect the original workspace.")
+        result = {"machine": machine, "workspace": workspace, "path": path,
+                  "head_sha": current["head_sha"], "sha256": hashlib.sha256(desired).hexdigest(),
+                  "size_bytes": len(desired)}
+        with file_parent(root, parts) as parent:
+            previous, metadata = file_bytes(parent, parts[-1])
+            digest = hashlib.sha256(previous).hexdigest() if previous is not None else ""
+            if previous == desired:
+                return result | {"status": "already_current", "previous_sha256": digest}
+            if digest != expected_sha256:
+                raise Fault("content_mismatch", "The file no longer matches the observed bytes; do not overwrite it.")
+            temporary = ".openmachine-edit-" + uuid.uuid4().hex
+            published = False
+            try:
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(desired)
+                    os.fchmod(stream.fileno(), metadata.st_mode & 0o777 if metadata else 0o644)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                check, info = file_bytes(parent, parts[-1])
+                if check != previous or (metadata and (info.st_ino, info.st_mode) != (metadata.st_ino, metadata.st_mode)):
+                    raise Fault("content_mismatch", "The file changed before replacement.")
+                latest = context(root)
+                if (latest["git_status"] == "unavailable" or latest["worktree"] != current["worktree"]
+                        or (latest["head_sha"] or "") != expected_head_sha):
+                    raise Fault("context_mismatch", "Git HEAD changed before replacement.")
+                if metadata is None:
+                    os.link(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+                    published = True
+                    os.unlink(temporary, dir_fd=parent)
+                else:
+                    os.replace(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
+                    published = True
+                os.fsync(parent)
+                actual, _ = file_bytes(parent, parts[-1])
+                if actual != desired:
+                    return result | {"status": "write_outcome_unknown", "detail": "Read the destination before retrying."}
+            except (OSError, Fault):
+                if published:
+                    return result | {"status": "write_outcome_unknown", "detail": "Replacement occurred; durability/readback is unverified."}
+                raise
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
+        return result | {"status": "written", "previous_sha256": digest}

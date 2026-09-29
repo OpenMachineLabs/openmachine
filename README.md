@@ -4,27 +4,23 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a3` adds the minimal GitHub attribution slice from [Spec #6](https://github.com/OpenMachineLabs/openmachine/issues/6)
-on top of the accepted local coding workflow in [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2).
-It is not the completed or published v0.1.0 release. ChatGPT plans; this package
-executes explicit calls. There are no model API calls, hidden agents, private Brain imports,
-Codex workers or organization-specific settings.
+`0.1.0a4` adds explicit text edits, user Skills and durable task checkpoints for
+[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2). It retains the
+minimal GitHub attribution slice from [Spec #6](https://github.com/OpenMachineLabs/openmachine/issues/6).
+This is not a published v0.1.0 release. ChatGPT plans; the package executes explicit
+calls without model APIs, hidden agents, private Brain imports or another agent installation.
 
-Implemented: an independently installable Python package, safe configuration,
-`init`/`doctor`/`serve`, private Streamable HTTP MCP, a bundled operating Skill,
-bounded local search and Git status/diff, durable local execution, cancellation,
-execution lookup, rotating logs, and cooperative workspace/resource locks.
+The local workflow includes bounded inspection and file editing, native commands,
+tests, original execution receipts, cancellation, rotating logs and cooperative
+workspace/resource locks. Users can configure their own Skill directories and
+save revision-checked task progress separately from process receipts. A checkpoint
+is evidence for deliberate continuation, not automatic recovery of a conversation.
 
-Implemented GitHub scope is deliberately narrow: configured repositories may create or
-update Issues, Pull Requests, top-level comments and review summaries through the
-operator's existing `gh` login. The adapter adds the minimal Open Machine provenance
-footer at this boundary and verifies the stored body by readback. Branch/commit/push/merge
-GitHub workflows remain deferred.
-
-Deferred: task checkpoints, user Skill roots, SSH, broader GitHub collaboration, and
-managed service installation/update/rollback. No empty adapter or future-feature modules
-are shipped. Real ChatGPT/Tunnel acceptance is a separate account-bound gate; local
-tests do not establish it.
+The existing optional GitHub tools create/update configured Issue/PR/comment/review
+bodies using the operator's `gh` identity and provenance rules. SSH, broader GitHub
+collaboration, managed services, update/rollback and release acceptance remain
+separate milestones. Actual refreshed ChatGPT and cross-conversation acceptance
+must be recorded in the PR/Spec; local SDK tests alone do not establish them.
 
 ## Install
 
@@ -35,7 +31,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a3-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a4-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -105,8 +101,13 @@ change. A socket or a tool list does not prove that write tools work.
 | --- | --- |
 | `get_capabilities` | Version, configuration hash, configured machines/workspaces and implemented limits; health remains `not_probed`. |
 | `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`. |
-| `inspect_skills` | `action=list/read`; bundled Skill identity/hash and optionally text. No user-directory scan. |
-| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, and `resource_keys`. |
+| `inspect_skills` | `list/read/files`, exact discovered `skill`, relative resource `path`, query/range and `expected_snapshot`; bundled and explicit user sources only. |
+| `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256; UTF-8-safe pages, raw hash, Git context and explicit absence. |
+| `write_workspace_file` | Machine/workspace/path, complete text, required observed HEAD and SHA256; one verified replacement, not a command. |
+| `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
+| `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
+| `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
+| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys` and an existing `task_id`. |
 | `read_execution` | Original machine/ID and absolute byte offset; observed state, exit code, context, bounded output and next offset. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
@@ -186,7 +187,102 @@ Format-1 (`0.1.0a1`) receipts and prefix-only logs remain readable without rewri
 history. New receipts identify format 2. Legacy active workers cannot acquire the
 new cancellation protocol; their original installed runtime and records must be
 preserved. This is read compatibility, not managed upgrade/rollback or permission
-to downgrade a format-2 state store. Tasks and automatic resumption remain deferred.
+to downgrade a format-2 state store. Task references default to empty for older receipts; old records are never rewritten. Automatic resumption remains excluded.
+
+## Explicit file editing
+
+For an ordinary source change, read the exact file with `read_workspace_file`,
+then write its complete desired text with `write_workspace_file`. Supply the
+observed `expected_head_sha` and whole-file `expected_sha256`. Empty HEAD explicitly
+means the workspace has no HEAD; empty SHA256 means the file is absent, not empty.
+An existing empty file has the normal SHA256 of zero bytes. Both preconditions
+are required arguments. Identical destination content returns `already_current`.
+
+Files are at most 128 KiB of UTF-8 text; read pages are at most 32 KiB and retain
+character boundaries. Follow `next_offset` until `has_more=false`, echoing the
+original SHA256. Do not overwrite a file from incomplete or redacted content.
+The fixed 1 MiB MCP request bound accommodates worst-case JSON escaping of a
+bounded file; it does not allow a larger file or unbounded commands.
+
+Writes require the selected machine's existing `execution_enabled` setting and
+remain inside its named configured workspace. They share the original execution
+worktree lock, reject credential/Git-control paths, traversal, descendant symlinks,
+hardlinks and special files, and require existing parents. Publication preserves
+ordinary file mode, atomically installs the destination, fsyncs it and reads back.
+No shell, content execution, deletion, directory creation, permission-change API,
+Git mutation or network call is supplied by the file writer. Tests and authorized
+Git commands still use `start_execution`.
+
+These are single-file operations, not multi-file transactions or an OS sandbox.
+Cooperative locks cannot fence manual editors or hostile same-account processes.
+`write_outcome_unknown` requires destination readback before any retry. Honest
+write/destructive/idempotence annotations describe actual effects; they do not
+replace platform approval or guarantee fewer OpenAI blocks. Never disguise or
+reroute a refused operation to evade its checks.
+
+## User Skills
+
+Optionally add explicit existing sources to configuration:
+
+```toml
+[skills]
+roots = ["/absolute/path/to/my-skills"]
+```
+
+A source is either a Skill directory with `SKILL.md`, or a collection whose
+immediate child directories contain Skills. There is no recursive account or
+agent-installation scan. Configure a deeper collection explicitly when needed.
+Configured root links and whole-Skill directory links resolve to canonical
+identities; duplicate sources are deduplicated, equal names are not. Resources
+inside a selected Skill do not follow descendant links or escape its boundary.
+Useful dotfiles remain readable while credential paths are excluded.
+
+`inspect_skills` returns source paths, hashes, pagination and warnings. Discovery
+inspects at most 2,000 collection entries per call; incomplete or inaccessible
+sources are explicit, not a successful empty result. `read` without a selector
+still returns the bundled operating Skill. User Skill edits appear on the next
+read; changing configuration roots follows the existing service restart flow.
+A Skill is instructions/resources, not a tool, credential or grant of authority.
+
+## Durable task continuity
+
+A logical task may refer to multiple executions. One private store owns it:
+
+```text
+<state-dir>/tasks/index.json          # lookup metadata and integrity references
+<state-dir>/tasks/<task-id>/task.md   # material progress, evidence and next action
+```
+
+`save_task` creates at revision zero and updates only the observed revision. It
+serializes saves under one stable store lock; an identical retry of the latest
+write returns unchanged. Titles and exact anchors live only in the index with
+revision/hash metadata; execution status and checkpoint prose are not duplicated.
+Checkpoints are at most 32 KiB and the index at most 2 MiB. Keep only goals,
+exclusions, authorization references, worktree/branch, original execution IDs and
+log offsets, reusable evidence, failed approaches and the next safe action.
+Never save credentials, hidden reasoning, transcripts or bulk logs/source.
+
+Each file replacement is atomic and durable, but the checkpoint and index are
+not a two-file transaction. An interrupted update may leave a mismatch. Missing
+indexes, orphan directories, changed hashes and inconsistent generations fail
+explicitly; read the original record and reconcile deliberately rather than
+initializing over history. The persistent store lock also distinguishes a lost
+task directory from a never-initialized store. No automatic repair or replay is
+provided. State permissions are private; same-account records are not tamper-proof.
+
+Continuation is deliberate: find/read the original task, recheck current user
+instructions, Git and original execution receipts, reuse still-valid results,
+then perform only the missing step and save material progress. A keyword result
+is a candidate even when unique; exact anchors may be ambiguous. An execution's
+optional `task_id` verifies the checkpoint for a new launch but never updates
+progress. Existing-ID reconciliation does not depend on a still-readable task
+store. Old receipts without the field remain readable without migration.
+
+Save a command's original ID before launch, so a lost acknowledgement can be
+reconciled. A changed instruction preserves prior evidence and observes or
+cancels the original owned execution, verifying termination before new work.
+A checkpoint does not restore hidden chat context, provide new approval, schedule
+models or mark a task complete when a process merely exits zero.
 
 ## Trust boundary
 

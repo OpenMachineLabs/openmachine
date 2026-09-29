@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -80,7 +81,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 init = await session.initialize()
                 self.assertEqual(init.serverInfo.version, openmachine.__version__)
                 tools = {t.name: t for t in (await session.list_tools()).tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
@@ -255,6 +256,139 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 repeated = await session.call_tool("cancel_execution", identity)
                 self.assertEqual(repeated.structuredContent["status"], "cancelled")
 
+
+    async def test_explicit_edits_and_checkpoints_continue_across_client_sessions(self):
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.work), *args], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        (self.work / "calculator.py").write_text("def add(a, b):\n    return a - b\n")
+        (self.work / "test_calculator.py").write_text(
+            "import unittest\nfrom pathlib import Path\nfrom calculator import add\n"
+            "class Addition(unittest.TestCase):\n    def test_add(self):\n"
+            "        p = Path('test_runs.txt')\n"
+            "        p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n"
+            "        self.assertEqual(add(2, 3), 5)\n")
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")
+        head = git("rev-parse", "HEAD")
+        (self.work / "unrelated.txt").write_text("preserve existing work\n")
+        source = self.root / "user-skill"
+        source.mkdir()
+        (source / "SKILL.md").write_text("---\nname: repair\n---\nInspect the diff before completion.\n")
+        self.stop(self.processes[0])
+        self.config.write_text(self.config.read_text() + '\n[skills]\nroots = [' + json.dumps(str(source)) + ']\n')
+        self.launch()
+        scope = {"machine": "desktop", "workspace_name": "example"}
+        identity = uuid.uuid4().hex
+        anchor = "issue=example/project#17"
+        checkpoint = {"task_id": "resume-fixture", "title": "Repair calculator", "anchors": [anchor]}
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                listing = (await session.call_tool("inspect_skills", {})).structuredContent
+                selected = next(item["skill"] for item in listing["skills"] if item["name"] == "repair")
+                self.assertIn("Inspect the diff", (await session.call_tool("inspect_skills", {"action": "read", "skill": selected})).structuredContent["text"])
+                original = (await session.call_tool("read_workspace_file", {**scope, "path": "calculator.py"})).structuredContent
+                initial = await session.call_tool("save_task", {**checkpoint, "expected_revision": 0,
+                    "body": "Goal: repair calculator in the disposable project.\nNext: make the authorized change.\n"})
+                self.assertFalse(initial.isError, initial)
+                changed = await session.call_tool("write_workspace_file", {**scope, "path": "calculator.py",
+                    "content": "def add(a, b):\n    return a + b\n", "expected_head_sha": head,
+                    "expected_sha256": original["sha256"]})
+                self.assertEqual(changed.structuredContent["status"], "written")
+                intent = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1,
+                    "body": "Completed: code repair.\nExecution: " + identity + "\nNext: run the project test once.\n"})
+                self.assertFalse(intent.isError, intent)
+                start = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": identity,
+                    "cwd": str(self.work), "argv": [sys.executable, "-m", "unittest", "discover", "-p", "test_calculator.py"],
+                    "expected_head_sha": head, "task_id": "resume-fixture"})
+                self.assertFalse(start.isError, start)
+                for _ in range(100):
+                    receipt = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
+                    if receipt.structuredContent["status"] in ("succeeded", "failed", "outcome_unknown"):
+                        break
+                    await asyncio.sleep(0.03)
+                self.assertEqual((receipt.structuredContent["status"], receipt.structuredContent["exit_code"]), ("succeeded", 0))
+                self.assertEqual(receipt.structuredContent["task_id"], "resume-fixture")
+                result = await session.call_tool("save_task", {**checkpoint, "expected_revision": 2,
+                    "body": "Completed: repair and passing tests.\nOriginal execution: " + identity + "\nNext: inspect diff only.\n"})
+                self.assertFalse(result.isError, result)
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                found = await session.call_tool("find_tasks", {"anchors": [anchor]})
+                self.assertEqual(found.structuredContent["status"], "matched")
+                checkpoint_read = await session.call_tool("read_task", {"task_id": "resume-fixture"})
+                self.assertIn(identity, checkpoint_read.structuredContent["body"])
+                observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
+                self.assertEqual(observed.structuredContent["status"], "succeeded")
+                status = await session.call_tool("inspect_workspace", {**scope, "action": "status"})
+                self.assertEqual(status.structuredContent["context"]["head_sha"], head)
+                diff = await session.call_tool("inspect_workspace", {**scope, "action": "diff", "path": "calculator.py"})
+                self.assertIn("+    return a + b", diff.structuredContent["text"])
+                latest = await session.call_tool("read_workspace_file", {**scope, "path": "calculator.py"})
+                self.assertEqual(latest.structuredContent["sha256"], changed.structuredContent["sha256"])
+                final = await session.call_tool("save_task", {**checkpoint, "expected_revision": 3,
+                    "body": "Completed: repair, original passing tests, unchanged source, and final diff review.\nNo further action.\n"})
+                self.assertEqual(final.structuredContent["revision"], 4)
+        self.assertEqual((self.work / "test_runs.txt").read_text(), "1")
+        self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve existing work\n")
+        self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
+
+    async def test_large_explicit_payload_and_changed_instruction_cancellation(self):
+        scope = {"machine": "desktop", "workspace_name": "example"}
+        identity = uuid.uuid4().hex
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                for name in ("save_task", "write_workspace_file"):
+                    self.assertFalse(tools[name].annotations.readOnlyHint)
+                    self.assertTrue(tools[name].annotations.destructiveHint)
+                    self.assertTrue(tools[name].annotations.idempotentHint)
+                    self.assertFalse(tools[name].annotations.openWorldHint)
+                content = "\x01" * 131072
+                write = await session.call_tool("write_workspace_file", {**scope, "path": "large.txt", "content": content,
+                    "expected_head_sha": "", "expected_sha256": ""})
+                self.assertFalse(write.isError, write)
+                self.assertEqual(write.structuredContent["status"], "written")
+                digest = hashlib.sha256(content.encode()).hexdigest()
+                offset, pieces = 0, []
+                while True:
+                    page = (await session.call_tool("read_workspace_file", {**scope, "path": "large.txt",
+                        "offset": offset, "expected_sha256": digest})).structuredContent
+                    self.assertLessEqual(len(page["text"].encode()), 32768)
+                    pieces.append(page["text"])
+                    offset = page["next_offset"]
+                    if not page["has_more"]:
+                        break
+                self.assertEqual("".join(pieces), content)
+                checkpoint = {"task_id": "changed-goal", "title": "Short cancellation fixture", "anchors": []}
+                initial = await session.call_tool("save_task", {**checkpoint, "expected_revision": 0,
+                    "body": "Goal: observe one short owned command.\nPlanned execution: " + identity + "\n"})
+                self.assertFalse(initial.isError, initial)
+                start = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": identity,
+                    "cwd": str(self.work), "argv": [sys.executable, "-c", "import time; time.sleep(20)"], "task_id": "changed-goal"})
+                self.assertFalse(start.isError, start)
+                revised = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1,
+                    "body": "Changed fixture instruction: stop the original command.\nOriginal execution: " + identity + "\nNext: cancel and read termination.\n"})
+                self.assertFalse(revised.isError, revised)
+                cancel = await session.call_tool("cancel_execution", {"machine": "desktop", "execution_id": identity})
+                self.assertFalse(cancel.isError, cancel)
+                for _ in range(100):
+                    receipt = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
+                    if receipt.structuredContent["status"] == "cancelled":
+                        break
+                    await asyncio.sleep(0.03)
+                self.assertEqual(receipt.structuredContent["status"], "cancelled")
+                conflict = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1, "body": "Stale progress."})
+                self.assertTrue(conflict.isError)
+                self.assertEqual(conflict.structuredContent["error"]["code"], "task_conflict")
+                final = await session.call_tool("save_task", {**checkpoint, "expected_revision": 2,
+                    "body": "Changed instruction retained. Original execution " + identity + " is cancelled. No replacement was started.\n"})
+                self.assertEqual(final.structuredContent["revision"], 3)
+        self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
 
 
 if __name__ == "__main__":
