@@ -19,7 +19,7 @@ cd /tmp
 
 The system suite remains standard-library-only. Product tests use the locked
 runtime dependencies, disposable directories, short local processes and private
-Unix sockets. They do not use production projects, SSH, GPUs, GitHub credentials,
+Unix sockets. CI does not use production projects, live SSH, GPUs, GitHub credentials,
 Codex or inference APIs. No live account is needed for CI.
 
 Local MCP tests are **not** real ChatGPT/Tunnel acceptance. Connect a separately
@@ -42,3 +42,17 @@ separate SDK sessions to verify no duplicate file/test execution. Worst-case
 JSON escaping is exercised with one bounded text file. This is local protocol
 evidence, not actual cross-conversation ChatGPT acceptance; record that separately
 on the refreshed candidate connection before marking M2 accepted.
+
+SSH unit checks cover configured routing, bounded structured transport, identity
+and file preconditions, controller-only task references, shared target locks,
+format-3 cleanup observations and dependency-free deterministic worker bundles.
+Mocked transport is explicitly not live SSH evidence. The SDK checks verify
+remote metadata and local independence without contacting an unconfigured host.
+
+M3 live acceptance uses an explicitly prepared Linux CPU-only disposable project
+and the exact installed worker artifact. Record real SSH file/test/diff, same-ID
+reconnection without replay, owned-child cancellation, alias contention and
+important prerequisite failures. Separately exercise the refreshed tools from
+actual ChatGPT; neither native adapter calls nor SDK sessions substitute for it.
+Preserve original executions and unrelated fixture work. No production canary,
+private CI runner, long benchmark or automatic service migration is required.

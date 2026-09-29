@@ -66,7 +66,7 @@ def _load(directory: Path) -> dict:
             record = json.load(stream)
         if record["status"] not in TERMINAL | {"accepted", "preparing", "running"}:
             raise ValueError("invalid state")
-        if record.get("format_version", 1) not in (1, 2):
+        if record.get("format_version", 1) not in (1, 2, 3):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
         code = record["exit_code"]
         if code is not None and type(code) is not int:
@@ -93,6 +93,12 @@ def _load(directory: Path) -> dict:
             raise ValueError("invalid receipt metadata")
         if record["status"] in TERMINAL and not isinstance(record["finished_at"], (int, float)):
             raise ValueError("missing terminal receipt")
+        if record.get("format_version") == 3:
+            if (record.get("scope_unit") != f"openmachine-{directory.name}.scope"
+                    or not re.fullmatch(r"[0-9a-f]{64}", request["machine"])
+                    or record["context"].get("target_identity") != request["machine"]
+                    or not re.fullmatch(r"[0-9a-f]{64}", record["context"].get("worker_sha256", ""))):
+                raise ValueError("invalid remote ownership")
         return record
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error
@@ -119,8 +125,9 @@ def _directory(state: Path, execution_id: str) -> Path:
 
 def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
-          workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "") -> dict:
-    config.machine(machine, write=True)
+          workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
+          *, remote_worker: Path | None = None) -> dict:
+    target = config.machine(machine, write=True)
     if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
         raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
     if not argv or not argv[0] or len(argv) > 100 or any("\0" in a or len(a) > 4096 for a in argv):
@@ -136,6 +143,11 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
         raise Fault("invalid_head", "expected_head_sha must be a full lowercase Git commit SHA.")
     if not Path(cwd).is_absolute():
         raise Fault("invalid_cwd", "Select an existing absolute working directory.")
+    if target.transport == "ssh":
+        from integrations.ssh import call
+        return call(config, state, machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
+                    timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
+                    workspace_access=workspace_access, resource_keys=keys, task_id=task_id)
     working = Path(cwd).resolve(strict=True)
     if not working.is_dir() or not any(
         working.is_relative_to(Path(item.root).resolve())
@@ -155,7 +167,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
-        if task_id:
+        if task_id and remote_worker is None:
             from openmachine.tasks import read as read_task
             read_task(state, task_id)  # Verify a reference, not permission or task completion.
         observed = context(working)
@@ -173,13 +185,22 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             record = {"request": request, "context": observed, "version": __version__, "format_version": 2,
                       "status": "accepted", "exit_code": None, "created_at": time.time(),
                       "log_truncated": False, "output_incomplete": False}
+            if remote_worker is not None:
+                record.update(format_version=3, scope_unit=f"openmachine-{execution_id}.scope")
+                observed.update(target_identity=machine, worker_archive=str(remote_worker),
+                                worker_sha256=remote_worker.stem)
             with _lease(directory / "control.lock"), _lease(directory / "worker.lock") as worker_lease:
                 _save(directory / "record.json", record)
                 fds = [lease.fileno() for lease in owned]
+                launcher = [sys.executable, "-I", "-m", "openmachine.execution"]
+                if remote_worker is not None:
+                    launcher = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
+                                "--expand-environment=no", "--unit=" + record["scope_unit"],
+                                "--property=TimeoutStopSec=2s", f"--property=RuntimeMaxSec={timeout_seconds + 30}s",
+                                sys.executable, "-I", str(remote_worker), "worker"]
                 try:
                     process = subprocess.Popen(
-                        [sys.executable, "-I", "-m", "openmachine.execution", str(directory),
-                         str(worker_lease.fileno()), *(str(fd) for fd in fds)],
+                        [*launcher, str(directory), str(worker_lease.fileno()), *(str(fd) for fd in fds)],
                         cwd=state, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL, start_new_session=True,
                         pass_fds=(*fds, worker_lease.fileno()),
@@ -199,7 +220,7 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
         if (directory / "control.lock").exists():
             stack.enter_context(_lease(directory / "control.lock", shared=True, wait=True, create=False))
         record = _load(directory)
-        if record.get("format_version", 1) == 2 and not (directory / "control.lock").is_file():
+        if record.get("format_version", 1) >= 2 and not (directory / "control.lock").is_file():
             raise Fault("corrupt_state", "Execution control state is missing; preserve the original record.")
         if record["request"]["machine"] != machine:
             raise Fault("context_mismatch", "Use the original machine identity for this execution.")
@@ -213,12 +234,35 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
                     raise
             except OSError:
                 status = "outcome_unknown"
+        if status in TERMINAL and record.get("format_version") == 3:
+            try:
+                if _scope_state(record["scope_unit"]) not in {"inactive", "not-found"}:
+                    status = "finishing"
+            except Fault:
+                status = "outcome_unknown"
         return record, status
+
+
+def _scope_state(unit: str) -> str:
+    try:
+        result = subprocess.run(["systemctl", "--user", "--no-ask-password", "show", unit,
+                                 "--property=LoadState", "--property=ActiveState"],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise Fault("scope_unavailable", "The original user scope cannot be verified.") from error
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if fields.get("LoadState") == "not-found":
+        return "not-found"
+    if result.returncode or fields.get("ActiveState") not in {"active", "activating", "deactivating", "inactive", "failed"}:
+        raise Fault("scope_unavailable", "The original user scope cannot be verified.")
+    return fields["ActiveState"]
 
 
 def read(config: "Settings", state: Path, machine: str, execution_id: str,
          offset: int = 0, max_bytes: int = MAX_READ) -> dict:
-    config.machine(machine)
+    if config.machine(machine).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, state, machine, "read_execution", execution_id=execution_id, offset=offset, max_bytes=max_bytes)
     directory = _directory(state, execution_id)
     record, status = _receipt(directory, machine)
     output = logs.read(directory, offset, max_bytes, legacy=record.get("format_version", 1) == 1)
@@ -236,7 +280,9 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
 
 def list_records(config: "Settings", state: Path, machine: str, cursor: str = "", limit: int = 20) -> dict:
     """Page stable IDs, not guessed logical tasks; inspect at most limit receipts."""
-    config.machine(machine)
+    if config.machine(machine).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, state, machine, "list_executions", cursor=cursor, limit=limit)
     if cursor:
         _directory(state, cursor)
     if not 1 <= limit <= 100:
@@ -264,14 +310,25 @@ def list_records(config: "Settings", state: Path, machine: str, cursor: str = ""
 
 
 def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
-    config.machine(machine)
+    if config.machine(machine).transport == "ssh":
+        from integrations.ssh import call
+        return call(config, state, machine, "cancel_execution", execution_id=execution_id)
     directory = _directory(state, execution_id)
     record, status = _receipt(directory, machine)
+    if status == "finishing":
+        # Only a mutation tool may request cleanup again; reads never stop a scope.
+        try:
+            subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5, check=True)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise Fault("outcome_unknown", "Scope cleanup is unverified; read the original execution.") from error
+        return read(config, state, machine, execution_id)
     if status in TERMINAL:
         return read(config, state, machine, execution_id)
     if status == "outcome_unknown":
         raise Fault("outcome_unknown", "Worker ownership is unverified; cancellation cannot claim termination.")
-    if record.get("format_version", 1) != 2:
+    if record.get("format_version", 1) < 2:
         raise Fault("unsupported_operation", "This legacy worker does not support cancellation; preserve its runtime.")
     with _lease(directory / "control.lock", wait=True, create=False):
         # Only the worker publishes execution status. A repeated request is a no-op.
@@ -328,7 +385,11 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     signal.signal(signal.SIGTERM, interrupt)
     signal.signal(signal.SIGINT, interrupt)
     try:
-        record.update(status="preparing", context=context(Path(request["cwd"])))
+        if record.get("format_version") == 3:
+            groups = Path("/proc/self/cgroup").read_text().splitlines()
+            if not any(line.endswith("/" + record["scope_unit"]) for line in groups):
+                raise Fault("scope_mismatch", "The remote worker did not enter its owned user scope.")
+        record.update(status="preparing", context=record["context"] | context(Path(request["cwd"])))
         _save(directory / "record.json", record)
         if record["context"]["git_status"] == "unavailable" or record["context"]["worktree"] != original_worktree:
             raise Fault("context_mismatch", "The canonical worktree changed before launch.")
@@ -380,10 +441,26 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             process.stdout.close()
     # Readers cannot observe the lease-release/publication gap as a lost worker.
     with _lease(directory / "control.lock", wait=True, create=False):
-        for fd in (*owned_fds, worker_fd):
-            os.close(fd)
+        if record.get("format_version") != 3:
+            for fd in (*owned_fds, worker_fd):
+                os.close(fd)
         record["finished_at"] = time.time()
         _save(directory / "record.json", record)
+    if record.get("format_version") == 3:
+        # Keep inherited leases until systemd removes this entire owned cgroup.
+        # The durable receipt is observable as terminal only after scope cleanup.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        try:
+            subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5, check=True)
+        except (OSError, subprocess.SubprocessError):
+            with _lease(directory / "control.lock", wait=True, create=False):
+                record.update(status="failed", error="scope_cleanup_unverified")
+                _save(directory / "record.json", record)
+        # RuntimeMaxSec also bounds the scope if its explicit stop is lost.
+        while True:
+            signal.pause()
 
 
 if __name__ == "__main__":

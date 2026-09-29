@@ -19,7 +19,10 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
-    commands.add_parser("doctor", help="Read configuration and local workspace availability without changes")
+    doctor = commands.add_parser("doctor", help="Inspect local configuration, or explicitly probe one SSH target")
+    doctor.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
+    bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
+    bundle.add_argument("--directory", type=Path, required=True)
     commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
     args = parser.parse_args()
     try:
@@ -37,12 +40,23 @@ def main() -> int:
                 os.fsync(output.fileno())
             print(json.dumps({"created": str(args.config), "execution_enabled": False}))
             return 0
+        if args.command == "worker-bundle":
+            from integrations.ssh import build_bundle
+            print(json.dumps(build_bundle(args.directory)))
+            return 0
         config = load(args.config)
         if args.command == "doctor":
-            unavailable = [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]
+            if args.machine:
+                from integrations.ssh import call
+                result = call(config, None, args.machine, "probe")
+                print(json.dumps(result))
+                return int(not result["identity_verified"] or bool(result["unavailable_workspaces"]))
+            unavailable = [name for name, item in config.workspaces.items()
+                           if config.machine(item.machine).transport == "local" and not Path(item.root).is_dir()]
             print(json.dumps({"version": __version__, "configuration": "valid", "unavailable_workspaces": unavailable,
                               "state_directory_exists": args.state_dir.is_dir(),
-                              "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed"}))
+                              "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed",
+                              "ssh_targets": {name: "not_probed" for name, item in config.machines.items() if item.transport == "ssh"}}))
             return int(bool(unavailable))
         from openmachine.server import serve
         serve(config, args.state_dir)

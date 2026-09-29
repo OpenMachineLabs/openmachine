@@ -1,6 +1,7 @@
-"""Explicit local machines and workspaces; no implicit execution authority."""
+"""Explicit machines and workspaces; no implicit execution authority."""
 
 from pathlib import Path
+import re
 import tomllib
 from typing import Annotated, Literal
 
@@ -16,8 +17,25 @@ DEFAULT_STATE = Path.home() / ".local/state/openmachine"
 
 class Machine(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    transport: Literal["local"]
+    transport: Literal["local", "ssh"]
     execution_enabled: bool = False
+    ssh_alias: Name | None = None
+    ssh_worker: str | None = None
+    ssh_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = ""
+
+    @model_validator(mode="after")
+    def transport_settings(self):
+        if self.transport == "local":
+            if self.ssh_alias is not None or self.ssh_worker is not None or self.ssh_identity:
+                raise ValueError("local machines do not accept SSH settings")
+        elif (self.ssh_alias is None or self.ssh_worker is None
+              or not self.ssh_worker.startswith("/") or "\0" in self.ssh_worker
+              or len(self.ssh_worker) > 4096
+              or not re.fullmatch(r"[0-9a-f]{64}\.pyz", Path(self.ssh_worker).name)):
+            raise ValueError("SSH requires an alias and an absolute content-addressed worker archive")
+        elif self.execution_enabled and not self.ssh_identity:
+            raise ValueError("probe and explicitly pin the SSH identity before enabling execution")
+        return self
 
 
 class Workspace(BaseModel):
@@ -80,6 +98,6 @@ def load(path: Path) -> Settings:
             return Settings.model_validate(tomllib.load(source))
     except (ValidationError, tomllib.TOMLDecodeError) as error:
         # Validation exceptions contain input values; do not print them.
-        raise Fault("invalid_config", "Check schema version, local transport, absolute roots, machine references, and GitHub settings.") from error
+        raise Fault("invalid_config", "Check the schema, transport settings, absolute roots, machine references, and integration settings.") from error
     except OSError as error:
         raise Fault("config_unavailable", "Cannot read configuration; run init or select an existing --config file.") from error
