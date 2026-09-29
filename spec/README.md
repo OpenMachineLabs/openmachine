@@ -7,11 +7,7 @@ No product Spec is approved by the repository scaffold.
 
 | Spec Issue | Binding | Current scope |
 | --- | --- | --- |
-
-No active Spec is registered. Add a real Issue link and approval reference only
-when a maintainer explicitly designates an implementable design. Use
-`direct_issue_contract` for that approved scope; unapproved proposals stay in
-Issues and do not acquire authority from being open or labeled `spec`.
+| [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [recorded maintainer instruction](https://github.com/OpenMachineLabs/openmachine/issues/2#issuecomment-5883265487) | PR1 local MCP foundation only. The latest instruction selects root `test/`. Broader milestones, real-account acceptance, merge and release remain separate. |
 
 ## Survey Issues
 

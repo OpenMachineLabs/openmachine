@@ -29,6 +29,29 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test repository checks
-        run: python3 -m unittest discover -s tests -p 'test_*.py'
+        run: python3 -m unittest discover -s test/system -p 'test_*.py'
       - name: Check repository and event metadata
         run: python3 scripts/check_repository.py
+
+  runtime:
+    if: github.event_name != 'issues'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the locked build and runtime dependencies
+        run: python3 -m pip install -r requirements.lock
+      - name: Build and install the independent wheel
+        run: |
+          python3 -m pip wheel --no-deps --no-build-isolation . --wheel-dir /tmp/openmachine-wheel
+          python3 -m pip install --no-deps /tmp/openmachine-wheel/openmachine-*.whl
+      - name: Test the installed runtime outside its checkout
+        working-directory: /tmp
+        run: |
+          python3 -m unittest discover -s "$GITHUB_WORKSPACE/test/unit" -p 'test_*.py'
+          python3 -m unittest discover -s "$GITHUB_WORKSPACE/test/contract" -p 'test_*.py'

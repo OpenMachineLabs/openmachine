@@ -1,0 +1,58 @@
+"""Initialize, diagnose and serve; not a chat UI or service manager."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+
+from openmachine import __version__
+from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE, load
+from openmachine.sanitize import Fault
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="openmachine")
+    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
+    commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
+    init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
+    commands.add_parser("doctor", help="Read configuration and local workspace availability without changes")
+    commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
+    args = parser.parse_args()
+    try:
+        if args.command == "init":
+            text = 'schema_version = 1\n\n[machines.local]\ntransport = "local"\nexecution_enabled = false\n'
+            if args.workspace is not None:
+                if not args.workspace.is_absolute() or not args.workspace.is_dir():
+                    raise Fault("invalid_workspace", "--workspace must be an existing absolute directory.")
+                text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(args.workspace.resolve())) + '\n'
+            args.config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(args.config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as output:
+                output.write(text)
+                output.flush()
+                os.fsync(output.fileno())
+            print(json.dumps({"created": str(args.config), "execution_enabled": False}))
+            return 0
+        config = load(args.config)
+        if args.command == "doctor":
+            unavailable = [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]
+            print(json.dumps({"version": __version__, "configuration": "valid", "unavailable_workspaces": unavailable,
+                              "state_directory_exists": args.state_dir.is_dir(),
+                              "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed"}))
+            return int(bool(unavailable))
+        from openmachine.server import serve
+        serve(config, args.state_dir)
+        return 0
+    except (Fault, OSError) as error:
+        print(json.dumps({"error": {"code": error.code if isinstance(error, Fault) else type(error).__name__,
+                                     "message": str(error) if isinstance(error, Fault) else "Operation failed; check paths and permissions."}}),
+              file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
