@@ -229,7 +229,7 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
         revision, previous = 0, None
         if identity in index["tasks"]:
             item, previous = _checkpoint(root, index, identity)
-            metadata["anchors"] = sorted(set(item["anchors"]) | set(metadata["anchors"]))
+            metadata = _metadata(metadata["title"], sorted(set(item["anchors"]) | set(metadata["anchors"])))
             revision = item["revision"]
             if raw == previous and metadata == {key: item[key] for key in ("title", "anchors")}:
                 if expected_revision not in (revision, revision - 1):

@@ -158,6 +158,19 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(len(result["skills"]), 1)
         self.assertEqual(result["warnings"][0]["code"], "invalid_skill_root")
 
+    def test_additive_anchor_limit_rejects_before_mutating_state(self):
+        anchors = [f"anchor={index}" for index in range(16)]
+        saved = self.save(anchors=anchors)
+        self.assertEqual(saved["revision"], 1)
+        checkpoint = (self.state / "tasks/task-one/task.md").read_bytes()
+        index = (self.state / "tasks/index.json").read_bytes()
+        self.assertEqual(self.save(revision=1, anchors=[anchors[0]])["status"], "unchanged")
+        self.fault("invalid_task", self.save, revision=1, body="Would exceed anchor limit.\n",
+                   anchors=["anchor=overflow"])
+        self.assertEqual((self.state / "tasks/task-one/task.md").read_bytes(), checkpoint)
+        self.assertEqual((self.state / "tasks/index.json").read_bytes(), index)
+        self.assertEqual(tasks.read(self.state, "task-one")["anchors"], sorted(anchors))
+
     def test_missing_established_lock_is_not_recreated_while_old_inode_is_held(self):
         self.save()
         lock = self.state / "locks/tasks.lock"
