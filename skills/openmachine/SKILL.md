@@ -26,6 +26,8 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    from partial or redacted text. Write with the observed HEAD and full raw-byte
    hash. Empty SHA means absent, not empty. Preserve unrelated work. The writer
    changes one file only; it does not run content or create missing directories.
+   Pause external editors writing that file: hash checking and atomic rename are
+   separate, and runtime locks cannot fence non-cooperating processes.
 5. Before a command, save its new 32-hex execution ID, machine, absolute cwd,
    explicit argv, expected HEAD and intended effect in the task. Use the project's
    selected interpreter. Call start_execution once, optionally linking task_id.

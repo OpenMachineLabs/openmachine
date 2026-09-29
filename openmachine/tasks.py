@@ -205,10 +205,17 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
     if expected_revision and not (state / "tasks").exists():
         raise Fault("corrupt_tasks", "The original task store is missing; do not initialize new history.")
     state = private_directory(state)
-    locks = private_directory(state / "locks")
     root = state / "tasks"
+    existing = os.path.lexists(root)
+    if existing:
+        try:
+            _private(state / "locks", directory=True)
+            _private(state / "locks/tasks.lock")
+        except OSError as error:
+            raise Fault("corrupt_tasks", "The existing task-store lock is missing; never recreate it over prior history.") from error
+    locks = private_directory(state / "locks")
     previous_store = os.path.lexists(locks / "tasks.lock")
-    with _lease(locks / "tasks.lock"):
+    with _lease(locks / "tasks.lock", create=not existing):
         _private(locks / "tasks.lock")
         try:
             root.lstat()

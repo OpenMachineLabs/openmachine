@@ -100,7 +100,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                              content: Annotated[str, Field(max_length=131072)],
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]) -> CallToolResult:
-        """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Rejects traversal, credential paths, links and special files. No shell, script execution, deletion, parent creation, permission-change interface or network. Read back any unknown outcome; platform approval remains independent."""
+        """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, script execution, deletion, parent creation, permission-change interface or network. Read back any unknown outcome; platform approval remains independent."""
         return _reply(lambda: workspace.write_text_file(config, state, machine, workspace_name, path, content,
                                                         expected_head_sha, expected_sha256))
 

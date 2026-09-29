@@ -158,6 +158,17 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(len(result["skills"]), 1)
         self.assertEqual(result["warnings"][0]["code"], "invalid_skill_root")
 
+    def test_missing_established_lock_is_not_recreated_while_old_inode_is_held(self):
+        self.save()
+        lock = self.state / "locks/tasks.lock"
+        original = (self.state / "tasks/task-one/task.md").read_bytes()
+        with execution._lease(lock):
+            lock.unlink()
+            self.fault("corrupt_tasks", self.save, revision=1, body="Must not use a replacement lock inode.")
+            self.assertFalse(lock.exists())
+            self.fault("corrupt_tasks", tasks.read, self.state, "task-one")
+        self.assertEqual((self.state / "tasks/task-one/task.md").read_bytes(), original)
+
     def test_original_execution_link_and_legacy_receipts_do_not_replay(self):
         self.save()
         identity = uuid.uuid4().hex

@@ -215,6 +215,10 @@ Git commands still use `start_execution`.
 
 These are single-file operations, not multi-file transactions or an OS sandbox.
 Cooperative locks cannot fence manual editors or hostile same-account processes.
+The final hash check and rename are separate operations, not a kernel-supported
+compare-and-swap. Pause external writers to the same file; an external write in
+that interval may be overwritten despite the earlier checked hash. No portable
+mandatory editor fencing is promised by this increment.
 `write_outcome_unknown` requires destination readback before any retry. Honest
 write/destructive/idempotence annotations describe actual effects; they do not
 replace platform approval or guarantee fewer OpenAI blocks. Never disguise or
@@ -266,7 +270,8 @@ Never save credentials, hidden reasoning, transcripts or bulk logs/source.
 
 Each file replacement is atomic and durable, but the checkpoint and index are
 not a two-file transaction. An interrupted update may leave a mismatch. Missing
-indexes, orphan directories, changed hashes and inconsistent generations fail
+indexes or established lock files, orphan directories, changed hashes and
+inconsistent generations fail
 explicitly; read the original record and reconcile deliberately rather than
 initializing over history. The persistent store lock also distinguishes a lost
 task directory from a never-initialized store. No automatic repair or replay is

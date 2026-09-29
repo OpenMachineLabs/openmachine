@@ -457,13 +457,14 @@ def write_text_file(config: "Settings", state: Path, machine: str, workspace: st
                     os.fchmod(stream.fileno(), metadata.st_mode & 0o777 if metadata else 0o644)
                     stream.flush()
                     os.fsync(stream.fileno())
-                check, info = file_bytes(parent, parts[-1])
-                if check != previous or (metadata and (info.st_ino, info.st_mode) != (metadata.st_ino, metadata.st_mode)):
-                    raise Fault("content_mismatch", "The file changed before replacement.")
                 latest = context(root)
                 if (latest["git_status"] == "unavailable" or latest["worktree"] != current["worktree"]
                         or (latest["head_sha"] or "") != expected_head_sha):
                     raise Fault("context_mismatch", "Git HEAD changed before replacement.")
+                # Final content check is adjacent to publication, not a kernel CAS against external writers.
+                check, info = file_bytes(parent, parts[-1])
+                if check != previous or (metadata and (info.st_ino, info.st_mode) != (metadata.st_ino, metadata.st_mode)):
+                    raise Fault("content_mismatch", "The file changed before replacement.")
                 if metadata is None:
                     os.link(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
                     published = True
