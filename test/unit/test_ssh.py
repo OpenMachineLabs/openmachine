@@ -186,3 +186,24 @@ class SSHTests(unittest.TestCase):
         with self.assertRaises(Fault) as caught:
             execution._receipt(directory, self.identity)
         self.assertEqual(caught.exception.code, "corrupt_state")
+
+    def test_worker_alias_cannot_change_the_checked_checksum_filename(self):
+        artifact = Path(ssh.build_bundle(self.root / "workers")["path"])
+        alias = artifact.parent / ("0" * 64 + ".pyz")
+        alias.symlink_to(artifact)
+        result = subprocess.run([sys.executable, "-I", "-S", str(alias), "rpc"], input="{}",
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(result.stdout)["error"]["code"], "worker_identity_mismatch")
+
+    def test_malformed_response_and_prelaunch_size_failures_are_explicit(self):
+        code, raw = self.response({})
+        response = json.loads(raw)
+        response["identity"] = None
+        with patch.object(ssh, "_exchange", return_value=(code, json.dumps(response).encode())):
+            with self.assertRaises(Fault) as caught:
+                ssh.call(self.settings, None, "build-machine", "list_executions")
+        self.assertEqual(caught.exception.code, "ssh_protocol_error")
+        with patch.object(subprocess, "Popen", side_effect=AssertionError("Oversized input must not contact SSH")):
+            with self.assertRaises(Fault) as caught:
+                ssh.call(self.settings, None, "build-machine", "write_workspace_file", content="x" * ssh.MAX_MESSAGE)
+        self.assertEqual(caught.exception.code, "request_limit")

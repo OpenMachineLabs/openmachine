@@ -11,6 +11,7 @@ import pwd
 import re
 import selectors
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,20 @@ MAX_MESSAGE = 1024 * 1024
 MAX_BUNDLE = 512 * 1024
 PROTOCOL = 1
 MUTATIONS = {"start_execution", "write_workspace_file", "cancel_execution"}
+
+
+def _archive_bytes(path: Path) -> bytes:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise OSError
+            data = stream.read(MAX_BUNDLE + 1)
+    except OSError as error:
+        raise Fault("worker_identity_mismatch", "Use an available regular worker archive, not a filesystem link.") from error
+    if len(data) > MAX_BUNDLE or path.name != hashlib.sha256(data).hexdigest() + ".pyz":
+        raise Fault("worker_identity_mismatch", "The worker bytes do not match the originally configured checksum filename.")
+    return data
 
 
 def build_bundle(directory: Path) -> dict:
@@ -62,7 +77,11 @@ def build_bundle(directory: Path) -> dict:
         try:
             os.link(temporary, destination)
         except FileExistsError:
-            if destination.is_symlink() or destination.read_bytes() != data:
+            try:
+                existing = _archive_bytes(destination)
+            except Fault as error:
+                raise Fault("worker_conflict", "Preserve the existing artifact; it is not the expected regular worker.") from error
+            if existing != data:
                 raise Fault("worker_conflict", "Preserve the existing artifact; its content does not match its name.")
         fd = os.open(directory, os.O_RDONLY)
         try:
@@ -144,6 +163,8 @@ def call(config: "Settings", state: Path | None, machine: str, operation: str, *
     except FileNotFoundError as error:
         raise Fault("ssh_missing", "Install the system OpenSSH client; no target was contacted.") from error
     except (OSError, TimeoutError, subprocess.SubprocessError, Fault) as error:
+        if isinstance(error, Fault) and (error.code == "request_limit" or not mutating):
+            raise
         raise Fault("outcome_unknown" if mutating else "ssh_unavailable",
                     "No complete SSH response was verified. Read the original execution or destination before any mutation retry.") from error
     try:
@@ -161,14 +182,18 @@ def call(config: "Settings", state: Path | None, machine: str, operation: str, *
         raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote error response was invalid.")
     if (code or response.get("protocol") != PROTOCOL or response.get("version") != __version__
             or response.get("worker_sha256") != Path(target.ssh_worker).stem
-            or not re.fullmatch(r"[0-9a-f]{64}", response.get("identity", ""))
+            or not isinstance(response.get("identity"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", response["identity"])
             or (target.ssh_identity and response["identity"] != target.ssh_identity)
             or not isinstance(response.get("result"), dict)):
         raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote response identity was not verified.")
     result = response["result"]
     if "machine" in result:
         result["machine"] = machine
-    for item in result.get("executions", []):
+    items = result.get("executions", [])
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The execution list response was invalid.")
+    for item in items:
         item["machine"] = machine
     return result | {"target_identity": response["identity"], "worker_sha256": response["worker_sha256"]}
 
@@ -265,11 +290,9 @@ def _dispatch(request: dict, archive: Path) -> dict:
 
 def main() -> None:
     try:
-        archive = Path(sys.argv[0]).resolve(strict=True)
-        with archive.open("rb") as source:
-            raw = source.read(MAX_BUNDLE + 1)
-        if len(raw) > MAX_BUNDLE or archive.name != hashlib.sha256(raw).hexdigest() + ".pyz":
-            raise Fault("worker_identity_mismatch", "Use the original content-addressed worker archive; preserve active versions.")
+        # Retain the requested filename: resolving a final link first changes the pin.
+        archive = Path(sys.argv[0]).absolute()
+        _archive_bytes(archive)
         if sys.argv[1:] and sys.argv[1] == "worker":
             execution.worker(Path(sys.argv[2]), *(int(value) for value in sys.argv[3:]))
             return
@@ -280,7 +303,7 @@ def main() -> None:
             raise Fault("request_limit", "Remote requests are bounded to one MiB.")
         result = _dispatch(json.loads(raw), archive)
         encoded = json.dumps(result, ensure_ascii=True).encode()
-        if len(encoded) > MAX_MESSAGE:
+        if len(encoded) + 1 > MAX_MESSAGE:
             raise Fault("outcome_unknown", "The response exceeded its bound; read the original execution or destination before retrying.")
     except Fault as error:
         encoded = json.dumps({"error": {"code": error.code, "message": str(error)}}).encode()
