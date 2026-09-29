@@ -20,9 +20,14 @@
     "description": "An observed defect in existing behavior."
   },
   {
-    "name": "enhancement",
+    "name": "implementation",
+    "color": "0e8a16",
+    "description": "A scoped implementation increment for approved behavior."
+  },
+  {
+    "name": "feature",
     "color": "a2eeef",
-    "description": "A new capability or a multi-stage program."
+    "description": "A new product capability or a multi-stage program."
   },
   {
     "name": "maintenance",
