@@ -2,9 +2,10 @@
 
 ## Scope and authority
 
-Open Machine is currently a repository scaffold. Do not choose a product
-architecture, language, framework, provider, or deployment model as a side
-effect of repository maintenance.
+Open Machine implements the approved PR1 local runtime slice indexed in
+`spec/README.md`. Do not expand architecture, integrations or deployment as a
+side effect of repository maintenance. Keep all tests under root `test/`; add
+only responsibility groups that contain real checks.
 
 Follow current user instructions, then the approved design for the requested
 delta. Current code and tests describe implemented behavior; a Survey, draft,

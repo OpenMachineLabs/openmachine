@@ -7,7 +7,8 @@ Keep templates and automation in English. Reuse the managed label manifest;
 do not add status, priority, or architecture taxonomies without a current need.
 
 Quality checks must stay read-only, bounded, and runnable without private
-infrastructure or product dependencies. Pin external actions to full commit
+infrastructure. Repository hygiene remains dependency-free; a separate product
+job may install the locked public runtime dependencies. Pin external actions to full commit
 SHAs and disable persisted checkout credentials. Read event JSON as data;
 never interpolate untrusted titles or bodies into executable commands.
 

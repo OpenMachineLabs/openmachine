@@ -1,0 +1,9 @@
+schema_version = 1
+
+[machines.local]
+transport = "local"
+execution_enabled = false
+
+[workspaces.project]
+machine = "local"
+root = "/absolute/path/to/your/project"

@@ -2,9 +2,9 @@
 
 ## Repository boundary
 
-This scaffold establishes how work is proposed and reviewed, not how the
-product must be built. Add implementation files, dependencies, and their tests
-only when an approved change needs them. Python is repository tooling only.
+The Spec index binds approved implementation slices. Add files, dependencies
+and tests only for the current approved behavior. The first runtime slice uses
+Python; later scope remains subject to explicit approval.
 Keep all repository-authored content in English, including commit and PR bodies.
 
 ## Design and research
@@ -93,11 +93,12 @@ workflow is assumed. Add planning integration only when it has an actual owner.
 ## Checks and evidence
 
 ```sh
-python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -m unittest discover -s test/system -p 'test_*.py'
 python3 scripts/check_repository.py
 ```
 
-The suite tests the repository checker itself. The checker validates tracked
+The system suite tests the repository checker itself; product checks and their
+installed-wheel entry points are documented in `test/README.md`. The checker validates tracked
 text hygiene, relative Markdown file links, the label manifest, and the naming
 and English-language backstop for supported GitHub events and new commits.
 It rejects CJK text as a common accidental language switch; it does not detect
