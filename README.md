@@ -167,8 +167,9 @@ normal completion wins over a later cancellation. Cancellation/timeout clean up
 the owned process group, not arbitrary PIDs or independent services, and do not
 undo previous side effects. Graceful worker interruption is distinct from failed,
 timed-out and cancelled work. Intentionally detached processes, host reboot,
-sleep, disk loss and session teardown are not recovery promises. Local execution retains this process-group contract; configured SSH execution uses
-the target user-scope lifecycle described below.
+sleep, disk loss and session teardown are not recovery promises. Local execution
+retains this process-group contract; configured SSH execution uses the target
+user-scope lifecycle described below.
 
 Output rotates through **four 1 MiB segments** without stopping the command.
 Readers use absolute byte offsets across rotations; expired offsets report
@@ -203,9 +204,10 @@ remain inside its named configured workspace. They share the original execution
 worktree lock, reject credential/Git-control paths, traversal, descendant symlinks,
 hardlinks and special files, and require existing parents. Publication preserves
 ordinary file mode, atomically installs the destination, fsyncs it and reads back.
-No shell, content execution, deletion, directory creation, permission-change API,
-Git mutation or network call is supplied by the file writer. Tests and authorized
-Git commands still use `start_execution`.
+The file writer does not expose a shell, content execution, deletion, directory
+creation, permission changes or Git mutations. Local edits make no network calls;
+configured SSH edits use the pinned target. Tests and authorized Git commands
+still use `start_execution`.
 
 These are single-file operations, not multi-file transactions or an OS sandbox.
 Cooperative locks cannot fence manual editors or hostile same-account processes.
