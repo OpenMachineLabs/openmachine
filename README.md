@@ -4,17 +4,21 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a7` adds the macOS managed-service lifecycle for
-[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M5: explicit
-installation, real MCP/file readiness, immutable version activation and compatible
-rollback. The accepted local/SSH execution, Skills, task and scoped GitHub owners
-remain unchanged. There is no new dependency, model call or MCP lifecycle tool.
+`0.1.0a8` extracts shared state and text-file primitives from the accepted
+[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M1-M5 runtime.
+`state.py` owns private directories, durable JSON saves and cooperative leases;
+`files.py` owns shared bounded text/path readers. Execution records stay owned by
+`execution.py`; workspace edits, task checkpoints and service selection keep their
+existing owners. The installed SSH archive explicitly includes the two new modules.
 
-Managed service support is for a logged-in macOS controller. Linux manual `serve`
-and configured Linux SSH workers remain separate; Linux controller service management
-is not claimed. Production transition, native GitHub App login, Desktop, release and
-Spec closure remain outside this increment. The implementing PR records unit/SDK,
-actual OS-service and actual ChatGPT/Tunnel evidence separately.
+Tool schemas, configuration, file limits, errors, state formats, lock identities
+and the worker entry point are unchanged. There is no new dependency, service or
+integration. New SSH calls still require a matching controller/worker version;
+keep original immutable archives and environments for existing executions.
+
+Managed services remain limited to logged-in macOS controllers. Linux manual
+`serve` and configured Linux SSH workers remain separate. This refactor does not
+complete M6, retire the previous bridge, publish a release or close the Spec.
 
 ## Install
 
@@ -25,7 +29,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a7-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a8-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -77,7 +81,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.1.0a7-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.1.0a8-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start

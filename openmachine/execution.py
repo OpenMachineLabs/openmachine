@@ -1,7 +1,6 @@
 """Per-execution workers and durable receipts, using only the standard library."""
 
-from contextlib import ExitStack, contextmanager
-import fcntl
+from contextlib import ExitStack
 import hashlib
 import heapq
 import json
@@ -10,16 +9,15 @@ from pathlib import Path
 import re
 import selectors
 import signal
-import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from typing import TYPE_CHECKING
 
 from openmachine import __version__, logs
 from openmachine.sanitize import Fault
+from openmachine.state import lease, private_directory, save_json
 from openmachine.workspace import context
 
 if TYPE_CHECKING:
@@ -32,35 +30,8 @@ MAX_TIMEOUT = 86400
 TERMINAL = {"succeeded", "failed", "timed_out", "cancelled", "interrupted"}
 
 
-def private_directory(path: Path) -> Path:
-    if not path.is_absolute():
-        raise Fault("invalid_state", "The state directory must be an absolute path.")
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = path.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise Fault("unsafe_state", "State directories must be owned by this user with mode 0700.")
-    return path.resolve()
-
-
-def _save(path: Path, value: dict) -> None:
-    fd, name = tempfile.mkstemp(prefix=".record-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(value, stream, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-def _load(directory: Path) -> dict:
+def read_record(directory: Path) -> dict:
+    """Validate an original execution record without rewriting or observing its process."""
     try:
         with (directory / "record.json").open() as stream:
             record = json.load(stream)
@@ -102,19 +73,6 @@ def _load(directory: Path) -> dict:
         return record
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error
-
-
-@contextmanager
-def _lease(path: Path, *, shared: bool = False, wait: bool = False, create: bool = True):
-    flags = (os.O_RDWR | os.O_CREAT) if create else os.O_RDONLY
-    fd = os.open(path, flags | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "rb") as lease:
-        try:
-            fcntl.flock(lease, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | (0 if wait else fcntl.LOCK_NB))
-        except BlockingIOError as error:
-            raise Fault("resource_busy", "An owned operation already holds this execution or worktree.") from error
-        # Close only: an inherited descriptor must keep its lock after launch.
-        yield lease
 
 
 def _directory(state: Path, execution_id: str) -> Path:
@@ -161,9 +119,9 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     request = {"machine": machine, "cwd": str(working), "argv": argv,
                "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha,
                "workspace_access": workspace_access, "resource_keys": sorted(set(keys)), "task_id": task_id}
-    with _lease(locks / f"{execution_id}.lock"):
+    with lease(locks / f"{execution_id}.lock"):
         if directory.exists():
-            original = {"workspace_access": "exclusive", "resource_keys": [], "task_id": "", **_load(directory)["request"]}
+            original = {"workspace_access": "exclusive", "resource_keys": [], "task_id": "", **read_record(directory)["request"]}
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
@@ -175,10 +133,10 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
         key = hashlib.sha256(observed["worktree"].encode()).hexdigest()
         with ExitStack() as leases:
-            owned = [leases.enter_context(_lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
             for name in request["resource_keys"]:
                 digest = hashlib.sha256(name.encode()).hexdigest()
-                owned.append(leases.enter_context(_lease(locks / f"resource-{digest}.lock")))
+                owned.append(leases.enter_context(lease(locks / f"resource-{digest}.lock")))
             if expected_head_sha and observed["head_sha"] != expected_head_sha:
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
             private_directory(directory)
@@ -189,8 +147,8 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 record.update(format_version=3, scope_unit=f"openmachine-{execution_id}.scope")
                 observed.update(target_identity=machine, worker_archive=str(remote_worker),
                                 worker_sha256=remote_worker.stem)
-            with _lease(directory / "control.lock"), _lease(directory / "worker.lock") as worker_lease:
-                _save(directory / "record.json", record)
+            with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
+                save_json(directory / "record.json", record)
                 fds = [lease.fileno() for lease in owned]
                 launcher = [sys.executable, "-I", "-m", "openmachine.execution"]
                 if remote_worker is not None:
@@ -208,7 +166,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                     threading.Thread(target=process.wait, daemon=True).start()
                 except OSError as error:
                     record.update(status="failed", error="worker_launch_failed", finished_at=time.time())
-                    _save(directory / "record.json", record)
+                    save_json(directory / "record.json", record)
                     raise Fault("worker_launch_failed", "The worker could not start; inspect this execution ID.") from error
     return read(config, state, machine, execution_id)
 
@@ -218,8 +176,8 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
         raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
     with ExitStack() as stack:
         if (directory / "control.lock").exists():
-            stack.enter_context(_lease(directory / "control.lock", shared=True, wait=True, create=False))
-        record = _load(directory)
+            stack.enter_context(lease(directory / "control.lock", shared=True, wait=True, create=False))
+        record = read_record(directory)
         if record.get("format_version", 1) >= 2 and not (directory / "control.lock").is_file():
             raise Fault("corrupt_state", "Execution control state is missing; preserve the original record.")
         if record["request"]["machine"] != machine:
@@ -227,7 +185,7 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
         status = record["status"]
         if status not in TERMINAL:
             try:
-                with _lease(directory / "worker.lock", create=False):
+                with lease(directory / "worker.lock", create=False):
                     status = "outcome_unknown"
             except Fault as error:
                 if error.code != "resource_busy":
@@ -330,9 +288,9 @@ def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> 
         raise Fault("outcome_unknown", "Worker ownership is unverified; cancellation cannot claim termination.")
     if record.get("format_version", 1) < 2:
         raise Fault("unsupported_operation", "This legacy worker does not support cancellation; preserve its runtime.")
-    with _lease(directory / "control.lock", wait=True, create=False):
+    with lease(directory / "control.lock", wait=True, create=False):
         # Only the worker publishes execution status. A repeated request is a no-op.
-        record = _load(directory)
+        record = read_record(directory)
         if record["status"] not in TERMINAL:
             try:
                 fd = os.open(directory / "cancel.request", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -371,7 +329,7 @@ def _terminate(process: subprocess.Popen) -> None:
 def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     for fd in (worker_fd, *owned_fds):
         os.fstat(fd)
-    record = _load(directory)
+    record = read_record(directory)
     request = record["request"]
     original_worktree = record["context"]["worktree"]
     process = None
@@ -390,7 +348,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             if not any(line.endswith("/" + record["scope_unit"]) for line in groups):
                 raise Fault("scope_mismatch", "The remote worker did not enter its owned user scope.")
         record.update(status="preparing", context=record["context"] | context(Path(request["cwd"])))
-        _save(directory / "record.json", record)
+        save_json(directory / "record.json", record)
         if record["context"]["git_status"] == "unavailable" or record["context"]["worktree"] != original_worktree:
             raise Fault("context_mismatch", "The canonical worktree changed before launch.")
         if request["expected_head_sha"] and record["context"]["head_sha"] != request["expected_head_sha"]:
@@ -403,7 +361,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                            start_new_session=True, pass_fds=owned_fds)
                 record.update(status="running", started_at=time.time())
-                _save(directory / "record.json", record)
+                save_json(directory / "record.json", record)
                 os.set_blocking(process.stdout.fileno(), False)
                 selector.register(process.stdout, selectors.EVENT_READ)
                 deadline = time.monotonic() + request["timeout_seconds"]
@@ -440,12 +398,12 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                 _terminate(process)
             process.stdout.close()
     # Readers cannot observe the lease-release/publication gap as a lost worker.
-    with _lease(directory / "control.lock", wait=True, create=False):
+    with lease(directory / "control.lock", wait=True, create=False):
         if record.get("format_version") != 3:
             for fd in (*owned_fds, worker_fd):
                 os.close(fd)
         record["finished_at"] = time.time()
-        _save(directory / "record.json", record)
+        save_json(directory / "record.json", record)
     if record.get("format_version") == 3:
         # Keep inherited leases until systemd removes this entire owned cgroup.
         # The durable receipt is observable as terminal only after scope cleanup.
@@ -455,9 +413,9 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=5, check=True)
         except (OSError, subprocess.SubprocessError):
-            with _lease(directory / "control.lock", wait=True, create=False):
+            with lease(directory / "control.lock", wait=True, create=False):
                 record.update(status="failed", error="scope_cleanup_unverified")
-                _save(directory / "record.json", record)
+                save_json(directory / "record.json", record)
         # RuntimeMaxSec also bounds the scope if its explicit stop is lost.
         while True:
             signal.pause()

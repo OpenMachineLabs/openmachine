@@ -14,6 +14,7 @@ from integrations import ssh
 from openmachine import __version__, execution, tasks
 from openmachine.config import Settings
 from openmachine.sanitize import Fault
+from openmachine.state import lease, private_directory, save_json
 
 
 class SSHTests(unittest.TestCase):
@@ -73,6 +74,7 @@ class SSHTests(unittest.TestCase):
         with zipfile.ZipFile(artifact) as archive:
             self.assertEqual(set(archive.namelist()), {"__main__.py", "integrations/__init__.py", "integrations/ssh.py",
                               "openmachine/__init__.py", "openmachine/execution.py", "openmachine/workspace.py",
+                              "openmachine/state.py", "openmachine/files.py",
                               "openmachine/logs.py", "openmachine/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
         result = subprocess.run([sys.executable, "-I", "-S", str(artifact), "rpc"], input="{}",
@@ -148,7 +150,7 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "content_mismatch")
         state = self.root / ".local/state/openmachine"
         lock = state / "locks" / ("workspace-" + hashlib.sha256(str(self.project).encode()).hexdigest() + ".lock")
-        with execution._lease(lock):
+        with lease(lock):
             self.request["workspaces"] = {"another-alias": str(self.project)}
             with self.assertRaises(Fault) as caught:
                 self.dispatch("write_workspace_file", workspace="another-alias", path="file.txt", content="new",
@@ -166,15 +168,15 @@ class SSHTests(unittest.TestCase):
 
     def test_terminal_remote_receipt_waits_for_scope_cleanup(self):
         state = self.root / "state"
-        directory = execution.private_directory(state / "executions" / ("c" * 32))
-        with execution._lease(directory / "control.lock"):
+        directory = private_directory(state / "executions" / ("c" * 32))
+        with lease(directory / "control.lock"):
             record = {"format_version": 3, "version": __version__, "status": "succeeded", "exit_code": 0,
                       "created_at": 1, "finished_at": 2, "log_truncated": False, "output_incomplete": False,
                       "scope_unit": "openmachine-" + "c" * 32 + ".scope",
                       "context": {"target_identity": self.identity, "worker_sha256": self.digest},
                       "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
                                   "argv": ["true"], "timeout_seconds": 10}}
-            execution._save(directory / "record.json", record)
+            save_json(directory / "record.json", record)
         with patch.object(execution, "_scope_state", return_value="active"):
             self.assertEqual(execution._receipt(directory, self.identity)[1], "finishing")
         with patch.object(execution, "_scope_state", return_value="not-found"):
@@ -182,7 +184,7 @@ class SSHTests(unittest.TestCase):
         with patch.object(execution, "_scope_state", side_effect=Fault("scope_unavailable", "No user manager")):
             self.assertEqual(execution._receipt(directory, self.identity)[1], "outcome_unknown")
         record["scope_unit"] = "unrelated.scope"
-        execution._save(directory / "record.json", record)
+        save_json(directory / "record.json", record)
         with self.assertRaises(Fault) as caught:
             execution._receipt(directory, self.identity)
         self.assertEqual(caught.exception.code, "corrupt_state")

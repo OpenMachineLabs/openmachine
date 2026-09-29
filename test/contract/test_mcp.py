@@ -20,6 +20,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 import openmachine
+from openmachine.state import lease
 
 
 class MCPContractTests(unittest.IsolatedAsyncioTestCase):
@@ -533,7 +534,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 await session.initialize()
                 request = {"task_id": "transition-guard", "title": "Transition guard",
                            "expected_revision": 0, "body": "One authorized fixture checkpoint.", "anchors": []}
-                with execution._lease(self.state / "locks/lifecycle.lock"):
+                with lease(self.state / "locks/lifecycle.lock"):
                     denied = await session.call_tool("save_task", request)
                     self.assertTrue(denied.isError)
                     self.assertEqual(denied.structuredContent["error"]["code"], "resource_busy")

@@ -51,7 +51,7 @@ def build_bundle(directory: Path) -> dict:
     output = io.BytesIO()
     members = {"__main__.py": b"from integrations.ssh import main\nmain()\n"}
     for package, names in {
-        "openmachine": ("__init__.py", "execution.py", "workspace.py", "logs.py", "sanitize.py"),
+        "openmachine": ("__init__.py", "execution.py", "workspace.py", "logs.py", "sanitize.py", "state.py", "files.py"),
         "integrations": ("__init__.py", "ssh.py"),
     }.items():
         for name in names:

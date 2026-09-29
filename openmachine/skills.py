@@ -10,7 +10,7 @@ import re
 from typing import TYPE_CHECKING
 
 from openmachine.sanitize import Fault
-from openmachine.workspace import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, excluded, file_bytes, file_parent, file_parts, text_page
+from openmachine.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, excluded, file_bytes, file_parent, file_parts, text_page
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
