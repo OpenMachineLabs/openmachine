@@ -2,37 +2,51 @@
 
 An open-source runtime for AI to operate your machines.
 
-## Current increment
+## v0.1.0
 
-`0.1.0a8` extracts shared state and text-file primitives from the accepted
-[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M1-M5 runtime.
-`state.py` owns private directories, durable JSON saves and cooperative leases;
-`files.py` owns shared bounded text/path readers. Execution records stay owned by
-`execution.py`; workspace edits, task checkpoints and service selection keep their
-existing owners. The installed SSH archive explicitly includes the two new modules.
+Open Machine connects ChatGPT to your local and SSH-connected machines through
+an operator-controlled MCP runtime. It supports an end-to-end workflow: read
+instructions and code, edit files, run tests, inspect the result, collaborate on
+GitHub, and continue an interrupted task from its original evidence.
 
-Tool schemas, configuration, file limits, errors, state formats, lock identities
-and the worker entry point are unchanged. There is no new dependency, service or
-integration. New SSH calls still require a matching controller/worker version;
-keep original immutable archives and environments for existing executions.
+This first versioned release completes [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2).
+It includes local execution, Linux SSH workers, reusable Skills, durable task
+checkpoints, optional GitHub collaboration, and managed macOS service updates
+and rollback. ChatGPT plans the work; Open Machine executes explicit tool calls.
+No Codex, private Brain package, hidden agent loop, or model inference API is
+required by the runtime.
 
-Managed services remain limited to logged-in macOS controllers. Linux manual
-`serve` and configured Linux SSH workers remain separate. M6 final acceptance is
-recorded in [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2);
-specialized/browser workflows, the `v0.1.0` release and Spec closure remain separate.
+Read the [v0.1.0 release notes and download artifacts](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.1.0)
+for the feature overview, supported environments, validation and known limits.
+Version `0.1.0` is an initial-development release, not a stable 1.x API promise.
+Release tags identify fixed commits; the package, CLI, MCP service and newly
+built SSH worker all report `0.1.0` from one version source.
+
+Managed services are supported for logged-in macOS controllers. Linux supports
+manual `serve` and configured SSH workers; managed Linux services and Windows
+are not included. Native execution is disabled by default and is **not a
+sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI.
 
 ## Install
 
-Use Python 3.12 or newer on macOS or Linux. Run from a version-pinned source
-checkout; no public registry name or release is assumed:
+Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
+identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
+git clone --branch v0.1.0 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a8-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
+
+Alternatively, use the release's wheel, matching `requirements.lock`, and
+`SHA256SUMS`; verify the downloads before installing. The release notes contain
+that shorter installation path. No PyPI package, Homebrew formula or npm
+publication is assumed. Repository access is required while this repository
+remains private; creating a GitHub Release does not change its visibility.
 
 The wheel includes the core, direct adapters and bundled Skill, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a
@@ -82,7 +96,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.1.0a8-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.1.0-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
@@ -148,6 +162,14 @@ automatic cleanup, remote provisioning, workload restart or mutation replay.
 Cooperative locks are not a sandbox or a fence against external native commands.
 A brief MCP disconnect is possible; reconnect and read the same task/execution IDs.
 Do not repeat a test, commit or external write merely because a reply was lost.
+
+For an upgrade from the development builds to `0.1.0`, new SSH requests require
+a matching `0.1.0` worker. Run `worker-bundle` from the newly installed release,
+explicitly copy the checksum-named archive to each enabled target, update its
+`ssh_worker` path, and verify the pinned target with `doctor --machine NAME`.
+Retain the previous archive and interpreter for original executions. Controller
+update and rollback never provision or replace remote workers automatically;
+a rollback also requires a worker matching the selected controller for new calls.
 
 Managed transitions require the same lifecycle/state contract and successful
 candidate-owned validation of current configuration, task and execution formats.
@@ -590,8 +612,8 @@ state; receipts are not tamper-proof.
 
 Returned text/logs go to ChatGPT through OpenAI. Self-hosted does not mean all
 data stays local. A Skill never grants write authority. Do not expose this
-listener publicly or treat a tunnel ID as a complete access policy. This PR
-performs no production transition, service replacement or OS permission changes.
+listener publicly or treat a tunnel ID as a complete access policy. Open Machine does not
+automatically migrate production workloads or grant OS permissions.
 
 ## Development and review
 
