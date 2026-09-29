@@ -8,11 +8,16 @@ execution_enabled = false
 machine = "local"
 root = "/absolute/path/to/your/project"
 
-# Optional GitHub collaboration. Listing a repository enables the dedicated write tools.
-# Omit attribution for the default policy: public on, private off.
+# Optional GitHub connection using the existing gh account; no credentials here.
+# Write scopes include reads. Empty scopes grant no repository access.
+# Legacy repositories retains exact read/write access; do not mix scope forms.
 # [github]
-# repositories = ["owner/repository"]
-# attribution = true
+# account = "my-account"
+# read_repositories = ["owner/reference"]
+# write_repositories = ["owner/project"]
+# read_owners = []
+# write_owners = []
+# attribution = true # Default when omitted: public on, private off.
 
 # Optional explicit Skill sources; the empty default does not scan user accounts.
 [skills]

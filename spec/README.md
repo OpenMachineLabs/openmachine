@@ -7,7 +7,7 @@ No product Spec is approved by the repository scaffold.
 
 | Spec Issue | Binding | Current scope |
 | --- | --- | --- |
-| [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Accepted M1/M2 plus the maintainer-approved M3 configured SSH increment: reuse existing workspace/execution owners, explicit worker preparation, target-owned receipts and locks, scoped real SSH/ChatGPT acceptance. Self-review and merge are authorized only after scoped acceptance. Later milestones, release and Spec closure remain separate. |
+| [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Accepted M1-M3 plus the maintainer-approved M4 GitHub increment: existing gh identity, explicit read/write scopes, paged candidate evidence, shared typed operations and verified current-head merge. The implementing PR records the current user instruction; self-review, merge after scoped acceptance and a post-merge Issue body update are authorized. M5/M6, native GitHub onboarding, release and Spec closure remain separate. |
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [implementation authorization and acceptance](https://github.com/OpenMachineLabs/openmachine/issues/6) | Minimal GitHub provenance footers for configured Issue/PR/comment/review body writes; broader GitHub collaboration remains in #2 M4. |
 
 ## Survey Issues

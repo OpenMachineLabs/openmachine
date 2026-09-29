@@ -4,17 +4,17 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a5` extends the accepted local coding, Skills and task workflow with
-configured Linux SSH machines for [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M3.
-The same workspace/file/execution tools use a thin SSH adapter and a versioned
-standard-library worker. Tasks and Skills stay on the controller; execution
-receipts, logs and locks stay on the target. No model calls, private controller,
-remote MCP daemon or public port is introduced.
+`0.1.0a6` adds scoped GitHub collaboration to the accepted local/SSH coding,
+Skills and task workflow for [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M4.
+One implementation serves MCP and direct Python callers: existing `gh` identity,
+read/write scopes, paged review evidence, typed writes and current-candidate merge
+with verified destination readback. No AI client's GitHub plugin, GUI, OAuth
+service, model call, private package or new dependency is required.
 
-The optional GitHub body/provenance slice remains unchanged. Complete GitHub
-collaboration, managed services, update/rollback, production transition and
-v0.1.0 release acceptance remain separate. A source merge or local SDK pass does
-not establish actual ChatGPT/SSH acceptance; the PR/Spec records that evidence.
+The existing local and SSH execution owners are unchanged. Managed services,
+update/rollback, production transition, native GitHub App login and v0.1.0 release
+acceptance remain separate. Installed/SDK tests are not actual ChatGPT/GitHub
+acceptance; the implementing PR and Spec record that evidence.
 
 ## Install
 
@@ -25,7 +25,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a5-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a6-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -53,10 +53,9 @@ for a machine only when native account access is intended. Restart this
 service after changing configuration.
 
 Machine/workspace names are operator-owned; see [examples/config.toml](examples/config.toml).
-Local and explicitly configured SSH transports are supported. Optional `[github]` configuration lists
-exact repositories enabled for the dedicated collaboration tools. Omit `attribution` for
-the default policy (public repositories on, private repositories off), or set it explicitly
-to `true` / `false`. Open Machine uses the existing `gh` login and stores no GitHub token.
+Local and explicitly configured SSH transports are supported. Optional `[github]`
+configuration enables the scoped collaboration tools described below. Omit it to
+keep GitHub disabled. Open Machine uses the existing `gh` login and stores no token.
 Unknown fields are rejected, not ignored. `doctor` checks configuration and directory
 existence, not effective file access, service readiness, tunnels or ChatGPT.
 Verify an actual file read through MCP before calling an environment ready.
@@ -105,10 +104,12 @@ change. A socket or a tool list does not prove that write tools work.
 | `read_execution` | Original machine/ID and absolute byte offset; observed state, exit code, context, bounded output and next offset. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
-| `github_issue` | Conditional on `[github]`; create/update an enabled Issue, preserving existing Open Machine attribution on edits. |
+| `github_read` | Conditional on `[github]`; identity/status, scoped objects, pinned source and paged PR/check/discussion observations; never dispatches arbitrary endpoints. |
+| `github_issue` | Create/update a scoped Issue, including open/closed state, with field readback and retained provenance. |
 | `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request with Created via attribution on eligible new artifacts. |
 | `github_comment` | Conditional on `[github]`; create/update a top-level Issue/PR comment with Posted via attribution on eligible new posts. |
-| `github_review` | Conditional on `[github]`; create an exact-HEAD review summary or update its body; inline review comments are not decorated. |
+| `github_review` | Submit an exact-HEAD summary after complete gate observation, or update its body; self-review is COMMENT, not independent approval. |
+| `github_merge` | Explicit current-HEAD merge after complete checks/discussions and clean native policy; verify the actual destination commit. |
 
 From ChatGPT, read capabilities, the operating Skill and the disposable project's
 `AGENTS.md`. Inspect Git status, search and read the relevant source. Use an
@@ -183,6 +184,108 @@ history. New receipts identify format 2. Legacy active workers cannot acquire th
 new cancellation protocol; their original installed runtime and records must be
 preserved. This is read compatibility, not managed upgrade/rollback or permission
 to downgrade a format-2 state store. Task references default to empty for older receipts; old records are never rewritten. Automatic resumption remains excluded.
+
+## GitHub collaboration
+
+Enable the developer connection using the existing local `gh` account:
+
+```toml
+[github]
+account = "my-account" # Optional pin; a mismatch fails without switching identities.
+read_repositories = ["owner/reference"]
+write_repositories = ["owner/project"]
+read_owners = []
+write_owners = []
+# attribution = true
+```
+
+Write grants include reads. Owners can be personal accounts or organizations;
+matching is case-insensitive and exact, never a substring or wildcard. An empty
+scope grants no repository access. Legacy `repositories = ["owner/project"]`
+retains its exact read/write meaning, but cannot be mixed with the new scope
+fields. Migrate explicitly; omitting a write grant must not widen permission.
+The optional account pin checks the actual API actor, not Git author metadata.
+
+```sh
+openmachine --config /absolute/path/config.toml doctor --github
+openmachine --config /absolute/path/config.toml doctor --github --repository owner/project
+```
+
+These are real probes, unlike `get_capabilities`, which reports `not_probed`.
+Missing CLI, authentication, access, target identity and network failures are
+distinct. Missing GitHub never prevents local or SSH tools from working. Do not
+switch `gh` accounts during an operation: before/after checks detect observed
+identity drift, not an atomic credential lease. OM neither copies credentials
+nor automatically logs in, changes scopes, switches accounts or repairs Git config.
+
+Read `pull_request` first. Candidate `files`, `reviews`, `review_comments`,
+`threads` and `merge_context` require its exact `expected_head_sha`; echo both
+HEAD and base on subsequent pages. `checks` takes a full commit SHA in `ref`.
+Follow `next_page` or `next_cursor`; an empty partial result is not proof of
+absence. Thread results include resolution state and a first-comment locator;
+read the separately paged `review_comments` for full inline discussion bodies.
+Ordinary Issue/PR conversation comments use `comments`.
+
+API patches may be missing or incomplete even when their field is present.
+Review complete relevant base/head files with `file`, or use native Git through
+existing execution. `file` accepts an exact commit and relative text path, checks
+Git tree modes and blob bytes, and rejects credential paths, symlinks, submodules
+and binary data. It returns 16 KiB UTF-8-safe byte pages with full raw SHA256,
+`next_offset` and `has_more`, for sources up to 1 MiB. API responses are bounded
+to 2 MiB and returned observations to 256 KiB after JSON escaping. An oversized
+result requires a narrower read, not an invented success. GitHub's PR file API
+has a 3,000-file cap; larger candidates expose an explicit coverage gap.
+
+Create/update operations preserve the existing provenance policy: default on
+for public repositories and off for private ones; `attribution` overrides it.
+Updates preserve an existing footer without branding older artifacts. Readback
+checks all submitted fields, object identity, review commit/event and the acting
+account. Optional `expected_updated_at` detects stale Issue/PR/comment edits;
+this preflight and the API write are not atomic CAS. Legacy calls without this
+field retain their previous weaker edit guarantee. Prefer `expected_head_sha`
+for PR creation/updates; pinned creation uses a same-repository branch.
+
+The delivery loop is instructions -> inspected change -> tests -> native
+commit/push -> PR -> full diff/review context -> submitted HEAD-bound review ->
+authorized merge -> destination readback. `merge_context` is read-only. The gate
+pages up to 1,000 check, review or thread records per evidence family and rejects
+incomplete evidence. It selects the latest check ID per app/name and latest
+status ID per context, rather than failing on superseded attempts. Zero actual
+checks is `no_checks`, not an unknown or passing CI run. Any current non-passing
+check, unresolved thread, effective change request or unmet review requirement
+blocks merge. GitHub must independently report clean, mergeable, non-draft policy.
+
+A current-HEAD submitted COMMENT may record authorized self-review; it never
+satisfies a required independent approval by itself. A review can describe known
+check failures, but cannot be submitted with missing gate evidence. Native branch
+protections remain authoritative. No bypass flags, auto-merge, merge queues or
+stacked-PR orchestration are implemented. Only `merged_verified` confirms that
+the PR's returned merge commit is actually present on the destination branch;
+sequential observations do not constitute an atomic GitHub transaction.
+
+Creates are not idempotent. Record intent and the original Issue/PR/comment or
+review locator in the existing task checkpoint. On `write_outcome_unknown`,
+`write_unverified`, `merge_outcome_unknown` or `merge_unverified`, read the actual
+destination before any retry. OM never automatically replays external writes and
+adds no second task ledger or publication queue.
+
+Local Git remains native execution. An operator choosing HTTPS Git can reuse the
+same existing `gh` connection with a command-scoped credential helper, for example:
+
+```sh
+git -c credential.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' push origin HEAD
+```
+
+This does not change global Git configuration or rewrite an existing remote.
+Never place tokens in remotes, arguments or logs. SSH-connected machines need
+their own explicitly authorized Git access; do not copy controller credentials.
+
+The reusable functions live in `openmachine/github.py`; MCP only declares schemas
+and serializes results. Future Desktop/headless callers consume those same
+operations, not a second GitHub stack. The native GitHub App connection and GUI
+remain [Spec #11](https://github.com/OpenMachineLabs/openmachine/issues/11) follow-ups.
+This increment is the existing-identity bridge, not one-click native onboarding,
+Projects management, a general plugin SDK or a claim that Desktop has shipped.
 
 ## Explicit file editing
 

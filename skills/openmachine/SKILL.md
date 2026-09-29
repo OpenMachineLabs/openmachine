@@ -43,8 +43,20 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    cancel the original owned execution and read its terminal result before starting
    incompatible work. Do not mutate running argv. Cancellation does not undo file,
    commit or external side effects. A completed process does not complete its task.
-8. Use configured GitHub tools for Issue/PR/comment/review body writes so provenance
-   and destination readback remain at that boundary. Do not assume broader adapters.
+8. Use the configured GitHub tools, not a second client's connector. Probe the
+   selected identity with github_read(status); configuration is not authentication.
+   Read the Issue/PR and all relevant diff, check, review and discussion pages.
+   Echo exact HEAD/base on candidate continuation; missing patches require pinned
+   file reads or native Git, never a claim of no changes. Thread state and inline
+   comment bodies have separate paged reads. Respect coverage/redaction gaps.
+   Keep branch/commit/push in native execution with existing user-owned credentials.
+   Use typed Issue/PR/comment/review writes to preserve provenance and field readback.
+   Prefer observed updated_at and exact HEAD guards. Submit a current-HEAD review;
+   self-review is COMMENT, not independent approval. Merge only under explicit
+   authority and native protections; only merged_verified proves its destination.
+   Save original external locators in the existing checkpoint. Unknown/unverified
+   writes are reconciled by destination reads, never automatic repeats or another
+   account. Missing gh or grants do not authorize login/configuration changes.
    Keep completion, source merge, deployment, client refresh and real integration
    acceptance separate. Local SDK sessions are not real ChatGPT conversations.
 

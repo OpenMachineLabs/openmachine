@@ -4,6 +4,8 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -37,10 +39,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.stop_all)
         self.launch()
 
-    def launch(self):
+    def launch(self, environment=None):
         process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
                                     "--state-dir", str(self.state), "serve"],
-                                   cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                   cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment)
         self.processes.append(process)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -102,12 +104,17 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 init = await session.initialize()
                 self.assertEqual(init.serverInfo.version, openmachine.__version__)
                 tools = {t.name: t for t in (await session.list_tools()).tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
                 self.assertFalse(tools["cancel_execution"].annotations.readOnlyHint)
                 self.assertFalse(tools["github_issue"].annotations.readOnlyHint)
+                self.assertTrue(tools["github_read"].annotations.readOnlyHint)
+                self.assertTrue(tools["github_read"].annotations.openWorldHint)
+                for name in ("github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"):
+                    self.assertFalse(tools[name].annotations.idempotentHint)
+                self.assertNotIn("endpoint", tools["github_read"].inputSchema["properties"])
                 timeout = tools["start_execution"].inputSchema["properties"]["timeout_seconds"]
                 self.assertEqual((timeout["default"], timeout["maximum"]), (600, 86400))
                 caps = (await session.call_tool("get_capabilities", {})).structuredContent
@@ -116,6 +123,89 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
                 self.assertFalse(skill.isError)
                 self.assertIn("Operate Open Machine", skill.structuredContent["text"])
+
+    async def test_github_scope_rejects_before_connection(self):
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                for name, arguments in (
+                    ("github_read", {"action": "repository", "repository": "Other/repo"}),
+                    ("github_issue", {"action": "create", "repository": "Other/repo", "title": "not submitted"}),
+                    ("github_merge", {"repository": "Other/repo", "number": 1, "expected_head_sha": "a" * 40}),
+                ):
+                    result = await session.call_tool(name, arguments)
+                    self.assertTrue(result.isError)
+                    self.assertEqual(result.structuredContent["error"]["code"], "github_not_allowed")
+
+    async def test_missing_gh_and_auth_do_not_break_local_execution(self):
+        self.stop(self.processes[-1])
+        binaries = self.root / "without-gh"
+        binaries.mkdir()
+        for name in ("git", "ps"):
+            source = shutil.which(name)
+            if source:
+                (binaries / name).symlink_to(source)
+        environment = dict(os.environ, PATH=str(binaries))
+        for code in ("github_unavailable", "github_authentication_required"):
+            if code == "github_authentication_required":
+                command = binaries / "gh"
+                command.write_text("#!/bin/sh\nprintf 'gh: Bad credentials (HTTP 401)\\n' >&2\nexit 1\n")
+                command.chmod(0o700)
+            process = self.launch(environment)
+            async with self.client() as (reader, writer, _):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    unavailable = await session.call_tool("github_read", {"action": "status"})
+                    self.assertTrue(unavailable.isError)
+                    self.assertEqual(unavailable.structuredContent["error"]["code"], code)
+                    identity = uuid.uuid4().hex
+                    started = await session.call_tool("start_execution", {
+                        "machine": "desktop", "execution_id": identity, "cwd": str(self.work),
+                        "argv": [sys.executable, "-c", "print('local-still-usable')"],
+                    })
+                    self.assertFalse(started.isError, started)
+                    for _ in range(100):
+                        observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
+                        self.assertFalse(observed.isError, observed)
+                        if observed.structuredContent["status"] == "succeeded":
+                            break
+                        await asyncio.sleep(0.03)
+                    self.assertEqual(observed.structuredContent["exit_code"], 0)
+                    self.assertIn("local-still-usable", observed.structuredContent["output"])
+            self.stop(process)
+
+    async def test_github_typed_boundaries_before_dispatch(self):
+        self.stop(self.processes[-1])
+        binaries = self.root / "synthetic-gh"
+        binaries.mkdir()
+        calls = self.root / "github-calls.jsonl"
+        responses = {"user": {"id": 1, "login": "Operator"},
+                     "repos/Example/repo": {"id": 1, "full_name": "Example/repo"},
+                     "repos/Example/repo/issues/2": {"id": 2, "number": 2, "pull_request": {}}}
+        command = binaries / "gh"
+        command.write_text(f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\n"
+                           "method = sys.argv[sys.argv.index('--method') + 1]\n"
+                           f"with Path({str(calls)!r}).open('a') as log:\n"
+                           "    log.write(json.dumps([method, sys.argv[-1]]) + '\\n')\n"
+                           "assert method == 'GET', 'Unexpected mutation'\n"
+                           f"print(json.dumps({responses!r}[sys.argv[-1]]))\n")
+        command.chmod(0o700)
+        self.launch(dict(os.environ, PATH=str(binaries)))
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("github_issue", {
+                    "action": "update", "repository": "Example/repo", "number": 2, "state": "closed"})
+                self.assertTrue(result.isError)
+                self.assertEqual(result.structuredContent["error"]["code"], "github_wrong_object_type")
+                for path in (".ENV", "Secrets.toml", "ID_RSA", "config/.EnV.local"):
+                    result = await session.call_tool("github_read", {
+                        "action": "file", "repository": "Example/repo", "ref": "a" * 40, "path": path})
+                    self.assertTrue(result.isError)
+                    self.assertEqual(result.structuredContent["error"]["code"], "invalid_github_request")
+        observed = [json.loads(line) for line in calls.read_text().splitlines()]
+        self.assertTrue(observed)
+        self.assertTrue(all(method == "GET" and endpoint in responses for method, endpoint in observed))
 
     async def test_real_write_survives_service_restart_and_is_not_replayed(self):
         execution_id = uuid.uuid4().hex

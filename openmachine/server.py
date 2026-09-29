@@ -22,6 +22,8 @@ from openmachine.sanitize import Fault
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+GITHUB_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+GITHUB_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
 
 def _reply(operation) -> CallToolResult:
@@ -63,8 +65,8 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "workspaces": {name: item.model_dump() for name, item in config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": config.skills.roots, "task_continuity": True,
             "integrations": (["github"] if config.github is not None else []) + (["ssh"] if has_ssh else []),
-            "github": None if config.github is None else {"repositories": config.github.repositories,
-                                                           "attribution": config.github.attribution},
+            "github": None if config.github is None else {**config.github.model_dump(), "backend": "gh",
+                                                           "probe_status": "not_probed", "read_and_merge": True},
             "transport": "private_unix_socket",
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
@@ -157,33 +159,62 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         return _reply(lambda: execution.cancel(config, state, machine, execution_id))
 
     if config.github is not None:
-        @mcp.tool(annotations=WRITE, structured_output=False)
-        def github_issue(action: Literal["create", "update"], repository: str, title: str | None = None,
-                         body: str | None = None, number: Annotated[int, Field(ge=0)] = 0) -> CallToolResult:
-            """Create or update an enabled GitHub Issue. New public artifacts get the configured Open Machine provenance footer."""
-            return _reply(lambda: github.issue(config, action, repository, title, body, number))
+        @mcp.tool(annotations=GITHUB_READ, structured_output=False)
+        def github_read(action: github.ReadAction, repository: str = "", number: Annotated[int, Field(ge=0)] = 0,
+                        ref: str = "", path: str = "", page: Annotated[int, Field(ge=1, le=1000)] = 1,
+                        limit: Annotated[int, Field(ge=1, le=100)] = 30, cursor: Annotated[str, Field(max_length=1024)] = "",
+                        expected_head_sha: str = "", expected_base_sha: str = "",
+                        offset: Annotated[int, Field(ge=0, le=1048576)] = 0) -> CallToolResult:
+            """Read scoped GitHub identity, repositories, Issues and version-bound PR evidence. Read pull_request before candidate pages; echo both HEAD/base on continuation. Follow next_page/next_cursor and evidence gaps. checks uses an exact commit ref. file uses a fixed commit and 16 KiB UTF-8 byte pages; no symlink/credential reads. API patches are not proof of complete diffs. status probes the existing gh identity without credentials or login changes. merge_context observes gates and never merges. No arbitrary endpoint or mutation dispatch."""
+            return _reply(lambda: github.read(config, action, repository, number, ref, path, page, limit, cursor,
+                                              expected_head_sha, expected_base_sha, offset))
 
-        @mcp.tool(annotations=WRITE, structured_output=False)
-        def github_pull_request(action: Literal["create", "update"], repository: str, title: str | None = None,
-                                body: str | None = None, number: Annotated[int, Field(ge=0)] = 0,
-                                head: str = "", base: str = "", draft: bool = False) -> CallToolResult:
-            """Create or update an enabled GitHub Pull Request with readback-verified body attribution."""
-            return _reply(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft))
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_issue(action: Literal["create", "update"], repository: str,
+                         title: Annotated[str | None, Field(max_length=256)] = None,
+                         body: Annotated[str | None, Field(max_length=60000)] = None,
+                         number: Annotated[int, Field(ge=0)] = 0,
+                         state: Literal["open", "closed"] | None = None, expected_updated_at: str = "") -> CallToolResult:
+            """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
+            return _reply(lambda: github.issue(config, action, repository, title, body, number, state, expected_updated_at))
 
-        @mcp.tool(annotations=WRITE, structured_output=False)
-        def github_comment(action: Literal["create", "update"], repository: str, body: str,
-                           number: Annotated[int, Field(ge=0)] = 0,
-                           comment_id: Annotated[int, Field(ge=0)] = 0) -> CallToolResult:
-            """Create or update a top-level GitHub conversation comment. Inline review comments are outside this tool."""
-            return _reply(lambda: github.comment(config, action, repository, body, number, comment_id))
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_pull_request(action: Literal["create", "update"], repository: str,
+                                title: Annotated[str | None, Field(max_length=256)] = None,
+                                body: Annotated[str | None, Field(max_length=60000)] = None,
+                                number: Annotated[int, Field(ge=0)] = 0,
+                                head: str = "", base: str = "", draft: bool = False,
+                                state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
+                                expected_head_sha: str = "") -> CallToolResult:
+            """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
+            return _reply(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft,
+                                                      state, expected_updated_at, expected_head_sha))
 
-        @mcp.tool(annotations=WRITE, structured_output=False)
-        def github_review(action: Literal["create", "update"], repository: str, body: str,
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_comment(action: Literal["create", "update"], repository: str,
+                           body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
+                           comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "") -> CallToolResult:
+            """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. updated_at detects an observed edit conflict without promising atomic CAS."""
+            return _reply(lambda: github.comment(config, action, repository, body, number, comment_id, expected_updated_at))
+
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_review(action: Literal["create", "update"], repository: str,
+                          body: Annotated[str, Field(max_length=60000)],
                           number: Annotated[int, Field(ge=0)] = 0, review_id: Annotated[int, Field(ge=0)] = 0,
                           expected_head_sha: str = "",
                           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT") -> CallToolResult:
-            """Create a HEAD-bound review summary or update its body. Inline comments are never decorated here."""
+            """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. Uncertain writes require original-review readback, never blind retry."""
             return _reply(lambda: github.review(config, action, repository, body, number, review_id, expected_head_sha, event))
+
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_merge(repository: str, number: Annotated[int, Field(ge=1)],
+                         expected_head_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")],
+                         expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
+                         commit_title: Annotated[str, Field(max_length=256)] = "",
+                         commit_message: Annotated[str, Field(max_length=60000)] = "") -> CallToolResult:
+            """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
+            return _reply(lambda: github.merge(config, repository, number, expected_head_sha, expected_base_sha,
+                                               method, commit_title, commit_message))
 
     sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
 

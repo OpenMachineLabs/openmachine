@@ -20,7 +20,10 @@ def main() -> int:
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
     doctor = commands.add_parser("doctor", help="Inspect local configuration, or explicitly probe one SSH target")
-    doctor.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
+    target = doctor.add_mutually_exclusive_group()
+    target.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
+    target.add_argument("--github", action="store_true", help="Probe the existing GitHub identity without changing login")
+    doctor.add_argument("--repository", default="", help="With --github, probe one configured repository")
     bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
     bundle.add_argument("--directory", type=Path, required=True)
     commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
@@ -46,6 +49,12 @@ def main() -> int:
             return 0
         config = load(args.config)
         if args.command == "doctor":
+            if args.repository and not args.github:
+                raise Fault("invalid_github_request", "--repository requires doctor --github.")
+            if args.github:
+                from openmachine.github import read
+                print(json.dumps(read(config, "status", args.repository)))
+                return 0
             if args.machine:
                 from integrations.ssh import call
                 result = call(config, None, args.machine, "probe")
@@ -56,6 +65,7 @@ def main() -> int:
             print(json.dumps({"version": __version__, "configuration": "valid", "unavailable_workspaces": unavailable,
                               "state_directory_exists": args.state_dir.is_dir(),
                               "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed",
+                              "github": "not_probed" if config.github is not None else "disabled",
                               "ssh_targets": {name: "not_probed" for name, item in config.machines.items() if item.transport == "ssh"}}))
             return int(bool(unavailable))
         from openmachine.server import serve
