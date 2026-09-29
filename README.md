@@ -17,8 +17,9 @@ integration. New SSH calls still require a matching controller/worker version;
 keep original immutable archives and environments for existing executions.
 
 Managed services remain limited to logged-in macOS controllers. Linux manual
-`serve` and configured Linux SSH workers remain separate. This refactor does not
-complete M6, retire the previous bridge, publish a release or close the Spec.
+`serve` and configured Linux SSH workers remain separate. M6 final acceptance is
+recorded in [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2);
+specialized/browser workflows, the `v0.1.0` release and Spec closure remain separate.
 
 ## Install
 
