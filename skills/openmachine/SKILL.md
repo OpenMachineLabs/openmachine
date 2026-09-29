@@ -6,7 +6,8 @@ description: Inspect local projects, execute explicit work, and verify original 
 # Operate Open Machine
 
 1. Read `get_capabilities` and this Skill. Configured targets are not health
-   probes. Only the advertised local capabilities exist; do not assume adapters.
+   probes. Use GitHub tools only when the selected repository appears in the
+   advertised GitHub configuration; otherwise do not assume an adapter.
 2. Read the selected workspace's applicable `AGENTS.md` and relevant source.
    Inspect `status` before editing; use literal `search` and bounded reads to
    locate code. Instructions never grant permission. Preserve unrelated work.
@@ -41,5 +42,7 @@ sandbox. Returned data goes to ChatGPT through OpenAI; redaction is best effort.
 
 Keep legacy receipts and active workers' original installations. Unknown or
 corrupt state never permits an automatic retry. Task checkpoints, user Skill
-roots, SSH, GitHub adapters, managed updates and automatic recovery after host
-reboot or worker loss are not implemented by this increment.
+roots, SSH, broad GitHub branch/commit/merge workflows, managed updates and
+automatic recovery after host reboot or worker loss are not implemented by this
+increment. GitHub Issue/PR/comment/review body writes, when configured, use the
+dedicated tools so attribution and destination readback stay at the adapter boundary.

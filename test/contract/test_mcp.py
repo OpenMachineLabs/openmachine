@@ -28,7 +28,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         (self.work / "AGENTS.md").write_text("Only modify this disposable project.\n")
         self.config = self.root / "config.toml"
         self.config.write_text('schema_version = 1\n[machines.desktop]\ntransport = "local"\nexecution_enabled = true\n'
-                               '[workspaces.example]\nmachine = "desktop"\nroot = ' + json.dumps(str(self.work)) + '\n')
+                               '[workspaces.example]\nmachine = "desktop"\nroot = ' + json.dumps(str(self.work)) + '\n'
+                               '[github]\nrepositories = ["Example/repo"]\nattribution = false\n')
         self.state = self.root / "state"
         self.socket = self.state / "mcp.sock"
         self.processes = []
@@ -79,15 +80,17 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 init = await session.initialize()
                 self.assertEqual(init.serverInfo.version, openmachine.__version__)
                 tools = {t.name: t for t in (await session.list_tools()).tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
                 self.assertFalse(tools["cancel_execution"].annotations.readOnlyHint)
+                self.assertFalse(tools["github_issue"].annotations.readOnlyHint)
                 timeout = tools["start_execution"].inputSchema["properties"]["timeout_seconds"]
                 self.assertEqual((timeout["default"], timeout["maximum"]), (600, 86400))
                 caps = (await session.call_tool("get_capabilities", {})).structuredContent
                 self.assertEqual(caps["machines"]["desktop"]["probe_status"], "not_probed")
+                self.assertEqual(caps["integrations"], ["github"])
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
                 self.assertFalse(skill.isError)
                 self.assertIn("Operate Open Machine", skill.structuredContent["text"])

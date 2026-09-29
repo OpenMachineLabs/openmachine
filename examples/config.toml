@@ -7,3 +7,9 @@ execution_enabled = false
 [workspaces.project]
 machine = "local"
 root = "/absolute/path/to/your/project"
+
+# Optional GitHub collaboration. Listing a repository enables the dedicated write tools.
+# Omit attribution for the default policy: public on, private off.
+# [github]
+# repositories = ["owner/repository"]
+# attribution = true
