@@ -255,7 +255,9 @@ A logical task may refer to multiple executions. One private store owns it:
 
 `save_task` creates at revision zero and updates only the observed revision. It
 serializes saves under one stable store lock; an identical retry of the latest
-write returns unchanged. Titles and exact anchors live only in the index with
+write returns unchanged. Lookup anchors are additive: an omitted or empty list
+preserves prior references rather than silently removing task locators. Titles
+and exact anchors live only in the index with
 revision/hash metadata; execution status and checkpoint prose are not duplicated.
 Checkpoints are at most 32 KiB and the index at most 2 MiB. Keep only goals,
 exclusions, authorization references, worktree/branch, original execution IDs and

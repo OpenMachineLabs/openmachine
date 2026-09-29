@@ -46,8 +46,8 @@ def _discover(config: "Settings") -> tuple[dict, list[dict]]:
     for configured in config.skills.roots:
         try:
             root = Path(configured).resolve(strict=True)
-            if not root.is_dir():
-                raise Fault("invalid_skill_root", "Skill sources must be directories.")
+            if root == Path("/") or not root.is_dir():
+                raise Fault("invalid_skill_root", "Skill sources must be explicit non-root directories.")
             if (root / "SKILL.md").exists():
                 candidates = [root]
             else:

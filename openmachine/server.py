@@ -122,7 +122,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                   title: Annotated[str, Field(min_length=1, max_length=200)],
                   body: Annotated[str, Field(min_length=1, max_length=32768)],
                   anchors: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
-        """Save one private material checkpoint and lookup metadata. Expected revision zero creates; updates compare the observed revision under a store lock. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Keep goals, authority references, original executions, evidence and next action, not credentials, transcripts or hidden reasoning. No code execution, external publication or automatic resume. Torn two-file saves are reported, not silently repaired."""
+        """Save one private material checkpoint and lookup metadata. Expected revision zero creates; updates compare the observed revision under a store lock. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Lookup anchors are additive; omitting them preserves prior references. Keep goals, authority references, original executions, evidence and next action, not credentials, transcripts or hidden reasoning. No code execution, external publication or automatic resume. Torn two-file saves are reported, not silently repaired."""
         return _reply(lambda: tasks.save(state, task_id, expected_revision, title, body, anchors))
 
     @mcp.tool(annotations=WRITE, structured_output=False)

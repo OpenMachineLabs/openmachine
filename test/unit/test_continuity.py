@@ -145,6 +145,19 @@ class ContinuityTests(unittest.TestCase):
         self.fault("corrupt_tasks", tasks.find, self.state)
         self.fault("corrupt_tasks", self.save, revision=1, body="Do not adopt an unknown index shape.")
 
+    def test_progress_updates_preserve_anchors_and_skill_root_alias_is_rejected(self):
+        self.save()
+        self.save(revision=1, body="Next material checkpoint.", anchors=[])
+        self.assertEqual(tasks.find(self.state, anchors=["issue=example/project#1"])["status"], "matched")
+        self.save(revision=2, body="Next material checkpoint.", anchors=["branch=repair-fixture"])
+        self.assertEqual(tasks.read(self.state, "task-one")["anchors"], ["branch=repair-fixture", "issue=example/project#1"])
+        root_alias = self.root / "root-alias"
+        root_alias.symlink_to(Path("/"), target_is_directory=True)
+        self.config.skills = SkillSources(roots=[str(root_alias)])
+        result = skills.inspect(self.config)
+        self.assertEqual(len(result["skills"]), 1)
+        self.assertEqual(result["warnings"][0]["code"], "invalid_skill_root")
+
     def test_original_execution_link_and_legacy_receipts_do_not_replay(self):
         self.save()
         identity = uuid.uuid4().hex
