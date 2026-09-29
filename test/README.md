@@ -69,3 +69,14 @@ HEAD-bound review, authorized merge and actual destination readback. Retain orig
 IDs and verify no repeated test/publication after interruption. Keep credentials
 out of CI and logs; neither native API probes nor local SDK calls substitute for
 the actual client gate. No production repository settings are changed for a test.
+
+M5 adds focused service selection, state compatibility, activation failure and
+recovery checks in the existing unit group. SDK checks exercise actual identity
+and file-read readiness, write exclusion during activation, and stale-socket
+recovery without replacing a live listener. Mocked launchctl is not a native
+macOS service test. A separately authorized disposable native run must prove
+install/start/status/stop/restart, candidate rejection, real activation and
+compatible rollback while preserving an original running worker, counter, tasks,
+configuration and user Skills. Restart the test tunnel separately and read the
+same execution from ChatGPT; do not repeat earlier coding/GitHub acceptance.
+No production services or private CI runners are needed.

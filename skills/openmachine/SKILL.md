@@ -73,8 +73,8 @@ current facts and authority rather than claiming hidden-context recovery. Read
 updated user Skills on demand without reinstalling. Preserve old execution receipts
 and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
-through OpenAI and redaction is best effort. Managed upgrades, autonomous resume
-and automatic recovery after worker/host loss remain outside this increment.
+through OpenAI and redaction is best effort. Autonomous resume and automatic recovery after worker/host loss remain outside
+this increment.
 
 For SSH work, select only a configured, identity-pinned machine. Read remote
 instructions and files through the same tools; never resolve its paths on the
@@ -90,3 +90,15 @@ an unreachable host or missing scope evidence is unknown. Read the same ID, neve
 relaunch completed work. Alternate aliases share the target's canonical state and
 worktree locks. Do not install, update or remove another task's worker/runtime to
 make a check pass.
+
+For an explicitly authorized lifecycle task, use the documented CLI through native
+execution on the macOS controller. Read service status and the original task before
+changing anything. Install/update select an exact trusted wheel and pinned lock;
+never upgrade a running environment in place, remove a retained worker dependency,
+or change the separately managed tunnel without authorization. A successful MCP
+handshake and real permitted file read establish local readiness, not tunnel/client
+acceptance. New MCP writes may return resource_busy during activation; active
+workers continue. activation_pending/recovery_required require original selection
+readback and explicit compatible rollback, not another update or workload replay.
+Distinguish candidate rejection, verified restoration and unknown recovery. Keep
+source merge, service activation and any ChatGPT metadata refresh separate.

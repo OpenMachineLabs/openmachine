@@ -4,17 +4,17 @@ An open-source runtime for AI to operate your machines.
 
 ## Current increment
 
-`0.1.0a6` adds scoped GitHub collaboration to the accepted local/SSH coding,
-Skills and task workflow for [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M4.
-One implementation serves MCP and direct Python callers: existing `gh` identity,
-read/write scopes, paged review evidence, typed writes and current-candidate merge
-with verified destination readback. No AI client's GitHub plugin, GUI, OAuth
-service, model call, private package or new dependency is required.
+`0.1.0a7` adds the macOS managed-service lifecycle for
+[Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2) M5: explicit
+installation, real MCP/file readiness, immutable version activation and compatible
+rollback. The accepted local/SSH execution, Skills, task and scoped GitHub owners
+remain unchanged. There is no new dependency, model call or MCP lifecycle tool.
 
-The existing local and SSH execution owners are unchanged. Managed services,
-update/rollback, production transition, native GitHub App login and v0.1.0 release
-acceptance remain separate. Installed/SDK tests are not actual ChatGPT/GitHub
-acceptance; the implementing PR and Spec record that evidence.
+Managed service support is for a logged-in macOS controller. Linux manual `serve`
+and configured Linux SSH workers remain separate; Linux controller service management
+is not claimed. Production transition, native GitHub App login, Desktop, release and
+Spec closure remain outside this increment. The implementing PR records unit/SDK,
+actual OS-service and actual ChatGPT/Tunnel evidence separately.
 
 ## Install
 
@@ -25,7 +25,7 @@ checkout; no public registry name or release is assumed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a6-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0a7-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -56,9 +56,10 @@ Machine/workspace names are operator-owned; see [examples/config.toml](examples/
 Local and explicitly configured SSH transports are supported. Optional `[github]`
 configuration enables the scoped collaboration tools described below. Omit it to
 keep GitHub disabled. Open Machine uses the existing `gh` login and stores no token.
-Unknown fields are rejected, not ignored. `doctor` checks configuration and directory
-existence, not effective file access, service readiness, tunnels or ChatGPT.
-Verify an actual file read through MCP before calling an environment ready.
+Unknown fields are rejected, not ignored. Plain `doctor` checks configuration and
+directory existence, not effective file access or network readiness. Managed
+`doctor --service` verifies the selected runtime, MCP identity and an actual
+permitted file read; neither command claims tunnel or ChatGPT readiness.
 
 `serve` listens only at `<state-dir>/mcp.sock`, with directory mode 0700 and socket
 mode 0600. It opens no TCP port, manages no tunnel and installs no OS service.
@@ -66,6 +67,109 @@ An occupied socket is never replaced. After an abrupt exit, verify that no owner
 is using a stale socket before manually removing it. Graceful shutdown removes
 only this instance's socket. Existing state with broader permissions is rejected,
 never silently chmodded. Keep socket paths within the host's Unix-socket limit.
+
+## Manage the macOS service
+
+Build the wheel above using the matching committed `requirements.lock`. Choose a
+short, existing local workspace with a harmless readable file, then initialize
+configuration as above. Do not start manual `serve` on the same state. From the
+checkout, install the already-built artifact and register its file-read probe:
+
+```sh
+.venv/bin/openmachine service install \
+  --wheel "$PWD/dist/openmachine-0.1.0a7-py3-none-any.whl" \
+  --requirements "$PWD/requirements.lock" \
+  --probe-workspace project --probe-path AGENTS.md
+.venv/bin/openmachine service start
+.venv/bin/openmachine service status
+.venv/bin/openmachine doctor --service
+.venv/bin/openmachine service restart
+.venv/bin/openmachine service stop
+```
+
+Global absolute `--config` and `--state-dir` overrides precede the command. Install
+validates but does not start the service or enable execution. Start/restart require
+MCP initialization, advertised version/configuration/process identity and the
+registered file read to succeed. The probe returns its hash, not file contents.
+A service that cannot access that file is not ready even when its process is alive.
+Use a stable existing probe file; editing its contents is allowed, deleting it makes
+the service unready. The probe must name a configured **local** workspace.
+
+The user LaunchAgent is `~/Library/LaunchAgents/co.openmachine.runtime.<state-id>.plist`.
+Its state-derived label prevents separate configured instances from controlling
+each other. The stable launcher and immutable environments live below
+`<state-dir>/service/`; `service.json` owns only the selected installation, previous
+installation, probe and any unfinished activation. Configuration, user Skills,
+`tasks/`, `executions/` and their locks keep their original owners and locations.
+The launcher uses the selected base Python at installation time; preserve that
+interpreter as well as the version environments. Do not move virtual environments.
+
+`launchd` owns service supervision. Stop removes the loaded job, not its installed
+LaunchAgent: it can start again at the next GUI login. The service inherits the
+explicitly captured installation `PATH`, not shell startup files or copied
+credentials; required Git/gh/SSH utilities must be accessible there. The service
+log is private at `<state-dir>/service/service.log`; inspect it locally without
+pasting credentials or raw user data. It is not the bounded execution-log store.
+No system daemon, privilege grant, tunnel service or remote MCP daemon is installed.
+
+### Update and roll back
+
+Use a trusted local wheel and its matching fully pinned requirements, never an
+unqualified `latest` or an in-place upgrade of a running environment:
+
+```sh
+.venv/bin/openmachine update \
+  --wheel /absolute/path/to/new/openmachine-VERSION-py3-none-any.whl \
+  --requirements /absolute/path/to/new/requirements.lock
+.venv/bin/openmachine rollback
+.venv/bin/openmachine doctor --service
+```
+
+Preparation snapshots the selected artifacts, creates a distinct environment at
+its final path, checks dependencies and installed version identity, validates the
+existing configuration/records with the candidate's own readers, and exercises a
+private MCP/file-read probe. It never imports a source checkout or private Brain.
+An unhealthy candidate is rejected before stopping the healthy service. Activation
+then pauses new cooperating MCP mutations, verifies state again, records its intent,
+switches the service and checks the actual managed instance. A failed activation
+restores and verifies the prior instance or reports `recovery_required`; it never
+claims that rollback succeeded without readback. Update/rollback activate the
+selected service, including when it was previously stopped.
+
+Already-started local workers keep their original interpreter, package, process
+and receipt. SSH workers keep their original archive and target-side records.
+Version environments, including failed candidates, are retained; there is no
+automatic cleanup, remote provisioning, workload restart or mutation replay.
+Cooperative locks are not a sandbox or a fence against external native commands.
+A brief MCP disconnect is possible; reconnect and read the same task/execution IDs.
+Do not repeat a test, commit or external write merely because a reply was lost.
+
+Managed transitions require the same lifecycle/state contract and successful
+candidate-owned validation of current configuration, task and execution formats.
+`0.1.0a6` and earlier do not implement that contract and are not managed rollback
+targets. Unknown formats, corrupt state or an unsafe downgrade are refused; no
+migration or deletion is attempted. Rollback does not undo user work or GitHub
+side effects. A successful identical update is a no-op, not a service restart.
+
+### Diagnose and recover
+
+| Observation | Required action |
+| --- | --- |
+| GUI user domain unavailable | Log in as the owning macOS user. No `sudo`, system daemon or silent session/permission change is attempted. |
+| MCP works but the probe read fails | Verify the configured path and grant only the required macOS Files and Folders / Full Disk Access permission manually to the responsible executable, or use an explicitly selected accessible workspace. Restart and verify the actual read. |
+| Socket left after an abrupt exit | Managed startup acquires the listener lock and removes only a verified owner-only dead socket. A live, changing or unverifiable socket is preserved. Manual `serve` still refuses stale paths. |
+| `activation_failed_restored` | The update failed and the previous instance was verified again. Inspect the candidate failure; do not replay the workload. |
+| `activation_pending` / `recovery_required` | Preserve `service.json`, both installations and original execution records. Inspect `service status`, then explicitly run `rollback`; it verifies and restores the original target. New MCP writes remain paused until recovery succeeds. |
+| Incompatible or corrupt persisted data | Preserve the original records and runtime. Repair the identified inconsistency or use a known compatible candidate; never delete history to make a downgrade pass. |
+| Incomplete installation or changed LaunchAgent/launcher | Inspect the original setup and owned paths; installation never overwrites them. Reconcile only task-owned incomplete setup artifacts after verifying no active worker or service uses them. |
+| Runtime ready, but ChatGPT unavailable | Diagnose the separately managed official tunnel and actual client connection. Refresh changed tool metadata and retest affected calls; local readiness is not client acceptance. |
+
+There is no automatic recovery from host reboot, sleep, user-session teardown,
+base-interpreter removal, disk loss or same-account tampering. For SSH targets,
+retain the accepted Linux/Python 3.12+/Git/systemd 255+ user-manager requirements;
+this increment grants no session persistence or OS privileges. CI exercises local
+contracts without private machines; real macOS service and tunnel acceptance must
+be recorded separately against the candidate revision.
 
 ## Connect the official tunnel
 

@@ -1,4 +1,4 @@
-"""Initialize, diagnose and serve; not a chat UI or service manager."""
+"""Initialize, diagnose and manage the runtime; not a chat UI."""
 
 import argparse
 import json
@@ -19,14 +19,29 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
-    doctor = commands.add_parser("doctor", help="Inspect local configuration, or explicitly probe one SSH target")
+    doctor = commands.add_parser("doctor", help="Inspect configuration or explicitly probe one integration or managed service")
     target = doctor.add_mutually_exclusive_group()
     target.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
     target.add_argument("--github", action="store_true", help="Probe the existing GitHub identity without changing login")
+    target.add_argument("--service", action="store_true", help="Verify managed service identity and its configured file read")
     doctor.add_argument("--repository", default="", help="With --github, probe one configured repository")
     bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
     bundle.add_argument("--directory", type=Path, required=True)
-    commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
+    serve = commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
+    serve.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
+    service = commands.add_parser("service", help="Manage this macOS user service without controlling the tunnel")
+    service_commands = service.add_subparsers(dest="service_action", required=True)
+    install = service_commands.add_parser("install", help="Install a verified wheel as a stopped user service")
+    install.add_argument("--wheel", type=Path, required=True)
+    install.add_argument("--requirements", type=Path, required=True)
+    install.add_argument("--probe-workspace", required=True)
+    install.add_argument("--probe-path", required=True)
+    for action in ("start", "status", "stop", "restart"):
+        service_commands.add_parser(action)
+    update = commands.add_parser("update", help="Verify and activate an explicit wheel; retain the original installation")
+    update.add_argument("--wheel", type=Path, required=True)
+    update.add_argument("--requirements", type=Path, required=True)
+    commands.add_parser("rollback", help="Verify and restore the retained compatible installation, never user work")
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -47,10 +62,23 @@ def main() -> int:
             from integrations.ssh import build_bundle
             print(json.dumps(build_bundle(args.directory)))
             return 0
+        if args.command in ("service", "update", "rollback"):
+            from openmachine.service import operate
+            result = operate(args.config, args.state_dir,
+                             args.service_action if args.command == "service" else args.command,
+                             wheel=getattr(args, "wheel", None), requirements=getattr(args, "requirements", None),
+                             workspace=getattr(args, "probe_workspace", ""), path=getattr(args, "probe_path", ""))
+            print(json.dumps(result))
+            return int(result["status"] in {"unready", "activation_pending"})
         config = load(args.config)
         if args.command == "doctor":
             if args.repository and not args.github:
                 raise Fault("invalid_github_request", "--repository requires doctor --github.")
+            if args.service:
+                from openmachine.service import operate
+                result = operate(args.config, args.state_dir, "status")
+                print(json.dumps(result))
+                return int(result["status"] != "ready")
             if args.github:
                 from openmachine.github import read
                 print(json.dumps(read(config, "status", args.repository)))
@@ -69,7 +97,7 @@ def main() -> int:
                               "ssh_targets": {name: "not_probed" for name, item in config.machines.items() if item.transport == "ssh"}}))
             return int(bool(unavailable))
         from openmachine.server import serve
-        serve(config, args.state_dir)
+        serve(config, args.state_dir, managed=args.managed)
         return 0
     except (Fault, OSError) as error:
         print(json.dumps({"error": {"code": error.code if isinstance(error, Fault) else type(error).__name__,

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -39,9 +40,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.stop_all)
         self.launch()
 
-    def launch(self, environment=None):
+    def launch(self, environment=None, *, managed=False):
         process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
-                                    "--state-dir", str(self.state), "serve"],
+                                    "--state-dir", str(self.state), "serve", *(["--managed"] if managed else [])],
                                    cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment)
         self.processes.append(process)
         deadline = time.monotonic() + 10
@@ -49,7 +50,13 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             if process.poll() is not None:
                 self.fail(process.stderr.read().decode())
             if self.socket.exists():
-                return process
+                try:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                        connection.settimeout(0.2)
+                        connection.connect(str(self.socket))
+                    return process
+                except OSError:
+                    pass
             time.sleep(0.03)
         self.fail("Private MCP socket was not created")
 
@@ -500,6 +507,61 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     "body": "Changed instruction retained. Original execution " + identity + " is cancelled. No replacement was started.\n"})
                 self.assertEqual(final.structuredContent["revision"], 3)
         self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
+
+
+    async def test_lifecycle_readiness_and_mutation_gate(self):
+        from openmachine import execution, service
+        from openmachine.sanitize import Fault
+        probe = {"workspace": "example", "path": "AGENTS.md"}
+        ready = await asyncio.to_thread(service.probe_service, self.state, self.config, probe,
+                                        openmachine.__version__, self.processes[-1].pid)
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(ready["tunnel"], "not_probed")
+        self.assertEqual(ready["chatgpt"], "not_probed")
+        self.assertNotIn("text", ready)
+        self.assertEqual(ready["file_sha256"], hashlib.sha256((self.work / "AGENTS.md").read_bytes()).hexdigest())
+        with self.assertRaises(Fault) as failed:
+            await asyncio.to_thread(service.probe_service, self.state, self.config, probe,
+                                    openmachine.__version__, self.processes[-1].pid + 1)
+        self.assertEqual(failed.exception.code, "service_identity_mismatch")
+        with self.assertRaises(Fault) as failed:
+            await asyncio.to_thread(service.probe_service, self.state, self.config,
+                                    {**probe, "path": "absent.txt"}, openmachine.__version__)
+        self.assertEqual(failed.exception.code, "service_read_unavailable")
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                request = {"task_id": "transition-guard", "title": "Transition guard",
+                           "expected_revision": 0, "body": "One authorized fixture checkpoint.", "anchors": []}
+                with execution._lease(self.state / "locks/lifecycle.lock"):
+                    denied = await session.call_tool("save_task", request)
+                    self.assertTrue(denied.isError)
+                    self.assertEqual(denied.structuredContent["error"]["code"], "resource_busy")
+                    self.assertFalse((await session.call_tool("get_capabilities", {})).isError)
+                    self.assertFalse((self.state / "tasks").exists())
+                saved = await session.call_tool("save_task", request)
+                self.assertFalse(saved.isError, saved)
+                self.assertEqual(saved.structuredContent["revision"], 1)
+
+    async def test_managed_stale_socket_recovery_preserves_live_owner(self):
+        import socket
+        self.stop(self.processes[0])
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+            stale.bind(str(self.socket))
+            self.socket.chmod(0o600)
+        self.launch(managed=True)
+        inode = self.socket.stat().st_ino
+        duplicate = subprocess.run([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
+                                    "--state-dir", str(self.state), "serve", "--managed"],
+                                   capture_output=True, timeout=10)
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertEqual(self.socket.stat().st_ino, inode)
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                caps = await session.call_tool("get_capabilities", {})
+                self.assertEqual(caps.structuredContent["lifecycle"]["pid"], self.processes[-1].pid)
+
 
 
 if __name__ == "__main__":
