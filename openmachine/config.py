@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from openmachine.sanitize import Fault
 
 Name = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
-Repository = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")]
+Owner = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")]
+REPOSITORY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$"
+Repository = Annotated[str, Field(pattern=REPOSITORY_PATTERN)]
 DEFAULT_CONFIG = Path.home() / ".config/openmachine/config.toml"
 DEFAULT_STATE = Path.home() / ".local/state/openmachine"
 
@@ -53,8 +55,24 @@ class Workspace(BaseModel):
 
 class GitHubConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    repositories: list[Repository] = Field(min_length=1)
+    # Legacy repositories retain their exact read/write grant, never an owner grant.
+    repositories: list[Repository] = Field(default_factory=list, max_length=256)
+    read_repositories: list[Repository] = Field(default_factory=list, max_length=256)
+    write_repositories: list[Repository] = Field(default_factory=list, max_length=256)
+    read_owners: list[Owner] = Field(default_factory=list, max_length=256)
+    write_owners: list[Owner] = Field(default_factory=list, max_length=256)
+    account: Owner | None = None
     attribution: bool | None = None
+
+    @model_validator(mode="after")
+    def explicit_scopes(self):
+        if self.repositories and (self.read_repositories or self.write_repositories
+                                  or self.read_owners or self.write_owners):
+            raise ValueError("use either legacy repositories or explicit read/write scopes, not both")
+        if any(item.rsplit("/", 1)[1] in {".", ".."}
+               for item in self.repositories + self.read_repositories + self.write_repositories):
+            raise ValueError("repository names cannot be path navigation")
+        return self
 
 
 class SkillSources(BaseModel):

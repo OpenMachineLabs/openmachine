@@ -56,3 +56,16 @@ important prerequisite failures. Separately exercise the refreshed tools from
 actual ChatGPT; neither native adapter calls nor SDK sessions substitute for it.
 Preserve original executions and unrelated fixture work. No production canary,
 private CI runner, long benchmark or automatic service migration is required.
+
+M4 retains the provenance cases and adds scoped identity, candidate pagination,
+check/review/thread gates, field/commit readback and uncertain-write reconciliation
+at the existing GitHub request boundary. Mocked responses are not live GitHub
+acceptance. Real SDK checks cover the expanded tool schemas, non-idempotent write
+annotations, scope rejection and local execution with missing gh/authentication.
+
+Actual M4 acceptance uses a separately authorized disposable GitHub repository
+and refreshed ChatGPT connection: one tested code change, push, PR/update/comment,
+HEAD-bound review, authorized merge and actual destination readback. Retain original
+IDs and verify no repeated test/publication after interruption. Keep credentials
+out of CI and logs; neither native API probes nor local SDK calls substitute for
+the actual client gate. No production repository settings are changed for a test.
