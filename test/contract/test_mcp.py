@@ -544,11 +544,11 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(saved.structuredContent["revision"], 1)
 
     async def test_managed_stale_socket_recovery_preserves_live_owner(self):
-        import socket
-        self.stop(self.processes[0])
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
-            stale.bind(str(self.socket))
-            self.socket.chmod(0o600)
+        # Leave this owned listener's socket behind without depending on graceful
+        # shutdown timing or trying to bind over a runner's existing stale path.
+        self.processes[0].kill()
+        self.processes[0].wait(timeout=5)
+        self.assertTrue(self.socket.exists())
         self.launch(managed=True)
         inode = self.socket.stat().st_ino
         duplicate = subprocess.run([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
