@@ -21,6 +21,7 @@ import zipfile
 from openmachine import __version__, execution, tasks
 from openmachine.config import load
 from openmachine.sanitize import Fault
+from openmachine.state import lease, private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
@@ -121,7 +122,7 @@ def check_state(config_path: Path, state: Path) -> dict:
         for directory in root.iterdir():
             if not re.fullmatch(r"[0-9a-f]{32}", directory.name) or directory.is_symlink() or not directory.is_dir():
                 raise Fault("corrupt_state", "An execution-store entry is invalid; preserve it before changing versions.")
-            execution._load(directory)
+            execution.read_record(directory)
             count += 1
     page = tasks.find(state, limit=50)
     task_count = 0
@@ -180,7 +181,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
     except (OSError, ValueError, UnicodeError, zipfile.BadZipFile) as error:
         raise Fault("invalid_installation_artifact", "Select a trusted local Open Machine wheel and fully pinned requirements file.") from error
     digest = hashlib.sha256((wheel_hash + hashlib.sha256(locked).hexdigest() + sys.version).encode()).hexdigest()
-    versions = execution.private_directory(state / "service/versions")
+    versions = private_directory(state / "service/versions")
     destination = versions / digest
     if destination.exists():
         original = _installed(state, digest)
@@ -188,7 +189,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
             raise Fault("installation_conflict", "The retained installation does not match the selected artifact.")
         return digest
     destination.mkdir(mode=0o700)
-    artifacts = execution.private_directory(destination / "artifacts")
+    artifacts = private_directory(destination / "artifacts")
     with wheel.open("rb") as source, (artifacts / wheel.name).open("xb") as output:
         shutil.copyfileobj(source, output)
     wheel = artifacts / wheel.name
@@ -209,7 +210,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
     observed = _candidate_state(destination / "bin/python", config_path, state)
     if observed["version"] != version or observed["prefix"] != str(destination):
         raise Fault("installation_identity_mismatch", "Wheel metadata, installed runtime and environment identity disagree.")
-    execution._save(destination / "installation.json", {
+    save_json(destination / "installation.json", {
         "identity": digest, "version": version, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
         "wheel_sha256": wheel_hash, "requirements_sha256": hashlib.sha256(locked).hexdigest(),
     })
@@ -393,7 +394,7 @@ def _start(state: Path, record: dict) -> dict:
 
 def _activate(state: Path, record: dict, target: str) -> dict:
     _verify_candidate(state, record, target)
-    with execution._lease(state / "locks/lifecycle.lock"):
+    with lease(state / "locks/lifecycle.lock"):
         # Freeze new cooperating MCP mutations, then check the candidate's readers again.
         _candidate_state(_runtime(state, target) / "bin/python", Path(record["config"]), state)
         original = dict(record)
@@ -404,14 +405,14 @@ def _activate(state: Path, record: dict, target: str) -> dict:
             raise Fault("recovery_required", "There is no verified prior installation to restore.")
         record = {**record, "current": target,
                   "pending": {"from": previous, "to": target, "previous": previous_previous}}
-        execution._save(state / "service/service.json", record)
+        save_json(state / "service/service.json", record)
         try:
             _stop(state)
             ready = _start(state, record)
         except Fault as error:
             restored = {**original, "current": previous, "previous": previous_previous,
                         "pending": {"from": previous, "to": target, "previous": previous_previous}}
-            execution._save(state / "service/service.json", restored)
+            save_json(state / "service/service.json", restored)
             try:
                 _verify_candidate(state, restored, previous)
                 _stop(state)
@@ -419,10 +420,10 @@ def _activate(state: Path, record: dict, target: str) -> dict:
             except Fault:
                 raise Fault("recovery_required", "Activation and restoration are unverified; selection intent is retained. Inspect status, then explicitly roll back.") from None
             restored["pending"] = None
-            execution._save(state / "service/service.json", restored)
+            save_json(state / "service/service.json", restored)
             raise Fault("activation_failed_restored", "The candidate failed readiness; the previous service was restored. No task was replayed. Cause: " + error.code) from None
         record.update(previous=previous if previous != target else previous_previous, pending=None)
-        execution._save(state / "service/service.json", record)
+        save_json(state / "service/service.json", record)
         return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
 
 
@@ -458,12 +459,12 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
     config_path = config_path.resolve()
     if action == "status":
         return status(config_path, state.resolve())
-    state = execution.private_directory(state)
+    state = private_directory(state)
     if len(os.fsencode(state / "mcp.sock")) >= 104:
         raise Fault("invalid_service_path", "Use a shorter state directory for the macOS Unix socket.")
-    root = execution.private_directory(state / "service")
-    execution.private_directory(state / "locks")
-    with execution._lease(root / "operation.lock"):
+    root = private_directory(state / "service")
+    private_directory(state / "locks")
+    with lease(root / "operation.lock"):
         if action == "install":
             if any(os.path.lexists(item) for item in (root / "service.json", root / "launch.py", root / "service.log", _plist_path(state))):
                 raise Fault("service_already_installed", "Preserve the existing installation; use status, start or update.")
@@ -476,7 +477,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                       "launch_python": str(Path(sys._base_executable).resolve()),
                       "path_environment": os.environ.get("PATH", os.defpath)}
             _verify_candidate(state, record, identity)
-            with execution._lease(state / "locks/lifecycle.lock"):
+            with lease(state / "locks/lifecycle.lock"):
                 if _live_socket(state / "mcp.sock"):
                     raise Fault("service_already_running", "An unmanaged service is using this state; explicitly stop it before installation.")
                 _plist_path(state).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -487,7 +488,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                         output.write(content)
                         output.flush()
                         os.fsync(output.fileno())
-                execution._save(root / "service.json", record)
+                save_json(root / "service.json", record)
             return {"status": "installed", "version": _installed(state, identity)["version"], "current": identity,
                     "service": "stopped", "next_action": "service start", "tunnel": "not_managed"}
         record = _record(state)
@@ -508,7 +509,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             if target == record["current"]:
                 return status(config_path, state)
             return _activate(state, record, target)
-        with execution._lease(state / "locks/lifecycle.lock"):
+        with lease(state / "locks/lifecycle.lock"):
             if action in ("start", "restart"):
                 _candidate_state(_runtime(state, record["current"]) / "bin/python", config_path, state)
             if action in ("stop", "restart"):

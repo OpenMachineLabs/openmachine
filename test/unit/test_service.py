@@ -11,8 +11,9 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from openmachine import execution, service, tasks
+from openmachine import service, tasks
 from openmachine.sanitize import Fault
+from openmachine.state import lease, private_directory, save_json
 
 
 class ServiceTests(unittest.TestCase):
@@ -20,15 +21,15 @@ class ServiceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="om-service-", dir="/tmp")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.state = execution.private_directory(self.root / "state")
-        execution.private_directory(self.state / "locks")
-        execution.private_directory(self.state / "service")
+        self.state = private_directory(self.root / "state")
+        private_directory(self.state / "locks")
+        private_directory(self.state / "service")
         self.config = self.root / "config.toml"
         self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         self.a, self.b = "a" * 64, "b" * 64
         for identity in (self.a, self.b):
-            directory = execution.private_directory(self.state / "service/versions" / identity)
-            execution._save(directory / "installation.json", {
+            directory = private_directory(self.state / "service/versions" / identity)
+            save_json(directory / "installation.json", {
                 "identity": identity, "version": "0.1.0a7", "protocol": 1, "state_contract": 1})
         self.record = {"format": 1, "config": str(self.config), "probe": {"workspace": "project", "path": "AGENTS.md"},
                        "current": self.a, "previous": None, "pending": None,
@@ -36,7 +37,7 @@ class ServiceTests(unittest.TestCase):
         self.save(self.record)
 
     def save(self, record):
-        execution._save(self.state / "service/service.json", record)
+        save_json(self.state / "service/service.json", record)
 
     def assert_fault(self, code, operation):
         with self.assertRaises(Fault) as caught:
@@ -61,13 +62,13 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual([path.read_bytes() for path in paths], before)
         value = json.loads(paths[0].read_text())
         value["format_version"] = 999
-        execution._save(paths[0], value)
+        save_json(paths[0], value)
         self.assert_fault("unsupported_task_format", lambda: service.check_state(self.config, self.state))
         self.assertEqual(json.loads(paths[0].read_text())["format_version"], 999)
 
     def test_incompatible_receipt_never_becomes_empty_history(self):
-        directory = execution.private_directory(self.state / "executions" / ("c" * 32))
-        execution._save(directory / "record.json", {"status": "running", "format_version": 999})
+        directory = private_directory(self.state / "executions" / ("c" * 32))
+        save_json(directory / "record.json", {"status": "running", "format_version": 999})
         self.assert_fault("unsupported_state_version", lambda: service.check_state(self.config, self.state))
         self.assertTrue((directory / "record.json").exists())
 
@@ -134,7 +135,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_activation_lock_conflict_preserves_selection(self):
         _, stop, start = self.activation_mocks()
-        with execution._lease(self.state / "locks/lifecycle.lock", shared=True):
+        with lease(self.state / "locks/lifecycle.lock", shared=True):
             self.assert_fault("resource_busy", lambda: service._activate(self.state, self.record, self.b))
         self.assertEqual(service._record(self.state), self.record)
         stop.assert_not_called()
@@ -183,7 +184,7 @@ class ServiceTests(unittest.TestCase):
         path = self.state / "service/versions" / self.a / "installation.json"
         value = service._json(path)
         del value["version"]
-        execution._save(path, value)
+        save_json(path, value)
         self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.a))
 
     def test_restart_rejects_incompatible_state_before_stopping_service(self):

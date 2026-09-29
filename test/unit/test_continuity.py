@@ -15,6 +15,7 @@ import uuid
 from openmachine import execution, skills, tasks, workspace
 from openmachine.config import Settings, SkillSources
 from openmachine.sanitize import Fault
+from openmachine.state import lease
 
 
 class ContinuityTests(unittest.TestCase):
@@ -71,7 +72,7 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(second["revision"], 2)
         self.fault("task_conflict", self.save, revision=1, body="Stale different progress.")
         self.fault("task_conflict", self.save, revision=0, body="Completed: tests.\nNext: review diff.\n")
-        with execution._lease(self.state / "locks/tasks.lock"):
+        with lease(self.state / "locks/tasks.lock"):
             self.fault("resource_busy", self.save, revision=2, body="Do not write while busy.")
         self.assertEqual(tasks.read(self.state, "task-one")["revision"], 2)
         self.assertEqual(first["generation"], 1)
@@ -108,7 +109,7 @@ class ContinuityTests(unittest.TestCase):
     def test_torn_checkpoint_index_save_is_reported_and_preserved(self):
         self.save()
         index = (self.state / "tasks/index.json").read_bytes()
-        with patch.object(tasks, "_save", side_effect=OSError("fixture interrupted index write")):
+        with patch.object(tasks, "save_json", side_effect=OSError("fixture interrupted index write")):
             self.fault("task_write_unverified", self.save, revision=1, body="Updated material progress.\n")
         self.assertEqual((self.state / "tasks/index.json").read_bytes(), index)
         self.assertEqual((self.state / "tasks/task-one/task.md").read_text(), "Updated material progress.\n")
@@ -175,7 +176,7 @@ class ContinuityTests(unittest.TestCase):
         self.save()
         lock = self.state / "locks/tasks.lock"
         original = (self.state / "tasks/task-one/task.md").read_bytes()
-        with execution._lease(lock):
+        with lease(lock):
             lock.unlink()
             self.fault("corrupt_tasks", self.save, revision=1, body="Must not use a replacement lock inode.")
             self.assertFalse(lock.exists())

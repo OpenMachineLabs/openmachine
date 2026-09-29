@@ -9,7 +9,7 @@ import re
 import stat
 import tempfile
 
-from openmachine.execution import _lease, _save, private_directory
+from openmachine.state import lease, private_directory, save_json
 from openmachine.sanitize import Fault, redact
 
 MAX_CHECKPOINT = 32768
@@ -127,7 +127,7 @@ def _reading(state: Path):
         _private(root, directory=True)
         _private(state / "locks", directory=True)
         _private(state / "locks/tasks.lock")
-        with _lease(state / "locks/tasks.lock", shared=True, create=False):
+        with lease(state / "locks/tasks.lock", shared=True, create=False):
             yield root, _index(root)
     except OSError as error:
         raise Fault("corrupt_tasks", "Existing task state or its lock is unavailable; preserve it.") from error
@@ -215,7 +215,7 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
             raise Fault("corrupt_tasks", "The existing task-store lock is missing; never recreate it over prior history.") from error
     locks = private_directory(state / "locks")
     previous_store = os.path.lexists(locks / "tasks.lock")
-    with _lease(locks / "tasks.lock", create=not existing):
+    with lease(locks / "tasks.lock", create=not existing):
         _private(locks / "tasks.lock")
         try:
             root.lstat()
@@ -223,7 +223,7 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
             if previous_store:
                 raise Fault("corrupt_tasks", "A prior task store is missing; do not initialize new history.")
             private_directory(root)
-            _save(root / "index.json", {"format_version": 1, "generation": 0, "tasks": {}})
+            save_json(root / "index.json", {"format_version": 1, "generation": 0, "tasks": {}})
         _private(root, directory=True)
         index = _index(root)
         revision, previous = 0, None
@@ -245,7 +245,7 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
         directory = private_directory(root / identity)
         try:
             _replace(directory / "task.md", raw)
-            _save(root / "index.json", index)
+            save_json(root / "index.json", index)
             actual = _index(root)
             observed, content = _checkpoint(root, actual, identity)
             if observed != item or content != raw:

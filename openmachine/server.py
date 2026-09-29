@@ -18,7 +18,9 @@ import uvicorn
 
 from openmachine import __version__, execution, github, service, skills, tasks, workspace
 from openmachine.config import Settings
+from openmachine.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.sanitize import Fault
+from openmachine.state import lease, private_directory
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
@@ -53,11 +55,11 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     # The pinned FastMCP constructor does not expose the low-level version field.
     mcp._mcp_server.version = __version__
 
-    execution.private_directory(state / "locks")
+    private_directory(state / "locks")
 
     def mutate(operation) -> CallToolResult:
         def locked():
-            with execution._lease(state / "locks/lifecycle.lock", shared=True):
+            with lease(state / "locks/lifecycle.lock", shared=True):
                 service.guard_writes(state)
                 return operation()
         return _reply(locked)
@@ -82,9 +84,9 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
-                       "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": workspace.MAX_SCAN_ENTRIES,
+                       "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": MAX_SCAN_ENTRIES,
                        "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,
-                       "text_file_bytes": workspace.MAX_TEXT_FILE, "text_page_bytes": workspace.TEXT_PAGE,
+                       "text_file_bytes": MAX_TEXT_FILE, "text_page_bytes": TEXT_PAGE,
                        "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         })
@@ -245,10 +247,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
 
 
 def serve(config: Settings, state: Path, *, managed: bool = False) -> None:
-    state = execution.private_directory(state)
+    state = private_directory(state)
     path = state / "mcp.sock"
-    locks = execution.private_directory(state / "locks")
-    with execution._lease(locks / "listener.lock"), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+    locks = private_directory(state / "locks")
+    with lease(locks / "listener.lock"), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         if managed and os.path.lexists(path):
             identity = path.lstat()
             if (not stat.S_ISSOCK(identity.st_mode) or identity.st_uid != os.getuid()
