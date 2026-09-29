@@ -276,6 +276,7 @@ def worker(directory: Path, workspace_fd: int, worker_fd: int) -> None:
             if not terminated:
                 _terminate(process)
             process.stdout.close()
+    os.close(workspace_fd)
     record["finished_at"] = time.time()
     _save(directory / "record.json", record)
 
