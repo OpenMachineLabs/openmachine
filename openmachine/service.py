@@ -509,10 +509,11 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 return status(config_path, state)
             return _activate(state, record, target)
         with execution._lease(state / "locks/lifecycle.lock"):
+            if action in ("start", "restart"):
+                _candidate_state(_runtime(state, record["current"]) / "bin/python", config_path, state)
             if action in ("stop", "restart"):
                 _stop(state)
             if action in ("start", "restart"):
-                _candidate_state(_runtime(state, record["current"]) / "bin/python", config_path, state)
                 return _start(state, record)
             if action == "stop":
                 return {"status": "stopped", "workers": "preserved", "tunnel": "not_managed"}

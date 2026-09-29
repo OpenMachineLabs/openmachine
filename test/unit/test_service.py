@@ -186,6 +186,15 @@ class ServiceTests(unittest.TestCase):
         execution._save(path, value)
         self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.a))
 
+    def test_restart_rejects_incompatible_state_before_stopping_service(self):
+        with patch.object(sys, "platform", "darwin"), patch.object(service, "_verify_files"), \
+                patch.object(service, "_candidate_state", side_effect=Fault("incompatible_state", "fixture")), \
+                patch.object(service, "_stop") as stop, patch.object(service, "_start") as start:
+            self.assert_fault("incompatible_state", lambda: service.operate(self.config, self.state, "restart"))
+            stop.assert_not_called()
+            start.assert_not_called()
+        self.assertEqual(service._record(self.state), self.record)
+
 
 if __name__ == "__main__":
     unittest.main()
