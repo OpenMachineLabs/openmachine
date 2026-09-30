@@ -51,7 +51,9 @@ def build_bundle(directory: Path) -> dict:
     output = io.BytesIO()
     members = {"__main__.py": b"from integrations.ssh import main\nmain()\n"}
     for package, names in {
-        "openmachine": ("__init__.py", "execution.py", "workspace.py", "logs.py"),
+        "openmachine": ("__init__.py",),
+        "openmachine.execution": ("__init__.py", "__main__.py", "api.py", "worker.py", "records.py", "logs.py"),
+        "openmachine.workspace": ("__init__.py", "inspect.py", "git.py", "files.py"),
         "openmachine.foundation": ("__init__.py", "state.py", "files.py", "sanitize.py"),
         "integrations": ("__init__.py", "ssh.py"),
     }.items():
@@ -295,7 +297,8 @@ def main() -> None:
         archive = Path(sys.argv[0]).absolute()
         _archive_bytes(archive)
         if sys.argv[1:] and sys.argv[1] == "worker":
-            execution.worker(Path(sys.argv[2]), *(int(value) for value in sys.argv[3:]))
+            from openmachine.execution.worker import worker
+            worker(Path(sys.argv[2]), *(int(value) for value in sys.argv[3:]))
             return
         if sys.argv[1:] != ["rpc"]:
             raise Fault("invalid_request", "Use the bounded remote request entry point.")

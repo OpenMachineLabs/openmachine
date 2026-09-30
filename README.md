@@ -617,11 +617,25 @@ automatically migrate production workloads or grant OS permissions.
 
 ## Development and review
 
-Shared filesystem primitives, durable writes, cooperative locks and safe errors
-live in `openmachine/foundation/`. This package depends only on the standard
-library and itself; execution/task record schemas and workspace editing policy
-remain with their existing domain owners. These internal module paths do not
-change the CLI, MCP tools or persisted state locations.
+The current core has three capability packages and one shared foundation:
+
+| Package | Ownership |
+| --- | --- |
+| `openmachine/execution/` | API admission and live observations; worker process lifecycle; persisted record validation; bounded logs. |
+| `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
+| `openmachine/tasks/` | Lock-coordinated checkpoint saves/reads; index metadata and checkpoint integrity. |
+| `openmachine/foundation/` | Shared filesystem primitives, durable writes, cooperative locks and safe errors; no domain schemas or policy. |
+
+Execution uses `workspace.git` for canonical identity. Task storage depends on
+its index validation, never the reverse. Package facades expose the existing
+operations; workers retain `python -m openmachine.execution`. These internal
+paths do not change MCP/CLI contracts, persisted locations, lock identities or
+save ordering. The checkpoint/index pair is still not a two-file transaction.
+
+Local/SSH routing and controller task-reference checks remain in their existing
+call paths until Spec #18 S3. The SSH archive includes the same target-capable
+execution/workspace code, not the controller task store. No second executor,
+compatibility implementation or new integration is introduced by packaging.
 
 Repository-authored documentation, comments, Issues, PRs, commits, labels and CI
 remain English. Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md)

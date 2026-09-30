@@ -1,64 +1,24 @@
-"""Small, bounded readers; configured paths are routing, not a sandbox."""
+"""Bounded listing, search and Git inspection results."""
 
 import hashlib
 import itertools
 import json
 import os
 from pathlib import Path
-import re
-import selectors
 import stat
-import subprocess
-import time
-import uuid
 from typing import TYPE_CHECKING
 
-from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, excluded, file_bytes, file_parent, file_parts, text_page
+from openmachine.foundation.files import MAX_SCAN_ENTRIES, excluded
 from openmachine.foundation.sanitize import Fault, redact
-from openmachine.foundation.state import lease, private_directory
+
+from .files import reader_path, root_for
+from .git import MAX_CAPTURE, MAX_READ, capture, context
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MAX_READ = 65536
-MAX_CAPTURE = 1024 * 1024
 MAX_SCAN_BYTES = 8 * 1024 * 1024
 MAX_MATCHES = 1000
-
-
-def root_for(config: "Settings", machine: str, workspace: str) -> Path:
-    if config.machine(machine).transport != "local":
-        raise Fault("remote_path", "Resolve this workspace through its SSH adapter, not the controller filesystem.")
-    item = config.workspaces.get(workspace)
-    if item is None or item.machine != machine:
-        raise Fault("unknown_workspace", "Select a workspace configured on this machine.")
-    root = Path(item.root).resolve(strict=True)
-    if not root.is_dir():
-        raise Fault("source_unavailable", "The configured workspace is not a directory.")
-    return root
-
-
-def context(cwd: Path) -> dict:
-    """Capture Git identity without changing the worktree or selecting an environment."""
-    result = {"cwd": str(cwd), "worktree": str(cwd), "head_sha": None, "branch": None,
-              "agents_files": [str(p / "AGENTS.md") for p in reversed((cwd, *cwd.parents))
-                               if (p / "AGENTS.md").is_file()]}
-    try:
-        probe = subprocess.run(["git", "--no-optional-locks", "--no-pager", "-c", "core.fsmonitor=false", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-                               capture_output=True, text=True, timeout=5, env=_git_environment())
-        if probe.returncode:
-            result["git_status"] = "not_a_worktree"
-            return result
-        result["worktree"] = str(Path(probe.stdout.strip()).resolve())
-        for key, args in (("head_sha", ["rev-parse", "--verify", "HEAD"]),
-                          ("branch", ["symbolic-ref", "--quiet", "--short", "HEAD"])):
-            item = subprocess.run(["git", "--no-optional-locks", "--no-pager", "-c", "core.fsmonitor=false", "-C", str(cwd), *args], capture_output=True,
-                                  text=True, timeout=5, env=_git_environment())
-            result[key] = item.stdout.strip() if item.returncode == 0 else None
-        result["git_status"] = "observed"
-    except (OSError, subprocess.TimeoutExpired):
-        result["git_status"] = "unavailable"
-    return result
 
 
 def inspect(config: "Settings", machine: str, workspace: str, action: str,
@@ -120,67 +80,6 @@ def inspect(config: "Settings", machine: str, workspace: str, action: str,
             "source_changed": (observed.st_size, observed.st_mtime_ns) != (after.st_size, after.st_mtime_ns)}
 
 
-def _git_environment() -> dict:
-    routing = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"}
-    return {key: value for key, value in os.environ.items() if key not in routing}
-
-
-def _git(root: Path, args: list[str]) -> tuple[bytes, int, bool]:
-    """Capture bounded output without a shell, pager, optional locks or fsmonitor."""
-    command = ["git", "--no-optional-locks", "--no-pager", "--literal-pathspecs",
-               "-c", "core.fsmonitor=false", "-C", str(root), *args]
-    output, diagnostic = bytearray(), bytearray()
-    clipped = False
-    try:
-        with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env=_git_environment()) as process:
-            try:
-                with selectors.DefaultSelector() as selector:
-                    selector.register(process.stdout, selectors.EVENT_READ, output)
-                    selector.register(process.stderr, selectors.EVENT_READ, diagnostic)
-                    deadline = time.monotonic() + 5
-                    while selector.get_map():
-                        if time.monotonic() >= deadline:
-                            raise Fault("git_timeout", "Git inspection exceeded five seconds; narrow the path.")
-                        for key, _ in selector.select(0.05):
-                            chunk = os.read(key.fd, MAX_READ)
-                            if not chunk:
-                                selector.unregister(key.fileobj)
-                                continue
-                            budget = MAX_CAPTURE if key.data is output else 4096
-                            room = budget - len(key.data)
-                            key.data.extend(chunk[:room])
-                            if len(chunk) > room:
-                                if key.data is diagnostic:
-                                    raise Fault("git_failed", "Git diagnostics exceeded the safe limit; inspect locally.")
-                                clipped = True
-                                break
-                        if clipped:
-                            break
-                if clipped:
-                    process.kill()
-                code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-    except FileNotFoundError as error:
-        raise Fault("missing_dependency", "Install Git to inspect a Git workspace.") from error
-    except subprocess.TimeoutExpired as error:
-        raise Fault("git_timeout", "Git did not finish within the inspection budget.") from error
-    return bytes(output), code, clipped
-
-
-def _reader_path(root: Path, relative: Path) -> bool:
-    if relative.is_absolute() or ".." in relative.parts or excluded(relative):
-        return False
-    try:
-        resolved = (root / relative).resolve()
-        return resolved.is_relative_to(root) and not excluded(resolved.relative_to(root))
-    except (OSError, RuntimeError):
-        return False
-
-
 def _snapshot(data: bytes, expected: str) -> str:
     digest = hashlib.sha256(data).hexdigest()
     if expected and expected != digest:
@@ -190,13 +89,13 @@ def _snapshot(data: bytes, expected: str) -> str:
 
 def _inspect_git(root: Path, machine: str, workspace: str, relative: Path, action: str,
                  staged: bool, offset: int, limit: int, expected: str) -> dict:
-    if not _reader_path(root, relative):
+    if not reader_path(root, relative):
         raise Fault("path_denied", "The selected path is outside the non-credential reader scope.")
     observed = context(root)
     if observed["git_status"] != "observed":
         raise Fault("git_unavailable", "This workspace is not a readable Git worktree.")
     # Clean/process filters can run even with --no-ext-diff and --no-textconv.
-    names, code, clipped = _git(root, ["config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|process)$"])
+    names, code, clipped = capture(root, ["config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|process)$"])
     if clipped or code not in (0, 1):
         raise Fault("git_config_unavailable", "Git filter settings could not be inspected safely.")
     filters = sorted({os.fsdecode(name).rsplit(".", 1)[0] for name in names.split(b"\0") if name})
@@ -204,13 +103,13 @@ def _inspect_git(root: Path, machine: str, workspace: str, relative: Path, actio
     warnings = ["External Git filters are disabled; this is a raw worktree comparison."] if filters else []
     skipped = 0
     if action == "status":
-        data, code, clipped = _git(root, [*flags, "status", "--porcelain=v1", "-z", "--no-renames",
+        data, code, clipped = capture(root, [*flags, "status", "--porcelain=v1", "-z", "--no-renames",
                                          "--untracked-files=all", "--ignore-submodules=dirty", "--", str(relative)])
         entries = []
         for item in data.split(b"\0")[:-1]:
             name = os.fsdecode(item[3:])
             path = Path(observed["worktree"]) / name
-            if not path.is_relative_to(root) or not _reader_path(root, path.relative_to(root)):
+            if not path.is_relative_to(root) or not reader_path(root, path.relative_to(root)):
                 skipped += 1
                 continue
             entries.append({"path": str(path.relative_to(root)), "index": chr(item[0]),
@@ -222,17 +121,17 @@ def _inspect_git(root: Path, machine: str, workspace: str, relative: Path, actio
             raise Fault("invalid_range", "The offset is beyond the current status entries.")
         warnings.append("Submodule contents are not inspected; renames are represented as add/delete.")
     else:
-        listed, code, clipped = _git(root, [*flags, "diff", "--name-only", "-z", "--no-renames",
+        listed, code, clipped = capture(root, [*flags, "diff", "--name-only", "-z", "--no-renames",
                                            "--no-ext-diff", "--no-textconv", "--relative", "--ignore-submodules=dirty",
                                            *(["--cached"] if staged else []), "--", str(relative)])
         if code and not clipped:
             raise Fault("git_failed", "Git could not enumerate the selected tracked files.")
         candidates = sorted(set(os.fsdecode(name) for name in listed.split(b"\0")[:-1]))
-        allowed = [name for name in candidates if _reader_path(root, Path(name))]
+        allowed = [name for name in candidates if reader_path(root, Path(name))]
         skipped = len(candidates) - len(allowed)
         limited = clipped or len(allowed) > MAX_SCAN_ENTRIES
         allowed = allowed[:MAX_SCAN_ENTRIES]
-        data, code, clipped = _git(root, [*flags, "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+        data, code, clipped = capture(root, [*flags, "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
                                          "--no-color", "--relative", "--submodule=short", "--ignore-submodules=dirty",
                                          *(["--cached"] if staged else []), "--", *allowed]) if allowed else (b"", 0, False)
         if code and not clipped:
@@ -260,7 +159,7 @@ def _search(root: Path, machine: str, workspace: str, relative: Path, query: str
             offset: int, limit: int, expected: str) -> dict:
     if not query or len(query) > 256 or "\0" in query or "\n" in query:
         raise Fault("invalid_query", "Supply a literal, single-line query of 1-256 characters.")
-    if not _reader_path(root, relative):
+    if not reader_path(root, relative):
         raise Fault("path_denied", "Search must stay inside the non-credential reader scope.")
     source = (root / relative).resolve(strict=True)
     pending = [source]
@@ -272,7 +171,7 @@ def _search(root: Path, machine: str, workspace: str, relative: Path, query: str
         path = pending.pop()
         seen += 1
         rel = path.relative_to(root)
-        if not _reader_path(root, rel):
+        if not reader_path(root, rel):
             warnings["excluded"] += 1
             continue
         try:
@@ -331,98 +230,3 @@ def _search(root: Path, machine: str, workspace: str, relative: Path, query: str
             "truncated": truncated, "source_changed": changed, "scanned_entries": seen, "scanned_bytes": total,
             "skipped": warnings, "credential_paths_excluded": True,
             "complete": not (truncated or changed or any(warnings.values()))}
-
-
-def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
-                   offset: int = 0, expected_sha256: str = "") -> dict:
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, None, machine, "read_workspace_file", workspace=workspace, path=path,
-                    offset=offset, expected_sha256=expected_sha256)
-    parts = file_parts(path)
-    root = root_for(config, machine, workspace)
-    if not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256):
-        raise Fault("invalid_hash", "Use the complete raw-byte SHA256 returned by the original read.")
-    with file_parent(root, parts) as parent:
-        raw, _ = file_bytes(parent, parts[-1])
-    digest = hashlib.sha256(raw).hexdigest() if raw is not None else ""
-    if expected_sha256 and digest != expected_sha256:
-        raise Fault("source_changed", "The file changed between pages; inspect its current version.")
-    return {"machine": machine, "workspace": workspace, "path": path, "context": context(root),
-            "exists": raw is not None, "sha256": digest, **text_page(raw or b"", offset)}
-
-
-def write_text_file(config: "Settings", state: Path, machine: str, workspace: str, path: str,
-                    content: str, expected_head_sha: str, expected_sha256: str) -> dict:
-    if config.machine(machine, write=True).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "write_workspace_file", workspace=workspace, path=path, content=content,
-                    expected_head_sha=expected_head_sha, expected_sha256=expected_sha256)
-    parts = file_parts(path)
-    if (not re.fullmatch(r"(?:[0-9a-f]{40})?", expected_head_sha)
-            or not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256)):
-        raise Fault("invalid_precondition", "Supply the observed HEAD and SHA256; empty values explicitly mean absent.")
-    desired = content.encode("utf-8")
-    if len(desired) > MAX_TEXT_FILE or b"\0" in desired:
-        raise Fault("invalid_content", "Supply at most 128 KiB of UTF-8 text without NUL bytes.")
-    root = root_for(config, machine, workspace)
-    observed = context(root)
-    if observed["git_status"] == "unavailable":
-        raise Fault("context_unavailable", "Git/worktree identity could not be checked.")
-    state = private_directory(state)
-    locks = private_directory(state / "locks")
-    key = hashlib.sha256(observed["worktree"].encode()).hexdigest()
-    with lease(locks / f"workspace-{key}.lock"):
-        current = context(root)
-        if (root_for(config, machine, workspace) != root or current["git_status"] == "unavailable"
-                or current["worktree"] != observed["worktree"]
-                or (current["head_sha"] or "") != expected_head_sha):
-            raise Fault("context_mismatch", "Workspace or Git HEAD changed; inspect the original workspace.")
-        result = {"machine": machine, "workspace": workspace, "path": path,
-                  "head_sha": current["head_sha"], "sha256": hashlib.sha256(desired).hexdigest(),
-                  "size_bytes": len(desired)}
-        with file_parent(root, parts) as parent:
-            previous, metadata = file_bytes(parent, parts[-1])
-            digest = hashlib.sha256(previous).hexdigest() if previous is not None else ""
-            if previous == desired:
-                return result | {"status": "already_current", "previous_sha256": digest}
-            if digest != expected_sha256:
-                raise Fault("content_mismatch", "The file no longer matches the observed bytes; do not overwrite it.")
-            temporary = ".openmachine-edit-" + uuid.uuid4().hex
-            published = False
-            try:
-                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(desired)
-                    os.fchmod(stream.fileno(), metadata.st_mode & 0o777 if metadata else 0o644)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                latest = context(root)
-                if (latest["git_status"] == "unavailable" or latest["worktree"] != current["worktree"]
-                        or (latest["head_sha"] or "") != expected_head_sha):
-                    raise Fault("context_mismatch", "Git HEAD changed before replacement.")
-                # Final content check is adjacent to publication, not a kernel CAS against external writers.
-                check, info = file_bytes(parent, parts[-1])
-                if check != previous or (metadata and (info.st_ino, info.st_mode) != (metadata.st_ino, metadata.st_mode)):
-                    raise Fault("content_mismatch", "The file changed before replacement.")
-                if metadata is None:
-                    os.link(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
-                    published = True
-                    os.unlink(temporary, dir_fd=parent)
-                else:
-                    os.replace(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
-                    published = True
-                os.fsync(parent)
-                actual, _ = file_bytes(parent, parts[-1])
-                if actual != desired:
-                    return result | {"status": "write_outcome_unknown", "detail": "Read the destination before retrying."}
-            except (OSError, Fault):
-                if published:
-                    return result | {"status": "write_outcome_unknown", "detail": "Replacement occurred; durability/readback is unverified."}
-                raise
-            finally:
-                try:
-                    os.unlink(temporary, dir_fd=parent)
-                except FileNotFoundError:
-                    pass
-        return result | {"status": "written", "previous_sha256": digest}

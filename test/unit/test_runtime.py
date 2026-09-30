@@ -13,7 +13,10 @@ import time
 import unittest
 import uuid
 
-from openmachine import execution, logs, workspace
+from openmachine import execution, workspace
+from openmachine.execution import logs
+from openmachine.execution.records import TERMINAL
+from openmachine.workspace.git import MAX_READ
 from openmachine.config import Settings, Workspace, load
 from openmachine.foundation.sanitize import Fault, redact
 
@@ -39,7 +42,7 @@ class RuntimeTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             result = execution.read(self.config, self.state, "my-laptop", result["execution_id"])
-            if result["status"] in execution.TERMINAL | {"outcome_unknown"}:
+            if result["status"] in TERMINAL | {"outcome_unknown"}:
                 return result
             time.sleep(0.03)
         self.fail(f"Execution did not finish: {result['execution_id']}")
@@ -128,7 +131,7 @@ class RuntimeTests(unittest.TestCase):
                 workspace.inspect(self.config, "my-laptop", "project", "read", path)
 
     def test_file_byte_pagination_and_listing(self):
-        content = "x" * (workspace.MAX_READ * 3)
+        content = "x" * (MAX_READ * 3)
         (self.work / "large.txt").write_text(content)
         parts, offset = [], 0
         while True:
