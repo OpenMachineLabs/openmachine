@@ -1,6 +1,7 @@
 """Local contracts with disposable directories and real short commands."""
 
 import ast
+from graphlib import CycleError, TopologicalSorter
 from importlib.resources import files
 from importlib.util import resolve_name
 import json
@@ -47,57 +48,131 @@ class RuntimeTests(unittest.TestCase):
             time.sleep(0.03)
         self.fail(f"Execution did not finish: {result['execution_id']}")
 
-    def test_capability_and_integration_import_boundaries(self):
-        sources = {}
-        for root in ("openmachine", "integrations"):
-            for path in Path(str(files(root))).rglob("*.py"):
-                relative = path.relative_to(Path(str(files(root))))
-                module = root + "." + ".".join(relative.with_suffix("").parts)
-                module = module.removesuffix(".__init__")
-                sources[module] = path
+    def assert_import_contract(self, sources):
+        # Bare names are exact interfaces; .* permits an owned implementation tree.
         boundaries = {
-            "openmachine.foundation": ("openmachine.foundation",),
-            "openmachine.execution": ("openmachine", "openmachine.execution", "openmachine.foundation", "openmachine.workspace.git"),
-            "openmachine.workspace": ("openmachine.workspace", "openmachine.foundation"),
-            "openmachine.tasks": ("openmachine.tasks", "openmachine.foundation"),
+            "openmachine": (),
+            "integrations": (),
+            "openmachine.foundation.*": ("openmachine.foundation.*",),
+            "openmachine.execution.*": ("openmachine", "openmachine.execution.*",
+                                        "openmachine.foundation.*", "openmachine.workspace.git"),
+            "openmachine.workspace.*": ("openmachine.workspace.*", "openmachine.foundation.*"),
+            "openmachine.tasks": ("openmachine.tasks.store", "openmachine.tasks.index"),
+            "openmachine.tasks.store": ("openmachine.tasks.index", "openmachine.foundation.*"),
+            "openmachine.tasks.index": ("openmachine.foundation.*",),
+            "openmachine.config": ("pydantic", "openmachine.foundation.*"),
+            "openmachine.skills": ("openmachine.foundation.*",),
+            "openmachine.service": ("openmachine", "openmachine.config", "openmachine.execution",
+                                    "openmachine.tasks", "openmachine.foundation.*", "httpx", "mcp.*"),
+            "openmachine.app": ("openmachine", "openmachine.app.machines", "openmachine.config",
+                                "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
+                                "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
+            "openmachine.app.machines": ("openmachine.config", "openmachine.execution", "openmachine.workspace",
+                                         "openmachine.tasks", "openmachine.foundation.*"),
+            "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
+                                      "integrations.github", "integrations.ssh.client"),
+            "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
+                                   "openmachine.service", "openmachine.foundation.*", "mcp.*", "pydantic", "uvicorn"),
+            # The CLI owns serve/worker-bundle dispatch, not execution internals.
+            "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
+                                "openmachine.bootstrap", "openmachine.server", "openmachine.service",
+                                "integrations.ssh.bundle"),
             "integrations.github": ("integrations.github.operations",),
-            "integrations.github.connection": ("openmachine.config", "openmachine.foundation"),
-            "integrations.github.client": ("integrations.github.connection", "openmachine.foundation"),
+            "integrations.github.connection": ("openmachine.config", "openmachine.foundation.*"),
+            "integrations.github.client": ("integrations.github.connection", "openmachine.foundation.*"),
             "integrations.github.evidence": ("integrations.github.client", "integrations.github.connection",
-                                             "openmachine.foundation"),
+                                             "openmachine.foundation.*"),
             "integrations.github.operations": ("integrations.github.client", "integrations.github.connection",
-                                               "integrations.github.evidence", "openmachine.config", "openmachine.foundation"),
-            "integrations.ssh": ("integrations.ssh",),
-            "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation"),
-            "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation"),
-            "integrations.ssh.endpoint": ("openmachine", "openmachine.execution", "openmachine.workspace",
-                                          "openmachine.foundation", "integrations.ssh", "integrations.ssh.bundle"),
+                                               "integrations.github.evidence", "openmachine.config", "openmachine.foundation.*"),
+            "integrations.ssh": (),
+            "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
+            "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
+            # The archive's worker process entry is the sole cross-domain worker caller.
+            "integrations.ssh.endpoint": ("openmachine", "openmachine.execution", "openmachine.execution.worker",
+                                          "openmachine.workspace", "openmachine.foundation.*",
+                                          "integrations.ssh", "integrations.ssh.bundle"),
         }
-        for module, source in sources.items():
-            owner = module if module in boundaries else module.rpartition(".")[0]
-            if owner not in boundaries:
-                continue
-            package = module if source.name == "__init__.py" else module.rpartition(".")[0]
-            tree = ast.parse(source.read_text())
-            # TYPE_CHECKING imports do not run in the dependency-free target.
+
+        def matches(module, pattern):
+            return module == pattern or (pattern.endswith(".*") and
+                                         (module == pattern[:-2] or module.startswith(pattern[:-1])))
+
+        graph = {module: set() for module in sources}
+        for module, (text, is_package) in sources.items():
+            owners = [owner for owner in boundaries if matches(module, owner)]
+            self.assertEqual(len(owners), 1, f"{module} needs one explicit dependency owner")
+            package = module if is_package else module.rpartition(".")[0]
+            tree = ast.parse(text)
+            # Type-only annotations do not pull controller dependencies onto SSH targets.
             for node in ast.walk(tree):
-                if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                if isinstance(node, ast.If) and ast.unparse(node.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
                     node.body = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     imports = [item.name for item in node.names]
                 elif isinstance(node, ast.ImportFrom):
+                    self.assertNotIn("*", [item.name for item in node.names], f"{module}:{node.lineno}: wildcard import")
                     base = resolve_name("." * node.level + (node.module or ""), package)
                     imports = [base + "." + item.name if base + "." + item.name in sources else base for item in node.names]
                 else:
                     continue
                 for dependency in imports:
                     allowed = dependency.split(".")[0] in sys.stdlib_module_names or any(
-                        dependency == prefix or (prefix not in {"openmachine", "integrations.ssh"}
-                                                  and dependency.startswith(prefix + "."))
-                        for prefix in boundaries[owner])
-                    with self.subTest(module=module, line=node.lineno, dependency=dependency):
-                        self.assertTrue(allowed, f"{module} must not depend on {dependency}")
+                        matches(dependency, pattern) for pattern in boundaries[owners[0]])
+                    self.assertTrue(allowed, f"{module}:{node.lineno} must not depend on {dependency}")
+                    if dependency in sources:
+                        graph[module].add(dependency)
+        try:
+            TopologicalSorter(graph).prepare()
+        except CycleError as error:
+            self.fail("Runtime source import cycle: " + " -> ".join(error.args[1]))
+
+    def test_runtime_import_boundaries_and_dependency_graph(self):
+        sources = {}
+        for root in ("openmachine", "integrations"):
+            directory = Path(str(files(root)))
+            for path in directory.rglob("*.py"):
+                relative = path.relative_to(directory).with_suffix("")
+                module = (root + "." + ".".join(relative.parts)).removesuffix(".__init__")
+                sources[module] = (path.read_text(), path.name == "__init__.py")
+        self.assert_import_contract(sources)
+
+    def test_import_check_rejects_forbidden_edges_and_unowned_modules(self):
+        cases = (
+            ("openmachine.foundation.files", "import openmachine.tasks", "must not depend"),
+            ("openmachine.foundation.files", "from ..tasks import read", "must not depend"),
+            ("openmachine.foundation.files", "def read():\n    import openmachine.tasks", "must not depend"),
+            ("openmachine.service", "from openmachine.execution.worker import worker", "must not depend"),
+            ("openmachine.tasks.index", "from . import store", "must not depend"),
+            ("integrations.github.connection", "from . import client", "must not depend"),
+            ("openmachine.execution.records", "from openmachine.config import Settings", "must not depend"),
+            ("openmachine.new_owner", "import os", "explicit dependency owner"),
+            ("openmachine.foundation.files", "from .sanitize import *", "wildcard import"),
+            ("openmachine.foundation.files", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.tasks", "must not depend"),
+        )
+        for module, text, message in cases:
+            with self.subTest(module=module, text=text), self.assertRaisesRegex(AssertionError, message):
+                self.assert_import_contract({module: (text, False), "openmachine.tasks.store": ("", False),
+                                             "integrations.github.client": ("", False)})
+
+    def test_import_check_detects_cycles_through_reexports_and_local_imports(self):
+        for final_edge in ("import openmachine.foundation", "def f():\n    from .. import foundation"):
+            with self.subTest(final_edge=final_edge), self.assertRaisesRegex(AssertionError, "Runtime source import cycle"):
+                self.assert_import_contract({
+                    "openmachine.foundation": ("from .files import read", True),
+                    "openmachine.foundation.files": ("from . import sanitize", False),
+                    "openmachine.foundation.sanitize": (final_edge, False),
+                })
+
+    def test_import_check_accepts_type_only_dependencies_and_process_entries(self):
+        self.assert_import_contract({
+            "openmachine.foundation.files": ("import os\nfrom typing import TYPE_CHECKING\n"
+                                            "if TYPE_CHECKING:\n    import openmachine.config\n"
+                                            "import typing\nif typing.TYPE_CHECKING:\n    import mcp", False),
+            "openmachine.cli": ("def main():\n    from integrations.ssh.bundle import build_bundle\n"
+                                "    from openmachine.server import serve", False),
+            "integrations.ssh.endpoint": ("from openmachine.execution.worker import worker", False),
+        })
 
     def test_disabled_integrations_are_not_imported_or_probed_by_composition(self):
         code = r'''import builtins

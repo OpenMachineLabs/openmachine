@@ -659,6 +659,14 @@ sources and merge gates, `client.py` owns REST/GraphQL pagination, and
 Dependencies point toward connection, never back to application or entrypoints.
 There is no second executor, task store, login stack or public plugin/DI framework.
 
+The installed-runtime tests enforce explicit dependency ownership and an acyclic
+source import graph, including relative imports, local imports and re-exports.
+External callers use capability facades rather than worker or record internals;
+CLI bundle/serve dispatch and the SSH worker process entry remain explicit.
+For a new module, identify its current caller, state owner and allowed dependencies
+before adding it. Static checks complement, rather than replace, installed startup,
+real workflow and version-transition evidence.
+
 Repository-authored documentation, comments, Issues, PRs, commits, labels and CI
 remain English. Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md)
 and the [Spec index](spec/README.md).

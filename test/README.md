@@ -83,9 +83,17 @@ No production services or private CI runners are needed.
 
 ## Capability and application boundaries
 
-The existing runtime suite checks foundation, capability, SSH and GitHub import boundaries,
-including relative/function-local imports and package re-exports. Runtime-only
-checks exclude `TYPE_CHECKING` imports; isolated assembly also rejects disabled
+The existing runtime suite classifies every installed production module and checks
+its explicit source dependencies, including relative/function-local imports and
+package re-exports. Unknown owners, forbidden edges, wildcard imports and cycles
+fail. External callers use exact capability facades; task index validation cannot
+call storage, and provider dependencies cannot reverse their declared order.
+Focused fixtures prove the checker rejects these violations, not just current code.
+
+The graph excludes type-only `TYPE_CHECKING` imports and does not model implicit
+package initialization or dynamically constructed imports. Full-candidate review
+and isolated startup/worker tests cover those separate boundaries; this is not a
+general Python dependency analyzer. Isolated assembly also rejects disabled
 integration imports and verifies that it creates no controller state. GitHub's
 existing cases exercise the packaged facade and owning modules through the single
 `connection.request` seam; subprocess-failure cases still run that actual backend.
@@ -109,8 +117,17 @@ with a mocked user manager. Torn task saves inject failure into the actual store
 owner rather than a facade re-export.
 
 Build wheel and sdist artifacts and test outside the checkout so source files
-cannot hide omitted capability, application, SSH or GitHub package resources. These checks do not
-claim final whole-runtime DAG or live SSH/managed-transition acceptance.
+cannot hide omitted capability, application, SSH or GitHub package resources.
+
+Final modular-runtime acceptance is recorded in Spec #18 against exact commits,
+artifact hashes, environments and original operation handles. In an explicitly
+scoped disposable service, use the released pre-refactor wheel, activate the
+candidate and roll back while one original worker remains active. Verify its
+creation time, interpreter, counter and receipts without relaunching it or replacing
+its environment. Retain original SSH archives and supported read/cancel routes.
+Record actual local/SSH/GitHub delivery and fresh-conversation continuation
+separately from SDK reconnection. Missing client access stays `NOT RUN`; installed
+tests alone do not close the Spec. Do not replay still-valid accepted work.
 
 ## Frozen MCP contract
 
