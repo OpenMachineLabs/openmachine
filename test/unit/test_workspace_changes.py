@@ -1208,6 +1208,51 @@ class WorkspaceChangeTests(unittest.TestCase):
         self.assertFalse((self.state / "workspace-changes").exists())
         self.assertFalse((self.work / "new").exists())
 
+    def test_patch_initial_record_budget_rejects_without_incomplete_allocation(self):
+        self.initialize_git()
+        (self.work / "unrelated").write_bytes(b"keep staged")
+        self.git("add", "unrelated")
+        index = (self.work / ".git/index").read_bytes()
+        component = "\U0001f9ed" * 55
+        names = ["/".join([component] * 4 + [f"f{i:02}.txt"]) for i in range(32)]
+        body = self.patch_document("".join(f"*** Add File: {name}\n+x\n" for name in names))
+        self.assertLessEqual(max(len(name.encode()) for name in names), 1024)
+        self.assertLessEqual(len(body.encode()), 131072)
+        for retained in (False, True):
+            with self.subTest(retained=retained):
+                self.state = self.root / f"initial-budget-{retained}"
+                self.app = create_application(self.config, self.state)
+                if retained:
+                    self.apply()
+                before = workspace.check_change_state(self.state)
+                records = {p: p.read_bytes() for p in self.state.glob("workspace-changes/*/record.json")}
+                source = self.file.read_bytes()
+                args = self.patch_arguments(body, create_parents=True)
+                self.assertLess(len(json.dumps(args, ensure_ascii=True).encode()), 1024 * 1024)
+                identity = uuid.uuid4().hex
+                self.fault("request_limit", lambda: self.patch_apply(args, change_id=identity))
+                self.assertFalse(self.directory(identity).exists())
+                self.assertEqual(workspace.check_change_state(self.state), before)
+                self.assertEqual({p: p.read_bytes() for p in records}, records)
+                self.assertEqual(self.file.read_bytes(), source)
+                self.assertFalse((self.work / component).exists())
+                self.assertEqual((self.work / ".git/index").read_bytes(), index)
+                self.assertEqual((self.work / "unrelated").read_bytes(), b"keep staged")
+
+    def test_retained_patch_is_reconciled_before_new_record_budget(self):
+        args = self.patch_arguments(self.patch_document("*** Add File: first\n+one\n"))
+        identity = uuid.uuid4().hex
+        original = self.patch_apply(args, change_id=identity)
+        path = self.directory(identity) / "record.json"
+        record = path.read_bytes()
+        (self.work / "first").write_text("later\n")
+        with patch.object(changes, "_record_budget", side_effect=AssertionError("No new admission")):
+            recovered = self.patch_apply(args, change_id=identity)
+        self.assertEqual((recovered["created_at"], recovered["revision"]),
+                         (original["created_at"], original["revision"]))
+        self.assertEqual(path.read_bytes(), record)
+        self.assertEqual((self.work / "first").read_text(), "later\n")
+
     def test_patch_limits_and_complete_record_budget_reject_before_target_effects(self):
         from openmachine.workspace import patch as patcher
         self.fault("request_limit", lambda: patcher.parse(self.patch_document("*** Add File: new\n+" + "x" * 131072 + "\n")))

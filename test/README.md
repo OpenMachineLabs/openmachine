@@ -340,3 +340,27 @@ contact a live host. The current maintainer excluded node1-node3 SSH testing;
 do not probe, enable or alter those hosts. Refreshed actual Chat/fresh-conversation,
 live SSH transport and native managed transitions remain W4, not implied by the
 installed SDK/unit results or by using an older OM to develop this candidate.
+
+
+## Spec #13 W4
+
+The existing workspace suite exercises a real bounded Unicode-path request that
+would overflow its initial receipt. Reject it before allocating a change ID in
+both empty and established stores; preserve original records, source and index.
+Retained-ID reconciliation precedes new-admission sizing. Keep actual initial IO
+failure tests: an uncertain allocated record is not cleaned up or replayed.
+
+The existing patch SDK workflow explicitly starts one validation execution,
+checks touched hashes before/after it, and stores both operation references in
+the existing task. After controller restart it reads the original task, change
+and execution; later source drift cannot inherit the old test PASS. The counter
+remains one. No new supervisor, test framework or frozen schema is introduced.
+
+Record actual managed transitions using distinct immutable W2/W3/W4 artifacts:
+format-1 compatibility, retained format-2 history, compatible rollback and
+incompatible-reader rejection before a healthy service stops. Preserve original
+workers, counters, records and configuration bytes. Test wheel/sdist and isolated
+standard-library target archives outside the checkout. SDK/native evidence is
+separate from real refreshed Chat tools and a fresh conversation's readback.
+Live SSH is NOT RUN, maintainer-waived for this W4 scope; offline tests and runtime
+compatibility checks remain intact. Missing actual-client evidence stays pending.

@@ -2,38 +2,31 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.0
+## v0.2.2
 
-Open Machine v0.2.0 completes the modular runtime architecture accepted in
-[Spec #18](https://github.com/OpenMachineLabs/openmachine/issues/18). Since
-v0.1.0, the runtime is reorganized around explicit foundation, execution,
-workspace, task, application-routing, SSH, and GitHub-provider boundaries.
-The public MCP tool contract, configuration schema, persisted task/execution
-state, and lifecycle protocol remain compatible.
+Open Machine v0.2.2 delivers the guarded workspace editing increments from
+[Spec #13](https://github.com/OpenMachineLabs/openmachine/issues/13): exact
+replacements, focused source windows, coordinated patches, pure previews and
+original-ID change receipts. Oversized admission evidence is rejected before
+reserving a change ID, without leaving incomplete history.
 
-Read the [v0.2.0 release notes and download artifacts](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.0)
-for the release delta, compatibility notes, upgrade requirements, and validation.
-Version `0.2.0` remains an initial-development release, not a stable 1.x API
-promise. Release tags identify fixed commits; the package, CLI, MCP service and
-newly built SSH worker all report `0.2.0` from one version source.
+Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
+remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
+current readers accept both. State contract 5 and SSH protocol 6 are compatibility
+contracts, not release versions. Execution retains format 5 and opt-in PTY control.
+Inspect installed capabilities; a checkout or version label alone is not evidence
+that the client exposes the current tools.
 
-Managed services are supported for logged-in macOS controllers. Linux supports
-manual `serve` and configured SSH workers; managed Linux services and Windows
-are not included. Native execution is disabled by default and is **not a
-sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI.
+Version `0.2.2` is an initial-development release, not a stable 1.x API promise.
+The Issue and PR retain exact installed/native/client acceptance and any pending
+checks. Local SDK reconnection is not actual fresh-conversation ChatGPT evidence.
+Live SSH acceptance is outside the maintainer-approved W4 required scope; offline
+routing and archive checks remain required. This does not weaken target checks.
 
-## Development after v0.2.0
-
-The current development tree includes the accepted Spec #28 interactive execution
-and Spec #13 W1-W3 guarded editing: exact replacements, focused source windows,
-strict coordinated patches, pure preview and original-ID change receipts.
-Sources/results remain 2 MiB per file; full-content/edit/patch payloads remain
-128 KiB. Execution records remain format 5; single-file changes retain format 1
-and patches use format 2, with readers for both. State contract 5 and SSH protocol
-6 describe the W3 compatibility boundary, not release versions. These changes are
-not part of the immutable releases above. Inspect installed capabilities before
-using new fields. Pipe remains the default; PTY is explicit. Source/SDK acceptance
-is separate from actual refreshed Chat, live SSH and managed-transition acceptance.
+Managed services support logged-in macOS controllers. Linux supports manual
+`serve` and configured SSH workers; managed Linux services and Windows are not
+included. Native execution is disabled by default and is **not a sandbox** once
+enabled. Returned files and logs travel to ChatGPT through OpenAI.
 
 ## Install
 
@@ -41,20 +34,18 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.0 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.2 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.0-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.2-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
-Alternatively, use the release's wheel, matching `requirements.lock`, and
-`SHA256SUMS`; verify the downloads before installing. The release notes contain
-that shorter installation path. No PyPI package, Homebrew formula or npm
-publication is assumed. Repository access is required while this repository
-remains private; creating a GitHub Release does not change its visibility.
+Release notes use a compact Changes/Changelog format and do not attach installers
+or wheels. Build from the exact tag with its committed lock file as shown above;
+no PyPI, Homebrew or npm publication is implied.
 
 The wheel includes the core, direct adapters and bundled Skill, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a
@@ -107,7 +98,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.2.0-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.2.2-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
@@ -303,7 +294,7 @@ change. A socket or a tool list does not prove that write tools work.
 | `github_merge` | Explicit current-HEAD merge after complete checks/discussions and clean native policy; verify the actual destination commit. |
 
 From ChatGPT, read capabilities, the operating Skill and the disposable project's
-`AGENTS.md`. Inspect Git status, search and read the relevant source. Use an
+`AGENTS.md`. Inspect Git status, search and read the relevant source. Use a
 typed edit or coordinated patch for the authorized file change, then a separate
 execution to run the project's test command with its selected interpreter. Inspect the original
 receipts and actual exit/output, review both staged and unstaged diffs as needed,
