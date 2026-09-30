@@ -213,6 +213,26 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(receipt.read_bytes(), original)
         self.assertEqual((self.work / "count.txt").read_text(), "1")
 
+    def test_application_initializes_private_state_before_admission_locks(self):
+        app = create_application(self.config, self.state)
+        previous_umask = os.umask(0o022)
+        try:
+            saved = app.save_task("private-root", 0, "Private state", "First direct application write.")
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(saved["revision"], 1)
+        for path in (self.state, self.state / "locks", self.state / "tasks"):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.state / "locks/lifecycle.lock").stat().st_mode & 0o777, 0o600)
+
+        unsafe = self.root / "unsafe-state"
+        unsafe.mkdir()
+        unsafe.chmod(0o755)
+        denied = create_application(self.config, unsafe)
+        self.fault("unsafe_state", denied.save_task, "not-saved", 0, "Denied", "Keep the original root.")
+        self.assertEqual(unsafe.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(list(unsafe.iterdir()), [])
+
     def test_application_releases_admission_before_background_work_finishes(self):
         app = create_application(self.config, self.state)
         identity = uuid.uuid4().hex

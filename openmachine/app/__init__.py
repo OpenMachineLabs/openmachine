@@ -27,6 +27,7 @@ class Application:
 
     @contextmanager
     def _admit(self) -> Iterator[None]:
+        private_directory(self.state)
         private_directory(self.state / "locks")
         with lease(self.state / "locks/lifecycle.lock", shared=True):
             service.guard_writes(self.state)
