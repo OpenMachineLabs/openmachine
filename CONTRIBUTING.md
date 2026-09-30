@@ -109,7 +109,8 @@ Local link checks validate file targets, not URL availability or heading anchors
 
 Quality CI uses GitHub-hosted runners, pinned action revisions, read-only
 permissions, no credentials supplied to candidate code, and a five-minute
-budget. Only the separate default-branch label workflow has `issues: write`.
+budget. Only separate default-branch metadata workflows have write access:
+label sync and post-merge Spec Development linking use `issues: write`.
 Never use `pull_request_target` to execute candidate code, interpolate Issue or
 PR text into shell commands, or introduce self-hosted machines for these checks.
 Branch protection is a separate maintainer setting, not enabled by this PR.

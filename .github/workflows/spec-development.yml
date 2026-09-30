@@ -1,0 +1,73 @@
+name: link merged spec development
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  link:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Link merged PR to referenced Spec
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          pull = event["pull_request"]
+          matches = re.findall(
+              r"(?m)^\s*-\s+Issue:\s*#([1-9]\d*)\s*$",
+              pull.get("body") or "",
+          )
+          if len(matches) != 1:
+              print("No unique numeric Issue field; skipping.")
+              raise SystemExit(0)
+
+          number = matches[0]
+          result = subprocess.run(
+              ["gh", "api", f"repos/{os.environ['GH_REPO']}/issues/{number}"],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          issue = json.loads(result.stdout)
+          if "pull_request" in issue:
+              print(f"#{number} is a pull request, not an Issue; skipping.")
+              raise SystemExit(0)
+          if "spec" not in {label["name"] for label in issue.get("labels", [])}:
+              print(f"Issue #{number} is not labeled spec; skipping.")
+              raise SystemExit(0)
+
+          mutation = """
+          mutation($issueId: ID!, $pullRequestIds: [ID!]!) {
+            addCloseIssueReferences(
+              input: {issueId: $issueId, pullRequestIds: $pullRequestIds}
+            ) {
+              issue { number }
+            }
+          }
+          """
+          subprocess.run(
+              [
+                  "gh", "api", "graphql",
+                  "-f", f"query={mutation}",
+                  "-F", f"issueId={issue['node_id']}",
+                  "-F", f"pullRequestIds[]={pull['node_id']}",
+              ],
+              check=True,
+          )
+          print(f"Linked PR #{pull['number']} to Spec #{number}.")
+          PYTHON
