@@ -1,5 +1,6 @@
-"""Four bounded segments, absolute byte cursors and explicit retention gaps."""
+"""Four bounded segments, absolute byte cursors and explicit presentation loss."""
 
+from collections.abc import Callable
 from contextlib import ExitStack
 import fcntl
 import os
@@ -7,11 +8,13 @@ import re
 from pathlib import Path
 
 from openmachine.foundation.sanitize import Fault, redact
+from openmachine.foundation.state import lease
 
 SEGMENT_BYTES = 1024 * 1024
 SEGMENTS = 4
 MAX_BYTES = SEGMENT_BYTES * SEGMENTS
 MAX_READ = 65536
+MAX_RESULT_BYTES = 1024 * 1024
 
 
 class Writer:
@@ -71,15 +74,14 @@ class Writer:
             self.lock.close()
 
 
-def read(directory: Path, offset: int, max_bytes: int, *, legacy: bool = False) -> dict:
-    if offset < 0 or not 1 <= max_bytes <= MAX_READ:
+def read(directory: Path, offset: int, max_bytes: int, *, legacy: bool = False, wait: bool = True) -> dict:
+    if type(offset) is not int or offset < 0 or type(max_bytes) is not int or not 1 <= max_bytes <= MAX_READ:
         raise Fault("invalid_range", "Use a nonnegative byte offset and at most 65536 bytes.")
     with ExitStack() as stack:
         if legacy:
             paths = [(0, directory / "output.log")] if (directory / "output.log").exists() else []
         elif (directory / "output.lock").exists():
-            lock = stack.enter_context((directory / "output.lock").open("rb"))
-            fcntl.flock(lock, fcntl.LOCK_SH)
+            stack.enter_context(lease(directory / "output.lock", shared=True, wait=wait, create=False))
             paths = []
             for path in directory.glob("output-*.log"):
                 match = re.fullmatch(r"output-([0-9]{20})\.log", path.name)
@@ -111,8 +113,28 @@ def read(directory: Path, offset: int, max_bytes: int, *, legacy: bool = False) 
             position += len(chunk)
             if len(data) == max_bytes:
                 break
-    return {"output": redact(data.decode("utf-8", errors="replace")), "offset": offset,
+    replaced = False
+    try:
+        decoded = data.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = data.decode("utf-8", errors="replace")
+        replaced = True
+    redacted = redact(decoded)
+    presented = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", lambda match: f"\\x{ord(match[0]):02x}", redacted)
+    return {"output": presented, "offset": offset,
             "next_offset": position, "log_start_offset": start, "log_bytes": end,
             "retained_bytes": sum(sizes), "has_more": position < end,
             "output_gap": offset < start, "output_unavailable": not streams,
+            "output_decode_replaced": replaced, "output_redacted": redacted != decoded,
+            "output_controls_escaped": presented != redacted, "output_presentation_truncated": False,
             "log_retention": "prefix_only" if legacy else "rotating"}
+
+
+def bound_output(result: dict, measure: Callable[[dict], int], limit: int) -> dict:
+    """Bound a caller's actual serialized envelope without changing source cursors."""
+    while measure(result) > limit:
+        if not result.get("output"):
+            raise Fault("response_limit", "Execution metadata exceeds the response bound; no complete observation was returned.")
+        result = result | {"output": result["output"][:len(result["output"]) // 2],
+                           "output_presentation_truncated": True}
+    return result

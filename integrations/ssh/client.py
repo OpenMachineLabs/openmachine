@@ -8,6 +8,7 @@ import selectors
 import shlex
 import subprocess
 import time
+import threading
 from typing import TYPE_CHECKING
 
 from openmachine import __version__
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 MUTATIONS = {"start_execution", "write_workspace_file", "cancel_execution"}
 
 
-def _exchange(argv: list[str], payload: bytes) -> tuple[int, bytes]:
+def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:
     """Bound stdin, both output streams and elapsed time without a shell or replay."""
     if len(payload) > MAX_MESSAGE:
         raise Fault("request_limit", "Narrow the request to at most one MiB of encoded JSON.")
@@ -37,7 +38,9 @@ def _exchange(argv: list[str], payload: bytes) -> tuple[int, bytes]:
                 selector.register(process.stderr, selectors.EVENT_READ, diagnostic)
                 offset = 0
                 deadline = time.monotonic() + 30
-                while selector.get_map():
+                while selector.get_map() or process.poll() is None:
+                    if cancelled is not None and cancelled.is_set():
+                        raise Fault("observation_cancelled", "The SSH observation was cancelled; the original worker is unchanged.")
                     if time.monotonic() >= deadline:
                         raise TimeoutError
                     for key, _ in selector.select(0.05):
@@ -61,7 +64,12 @@ def _exchange(argv: list[str], payload: bytes) -> tuple[int, bytes]:
             process.wait()
 
 
-def call(config: "Settings", machine: str, operation: str, **arguments) -> dict:
+def call(config: "Settings", machine: str, operation: str, *,
+         cancelled: threading.Event | None = None, **arguments) -> dict:
+    if cancelled is not None and operation != "read_execution":
+        raise Fault("invalid_request", "Observer cancellation is only valid for execution reads.")
+    if cancelled is not None and cancelled.is_set():
+        raise Fault("observation_cancelled", "The observation was cancelled before contacting the target.")
     target = config.machine(machine, write=operation in {"start_execution", "write_workspace_file"})
     if target.transport != "ssh":
         raise Fault("not_ssh", "Select a configured SSH target, or omit the explicit doctor target.")
@@ -76,7 +84,7 @@ def call(config: "Settings", machine: str, operation: str, **arguments) -> dict:
             target.ssh_alias, shlex.join(["python3", "-I", target.ssh_worker, "rpc"])]
     mutating = operation in MUTATIONS
     try:
-        code, raw = _exchange(argv, json.dumps(request, ensure_ascii=True).encode())
+        code, raw = _exchange(argv, json.dumps(request, ensure_ascii=True).encode(), cancelled=cancelled)
     except FileNotFoundError as error:
         raise Fault("ssh_missing", "Install the system OpenSSH client; no target was contacted.") from error
     except (OSError, TimeoutError, subprocess.SubprocessError, Fault) as error:

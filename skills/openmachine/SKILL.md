@@ -104,8 +104,8 @@ readback and explicit compatible rollback, not another update or workload replay
 Distinguish candidate rejection, verified restoration and unknown recovery. Keep
 source merge, service activation and any ChatGPT metadata refresh separate.
 
-E1 keeps pipes as the default and only IO mode; no PTY, input controls or waiting
-reads are advertised. New format-4 receipts separate command launch/exit, first
+E1/E2 keep pipes as the default and only IO mode; no PTY or input controls are
+advertised. New format-4 receipts separate command launch/exit, first
 stop reason, force use and cleanup. `termination_grace_seconds` accepts null or
 finite 0..30: null means 5 seconds for a new execution and the original effective
 value on an identical-ID retry. Old workers retain 0.5 seconds, not a retroactive
@@ -130,3 +130,19 @@ connection. A reachable manager alone is insufficient when last-login logout
 stops it. Preserve existing login/linger policy; do not enable lingering or create
 an account/service as an execution side effect. State the maintained prerequisite
 in acceptance, and keep account-manager teardown distinct from executor recovery.
+
+For E2, optionally read the same execution/cursor with `wait_seconds=0..5`;
+default zero adds no observation wait. `wait_expired` is not command timeout,
+and quiet output is not evidence of a hang. A disconnected/cancelled observation
+never cancels the original command. `reader_busy` means the server's 16 waiting
+slots are occupied; immediate reads and explicit command cancellation remain
+available. `observation_busy` means a consistent snapshot could not be acquired
+within its budget; preserve the ID and state rather than relaunching.
+
+Follow original raw-byte cursors despite UTF-8 replacement, redaction, visible
+terminal-control escaping or presentation truncation. Read the four explicit
+`output_*` presentation flags separately from retention gaps and incomplete
+output. A consumed byte is not necessarily displayed. Use a smaller read from
+the same source offset when presentation was truncated; do not reconstruct a
+source file from sanitized console output. SSH waiting happens in one target
+request and does not change the original worker archive or user-manager policy.

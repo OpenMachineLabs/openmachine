@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from openmachine.config import Settings
 
 DEFAULT_TIMEOUT = 600
+MAX_WAIT = 5
+MAX_WAITERS = 16
 
 
 def _directory(state: Path, execution_id: str) -> Path:
@@ -147,12 +149,13 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     return read(config, state, machine, execution_id)
 
 
-def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
+def _receipt(directory: Path, machine: str, *, wait: bool = True, deadline: float | None = None,
+             cancelled: threading.Event | None = None) -> tuple[dict, str]:
     if not directory.exists():
         raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
     with ExitStack() as stack:
         if (directory / "control.lock").exists():
-            stack.enter_context(lease(directory / "control.lock", shared=True, wait=True, create=False))
+            stack.enter_context(lease(directory / "control.lock", shared=True, wait=wait, create=False))
         record = read_record(directory)
         if record.get("format_version", 1) >= 2 and not (directory / "control.lock").is_file():
             raise Fault("corrupt_state", "Execution control state is missing; preserve the original record.")
@@ -168,44 +171,72 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
                     raise
             except OSError:
                 status = "outcome_unknown"
-        if status in TERMINAL and is_remote(record):
-            try:
-                cleaned = _scope_state(record["scope_unit"]) in {"inactive", "not-found"}
-                if not cleaned:
-                    status = "finishing"
-                if record.get("format_version") == FORMAT:
-                    record = record | {"cleanup": record["cleanup"] | {
-                        "status": "verified" if cleaned else "pending", "source": "systemd_scope"}}
-            except Fault:
-                status = "outcome_unknown"
-                if record.get("format_version") == FORMAT:
-                    record = record | {"cleanup": record["cleanup"] | {
-                        "status": "unverified", "source": "systemd_scope", "error": "scope_unavailable"}}
-        return record, status
+    # The immutable terminal record no longer needs the publication lock while
+    # a potentially slow user-manager query observes its separate cleanup boundary.
+    if status in TERMINAL and is_remote(record):
+        try:
+            cleaned = _scope_state(record["scope_unit"], deadline=deadline, cancelled=cancelled) in {"inactive", "not-found"}
+            if not cleaned:
+                status = "finishing"
+            if record.get("format_version") == FORMAT:
+                record = record | {"cleanup": record["cleanup"] | {
+                    "status": "verified" if cleaned else "pending", "source": "systemd_scope"}}
+        except Fault as error:
+            if error.code == "observation_cancelled":
+                raise
+            status = "outcome_unknown"
+            if record.get("format_version") == FORMAT:
+                record = record | {"cleanup": record["cleanup"] | {
+                    "status": "unverified", "source": "systemd_scope", "error": "scope_unavailable"}}
+    return record, status
 
 
-def _scope_state(unit: str) -> str:
+def _scope_state(unit: str, *, deadline: float | None = None,
+                 cancelled: threading.Event | None = None) -> str:
+    deadline = min(deadline if deadline is not None else float("inf"), time.monotonic() + MAX_WAIT)
     try:
-        result = subprocess.run(["systemctl", "--user", "--no-ask-password", "show", unit,
-                                 "--property=LoadState", "--property=ActiveState"],
-                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired) as error:
+        with subprocess.Popen(["systemctl", "--user", "--no-ask-password", "show", unit,
+                               "--property=LoadState", "--property=ActiveState"],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              text=True) as process:
+            try:
+                while True:
+                    if cancelled is not None and cancelled.is_set():
+                        raise Fault("observation_cancelled", "Only this observation was cancelled; the command is unchanged.")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    try:
+                        output, _ = process.communicate(timeout=min(0.05, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+    except (OSError, TimeoutError) as error:
         raise Fault("scope_unavailable", "The original user scope cannot be verified.") from error
-    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     if fields.get("LoadState") == "not-found":
         return "not-found"
-    if result.returncode or fields.get("ActiveState") not in {"active", "activating", "deactivating", "inactive", "failed"}:
+    if process.returncode or fields.get("ActiveState") not in {"active", "activating", "deactivating", "inactive", "failed"}:
         raise Fault("scope_unavailable", "The original user scope cannot be verified.")
     return fields["ActiveState"]
 
 
-def read(config: "Settings", state: Path, machine: str, execution_id: str,
-         offset: int = 0, max_bytes: int = MAX_READ) -> dict:
-    if config.machine(machine).transport != "local":
-        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
-    directory = _directory(state, execution_id)
-    record, status = _receipt(directory, machine)
-    output = logs.read(directory, offset, max_bytes, legacy=record.get("format_version", 1) == 1)
+def validate_read(offset: int, max_bytes: int, wait_seconds: float) -> None:
+    """Validate observation inputs before local IO or an SSH exchange."""
+    if type(offset) is not int or offset < 0 or type(max_bytes) is not int or not 1 <= max_bytes <= MAX_READ:
+        raise Fault("invalid_range", "Use a nonnegative byte offset and at most 65536 bytes.")
+    if type(wait_seconds) not in (int, float) or not 0 <= wait_seconds <= MAX_WAIT:
+        raise Fault("invalid_wait", "Use a finite wait_seconds from 0 to 5; zero reads immediately.")
+
+
+def _snapshot(directory: Path, machine: str, execution_id: str, offset: int, max_bytes: int,
+              deadline: float, cancelled: threading.Event) -> dict:
+    record, status = _receipt(directory, machine, wait=False, deadline=deadline, cancelled=cancelled)
+    output = logs.read(directory, offset, max_bytes, legacy=record.get("format_version", 1) == 1, wait=False)
     return {"execution_id": execution_id, "machine": machine, "status": status,
             "exit_code": record["exit_code"], "context": record["context"], "version": record["version"],
             "created_at": record["created_at"], "finished_at": record.get("finished_at"),
@@ -222,6 +253,47 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
             "error": record.get("error"), **output,
             "log_truncated": record["log_truncated"] or output["log_start_offset"] > 0,
             "output_incomplete": record["output_incomplete"]}
+
+
+def read(config: "Settings", state: Path, machine: str, execution_id: str,
+         offset: int = 0, max_bytes: int = MAX_READ, wait_seconds: float = 0,
+         *, cancelled: threading.Event | None = None) -> dict:
+    validate_read(offset, max_bytes, wait_seconds)
+    if config.machine(machine).transport != "local":
+        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
+    directory = _directory(state, execution_id)
+    cancelled = cancelled if cancelled is not None else threading.Event()
+    started = time.monotonic()
+    wait_deadline = started + wait_seconds
+    # Immediate reads add no observation wait, but retain a bounded IO budget.
+    io_deadline = started + (wait_seconds or MAX_WAIT)
+    previous = None
+    while True:
+        if cancelled.is_set():
+            raise Fault("observation_cancelled", "Only this observation was cancelled; the command is unchanged.")
+        try:
+            result = _snapshot(directory, machine, execution_id, offset, max_bytes, io_deadline, cancelled)
+        except Fault as error:
+            if error.code != "resource_busy":
+                raise
+            remaining = io_deadline - time.monotonic()
+            if remaining <= 0:
+                raise Fault("observation_busy", "A consistent observation was unavailable within its budget; read the original ID again.") from error
+            cancelled.wait(min(0.05, remaining))
+            continue
+        # Timestamps such as observed_at change on every read, not on progress.
+        facts = tuple(result[key] for key in ("status", "exit_code", "command", "stop", "cleanup",
+                      "cancel_requested", "finished_at", "error", "output_incomplete", "control"))
+        wake = (result["next_offset"] != offset or result["output_gap"] or result["status"] in TERMINAL
+                or (result["output_unavailable"] and result["status"] not in {"accepted", "preparing"})
+                or (previous is not None and facts != previous))
+        if not wait_seconds or wake:
+            return result | {"wait_expired": False}
+        remaining = wait_deadline - time.monotonic()
+        if remaining <= 0:
+            return result | {"wait_expired": True}
+        previous = facts
+        cancelled.wait(min(0.05, remaining))
 
 
 def list_records(config: "Settings", state: Path, machine: str, cursor: str = "", limit: int = 20) -> dict:

@@ -5,6 +5,12 @@
       "base_commit": "169d1c4e3329c641b2e401e7993300dd27293bcd",
       "change": "E1 adds only the optional bounded termination_grace_seconds input. The retained release baseline and all other tool schemas/annotations remain unchanged; real installed SDK discovery verifies the approved delta.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/28#issuecomment-5908056971",
+      "base_commit": "2e82b1f2b65917eb1522413fd2c61e82cd7b5e1f",
+      "change": "E2 adds only the optional finite wait_seconds input (0..5, default 0) to read_execution. Existing tool names and annotations remain unchanged; complete installed SDK discovery verifies the approved delta.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
     }
   ],
   "baseline": {
@@ -757,6 +763,13 @@
             "minimum": 0,
             "title": "Offset",
             "type": "integer"
+          },
+          "wait_seconds": {
+            "default": 0,
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Wait Seconds",
+            "type": "number"
           }
         },
         "required": [

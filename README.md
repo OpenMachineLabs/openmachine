@@ -24,12 +24,12 @@ sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI
 
 ## Development after v0.2.0
 
-The current development tree includes Spec #28 E1: format-4 execution facts,
-graceful draining termination, and directional service/SSH compatibility. These
-changes are **not** part of the immutable v0.2.0 release linked above. The E1
-contracts below apply to a build from the approved E1 commit; inspect actual
-capabilities before using new fields. Release installation commands remain pinned.
-PTY, input control and waiting reads are not implemented in E1.
+The current development tree includes Spec #28 E1/E2: format-4 execution facts,
+graceful draining termination, directional service/SSH compatibility, and bounded
+observation with safe output presentation. These changes are **not** part of the
+immutable v0.2.0 release linked above. Inspect the selected build's capabilities
+before using new fields; release installation commands remain pinned.
+PTY and input control are not implemented.
 
 ## Install
 
@@ -255,7 +255,7 @@ change. A socket or a tool list does not prove that write tools work.
 | `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
 | `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, and `termination_grace_seconds` (E1). |
-| `read_execution` | Original machine/ID and absolute byte offset; observed state, command/stop/cleanup facts, exit code, context, bounded output and next offset. |
+| `read_execution` | Original machine/ID, absolute byte offset and optional `wait_seconds=0..5`; observed state, command/stop/cleanup facts, output/presentation flags and next offset. Waiting never changes command lifetime. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
 | `github_read` | Conditional on `[github]`; identity/status, scoped objects, pinned source and paged PR/check/discussion observations; never dispatches arbitrary endpoints. |
@@ -345,6 +345,50 @@ Readers use absolute byte offsets across rotations; expired offsets report
 when a UTF-8 character is split. Full durable output belongs in an explicit
 artifact, not this bounded console cache. A zero process exit alone does not mark
 a logical task complete.
+
+### Bounded observation (E2)
+
+`read_execution(..., wait_seconds=0)` remains an immediate snapshot. A finite
+wait from 0 to 5 seconds can wait for unread output or meaningful state changes,
+including a zero-output exit. Existing unread data, retention gaps, terminal
+state and unavailable ownership return without an additional observation wait;
+a future offset is invalid. A preparing worker without a log segment is not
+mistaken for a lost worker. `wait_expired=true` means only that no wake condition
+was observed before this read's deadline, never that the command timed out.
+
+Waiting runs outside the MCP event loop. Each server admits at most 16 concurrent
+waiting reads; excess requests return `reader_busy` without a persistent queue.
+Immediate reads and cancellation do not consume those waiting slots. Cancelling
+an observer releases its own resources when its actual work ends; it never sends
+command cancellation, changes leases, or advances another reader's cursor.
+Receipt/output lock contention shares the observation's finite budget and can
+return `observation_busy`, without rewriting state. The zero-wait path retains a
+bounded IO budget. Filesystem/kernel stalls are not hard real-time guarantees.
+
+On SSH, one request carries the wait to the target's same execution reader;
+there is no per-poll reconnection. Cancelling that observation ends only the
+owned SSH exchange. Network/identity/serialization time remains part of the
+separate 30-second transport budget, not a five-second end-to-end latency promise.
+Prepare the matching immutable endpoint explicitly and preserve original worker
+archives; a newer reader does not replace or relaunch an old worker.
+
+`offset` and `next_offset` always count original source bytes. Presentation reports
+`output_decode_replaced`, `output_redacted`, `output_controls_escaped`, and
+`output_presentation_truncated` separately from `output_gap`/`output_incomplete`.
+Split or invalid UTF-8 may display replacement characters; concatenated display
+pages are not promised lossless. ESC, C0/C1 controls and carriage-return overwrite
+are escaped visibly; normal newlines/tabs remain. Raw retained logs are unchanged,
+and existing redaction is best effort, not universal secret filtering.
+
+Execution MCP results and SSH envelopes are bounded to one MiB, measuring JSON
+escaping and MCP's text/structured representations rather than raw log size.
+Presentation may shorten output without changing consumed source cursors; an
+oversized metadata-only result returns `response_limit`. A truncation flag means
+some consumed bytes were not displayed. Read a smaller page from the same source
+offset when needed; producer-owned artifacts remain the full-output authority.
+MCP request IDs and HTTP headers are outside the execution-result size contract.
+No event subscription, automatic task continuation, terminal emulator or new
+persisted format is introduced.
 
 New local and SSH executions write format 4. Original formats 1/2/3 and prefix
 logs remain readable without rewriting. Legacy command/stop/cleanup facts are
