@@ -234,3 +234,26 @@ disposable Linux SSH terminal/session behavior, original IDs/sequence/cursors an
 artifact hashes separately. Preserve the target's existing user-manager policy
 and original worker archives. E4 owns whole-candidate managed transitions and
 actual Chat/fresh-conversation acceptance; missing evidence is never called PASS.
+
+## Spec #28 E4
+
+The existing interactive fixture checks that the candidate's actual state reader
+leaves live and terminal v5 control receipts byte-identical. The installed SDK
+continuation test now restarts the actual controller process between connections:
+original worker/request identity, retained control receipt, raw-byte cursor and
+single input effect must survive. It is not a native launchd update or Chat test.
+
+Record native managed transitions against distinct immutable installation hashes;
+an identical-wheel update is a no-op. Keep one original old pipe worker and one
+v5 PTY through the applicable update/restart/compatible rollback paths. Verify
+process identity, in-process state, counters, sequence/receipt, leases and final
+cleanup. Separately prove that actual old readers reject active and completed v5
+state before stopping the healthy service, and that failed activation restores
+the exact prior configuration or leaves explicit recovery state.
+
+Reuse unchanged E1-E3 evidence and original SSH archives. Run only disposable
+projects with the existing user-manager policy; do not reboot a production host
+or add a new test framework. Refreshed real Chat calls and a fresh conversation's
+original-evidence readback are separate gates. Record exact candidate/artifact,
+platform and original handles, with PASS/FAIL/NOT RUN; missing client evidence or
+later MCP/task integration never becomes a pass through SDK tests.

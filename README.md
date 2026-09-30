@@ -202,6 +202,13 @@ No state migration, remote provisioning or worker relaunch is performed. Rollbac
 does not undo user work or GitHub effects. An identical update is a no-op, not a
 service restart; changing configuration alone is not disguised as such an update.
 
+After an update or restart, read capabilities and the original execution before
+sending more terminal input. Retain its output cursor and inspect its current
+control sequence/last receipt; a lost reply is not permission to resend input.
+A compatible controller can continue a live original PTY, but cannot reconstruct
+one after worker/host loss. The old worker's interpreter/archive must remain
+available even when a different controller installation is selected.
+
 ### Diagnose and recover
 
 | Observation | Required action |

@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from openmachine import execution
+from openmachine import execution, service
 from openmachine.bootstrap import create_application
 from openmachine.execution import control
 from openmachine.execution.records import CONTROL_PROTOCOL, MAX_CONTROL_SEQ, MAX_INPUT, TERMINAL
@@ -47,6 +47,28 @@ class InteractiveTests(unittest.TestCase):
     def frame(self, identity, sequence, text):
         return json.dumps({"protocol": CONTROL_PROTOCOL, "execution_id": identity,
                            **execution.control_request(sequence, "write_stdin", text)}).encode()
+
+    def test_candidate_reader_preserves_live_and_terminal_control_receipts(self):
+        config_path = self.root / "config.toml"
+        config_path.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
+        started = self.start('print("ready",flush=True); input(); print("received",flush=True); input()')
+        identity = started["execution_id"]
+        self.ready(identity)
+        receipt = self.send(identity, 0, text="once\n")["control_result"]
+        self.assertEqual(receipt["status"], "applied")
+        self.until(identity, lambda item: "received" in item["output"])
+        record_path = self.state / "executions" / identity / "record.json"
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                if terminal:
+                    execution.cancel(self.config, self.state, "local", identity)
+                    self.assertEqual(self.finish(started)["status"], "cancelled")
+                before = record_path.read_bytes()
+                result = service.check_state(config_path, self.state)
+                self.assertEqual(result["state_contract"], 3)
+                self.assertEqual(result["execution_records"], 1)
+                self.assertEqual(record_path.read_bytes(), before)
+                self.assertEqual(json.loads(before)["control"]["last"], receipt)
 
     def test_real_terminal_dimensions_exact_input_and_terminal_duplicate(self):
         code = ('import os,sys,termios; from pathlib import Path; '
