@@ -12,8 +12,8 @@ from unittest.mock import patch
 import zipfile
 
 from openmachine import service, tasks
-from openmachine.sanitize import Fault
-from openmachine.state import lease, private_directory, save_json
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, private_directory, save_json
 
 
 class ServiceTests(unittest.TestCase):

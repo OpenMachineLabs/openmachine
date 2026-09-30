@@ -21,7 +21,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import ListToolsResult
 
 import openmachine
-from openmachine.state import lease
+from openmachine.foundation.state import lease
 
 
 class MCPContractTests(unittest.IsolatedAsyncioTestCase):
@@ -561,7 +561,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lifecycle_readiness_and_mutation_gate(self):
         from openmachine import execution, service
-        from openmachine.sanitize import Fault
+        from openmachine.foundation.sanitize import Fault
         probe = {"workspace": "example", "path": "AGENTS.md"}
         ready = await asyncio.to_thread(service.probe_service, self.state, self.config, probe,
                                         openmachine.__version__, self.processes[-1].pid)

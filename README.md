@@ -617,6 +617,12 @@ automatically migrate production workloads or grant OS permissions.
 
 ## Development and review
 
+Shared filesystem primitives, durable writes, cooperative locks and safe errors
+live in `openmachine/foundation/`. This package depends only on the standard
+library and itself; execution/task record schemas and workspace editing policy
+remain with their existing domain owners. These internal module paths do not
+change the CLI, MCP tools or persisted state locations.
+
 Repository-authored documentation, comments, Issues, PRs, commits, labels and CI
 remain English. Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md)
 and the [Spec index](spec/README.md).

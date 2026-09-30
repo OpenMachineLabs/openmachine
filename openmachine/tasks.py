@@ -9,8 +9,8 @@ import re
 import stat
 import tempfile
 
-from openmachine.state import lease, private_directory, save_json
-from openmachine.sanitize import Fault, redact
+from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine.foundation.sanitize import Fault, redact
 
 MAX_CHECKPOINT = 32768
 MAX_INDEX = 2 * 1024 * 1024

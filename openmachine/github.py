@@ -14,8 +14,8 @@ from typing import Literal, get_args
 from urllib.parse import quote
 
 from openmachine.config import REPOSITORY_PATTERN, Settings
-from openmachine.sanitize import Fault, redact
-from openmachine.files import excluded
+from openmachine.foundation.sanitize import Fault, redact
+from openmachine.foundation.files import excluded
 
 ATTRIBUTION_URL = "https://github.com/OpenMachineLabs/openmachine"
 CREATED_FOOTER = f"---\n\nCreated via [Open Machine]({ATTRIBUTION_URL})."

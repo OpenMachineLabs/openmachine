@@ -81,6 +81,16 @@ configuration and user Skills. Restart the test tunnel separately and read the
 same execution from ChatGPT; do not repeat earlier coding/GitHub acceptance.
 No production services or private CI runners are needed.
 
+## Foundation boundary
+
+The existing runtime suite checks every foundation source import, including
+function-local and relative imports, against the standard-library-only boundary.
+The SSH suite checks the exact nested archive members and starts the actual
+archive with `-I -S`, without third-party site packages. Build wheel and sdist
+artifacts and test outside the checkout so source files cannot hide omitted
+package resources. These checks do not claim the later whole-runtime dependency
+DAG or live SSH/managed-transition acceptance.
+
 ## Frozen MCP contract
 
 [contract/mcp_contract.json](contract/mcp_contract.json) records the accepted

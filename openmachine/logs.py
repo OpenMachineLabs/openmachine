@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from openmachine.sanitize import Fault, redact
+from openmachine.foundation.sanitize import Fault, redact
 
 SEGMENT_BYTES = 1024 * 1024
 SEGMENTS = 4
