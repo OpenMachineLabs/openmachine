@@ -80,3 +80,27 @@ compatible rollback while preserving an original running worker, counter, tasks,
 configuration and user Skills. Restart the test tunnel separately and read the
 same execution from ChatGPT; do not repeat earlier coding/GitHub acceptance.
 No production services or private CI runners are needed.
+
+## Frozen MCP contract
+
+[contract/mcp_contract.json](contract/mcp_contract.json) records the accepted
+`v0.1.0` tool names, complete input schemas, optional output schemas and annotations.
+Its metadata identifies the source commit, released wheel checksum and SDK versions.
+The fixture was captured from that installed release through actual `tools/list`
+calls over a disposable private socket, before candidate test changes.
+
+One catalog represents GitHub plus SSH. Existing discovery scenarios and the
+GitHub-disabled test check all four enablement combinations. Expected results
+omit GitHub tools when disabled and change only the five SSH-sensitive
+`openWorldHint` values. Actual results are never normalized to hide differences;
+duplicate names, unexpected pagination, missing tools and field changes fail with
+an explicit diagnostic. Discovery does not contact GitHub or an SSH host.
+
+Tests read this fixture; they never regenerate it from the candidate. An intentional
+interface change needs explicit approval: install the newly accepted baseline with
+its locked dependencies outside the checkout, capture the same four configurations,
+retain only the named schema/annotation fields, and review the fixture and provenance
+diff. Do not update it merely to silence a failed comparison. Descriptions and
+runtime values are not snapshots; existing behavior tests retain responsibility for
+errors, results, limits, state integrity, CLI and lifecycle behavior. S0 evidence and
+the caller/move map remain in [Spec #18](https://github.com/OpenMachineLabs/openmachine/issues/18).

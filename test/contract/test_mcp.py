@@ -18,12 +18,15 @@ import uuid
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ListToolsResult
 
 import openmachine
 from openmachine.state import lease
 
 
 class MCPContractTests(unittest.IsolatedAsyncioTestCase):
+    maxDiff = None
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="om-mcp-", dir="/tmp")
         self.addCleanup(self.temp.cleanup)
@@ -82,6 +85,48 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with streamable_http_client("http://localhost/mcp", http_client=client) as streams:
                 yield streams
 
+    def assert_tool_contract(self, result: ListToolsResult, *, github: bool, ssh: bool):
+        expected = json.loads(Path(__file__).with_name("mcp_contract.json").read_text())["tools"]
+        if not github:
+            expected = {name: tool for name, tool in expected.items() if not name.startswith("github_")}
+        # Only these five annotations vary with configured SSH; never normalize actual results.
+        for name in ("inspect_workspace", "read_workspace_file", "write_workspace_file",
+                     "read_execution", "list_executions"):
+            expected[name]["annotations"]["openWorldHint"] = ssh
+        self.assertIsNone(result.nextCursor, "The baseline tool catalog is a single complete page")
+        actual = {tool.name: tool for tool in result.tools}
+        self.assertEqual(len(result.tools), len(actual), "Duplicate tool names in discovery")
+        self.assertEqual(set(actual), set(expected), "Configured MCP tool names changed")
+        for name, contract in expected.items():
+            observed = actual[name].model_dump(mode="json", by_alias=True, exclude_none=True,
+                                              include={"inputSchema", "outputSchema", "annotations"})
+            # JSON comparison preserves scalar types: a false default must not equal zero.
+            self.assertEqual(json.dumps(observed, indent=2, sort_keys=True),
+                             json.dumps(contract, indent=2, sort_keys=True),
+                             f"{name}: MCP contract changed; inspect before updating the baseline")
+
+    async def test_tool_contract_without_github(self):
+        self.stop(self.processes[0])
+        local = self.config.read_text().split("[github]")[0]
+        for ssh in (False, True):
+            with self.subTest(ssh=ssh):
+                config = local
+                if ssh:
+                    config += ('\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\n'
+                               'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n'
+                               '[workspaces.remote]\nmachine="build"\nroot="/remote/not-on-controller"\n')
+                self.config.write_text(config)
+                process = self.launch()
+                try:
+                    async with self.client() as (reader, writer, _):
+                        async with ClientSession(reader, writer) as session:
+                            await session.initialize()
+                            self.assert_tool_contract(await session.list_tools(), github=False, ssh=ssh)
+                            caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                            self.assertEqual(caps["integrations"], ["ssh"] if ssh else [])
+                finally:
+                    self.stop(process)
+
     async def test_ssh_metadata_and_local_independence(self):
         self.stop(self.processes[0])
         with self.config.open("a") as output:
@@ -92,7 +137,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         async with self.client() as (reader, writer, _):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                tools = {item.name: item for item in (await session.list_tools()).tools}
+                discovered = await session.list_tools()
+                self.assert_tool_contract(discovered, github=True, ssh=True)
+                tools = {item.name: item for item in discovered.tools}
                 self.assertTrue(tools["read_workspace_file"].annotations.openWorldHint)
                 self.assertTrue(tools["write_workspace_file"].annotations.openWorldHint)
                 self.assertFalse(tools["save_task"].annotations.openWorldHint)
@@ -111,7 +158,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with ClientSession(reader, writer) as session:
                 init = await session.initialize()
                 self.assertEqual(init.serverInfo.version, openmachine.__version__)
-                tools = {t.name: t for t in (await session.list_tools()).tools}
+                discovered = await session.list_tools()
+                self.assert_tool_contract(discovered, github=True, ssh=False)
+                tools = {t.name: t for t in discovered.tools}
                 self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)

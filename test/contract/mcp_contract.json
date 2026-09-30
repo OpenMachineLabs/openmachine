@@ -1,0 +1,1003 @@
+{
+  "baseline": {
+    "commit": "d5c4a825720fef69ece073841a8ea8813a86e704",
+    "mcp": "1.30.0",
+    "pydantic": "2.13.5",
+    "release": "v0.1.0",
+    "wheel_sha256": "61b2f8f98c92b1afc760537d0fa8a8b8bbc0492e0a745a5f3c49eb0c9621c8ca"
+  },
+  "tools": {
+    "cancel_execution": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id"
+        ],
+        "title": "cancel_executionArguments",
+        "type": "object"
+      }
+    },
+    "find_tasks": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "anchors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Anchors",
+            "type": "array"
+          },
+          "expected_generation": {
+            "default": -1,
+            "minimum": -1,
+            "title": "Expected Generation",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Query",
+            "type": "string"
+          },
+          "task_id": {
+            "default": "",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "title": "find_tasksArguments",
+        "type": "object"
+      }
+    },
+    "get_capabilities": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "title": "get_capabilitiesArguments",
+        "type": "object"
+      }
+    },
+    "github_comment": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 60000,
+            "title": "Body",
+            "type": "string"
+          },
+          "comment_id": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Comment Id",
+            "type": "integer"
+          },
+          "expected_updated_at": {
+            "default": "",
+            "title": "Expected Updated At",
+            "type": "string"
+          },
+          "number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "repository",
+          "body"
+        ],
+        "title": "github_commentArguments",
+        "type": "object"
+      }
+    },
+    "github_issue": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "maxLength": 60000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "expected_updated_at": {
+            "default": "",
+            "title": "Expected Updated At",
+            "type": "string"
+          },
+          "number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "closed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          }
+        },
+        "required": [
+          "action",
+          "repository"
+        ],
+        "title": "github_issueArguments",
+        "type": "object"
+      }
+    },
+    "github_merge": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "commit_message": {
+            "default": "",
+            "maxLength": 60000,
+            "title": "Commit Message",
+            "type": "string"
+          },
+          "commit_title": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Commit Title",
+            "type": "string"
+          },
+          "expected_base_sha": {
+            "default": "",
+            "title": "Expected Base Sha",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "method": {
+            "default": "squash",
+            "enum": [
+              "squash",
+              "merge",
+              "rebase"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "number": {
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "number",
+          "expected_head_sha"
+        ],
+        "title": "github_mergeArguments",
+        "type": "object"
+      }
+    },
+    "github_pull_request": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "base": {
+            "default": "",
+            "title": "Base",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "maxLength": 60000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "draft": {
+            "default": false,
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "expected_head_sha": {
+            "default": "",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "expected_updated_at": {
+            "default": "",
+            "title": "Expected Updated At",
+            "type": "string"
+          },
+          "head": {
+            "default": "",
+            "title": "Head",
+            "type": "string"
+          },
+          "number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "closed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          }
+        },
+        "required": [
+          "action",
+          "repository"
+        ],
+        "title": "github_pull_requestArguments",
+        "type": "object"
+      }
+    },
+    "github_read": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "status",
+              "repository",
+              "branch",
+              "commit",
+              "file",
+              "issue",
+              "issues",
+              "pull_request",
+              "pull_requests",
+              "files",
+              "comments",
+              "reviews",
+              "review_comments",
+              "threads",
+              "checks",
+              "merge_context"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "cursor": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Cursor",
+            "type": "string"
+          },
+          "expected_base_sha": {
+            "default": "",
+            "title": "Expected Base Sha",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "default": "",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "limit": {
+            "default": 30,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "maximum": 1048576,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "page": {
+            "default": 1,
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "path": {
+            "default": "",
+            "title": "Path",
+            "type": "string"
+          },
+          "ref": {
+            "default": "",
+            "title": "Ref",
+            "type": "string"
+          },
+          "repository": {
+            "default": "",
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "github_readArguments",
+        "type": "object"
+      }
+    },
+    "github_review": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 60000,
+            "title": "Body",
+            "type": "string"
+          },
+          "event": {
+            "default": "COMMENT",
+            "enum": [
+              "COMMENT",
+              "APPROVE",
+              "REQUEST_CHANGES"
+            ],
+            "title": "Event",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "default": "",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "review_id": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Review Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "repository",
+          "body"
+        ],
+        "title": "github_reviewArguments",
+        "type": "object"
+      }
+    },
+    "inspect_skills": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "default": "list",
+            "enum": [
+              "list",
+              "read",
+              "files"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_snapshot": {
+            "default": "",
+            "title": "Expected Snapshot",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "path": {
+            "default": "",
+            "title": "Path",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Query",
+            "type": "string"
+          },
+          "skill": {
+            "default": "",
+            "title": "Skill",
+            "type": "string"
+          }
+        },
+        "title": "inspect_skillsArguments",
+        "type": "object"
+      }
+    },
+    "inspect_workspace": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "files",
+              "read",
+              "search",
+              "status",
+              "diff"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_snapshot": {
+            "default": "",
+            "title": "Expected Snapshot",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "title": "Path",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "staged": {
+            "default": false,
+            "title": "Staged",
+            "type": "boolean"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "action"
+        ],
+        "title": "inspect_workspaceArguments",
+        "type": "object"
+      }
+    },
+    "list_executions": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "cursor": {
+            "default": "",
+            "title": "Cursor",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine"
+        ],
+        "title": "list_executionsArguments",
+        "type": "object"
+      }
+    },
+    "read_execution": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "max_bytes": {
+            "default": 65536,
+            "maximum": 65536,
+            "minimum": 1,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id"
+        ],
+        "title": "read_executionArguments",
+        "type": "object"
+      }
+    },
+    "read_task": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "read_taskArguments",
+        "type": "object"
+      }
+    },
+    "read_workspace_file": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "expected_sha256": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "maximum": 131072,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "path"
+        ],
+        "title": "read_workspace_fileArguments",
+        "type": "object"
+      }
+    },
+    "save_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "anchors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Anchors",
+            "type": "array"
+          },
+          "body": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_revision",
+          "title",
+          "body"
+        ],
+        "title": "save_taskArguments",
+        "type": "object"
+      }
+    },
+    "start_execution": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Argv",
+            "type": "array"
+          },
+          "cwd": {
+            "title": "Cwd",
+            "type": "string"
+          },
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "default": "",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "resource_keys": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Resource Keys",
+            "type": "array"
+          },
+          "task_id": {
+            "default": "",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 600,
+            "maximum": 86400,
+            "minimum": 1,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "workspace_access": {
+            "default": "exclusive",
+            "enum": [
+              "exclusive",
+              "shared"
+            ],
+            "title": "Workspace Access",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id",
+          "cwd",
+          "argv"
+        ],
+        "title": "start_executionArguments",
+        "type": "object"
+      }
+    },
+    "write_workspace_file": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "maxLength": 131072,
+            "title": "Content",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "pattern": "^(?:[0-9a-f]{40})?$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "expected_sha256": {
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "path",
+          "content",
+          "expected_head_sha",
+          "expected_sha256"
+        ],
+        "title": "write_workspace_fileArguments",
+        "type": "object"
+      }
+    }
+  }
+}
