@@ -80,6 +80,8 @@ class Process:
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       start_new_session=True, pass_fds=owned_fds)
         self.session = self.child.pid
+        self.started_at = time.time()
+        self.started_monotonic = time.monotonic()
         os.set_blocking(self.child.stdout.fileno(), False)
         if self.events is not None:
             event = select.kevent(self.child.pid, filter=select.KQ_FILTER_PROC,

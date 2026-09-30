@@ -255,6 +255,21 @@ while True: time.sleep(0.05)
             execution.cancel(self.config, self.state, "local", result["execution_id"])
         self.assertEqual(caught.exception.code, "outcome_unknown")
 
+    def test_command_budget_starts_at_launch_not_receipt_publication(self):
+        setup = ('original=w._publish\n'
+                 'def delayed(path,record):\n'
+                 ' if record["status"]=="running": w.time.sleep(1.5)\n'
+                 ' return original(path,record)\n'
+                 'w._publish=delayed')
+        with self.injected_worker(setup):
+            result = execution.start(self.config, self.state, "local", uuid.uuid4().hex, str(self.work),
+                                     [sys.executable, "-c", "import time; time.sleep(2)"], timeout_seconds=1)
+        self.ids.append(result["execution_id"])
+        final = self.finish(result)
+        self.assertEqual(final["status"], "timed_out")
+        self.assertEqual(final["stop"]["reason"], "timeout")
+        self.assertEqual(final["cleanup"]["status"], "verified")
+
     def test_timeout_preserves_reason_when_term_handler_returns_zero(self):
         code = 'import signal,time; signal.signal(signal.SIGTERM,lambda *_:exit(0)); print("ready",flush=True); time.sleep(4)'
         result = execution.start(self.config, self.state, "local", uuid.uuid4().hex, str(self.work),

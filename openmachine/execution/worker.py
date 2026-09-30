@@ -33,7 +33,7 @@ def _publish(directory: Path, record: dict) -> bool:
 def _run(directory: Path, record: dict, process: Process, output, interrupted) -> None:
     """Advance stop deadlines while consuming bounded output on every iteration."""
     command, stop, cleanup = record["command"], record["stop"], record["cleanup"]
-    deadline = time.monotonic() + record["request"]["timeout_seconds"]
+    deadline = process.started_monotonic + record["request"]["timeout_seconds"]
     term_deadline = force_deadline = drain_deadline = None
     term_groups = set()
     logging_failed = False
@@ -50,7 +50,7 @@ def _run(directory: Path, record: dict, process: Process, output, interrupted) -
                         record["status"] = "finishing"
                         _publish(directory, record)
                     # A late request cannot relabel an already observed natural exit.
-                    if not exited and stop["reason"] is None:
+                    if not exited and stop["reason"] is None and term_deadline is None:
                         reason = ("worker_signal" if interrupted() else "cancel" if (directory / "cancel.request").exists()
                                   else "timeout" if now >= deadline else None)
                         if reason:
@@ -159,7 +159,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                 except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
                     record["error"] = error.code if isinstance(error, Fault) else type(error).__name__
                 if process.child is not None:
-                    record["command"].update(spawned=True, started_at=time.time())
+                    record["command"].update(spawned=True, started_at=process.started_at)
                     record.update(status="running", started_at=record["command"]["started_at"])
                     if time.monotonic() >= preparation_deadline:
                         record["error"] = "preparation_timeout"
