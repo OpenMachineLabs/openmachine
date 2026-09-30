@@ -24,10 +24,6 @@ MAX_MATCHES = 1000
 def inspect(config: "Settings", machine: str, workspace: str, action: str,
             path: str = ".", offset: int = 0, limit: int = 100, *, query: str = "",
             staged: bool = False, expected_snapshot: str = "") -> dict:
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, None, machine, "inspect_workspace", workspace=workspace, action=action, path=path,
-                    offset=offset, limit=limit, query=query, staged=staged, expected_snapshot=expected_snapshot)
     root = root_for(config, machine, workspace)
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts or excluded(relative):

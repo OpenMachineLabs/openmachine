@@ -81,10 +81,21 @@ configuration and user Skills. Restart the test tunnel separately and read the
 same execution from ChatGPT; do not repeat earlier coding/GitHub acceptance.
 No production services or private CI runners are needed.
 
-## Foundation boundary
+## Capability and application boundaries
 
-The existing runtime suite checks every foundation source import, including
-function-local and relative imports, against the standard-library-only boundary.
+The existing runtime suite checks foundation, capability and SSH import boundaries,
+including relative/function-local imports and package re-exports. Runtime-only
+checks exclude `TYPE_CHECKING` imports; isolated assembly also rejects disabled
+integration imports and verifies that it creates no controller state.
+
+Direct application checks cover all nine mutations against pending selection,
+wrong-runtime identity and an exclusive lifecycle lease. Successful dispatch holds
+one shared lease, preserves the typed arguments (including GitHub Issue/PR state),
+and releases it before an actual background worker finishes. Original-ID tests
+retain local conflict-before-new-task ordering, remote final request comparison,
+and fail-closed uncertain pre-reads. Mocked routing never resolves remote paths on
+the controller and retains cancellation after execution is disabled.
+
 The SSH suite checks the exact nested archive members and starts the actual
 archive with `-I -S`, without third-party site packages. A short command also
 runs through the actual archive worker entry, using inherited leases and a
@@ -95,8 +106,8 @@ with a mocked user manager. Torn task saves inject failure into the actual store
 owner rather than a facade re-export.
 
 Build wheel and sdist artifacts and test outside the checkout so source files
-cannot hide omitted execution/workspace/tasks package resources. These checks do not claim the later whole-runtime dependency
-DAG or live SSH/managed-transition acceptance.
+cannot hide omitted capability, application or SSH package resources. These checks do not
+claim final whole-runtime DAG or live SSH/managed-transition acceptance.
 
 ## Frozen MCP contract
 

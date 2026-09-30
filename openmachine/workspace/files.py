@@ -41,10 +41,6 @@ def reader_path(root: Path, relative: Path) -> bool:
 
 def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
                    offset: int = 0, expected_sha256: str = "") -> dict:
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, None, machine, "read_workspace_file", workspace=workspace, path=path,
-                    offset=offset, expected_sha256=expected_sha256)
     parts = file_parts(path)
     root = root_for(config, machine, workspace)
     if not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256):
@@ -60,10 +56,7 @@ def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
 
 def write_text_file(config: "Settings", state: Path, machine: str, workspace: str, path: str,
                     content: str, expected_head_sha: str, expected_sha256: str) -> dict:
-    if config.machine(machine, write=True).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "write_workspace_file", workspace=workspace, path=path, content=content,
-                    expected_head_sha=expected_head_sha, expected_sha256=expected_sha256)
+    config.machine(machine, write=True)
     parts = file_parts(path)
     if (not re.fullmatch(r"(?:[0-9a-f]{40})?", expected_head_sha)
             or not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256)):

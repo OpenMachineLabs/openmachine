@@ -10,10 +10,11 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from integrations import ssh
+from integrations.ssh import MAX_MESSAGE, PROTOCOL, bundle, client, endpoint
 from openmachine import __version__, execution, tasks
 from openmachine.execution import api as execution_api, logs
 from openmachine.config import Settings
+from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
@@ -34,17 +35,17 @@ class SSHTests(unittest.TestCase):
                           "ssh_worker": str(self.archive), "ssh_identity": self.identity, "execution_enabled": True}},
             "workspaces": {"project": {"machine": "build-machine", "root": str(self.project)}},
         })
-        self.request = {"protocol": ssh.PROTOCOL, "version": __version__, "identity": self.identity,
+        self.request = {"protocol": PROTOCOL, "version": __version__, "identity": self.identity,
                         "execution_enabled": True, "workspaces": {"project": str(self.project)},
                         "operation": "read_workspace_file", "arguments": {"workspace": "project", "path": "file.txt"}}
 
     def dispatch(self, operation, **arguments):
         request = self.request | {"operation": operation, "arguments": arguments}
-        with patch.object(ssh, "_identity", return_value=(self.identity, self.root)):
-            return ssh._dispatch(request, self.archive)["result"]
+        with patch.object(endpoint, "_identity", return_value=(self.identity, self.root)):
+            return endpoint._dispatch(request, self.archive)["result"]
 
     def response(self, result):
-        return 0, json.dumps({"protocol": ssh.PROTOCOL, "version": __version__, "identity": self.identity,
+        return 0, json.dumps({"protocol": PROTOCOL, "version": __version__, "identity": self.identity,
                               "worker_sha256": self.digest, "result": result}).encode()
 
     def test_configuration_requires_explicit_alias_worker_and_identity_for_execution(self):
@@ -68,12 +69,13 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(value["ssh_targets"], {"build": "not_probed"})
 
     def test_bundle_is_reproducible_content_addressed_and_dependency_free(self):
-        first = ssh.build_bundle(self.root / "bundle")
-        self.assertEqual(first, ssh.build_bundle(self.root / "bundle"))
+        first = bundle.build_bundle(self.root / "bundle")
+        self.assertEqual(first, bundle.build_bundle(self.root / "bundle"))
         artifact = Path(first["path"])
         self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), first["sha256"])
         with zipfile.ZipFile(artifact) as archive:
-            self.assertEqual(set(archive.namelist()), {"__main__.py", "integrations/__init__.py", "integrations/ssh.py",
+            self.assertEqual(set(archive.namelist()), {"__main__.py", "integrations/__init__.py", "integrations/ssh/__init__.py",
+                              "integrations/ssh/endpoint.py", "integrations/ssh/bundle.py",
                               "openmachine/__init__.py", "openmachine/execution/__init__.py",
                               "openmachine/execution/__main__.py", "openmachine/execution/api.py",
                               "openmachine/execution/worker.py", "openmachine/execution/records.py",
@@ -88,11 +90,11 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["error"]["code"], "protocol_mismatch")
         artifact.write_bytes(b"changed")
         with self.assertRaises(Fault) as caught:
-            ssh.build_bundle(artifact.parent)
+            bundle.build_bundle(artifact.parent)
         self.assertEqual(caught.exception.code, "worker_conflict")
 
     def test_archive_worker_runs_without_site_packages_or_controller_task_store(self):
-        artifact = Path(ssh.build_bundle(self.root / "workers")["path"])
+        artifact = Path(bundle.build_bundle(self.root / "workers")["path"])
         state = private_directory(self.root / "state")
         directory = private_directory(state / "executions" / ("c" * 32))
         locks = private_directory(state / "locks")
@@ -123,8 +125,8 @@ class SSHTests(unittest.TestCase):
 
     def test_transport_preserves_arguments_as_json_and_pins_the_existing_alias(self):
         literal = ['python3', '-c', 'print("$HOME; $(touch escaped)")', '', 'two words', "a'b"]
-        with patch.object(ssh, "_exchange", return_value=self.response({"execution_id": "c" * 32})) as exchange:
-            ssh.call(self.settings, self.root / "controller", "build-machine", "start_execution",
+        with patch.object(client, "_exchange", return_value=self.response({"execution_id": "c" * 32})) as exchange:
+            client.call(self.settings, "build-machine", "start_execution",
                      execution_id="c" * 32, cwd=str(self.project), argv=literal)
         argv, data = exchange.call_args.args
         self.assertEqual(json.loads(data)["arguments"]["argv"], literal)
@@ -136,35 +138,77 @@ class SSHTests(unittest.TestCase):
 
     def test_unknown_mutation_is_not_replayed_and_read_failure_is_not_empty_success(self):
         for operation, expected in (("write_workspace_file", "outcome_unknown"), ("list_executions", "ssh_unavailable")):
-            with self.subTest(operation=operation), patch.object(ssh, "_exchange", side_effect=TimeoutError) as exchange:
+            with self.subTest(operation=operation), patch.object(client, "_exchange", side_effect=TimeoutError) as exchange:
                 with self.assertRaises(Fault) as caught:
-                    ssh.call(self.settings, None, "build-machine", operation)
+                    client.call(self.settings, "build-machine", operation)
                 self.assertEqual(caught.exception.code, expected)
                 self.assertEqual(exchange.call_count, 1)
 
     def test_controller_checkpoint_is_required_only_for_a_new_execution(self):
+        app = create_application(self.settings, self.root / "controller")
         arguments = {"execution_id": "c" * 32, "cwd": str(self.project), "argv": ["true"], "task_id": "original-task"}
         missing = (0, b'{"error":{"code":"execution_not_found","message":"No original receipt."}}')
-        with patch.object(ssh, "_exchange", return_value=missing) as exchange:
-            with self.assertRaises(Fault):
-                ssh.call(self.settings, self.root / "controller", "build-machine", "start_execution", **arguments)
+        with patch.object(client, "_exchange", return_value=missing) as exchange:
+            with self.assertRaises(Fault) as caught:
+                app.start_execution("build-machine", **arguments)
+            self.assertEqual(caught.exception.code, "tasks_uninitialized")
             self.assertEqual(exchange.call_count, 1)
-        state = self.root / "controller"
-        tasks.save(state, "original-task", 0, "Task", "Authorized disposable task.", [])
-        with patch.object(ssh, "_exchange", side_effect=[missing, self.response({"status": "accepted"})]) as exchange:
-            self.assertEqual(ssh.call(self.settings, state, "build-machine", "start_execution", **arguments)["status"], "accepted")
+        app.save_task("original-task", 0, "Task", "Authorized disposable task.")
+        with patch.object(client, "_exchange", side_effect=[missing, self.response({"status": "accepted"})]) as exchange:
+            self.assertEqual(app.start_execution("build-machine", **arguments)["status"], "accepted")
             self.assertEqual(exchange.call_count, 2)
-        with patch.object(ssh, "_exchange", return_value=self.response({"status": "succeeded"})), \
-                patch.object(tasks, "read", side_effect=AssertionError("Old receipts do not need a checkpoint")):
-            ssh.call(self.settings, state, "build-machine", "start_execution", **arguments)
+        conflict = (0, b'{"error":{"code":"execution_conflict","message":"Changed original request."}}')
+        for final in (self.response({"status": "succeeded"}), conflict):
+            with self.subTest(final=final), \
+                    patch.object(client, "_exchange", side_effect=[self.response({"status": "succeeded"}), final]) as exchange, \
+                    patch.object(tasks, "read", side_effect=AssertionError("Old receipts do not need a checkpoint")):
+                if final == conflict:
+                    with self.assertRaises(Fault) as caught:
+                        app.start_execution("build-machine", **(arguments | {"argv": ["false"]}))
+                    self.assertEqual(caught.exception.code, "execution_conflict")
+                else:
+                    self.assertEqual(app.start_execution("build-machine", **arguments)["status"], "succeeded")
+                operations = [json.loads(call.args[1])["operation"] for call in exchange.call_args_list]
+                self.assertEqual(operations, ["read_execution", "start_execution"])
+        with patch.object(client, "_exchange", side_effect=TimeoutError) as exchange:
+            with self.assertRaises(Fault) as caught:
+                app.start_execution("build-machine", **arguments)
+            self.assertEqual(caught.exception.code, "ssh_unavailable")
+            self.assertEqual(exchange.call_count, 1)
+        with patch.object(client, "_exchange", side_effect=AssertionError("Invalid requests never reach SSH")):
+            with self.assertRaises(Fault) as caught:
+                app.start_execution("build-machine", **(arguments | {"task_id": "invalid/task"}))
+            self.assertEqual(caught.exception.code, "invalid_task_id")
+
+    def test_application_routes_remote_files_without_resolving_controller_paths(self):
+        app = create_application(self.settings, self.root / "controller")
+        self.settings.workspaces["project"].root = "/remote/not-on-controller"
+        operations = [
+            (app.inspect_workspace, ("build-machine", "project", "files"), "inspect_workspace"),
+            (app.read_workspace_file, ("build-machine", "project", "file.txt"), "read_workspace_file"),
+            (app.write_workspace_file, ("build-machine", "project", "file.txt", "new", "", ""), "write_workspace_file"),
+            (app.read_execution, ("build-machine", "c" * 32), "read_execution"),
+            (app.list_executions, ("build-machine",), "list_executions"),
+            (app.cancel_execution, ("build-machine", "c" * 32), "cancel_execution"),
+        ]
+        for operation, arguments, name in operations:
+            with self.subTest(operation=name), patch.object(client, "_exchange", return_value=self.response({})) as exchange:
+                operation(*arguments)
+                request = json.loads(exchange.call_args.args[1])
+                self.assertEqual(request["operation"], name)
+                self.assertEqual(request["workspaces"], {"project": "/remote/not-on-controller"})
+        self.settings.machines["build-machine"].execution_enabled = False
+        with patch.object(client, "_exchange", return_value=self.response({"status": "succeeded"})):
+            self.assertEqual(app.cancel_execution("build-machine", "c" * 32)["status"], "succeeded")
+        self.assertFalse((app.state / "executions").exists())
 
     def test_identity_version_and_permission_fail_before_remote_file_changes(self):
         for delta, expected in (({"identity": "d" * 64}, "identity_mismatch"),
                                 ({"version": "different"}, "protocol_mismatch"),
                                 ({"identity": ""}, "identity_required")):
-            with self.subTest(delta=delta), patch.object(ssh, "_identity", return_value=(self.identity, self.root)):
+            with self.subTest(delta=delta), patch.object(endpoint, "_identity", return_value=(self.identity, self.root)):
                 with self.assertRaises(Fault) as caught:
-                    ssh._dispatch(self.request | delta, self.archive)
+                    endpoint._dispatch(self.request | delta, self.archive)
                 self.assertEqual(caught.exception.code, expected)
         self.request["execution_enabled"] = False
         with self.assertRaises(Fault) as caught:
@@ -195,11 +239,11 @@ class SSHTests(unittest.TestCase):
         self.assertEqual((self.project / "file.txt").read_text(), "old")
 
     def test_bounded_pipe_exchange_and_oversized_output(self):
-        code, data = ssh._exchange([sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"], b"hello")
+        code, data = client._exchange([sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"], b"hello")
         self.assertEqual((code, data), (0, b"hello"))
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream), self.assertRaises(Fault) as caught:
-                ssh._exchange([sys.executable, "-c", f"import sys; sys.stdin.buffer.read(); sys.{stream}.write('x'*2097152)"], b"hello")
+                client._exchange([sys.executable, "-c", f"import sys; sys.stdin.buffer.read(); sys.{stream}.write('x'*2097152)"], b"hello")
             self.assertEqual(caught.exception.code, "response_limit")
 
     def test_terminal_remote_receipt_waits_for_scope_cleanup(self):
@@ -213,7 +257,7 @@ class SSHTests(unittest.TestCase):
                       "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
                                   "argv": ["true"], "timeout_seconds": 10}}
             save_json(directory / "record.json", record)
-        config = ssh._RemoteConfig(self.identity, {}, False)
+        config = endpoint._RemoteConfig(self.identity, {}, False)
         with patch.object(execution_api, "_scope_state", return_value="active"):
             self.assertEqual(execution.read(config, state, self.identity, directory.name)["status"], "finishing")
         with patch.object(execution_api, "_scope_state", return_value="not-found"):
@@ -227,7 +271,7 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "corrupt_state")
 
     def test_worker_alias_cannot_change_the_checked_checksum_filename(self):
-        artifact = Path(ssh.build_bundle(self.root / "workers")["path"])
+        artifact = Path(bundle.build_bundle(self.root / "workers")["path"])
         alias = artifact.parent / ("0" * 64 + ".pyz")
         alias.symlink_to(artifact)
         result = subprocess.run([sys.executable, "-I", "-S", str(alias), "rpc"], input="{}",
@@ -238,11 +282,11 @@ class SSHTests(unittest.TestCase):
         code, raw = self.response({})
         response = json.loads(raw)
         response["identity"] = None
-        with patch.object(ssh, "_exchange", return_value=(code, json.dumps(response).encode())):
+        with patch.object(client, "_exchange", return_value=(code, json.dumps(response).encode())):
             with self.assertRaises(Fault) as caught:
-                ssh.call(self.settings, None, "build-machine", "list_executions")
+                client.call(self.settings, "build-machine", "list_executions")
         self.assertEqual(caught.exception.code, "ssh_protocol_error")
         with patch.object(subprocess, "Popen", side_effect=AssertionError("Oversized input must not contact SSH")):
             with self.assertRaises(Fault) as caught:
-                ssh.call(self.settings, None, "build-machine", "write_workspace_file", content="x" * ssh.MAX_MESSAGE)
+                client.call(self.settings, "build-machine", "write_workspace_file", content="x" * MAX_MESSAGE)
         self.assertEqual(caught.exception.code, "request_limit")

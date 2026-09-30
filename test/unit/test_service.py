@@ -11,7 +11,9 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from openmachine import service, tasks
+from openmachine import app as application, service, tasks
+from openmachine.bootstrap import create_application
+from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
@@ -87,6 +89,58 @@ class ServiceTests(unittest.TestCase):
         self.assert_fault("service_identity_mismatch", lambda: service.guard_writes(self.state))
         with patch.object(sys, "prefix", str(service._runtime(self.state, self.a))):
             service.guard_writes(self.state)
+
+    def test_application_mutations_share_admission_and_preserve_dispatch_arguments(self):
+        config = Settings.model_validate({"schema_version": 1,
+            "machines": {"local": {"transport": "local", "execution_enabled": True}},
+            "github": {"repositories": ["example/project"]}})
+        app = create_application(config, self.state)
+        issue = ("update", "example/project", "Title", "Body", 1, "closed", "observed-time")
+        pull = ("update", "example/project", "Title", "Body", 1, "topic", "main", False,
+                "closed", "observed-time", "f" * 40)
+        cases = [
+            ("write_workspace_file", ("local", "project", "file", "text", "", ""), app.machines, "write_workspace_file"),
+            ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, ""),
+             app.machines, "start_execution"),
+            ("cancel_execution", ("local", "c" * 32), app.machines, "cancel_execution"),
+            ("save_task", ("task", 0, "Title", "Body", []), tasks, "save"),
+            ("github_issue", issue, app.github, "issue"),
+            ("github_pull_request", pull, app.github, "pull_request"),
+            ("github_comment", ("create", "example/project", "Body", 1, 0, ""), app.github, "comment"),
+            ("github_review", ("create", "example/project", "Body", 1, 0, "f" * 40, "COMMENT"), app.github, "review"),
+            ("github_merge", ("example/project", 1, "f" * 40, "e" * 40, "squash", "Title", "Body"), app.github, "merge"),
+        ]
+        for name, arguments, owner, method in cases:
+            operation = getattr(app, name)
+            with self.subTest(operation=name), patch.object(owner, method) as dispatch:
+                self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}
+                self.save(self.record)
+                self.assert_fault("activation_pending", lambda: operation(*arguments))
+                self.record["pending"] = None
+                self.save(self.record)
+                self.assert_fault("service_identity_mismatch", lambda: operation(*arguments))
+                with lease(self.state / "locks/lifecycle.lock"):
+                    self.assert_fault("resource_busy", lambda: operation(*arguments))
+                    self.assertEqual(app.find_tasks()["status"], "uninitialized")
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 1)
+                dispatch.assert_not_called()
+
+                def admitted(*args):
+                    with self.assertRaises(Fault) as caught:
+                        with lease(self.state / "locks/lifecycle.lock"):
+                            self.fail("Admission lease was released before dispatch")
+                    self.assertEqual(caught.exception.code, "resource_busy")
+                    return {"dispatched": True}
+
+                dispatch.side_effect = admitted
+                with patch.object(sys, "prefix", str(service._runtime(self.state, self.a))), \
+                        patch.object(application, "lease", wraps=lease) as admission:
+                    self.assertEqual(operation(*arguments), {"dispatched": True})
+                    admission.assert_called_once_with(self.state / "locks/lifecycle.lock", shared=True)
+                prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
+                dispatch.assert_called_once_with(*prefix, *arguments)
+                with lease(self.state / "locks/lifecycle.lock"):
+                    pass
 
     def test_successful_activation_retains_rollback_target(self):
         verify, stop, start = self.activation_mocks()

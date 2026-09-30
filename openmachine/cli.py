@@ -59,7 +59,7 @@ def main() -> int:
             print(json.dumps({"created": str(args.config), "execution_enabled": False}))
             return 0
         if args.command == "worker-bundle":
-            from integrations.ssh import build_bundle
+            from integrations.ssh.bundle import build_bundle
             print(json.dumps(build_bundle(args.directory)))
             return 0
         if args.command in ("service", "update", "rollback"):
@@ -80,12 +80,12 @@ def main() -> int:
                 print(json.dumps(result))
                 return int(result["status"] != "ready")
             if args.github:
-                from openmachine.github import read
-                print(json.dumps(read(config, "status", args.repository)))
+                from openmachine.bootstrap import create_application
+                print(json.dumps(create_application(config, args.state_dir).github_read("status", args.repository)))
                 return 0
             if args.machine:
-                from integrations.ssh import call
-                result = call(config, None, args.machine, "probe")
+                from openmachine.bootstrap import create_application
+                result = create_application(config, args.state_dir).probe_machine(args.machine)
                 print(json.dumps(result))
                 return int(not result["identity_verified"] or bool(result["unavailable_workspaces"]))
             unavailable = [name for name, item in config.workspaces.items()
