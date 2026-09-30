@@ -44,6 +44,9 @@ jobs:
               text=True,
           )
           issue = json.loads(result.stdout)
+          if "pull_request" in issue:
+              print(f"#{number} is a pull request, not an Issue; skipping.")
+              raise SystemExit(0)
           if "spec" not in {label["name"] for label in issue.get("labels", [])}:
               print(f"Issue #{number} is not labeled spec; skipping.")
               raise SystemExit(0)
