@@ -14,6 +14,6 @@ def create_application(config: Settings, state: Path) -> Application:
         ssh_call = call
     provider = None
     if config.github is not None:
-        from openmachine import github
+        from integrations import github
         provider = github
     return Application(config, state, Machines(config, state, ssh_call), provider)

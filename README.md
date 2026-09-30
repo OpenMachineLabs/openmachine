@@ -411,9 +411,10 @@ This does not change global Git configuration or rewrite an existing remote.
 Never place tokens in remotes, arguments or logs. SSH-connected machines need
 their own explicitly authorized Git access; do not copy controller credentials.
 
-The reusable functions live in `openmachine/github.py`; MCP only declares schemas
-and serializes results. Future Desktop/headless callers consume those same
-operations, not a second GitHub stack. The native GitHub App connection and GUI
+The complete provider lives in `integrations/github/`. Its small facade exposes
+the existing operations to the application; MCP declares schemas and serializes
+results. Future Desktop/headless callers use the same application operations,
+not a second GitHub stack. The native GitHub App connection and GUI
 remain [Spec #11](https://github.com/OpenMachineLabs/openmachine/issues/11) follow-ups.
 This increment is the existing-identity bridge, not one-click native onboarding,
 Projects management, a general plugin SDK or a claim that Desktop has shipped.
@@ -624,6 +625,7 @@ The runtime has one application boundary, local capabilities and explicit integr
 | `openmachine/app/` | Typed operations, shared lifecycle admission, configured local/SSH routing and controller task-reference checks. |
 | `openmachine/bootstrap.py` | Assemble only configured components without probing, executing work or creating state. |
 | `integrations/ssh/` | Bounded controller transport, identity-checked target endpoint and immutable worker archives. |
+| `integrations/github/` | One gh connection backend, bounded API pagination, pinned review/merge evidence and scoped collaboration with destination reconciliation. |
 | `openmachine/execution/` | Local execution admission and live observations; worker process lifecycle; persisted record validation; bounded logs. |
 | `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
 | `openmachine/tasks/` | Lock-coordinated checkpoint saves/reads; index metadata and checkpoint integrity. |
@@ -650,10 +652,12 @@ the selected target. Transport loss never causes local fallback or replay.
 
 The curated archive contains the endpoint and dependency-free target closure,
 not the SSH client, app, controller tasks, service or optional provider code.
-Disabled integrations are not imported by application assembly. GitHub operations
-currently remain in `openmachine/github.py`; complete provider packaging is the
-separate S4 increment in Spec #18. There is no second executor, task store or
-public plugin/DI framework.
+Disabled integrations are not imported by application assembly. GitHub's
+`operations.py` owns collaboration and provenance, `evidence.py` owns pinned
+sources and merge gates, `client.py` owns REST/GraphQL pagination, and
+`connection.py` owns the single authenticated gh request and account/grant checks.
+Dependencies point toward connection, never back to application or entrypoints.
+There is no second executor, task store, login stack or public plugin/DI framework.
 
 Repository-authored documentation, comments, Issues, PRs, commits, labels and CI
 remain English. Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md)
