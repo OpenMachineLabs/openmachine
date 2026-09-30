@@ -66,7 +66,11 @@ class Application:
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
                           "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
             "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
-                          "patch": False, "max_edits": workspace.MAX_EDITS, "source_bytes": workspace.MAX_SOURCE,
+                          "patch": True, "patch_language": workspace.PATCH_LANGUAGE,
+                          "change_read_formats": list(workspace.READ_CHANGE_FORMATS),
+                          "max_patch_paths": workspace.MAX_PATHS, "max_patch_hunks": workspace.MAX_HUNKS,
+                          "prepared_bytes": workspace.MAX_PREPARED, "max_created_parents": workspace.MAX_PARENTS,
+                          "max_parent_depth": workspace.MAX_PARENT_DEPTH, "max_edits": workspace.MAX_EDITS, "source_bytes": workspace.MAX_SOURCE,
                           "line_windows": True, "max_lines": workspace.MAX_LINES,
                           "path_glob": {"recursive": False, "case_sensitive": True, "scope": "workspace_relative"},
                           "payload_bytes": MAX_TEXT_FILE, "change_record_bytes": workspace.MAX_RECORD,
@@ -117,6 +121,17 @@ class Application:
             return self.machines.edit_workspace_file(*arguments)
         with self._admit():
             return self.machines.edit_workspace_file(*arguments)
+
+    def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
+                              expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
+                              create_parents: bool = False, change_id: str = "", dry_run: bool = False,
+                              expected_plan_sha256: str = "") -> dict:
+        arguments = (machine, workspace_name, patch, expected_workspace_identity, expected_head_sha,
+                     preconditions, create_parents, change_id, dry_run, expected_plan_sha256)
+        if dry_run is True:
+            return self.machines.apply_workspace_patch(*arguments)
+        with self._admit():
+            return self.machines.apply_workspace_patch(*arguments)
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
         return self.machines.read_workspace_change(machine, change_id, observe_current)

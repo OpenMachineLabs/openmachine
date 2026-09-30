@@ -25,11 +25,12 @@ sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI
 ## Development after v0.2.0
 
 The current development tree includes the accepted Spec #28 interactive execution
-and Spec #13 W1/W2 guarded single-file editing: exact replacements, pure preview,
-original-ID change receipts, 2 MiB sources, line windows and filtered discovery.
-Full-content or combined edit payloads remain 128 KiB; multi-file patching is W3.
-Execution records remain format 5; workspace changes use format 1, state contract
-4 and SSH protocol 5. These internal numbers are not release versions, and W1/W2 are
+and Spec #13 W1-W3 guarded editing: exact replacements, focused source windows,
+strict coordinated patches, pure preview and original-ID change receipts.
+Sources/results remain 2 MiB per file; full-content/edit/patch payloads remain
+128 KiB. Execution records remain format 5; single-file changes retain format 1
+and patches use format 2, with readers for both. State contract 5 and SSH protocol
+6 describe the W3 compatibility boundary, not release versions. These changes are
 not part of the immutable releases above. Inspect installed capabilities before
 using new fields. Pipe remains the default; PTY is explicit. Source/SDK acceptance
 is separate from actual refreshed Chat, live SSH and managed-transition acceptance.
@@ -184,7 +185,7 @@ never provision or replace remote workers automatically; a rollback also require
 a worker matching the selected controller for new calls.
 
 W1 keeps lifecycle protocol 1 and advances state contract to 4. The transition-capable
-CLI recognizes contracts 1/2/3/4, but numbers alone never prove compatibility:
+CLI recognizes contracts 1/2/3/4/5, but numbers alone never prove compatibility:
 the candidate's actual readers must validate retained state. Readiness uses the
 selected installation's contract. Retained workspace change history blocks a
 candidate without its reader, even if an old check silently ignores that directory.
@@ -206,6 +207,13 @@ since the last activation. A conflicting edit observed during the transition is
 preserved with `recovery_required`; these checks do not fence uncooperative editors. Retain the
 private `service/configurations/` snapshots with both immutable installations.
 Use the transition-capable CLI for these transitions; an old CLI may reject them.
+
+W3 writes patch receipts as format 2 while preserving format-1 single-file
+receipts. The actual candidate must read every retained format; a writer-format
+number alone is not coverage. A compatible W2 candidate may read a format-1-only
+store, but its actual reader rejects format-2 history before service stop.
+No existing receipt is rewritten. W3 new calls require an explicitly prepared
+protocol-6 endpoint; this source change does not deploy or replace any endpoint.
 
 Before selecting an older controller, the current installed reader also checks
 original pinned targets for retained workspace changes and incompatible live
@@ -277,6 +285,7 @@ change. A socket or a tool list does not prove that write tools work.
 | `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256, or `start_line`/`line_count`; 2 MiB source, 32 KiB UTF-8-safe pages, raw hash/context and explicit absence. |
 | `write_workspace_file` | Complete bounded text, observed HEAD/hash; optional `change_id` requires `expected_workspace_identity` and retains the original change result. No-ID behavior stays legacy. |
 | `edit_workspace_file` | Exact `old_text/new_text` replacements in one original file, observed workspace identity/HEAD/hash; empty ID for `dry_run`, original caller-generated ID for apply; optional approved plan SHA. |
+| `apply_workspace_patch` | Strict `om_patch_v1` text, exact path/hash preconditions, observed workspace identity/HEAD; optional bounded parent creation and preview-plan binding. One original change ID records ordered add/update/delete/move effects, not an atomic batch. |
 | `read_workspace_change` | Original machine/change ID; historical receipt and owner observation, with optional separate current hashes. Never applies, repairs or initializes history. |
 | `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
 | `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
@@ -295,8 +304,8 @@ change. A socket or a tool list does not prove that write tools work.
 
 From ChatGPT, read capabilities, the operating Skill and the disposable project's
 `AGENTS.md`. Inspect Git status, search and read the relevant source. Use an
-explicit execution to make the authorized change, then another to run the
-project's test command with its selected interpreter. Inspect the original
+typed edit or coordinated patch for the authorized file change, then a separate
+execution to run the project's test command with its selected interpreter. Inspect the original
 receipts and actual exit/output, review both staged and unstaged diffs as needed,
 and read back the changed files. Preserve unrelated dirty work. Local SDK tests
 prove the protocol workflow, not this account-bound ChatGPT acceptance. Record
@@ -677,7 +686,8 @@ its deduplication protection.
 Local and SSH edits share one target-side publisher and the original worktree
 lease. Non-Git commands and edits use the unambiguous configured root. Descendant
 links, hardlinks, special files, credential/Git-control paths and nested repositories
-are refused; parent directories must already exist. Ordinary POSIX mode is retained;
+are refused. Single-file writers require existing parents; patches may explicitly
+create only their declared destination ancestors. Ordinary POSIX mode is retained;
 unsupported special metadata is rejected where detected, not copied or elevated.
 Publication stages an adjacent file, rechecks bytes/context/parent attachment,
 uses no-clobber creation or atomic replacement, then syncs and reads back. A saved
@@ -686,11 +696,84 @@ its original ID and known effects; it never silently retries or rolls back.
 
 These checks are not a kernel CAS against external writers. Pause competing
 editors; hash checking and rename remain separate syscalls. There is no formatter,
-LSP, shell, implicit test, automatic commit, parent creation, deletion or multi-file
-transaction. Run validation explicitly through execution, bind touched post-hashes
+LSP, shell, implicit test, automatic commit, recursive directory deletion or
+multi-file transaction. Run validation explicitly through execution, bind touched post-hashes
 and the execution/change IDs in the existing task, and verify applicability after
 source drift. File application is not a test PASS or completed task. Actual client,
 live SSH and managed-transition evidence remain separate W4 acceptance.
+
+### Coordinated patches (W3)
+
+Use `apply_workspace_patch` only when capabilities advertise `om_patch_v1`.
+One call selects one machine and workspace. `preconditions` must cover exactly
+all touched file paths, including both move endpoints: a complete raw SHA256 for
+an existing file, or `""` for an observed absence. Empty files have the SHA256 of
+zero bytes; they are not absent. All original files, resulting bytes, path
+relationships, parents and receipt budgets are checked before target effects.
+
+```text
+*** Begin Patch
+*** Update File: src/example.py
+@@
+-answer = 41
++answer = 42
+*** Add File: test/expected.txt
++42
+*** Update File: docs/old.txt
+*** Move to: docs/new.txt
+*** Delete File: docs/obsolete.txt
+*** End Patch
+```
+
+This is a strict string grammar, not unified diff, a shell command or `git apply`.
+Control lines use LF and exact markers. Update hunks begin with bare `@@`, need
+nonempty original context/removals and at least one addition/removal, and match
+uniquely against the same original source. Hunks must be source-ordered and not
+overlap. `*** End of File` requires an exact EOF match, without fallback. No
+whitespace guessing, regex, Unicode punctuation conversion or line-number hints.
+A pure move may omit hunks; add may contain zero payload lines for an empty file.
+Each file path participates once; move chains/cycles, overwriting destinations,
+file/parent conflicts and case/Unicode-equivalent spellings are rejected.
+
+Updates retain the source BOM, untouched line terminators and final-newline
+presence. New/replaced lines use the first existing LF/CRLF separator, or LF when
+none exists. A retained formerly unterminated final line must gain a separator
+when it becomes interior; the proposed diff includes that byte change. Empty
+output has no newline and a retained BOM is not removed. Bare-CR separators are
+unsupported for patch updates; exact edits and pure byte-preserving moves remain
+available. Nonempty adds use LF and a final newline.
+
+Patch text is limited to 128 KiB, each source/result to 2 MiB, all prepared
+before/after bytes to 8 MiB, touched file paths to 32 and hunks to 64.
+`create_parents=true` permits at most 16 missing destination ancestors and eight
+missing levels per path. The default is false. Directories use mode 0755 subject
+to the native umask; their actual identity/mode and separate effects are recorded.
+There is no general mkdir/chmod interface or automatic directory removal.
+
+`dry_run=true` requires an empty change ID and creates no target directory,
+staging artifact, change store or execution. It returns a plan hash and bounded
+proposed diff, with the same record budget checked as apply. Applying uses a
+saved caller-generated change ID and may bind `expected_plan_sha256`; all source
+preconditions are still checked again.
+
+Publication follows declared operation order. Each effect records `attempting`
+before IO and its verified observation before the next effect. A move publishes
+and verifies its absent destination before rechecking/removing the original;
+ordinary source mode/executable bits are preserved. A failure can leave both
+paths. Created directories and removal effects are not hidden in a move flag.
+A later failure leaves verified earlier effects in place: `partial` means a known
+applied prefix with no uncertain attempted effect, while `outcome_unknown` retains
+any known prefix but cannot establish at least one attempt or receipt durability.
+Later operations remain unattempted. There is no automatic rollback or replay.
+
+Read the original ID after any lost response. Same-ID identical calls return
+original history, even after later user edits. For patch receipts,
+`observe_current=true` adds bounded `current.files` observations separately from
+historical effects. Partial/unknown replies never label the whole proposal as an
+applied diff. Hash-only history cannot reconstruct a historical diff or undo files.
+Explicit execution remains responsible for tests; patch application is not a test
+PASS. Actual refreshed Chat, live SSH transport and native managed transitions
+remain separate W4 gates.
 
 ## Configured SSH machines
 

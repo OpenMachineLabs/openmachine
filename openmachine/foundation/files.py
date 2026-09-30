@@ -38,7 +38,8 @@ def file_parts(path: str) -> tuple[str, ...]:
 
 
 @contextmanager
-def file_parent(root: Path, parts: tuple[str, ...], *, identities: list | None = None):
+def file_parent(root: Path, parts: tuple[str, ...], *, identities: list | None = None,
+                missing: list | None = None):
     """Keep parent directories open and refuse every descendant filesystem link."""
     with ExitStack() as stack:
         fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -46,8 +47,15 @@ def file_parent(root: Path, parts: tuple[str, ...], *, identities: list | None =
         if identities is not None:
             info = os.fstat(fd)
             identities.append((info.st_dev, info.st_ino))
-        for part in parts[:-1]:
-            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        for index, part in enumerate(parts[:-1]):
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except FileNotFoundError:
+                if missing is None:
+                    raise
+                missing.extend(parts[index:-1])
+                break
+            fd = child
             stack.callback(os.close, fd)
             if identities is not None:
                 info = os.fstat(fd)

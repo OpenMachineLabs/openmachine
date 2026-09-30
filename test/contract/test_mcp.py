@@ -111,9 +111,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         expected = json.loads(Path(__file__).with_name("mcp_contract.json").read_text())["tools"]
         if not github:
             expected = {name: tool for name, tool in expected.items() if not name.startswith("github_")}
-        # Only these eight annotations vary with configured SSH; never normalize actual results.
+        # Only these nine annotations vary with configured SSH; never normalize actual results.
         for name in ("inspect_workspace", "read_workspace_file", "write_workspace_file",
-                     "read_execution", "list_executions", "control_execution", "edit_workspace_file", "read_workspace_change"):
+                     "read_execution", "list_executions", "control_execution", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch"):
             expected[name]["annotations"]["openWorldHint"] = ssh
         self.assertIsNone(result.nextCursor, "The baseline tool catalog is a single complete page")
         actual = {tool.name: tool for tool in result.tools}
@@ -183,7 +183,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "find_tasks", "read_task", "save_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
@@ -1084,6 +1084,147 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     offset = page["next_offset"]
         self.assertEqual("".join(parts), original)
 
+
+
+    async def test_patch_preview_apply_and_original_receipt_survive_server_restart(self):
+        source = self.work / "source.py"
+        source.write_bytes(b"answer = 41\r\n")
+        obsolete = self.work / "obsolete"
+        obsolete.write_bytes(b"old\n")
+        scope = {"machine": "desktop", "workspace_name": "example"}
+        identity = uuid.uuid4().hex
+        text = ("*** Begin Patch\n*** Update File: source.py\n*** Move to: new/source.py\n"
+                "@@\n-answer = 41\n+answer = 42\n*** Add File: new/expected\n+42\n"
+                "*** Delete File: obsolete\n*** End Patch\n")
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                read = (await session.call_tool("read_workspace_file", scope | {"path":"source.py"})).structuredContent
+                request = scope | {"patch":text,"expected_workspace_identity":read["context"]["workspace_identity"],
+                    "expected_head_sha":"","create_parents":True,
+                    "preconditions":[{"path":"source.py","expected_sha256":read["sha256"]},
+                        {"path":"new/source.py","expected_sha256":""},{"path":"new/expected","expected_sha256":""},
+                        {"path":"obsolete","expected_sha256":hashlib.sha256(obsolete.read_bytes()).hexdigest()}]}
+                preview = await session.call_tool("apply_workspace_patch", request | {"dry_run":True})
+                self.assertFalse(preview.isError,preview)
+                self.assertFalse((self.work / "new").exists())
+                self.assertFalse((self.state / "workspace-changes").exists())
+                request.update(change_id=identity,expected_plan_sha256=preview.structuredContent["plan_sha256"])
+                result = await session.call_tool("apply_workspace_patch",request)
+                self.assertFalse(result.isError,result)
+                first = result.structuredContent
+                self.assertEqual(first["status"],"applied")
+                self.assertEqual([item["kind"] for item in first["effects"]], ["mkdir","publish","remove","publish","remove"])
+                self.assertEqual((self.work / "new/source.py").read_bytes(), b"answer = 42\r\n")
+                self.assertFalse(source.exists())
+                self.assertFalse(obsolete.exists())
+                caps = (await session.call_tool("get_capabilities",{})).structuredContent
+                self.assertEqual(caps["workspace"]["patch_language"],"om_patch_v1")
+                self.assertEqual(caps["workspace"]["change_read_formats"],[1,2])
+        self.stop(self.processes[-1])
+        record = self.state / "workspace-changes" / identity / "record.json"
+        retained = record.read_bytes()
+        (self.work / "new/source.py").write_text("later work\n")
+        self.launch()
+        async with self.client() as (reader,writer,_):
+            async with ClientSession(reader,writer) as session:
+                await session.initialize()
+                read = await session.call_tool("read_workspace_change",{"machine":"desktop","change_id":identity,"observe_current":True})
+                self.assertFalse(read.isError,read)
+                self.assertEqual((read.structuredContent["created_at"],read.structuredContent["revision"]),(first["created_at"],first["revision"]))
+                again = await session.call_tool("apply_workspace_patch",request)
+                self.assertFalse(again.isError,again)
+                self.assertEqual(again.structuredContent["revision"],first["revision"])
+                self.assertEqual((self.work / "new/source.py").read_text(),"later work\n")
+                conflict = await session.call_tool("apply_workspace_patch",request | {"create_parents":False})
+                self.assertTrue(conflict.isError)
+                self.assertEqual(conflict.structuredContent["error"]["code"],"change_id_conflict")
+        self.assertEqual(record.read_bytes(),retained)
+        self.assertFalse((self.state / "executions").exists(),"Patch operations must never run hidden commands")
+
+    async def test_patch_strict_schema_independent_grant_and_escaped_response(self):
+        self.stop(self.processes[-1])
+        self.config.write_text(self.config.read_text().replace("execution_enabled = true","execution_enabled = false\nworkspace_write_enabled = true"))
+        self.launch()
+        scope = {"machine":"desktop","workspace_name":"example"}
+        text = "*** Begin Patch\n*** Add File: escaped\n+" + "\x01" * 32760 + "\n*** End Patch\n"
+        async with self.client() as (reader,writer,_):
+            async with ClientSession(reader,writer) as session:
+                await session.initialize()
+                read = (await session.call_tool("read_workspace_file",scope | {"path":"AGENTS.md"})).structuredContent
+                request = scope | {"patch":text,"expected_workspace_identity":read["context"]["workspace_identity"],
+                                  "expected_head_sha":"","preconditions":[{"path":"escaped","expected_sha256":""}]}
+                for delta in ({"create_parents":1},{"dry_run":"false"},{"preconditions":[]},
+                              {"preconditions":[{"path":"escaped","expected_sha256":"","extra":True}]}):
+                    result = await session.call_tool("apply_workspace_patch",request | {"change_id":uuid.uuid4().hex} | delta)
+                    self.assertTrue(result.isError)
+                    self.assertFalse((self.work / "escaped").exists())
+                identity = uuid.uuid4().hex
+                result = await session.call_tool("apply_workspace_patch",request | {"change_id":identity})
+                self.assertFalse(result.isError,result)
+                self.assertEqual(result.structuredContent["status"],"applied")
+                self.assertEqual(result.structuredContent["change_id"],identity)
+                self.assertEqual(len(result.structuredContent["effects"]),1)
+                self.assertEqual(json.loads(result.content[0].text),result.structuredContent)
+                self.assertLessEqual(len(json.dumps(result.model_dump(mode="json",by_alias=True,exclude_none=True)).encode()),server.MAX_WORKSPACE_RESULT-1024)
+                denied = await session.call_tool("start_execution",{"machine":"desktop","execution_id":uuid.uuid4().hex,
+                    "cwd":str(self.work),"argv":[sys.executable,"-c","pass"]})
+                self.assertEqual(denied.structuredContent["error"]["code"],"execution_disabled")
+
+    async def test_patch_disconnect_and_partial_receipt_keep_original_effects(self):
+        from openmachine.bootstrap import create_application
+        from openmachine.workspace import changes
+        root = self.root.resolve()
+        file = self.work / "source"
+        file.write_text("old\n")
+        config = Settings.model_validate({"schema_version":1,"machines":{"local":{"transport":"local","workspace_write_enabled":True}},
+                                         "workspaces":{"project":{"machine":"local","root":str(self.work.resolve())}}})
+        state = root / "patch-state"
+        app = create_application(config,state)
+        observed = app.read_workspace_file("local","project","source")
+        with patch.object(server,"create_application",return_value=app):
+            mcp = server.create_server(config,state)
+        identity = uuid.uuid4().hex
+        request = {"machine":"local","workspace_name":"project","change_id":identity,"expected_head_sha":"",
+            "expected_workspace_identity":observed["context"]["workspace_identity"],
+            "patch":"*** Begin Patch\n*** Add File: first\n+yes\n*** Add File: second\n+no\n*** End Patch\n",
+            "preconditions":[{"path":"first","expected_sha256":""},{"path":"second","expected_sha256":""}]}
+        entered,release = threading.Event(),threading.Event()
+        original = changes.publish_file
+        def controlled(*values,**kwargs):
+            if values[3]["path"] == "second":
+                return {"stage":"failed_no_effect","result_sha256":None,"synced":False,"readback_verified":False,
+                        "error":"fixture_io","cleanup":"not_created"}
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("Fixture publisher not released")
+            return original(*values,**kwargs)
+        with patch.object(changes,"publish_file",side_effect=controlled) as publisher:
+            mutation = asyncio.create_task(mcp.call_tool("apply_workspace_patch",request))
+            try:
+                deadline = time.monotonic()+3
+                while not entered.is_set() and not mutation.done() and time.monotonic()<deadline:
+                    await asyncio.sleep(.01)
+                self.assertTrue(entered.is_set(),mutation.result() if mutation.done() else "publisher not entered")
+                mutation.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await mutation
+            finally:
+                release.set()
+            deadline = time.monotonic()+3
+            while time.monotonic()<deadline:
+                read = await mcp.call_tool("read_workspace_change",{"machine":"local","change_id":identity})
+                if read.structuredContent["status"] == "partial":
+                    break
+                await asyncio.sleep(.01)
+            self.assertEqual(read.structuredContent["status"],"partial")
+            self.assertFalse(read.isError,"Inspecting a failed change is a successful read, not a successful patch")
+            again = await mcp.call_tool("apply_workspace_patch",request)
+            self.assertTrue(again.isError)
+            self.assertEqual(again.structuredContent["effects"],read.structuredContent["effects"])
+            self.assertEqual(publisher.call_count,2)
+            self.assertEqual((self.work / "first").read_text(),"yes\n")
+            self.assertFalse((self.work / "second").exists())
 
 
 class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):

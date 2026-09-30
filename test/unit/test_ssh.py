@@ -83,7 +83,7 @@ class SSHTests(unittest.TestCase):
                               "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
                               "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
-                              "openmachine/workspace/files.py", "openmachine/workspace/changes.py", "openmachine/foundation/__init__.py",
+                              "openmachine/workspace/files.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
                               "openmachine/foundation/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
@@ -191,6 +191,7 @@ class SSHTests(unittest.TestCase):
         app = create_application(self.settings, self.root / "controller")
         self.settings.workspaces["project"].root = "/remote/not-on-controller"
         operations = [
+            (app.apply_workspace_patch, ("build-machine", "project", "patch", "a" * 64, "", [], False, "c" * 32), "apply_workspace_patch"),
             (app.inspect_workspace, ("build-machine", "project", "files"), "inspect_workspace"),
             (app.read_workspace_file, ("build-machine", "project", "file.txt"), "read_workspace_file"),
             (app.write_workspace_file, ("build-machine", "project", "file.txt", "new", "", ""), "write_workspace_file"),

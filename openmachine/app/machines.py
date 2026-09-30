@@ -66,6 +66,19 @@ class Machines:
         return workspace.edit_text_file(self.config, self.state, machine, **arguments,
                                        validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
 
+    def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
+                              expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
+                              create_parents: bool = False, change_id: str = "", dry_run: bool = False,
+                              expected_plan_sha256: str = "") -> dict:
+        arguments = dict(workspace=workspace_name, patch_text=patch,
+                         expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
+                         preconditions=preconditions, create_parents=create_parents, change_id=change_id,
+                         dry_run=dry_run, expected_plan_sha256=expected_plan_sha256)
+        if self.config.machine(machine).transport == "ssh":
+            return self._ssh(machine, "apply_workspace_patch", **arguments)
+        return workspace.apply_patch(self.config, self.state, machine, **arguments,
+            validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current)

@@ -123,7 +123,7 @@ def _ordinary_metadata(parent: int, name: str, info: os.stat_result | None) -> N
             os.close(fd)
 
 
-def snapshot(root: Path, path: str) -> dict:
+def snapshot(root: Path, path: str, *, max_bytes: int = MAX_SOURCE, allow_missing: bool = False) -> dict:
     """Read original bytes and their containing directory identities without effects."""
     parts = file_parts(path)
     if len(path.encode("utf-8")) > 1024:
@@ -131,12 +131,12 @@ def snapshot(root: Path, path: str) -> dict:
     observed = context(root)
     if observed["git_status"] == "unavailable":
         raise Fault(observed.get("context_error", "context_unavailable"), "Workspace identity is unavailable.")
-    ancestors = []
-    with file_parent(root, parts, identities=ancestors) as parent:
-        raw, metadata = file_bytes(parent, parts[-1], max_bytes=MAX_SOURCE)
+    ancestors, missing = [], []
+    with file_parent(root, parts, identities=ancestors, missing=missing if allow_missing else None) as parent:
+        raw, metadata = (None, None) if missing else file_bytes(parent, parts[-1], max_bytes=min(MAX_SOURCE, max_bytes))
         _ordinary_metadata(parent, parts[-1], metadata)
-    # A nested repository is a separate configured workspace, not a descendant edit.
-    parent_context = context(root.joinpath(*parts[:-1]))
+    # Check the last existing ancestor, not a nonexistent proposed directory.
+    parent_context = context(root.joinpath(*parts[:len(ancestors) - 1]))
     if parent_context["git_status"] == "unavailable" or (
         parent_context["git_status"] == "observed" and
         parent_context["worktree"] != observed["worktree"]
@@ -146,10 +146,11 @@ def snapshot(root: Path, path: str) -> dict:
     if (current["workspace_identity"], current["head_sha"]) != (observed["workspace_identity"], observed["head_sha"]):
         raise Fault("context_mismatch", "The workspace changed while preparing the file.")
     return {"root": root, "path": path, "parts": parts, "raw": raw, "metadata": metadata,
-            "context": observed, "ancestors": ancestors}
+            "context": observed, "ancestors": ancestors,
+            "missing_parents": ["/".join(parts[:depth]) for depth in range(len(ancestors), len(parts))]}
 
 
-def _recheck(source: dict, parent: int, config, machine: str, workspace: str) -> None:
+def _recheck_parent(source: dict, parent: int, config, machine: str, workspace: str) -> None:
     root, parts = source["root"], source["parts"]
     if root_for(config, machine, workspace) != root:
         raise Fault("context_mismatch", "The configured workspace changed before publication.")
@@ -161,13 +162,19 @@ def _recheck(source: dict, parent: int, config, machine: str, workspace: str) ->
     with file_parent(root, parts, identities=ancestors) as attached:
         if ancestors != source["ancestors"] or os.fstat(attached).st_ino != os.fstat(parent).st_ino:
             raise Fault("context_mismatch", "A containing directory was replaced or detached.")
+
+
+def _recheck(source: dict, parent: int, config, machine: str, workspace: str) -> None:
+    _recheck_parent(source, parent, config, machine, workspace)
+    parts = source["parts"]
     raw, info = file_bytes(parent, parts[-1], max_bytes=MAX_SOURCE)
     if raw != source["raw"] or _metadata(info) != _metadata(source["metadata"]):
         raise Fault("content_mismatch", "The original bytes or file metadata changed before publication.")
     _ordinary_metadata(parent, parts[-1], info)
 
 
-def publish_file(config, machine: str, workspace: str, source: dict, desired: bytes, temporary: str) -> dict:
+def publish_file(config, machine: str, workspace: str, source: dict, desired: bytes, temporary: str,
+                 *, mode: int | None = None) -> dict:
     """Publish once. Report possible effects even when an OS operation loses its reply."""
     effect = {"stage": "failed_no_effect", "result_sha256": None, "synced": False,
               "readback_verified": False, "error": None, "cleanup": "not_created"}
@@ -183,7 +190,7 @@ def publish_file(config, machine: str, workspace: str, source: dict, desired: by
                 effect["cleanup"] = "pending"
                 output.write(desired)
                 info = source["metadata"]
-                desired_mode = stat.S_IMODE(info.st_mode) if info else 0o644
+                desired_mode = mode if mode is not None else stat.S_IMODE(info.st_mode) if info else 0o644
                 os.fchmod(output.fileno(), desired_mode)
                 output.flush()
                 os.fsync(output.fileno())
@@ -236,4 +243,58 @@ def publish_file(config, machine: str, workspace: str, source: dict, desired: by
                 except OSError:
                     effect["cleanup"] = "unknown"
                     effect["error"] = effect["error"] or "cleanup_unverified"
+    return effect
+
+
+
+def publish_path(config, machine: str, workspace: str, source: dict, kind: str) -> dict:
+    """Publish one declared directory or removal, with the same adjacent checks."""
+    if kind not in {"mkdir", "remove"}:
+        raise Fault("invalid_operation", "Select a prepared directory or file-removal effect.")
+    effect = {"stage": "failed_no_effect", "result_sha256": None, "synced": False,
+              "readback_verified": False, "error": None, "cleanup": "not_created",
+              "result_identity": None, "result_mode": None}
+    attempted = False
+    try:
+        with file_parent(source["root"], source["parts"]) as parent:
+            name = source["parts"][-1]
+            _recheck(source, parent, config, machine, workspace)
+            if (source["raw"] is None) != (kind == "mkdir"):
+                raise Fault("content_mismatch", "The prepared path presence no longer matches this effect.")
+            attempted = True
+            if kind == "mkdir":
+                try:
+                    os.mkdir(name, 0o755, dir_fd=parent)
+                except FileExistsError:
+                    attempted = False
+                    raise Fault("destination_exists", "A planned directory appeared before publication.") from None
+                fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                try:
+                    info = os.fstat(fd)
+                    effect["result_identity"] = [info.st_dev, info.st_ino]
+                    effect["result_mode"] = stat.S_IMODE(info.st_mode)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            else:
+                os.unlink(name, dir_fd=parent)
+            os.fsync(parent)
+            effect["synced"] = True
+            _recheck_parent(source, parent, config, machine, workspace)
+            try:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                current = None
+            if kind == "remove":
+                if current is not None:
+                    raise Fault("publication_raced", "The removed path reappeared before readback.")
+                effect["result_sha256"] = ""
+            elif (current is None or not stat.S_ISDIR(current.st_mode) or
+                  [current.st_dev, current.st_ino] != effect["result_identity"] or
+                  stat.S_IMODE(current.st_mode) != effect["result_mode"]):
+                raise Fault("publication_raced", "The created directory changed before readback.")
+            effect.update(stage="applied", readback_verified=True)
+    except (OSError, Fault) as error:
+        effect.update(stage="unknown" if attempted else "failed_no_effect",
+                      error=error.code if isinstance(error, Fault) else type(error).__name__)
     return effect
