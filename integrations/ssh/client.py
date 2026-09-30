@@ -19,7 +19,7 @@ from . import MAX_MESSAGE, PROTOCOL
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MUTATIONS = {"start_execution", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
+MUTATIONS = {"apply_workspace_patch", "start_execution", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
 
 
 def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:
@@ -85,7 +85,7 @@ def call(config: "Settings", machine: str, operation: str, *,
             "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
             "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR", "--",
             target.ssh_alias, shlex.join(["python3", "-I", target.ssh_worker, "rpc"])]
-    mutating = operation in MUTATIONS and not (operation == "edit_workspace_file" and arguments.get("dry_run") is True)
+    mutating = operation in MUTATIONS and not (operation in {"edit_workspace_file", "apply_workspace_patch"} and arguments.get("dry_run") is True)
     identity_evidence = {"machine": machine, "change_id": arguments["change_id"]} if arguments.get("change_id") else None
     try:
         code, raw = _exchange(argv, json.dumps(request, ensure_ascii=True).encode(), cancelled=cancelled)

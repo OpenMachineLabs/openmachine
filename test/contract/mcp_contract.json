@@ -30,6 +30,12 @@
       "base_commit": "5c1d22639237fe53184d66197b7245d65cee212e",
       "change": "W2 adds optional start_line/line_count and expands the raw read offset to 2 MiB; inspect_workspace adds optional path_glob. No tools or annotations change. Expectations are authored from the approved contract, not regenerated from actual SDK output.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
+    },
+    {
+      "approval": "Current maintainer explicitly approves the preceding W3 plan, implementation, self-review, merge and Spec13 body/Development update.",
+      "base_commit": "16ff23b98abf701275a441d2d82d6370bf361062",
+      "change": "W3 adds only apply_workspace_patch with strict bounded om_patch_v1 and explicit path preconditions. Existing tools and annotations remain unchanged. This expectation is manually authored from the approved contract, not regenerated from candidate SDK output.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
     }
   ],
   "baseline": {
@@ -40,6 +46,106 @@
     "wheel_sha256": "61b2f8f98c92b1afc760537d0fa8a8b8bbc0492e0a745a5f3c49eb0c9621c8ca"
   },
   "tools": {
+    "apply_workspace_patch": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "PatchPrecondition": {
+            "additionalProperties": false,
+            "properties": {
+              "expected_sha256": {
+                "pattern": "^(?:[0-9a-f]{64})?$",
+                "title": "Expected Sha256",
+                "type": "string"
+              },
+              "path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Path",
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "expected_sha256"
+            ],
+            "title": "PatchPrecondition",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "change_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "create_parents": {
+            "default": false,
+            "title": "Create Parents",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "expected_head_sha": {
+            "pattern": "^(?:[0-9a-f]{40})?$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "expected_plan_sha256": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Plan Sha256",
+            "type": "string"
+          },
+          "expected_workspace_identity": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Workspace Identity",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "patch": {
+            "maxLength": 131072,
+            "title": "Patch",
+            "type": "string"
+          },
+          "preconditions": {
+            "items": {
+              "$ref": "#/$defs/PatchPrecondition"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Preconditions",
+            "type": "array"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "patch",
+          "expected_workspace_identity",
+          "expected_head_sha",
+          "preconditions"
+        ],
+        "title": "apply_workspace_patchArguments",
+        "type": "object"
+      }
+    },
     "cancel_execution": {
       "annotations": {
         "destructiveHint": true,

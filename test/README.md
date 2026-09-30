@@ -306,3 +306,37 @@ contract 4 remain; SSH protocol 5 distinguishes W2 selectors and source limits.
 Build direct/sdist-derived wheels and the curated target archive outside the
 checkout. Live SSH transport, refreshed Chat and native managed transitions remain
 W4; mocked transport or installed SDK sessions cannot satisfy those gates.
+
+
+## Spec #13 W3
+
+The existing workspace group exercises strict om_patch_v1 parsing, exact original
+hunks, BOM/mixed terminators/EOF serialization, add/update/delete/move and bounded
+explicit parents. Whole-plan rejection leaves all target files/directories intact.
+Fault injection covers per-effect intent/observation saves, late destinations,
+source drift after move publication, replace/unlink acknowledgement loss, directory
+sync and terminal receipt failure. Verify ordered applied prefixes, unattempted
+suffixes and uncertainty without replay or automatic rollback. Preview checks the
+same worst-case record budget without initializing any state.
+
+Installed SDK tests use the one new tool through real private-socket sessions,
+strict schemas, edit-only grants, worst-case escaped responses, controller restart
+and original-ID readback. A disconnected request cannot cancel an admitted patch;
+a partial result is an error when applying but a successful historical read.
+The frozen fixture adds only the manually authored W3 tool and provenance; all
+prior tools are unchanged and all four integration catalogs are compared exactly.
+
+New patch records use format 2; existing write/edit records retain format 1 and
+new readers accept both without rewriting. State contract 5/SSH protocol 6 do not
+change execution format 5 or package/MCP versions. Use actual separately installed
+W2 and W3 readers to demonstrate format-1 compatibility and format-2 downgrade
+refusal, preserving receipt bytes. Candidate source tests are not native service
+activation/rollback evidence.
+
+Build direct and sdist-derived wheels, compare production/Skill contents with the
+source and installation, and verify the curated target archive includes patch.py
+under isolated -I -S startup. Target dispatch and transport-failure fixtures never
+contact a live host. The current maintainer excluded node1-node3 SSH testing;
+do not probe, enable or alter those hosts. Refreshed actual Chat/fresh-conversation,
+live SSH transport and native managed transitions remain W4, not implied by the
+installed SDK/unit results or by using an older OM to develop this candidate.

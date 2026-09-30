@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 4
+STATE_CONTRACT = 5
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -154,19 +154,33 @@ def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
         raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
 
 
+def _change_support(value: dict) -> set[int]:
+    """Interpret an actual reader's coverage, including W1/W2's format-1 report."""
+    latest = value.get("workspace_change_format")
+    formats = value.get("workspace_change_read_formats", [latest])
+    if (type(latest) is not int or latest not in workspace.READ_CHANGE_FORMATS or
+        not isinstance(formats, list) or not formats or len(set(formats)) != len(formats) or
+        any(type(item) is not int or item not in workspace.READ_CHANGE_FORMATS for item in formats) or latest not in formats):
+        raise ValueError("missing or unsupported actual change reader")
+    return set(formats)
+
+
 def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None) -> dict:
     result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)])
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2, 3, 4)
+                or value["state_contract"] not in (1, 2, 3, 4, 5)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
-        workspace.check_change_state(state)
-        if os.path.lexists(state / "workspace-changes") and (type(value.get("workspace_change_format")) is not int
-                or value["workspace_change_format"] != workspace.CHANGE_FORMAT):
-            raise ValueError("candidate ignores retained workspace state")
+        retained = workspace.check_change_state(state)
+        if retained["workspace_change_store_present"]:
+            supported = _change_support(value)
+            if (value.get("workspace_change_store_present") is not True or
+                value.get("workspace_change_records") != retained["workspace_change_records"] or
+                not set(retained["workspace_change_formats_present"]).issubset(supported)):
+                raise ValueError("candidate ignores retained workspace state")
         return value
     except (ValueError, KeyError, TypeError) as error:
         raise Fault("incompatible_state", "The candidate cannot validate current configuration and records; no state was migrated.") from error
@@ -320,7 +334,7 @@ def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
             result.returncode == 1 and not value.get("unavailable_workspaces") or
             value.get("target_identity") != target.ssh_identity or
             value.get("worker_sha256") != Path(target.ssh_worker).stem or
-            type(value.get("workspace_change_format")) is not int or value["workspace_change_format"] != workspace.CHANGE_FORMAT or
+            not _change_support(value) or
             type(value.get("workspace_change_records")) is not int or not 0 <= value["workspace_change_records"] <= workspace.MAX_CHANGES or
             type(value.get("workspace_change_store_present")) is not bool or
             type(value.get("legacy_workspace_compatible")) is not bool or

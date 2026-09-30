@@ -40,6 +40,12 @@ class ExactEdit(BaseModel):
     new_text: Annotated[str, Field(max_length=131072)]
 
 
+class PatchPrecondition(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    path: Annotated[str, Field(min_length=1, max_length=1024)]
+    expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]
+
+
 class TerminalSize(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rows: Annotated[int, Field(strict=True, ge=1, le=1000)]
@@ -164,6 +170,23 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         operation = partial(_reply, lambda: application.edit_workspace_file(machine, workspace_name, path,
             [edit.model_dump() for edit in edits], expected_workspace_identity, expected_head_sha, expected_sha256,
             change_id, dry_run, expected_plan_sha256), workspace_output=True, workspace_mutation=True, change_id=change_id)
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=file_write, structured_output=False)
+    async def apply_workspace_patch(machine: str, workspace_name: str,
+                            patch: Annotated[str, Field(max_length=131072)],
+                            expected_workspace_identity: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+                            expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
+                            preconditions: Annotated[list[PatchPrecondition], Field(min_length=1, max_length=32)],
+                            create_parents: Annotated[bool, Field(strict=True)] = False,
+                            change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
+                            dry_run: Annotated[bool, Field(strict=True)] = False,
+                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+        """Apply one strict om_patch_v1 add/update/delete/move plan on one workspace. Exact preconditions cover both move endpoints; empty hash means absence. All files are prepared before effects, then published in declared order, not as an atomic batch. Preview has no state or filesystem writes and requires an empty ID. Apply requires a caller-generated ID; retained identical requests never replay. Explicit parent creation is bounded. Partial and unknown outcomes retain the original effect evidence; do not retry or roll back automatically. File changes are not test results."""
+        operation = partial(_reply, lambda: application.apply_workspace_patch(machine, workspace_name, patch,
+            expected_workspace_identity, expected_head_sha, [item.model_dump() for item in preconditions],
+            create_parents, change_id, dry_run, expected_plan_sha256), workspace_output=True,
+            workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=machine_read, structured_output=False)

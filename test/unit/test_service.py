@@ -99,6 +99,8 @@ class ServiceTests(unittest.TestCase):
         pull = ("update", "example/project", "Title", "Body", 1, "topic", "main", False,
                 "closed", "observed-time", "f" * 40)
         cases = [
+            ("apply_workspace_patch", ("local", "project", "patch", "a" * 64, "", [], False, "c" * 32, False, ""),
+             app.machines, "apply_workspace_patch"),
             ("edit_workspace_file", ("local", "project", "file", [{"old_text": "a", "new_text": "b"}],
                                      "a" * 64, "", "b" * 64, "c" * 32, False, ""), app.machines, "edit_workspace_file"),
             ("write_workspace_file", ("local", "project", "file", "text", "", "", "", ""), app.machines, "write_workspace_file"),
@@ -125,7 +127,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 4)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 5)
                 dispatch.assert_not_called()
 
                 def admitted(*args):
@@ -256,7 +258,7 @@ class ServiceTests(unittest.TestCase):
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service._json(path)
-        for contract in (1, 2, 3, 4):
+        for contract in (1, 2, 3, 4, 5):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
@@ -264,7 +266,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service._candidate_state(
                     Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
-        for contract in (0, 5, True, "3"):
+        for contract in (0, 6, True, "3"):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.b))
 
@@ -432,6 +434,37 @@ class ServiceTests(unittest.TestCase):
             start.assert_not_called()
         self.assertEqual(record.read_bytes(), retained)
         self.assertEqual(service._record(self.state), self.record)
+
+
+    def test_change_format_coverage_is_directional_and_requires_actual_readers(self):
+        from openmachine import workspace
+        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nworkspace_write_enabled=true\n'
+                               '[workspaces.project]\nmachine="local"\nroot='+json.dumps(str(self.root))+'\n')
+        config = service.load(self.config)
+        file = self.root / "source.py"
+        file.write_text("a\n")
+        read = workspace.read_text_file(config,"local","project","source.py")
+        first = workspace.edit_text_file(config,self.state,"local","project","source.py",
+            [{"old_text":"a","new_text":"b"}],read["context"]["workspace_identity"],"",read["sha256"],"1"*32)
+        self.assertEqual(first["format"],1)
+        legacy = {"protocol":1,"state_contract":4,"workspace_change_format":1,
+                  "workspace_change_store_present":True,"workspace_change_records":1}
+        with patch.object(service,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
+            self.assertEqual(service._candidate_state(Path(sys.executable),self.config,self.state),legacy)
+        second = workspace.apply_patch(config,self.state,"local","project",
+            "*** Begin Patch\n*** Add File: new\n+x\n*** End Patch\n",read["context"]["workspace_identity"],"",
+            [{"path":"new","expected_sha256":""}],change_id="2"*32)
+        self.assertEqual(second["format"],2)
+        legacy["workspace_change_records"] = 2
+        with patch.object(service,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
+            self.assert_fault("incompatible_state",lambda:service._candidate_state(Path(sys.executable),self.config,self.state))
+        current = service.check_state(self.config,self.state)
+        self.assertEqual(current["workspace_change_formats_present"],[1,2])
+        records = list((self.state / "workspace-changes").glob("*/record.json"))
+        before = [path.read_bytes() for path in records]
+        with patch.object(service,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(current),"")):
+            service._candidate_state(Path(sys.executable),self.config,self.state)
+        self.assertEqual([path.read_bytes() for path in records],before)
 
 if __name__ == "__main__":
     unittest.main()

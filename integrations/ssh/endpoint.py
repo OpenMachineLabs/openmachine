@@ -142,6 +142,12 @@ def _dispatch(request: dict, archive: Path) -> dict:
             raise Fault("invalid_request", "Use only the documented exact-edit fields.")
         result = workspace.edit_text_file(config, state, identity, **arguments,
                                          validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
+    elif operation == "apply_workspace_patch":
+        if set(arguments) - {"workspace", "patch_text", "expected_workspace_identity", "expected_head_sha", "preconditions",
+                             "create_parents", "change_id", "dry_run", "expected_plan_sha256"}:
+            raise Fault("invalid_request", "Use only the documented coordinated-patch fields.")
+        result = workspace.apply_patch(config, state, identity, **arguments,
+                                       validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
     elif operation == "read_workspace_change":
         if set(arguments) - {"change_id", "observe_current"}:
             raise Fault("invalid_request", "Use only the documented change-read fields.")
@@ -155,7 +161,7 @@ def _dispatch(request: dict, archive: Path) -> dict:
             result, lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1,
             MAX_MESSAGE,
         )
-    if operation in {"inspect_workspace", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change"}:
+    if operation in {"inspect_workspace", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change"}:
         response["result"] = workspace.bound_result(result,
             lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1)
     return response

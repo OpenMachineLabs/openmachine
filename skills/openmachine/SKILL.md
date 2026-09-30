@@ -33,7 +33,8 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    has_more page with next_offset/expected_sha256 and never reconstruct a whole
    file from partial/redacted text. Empty SHA means absent, not empty. Preserve
    unrelated work and the index. Pause competing editors: checks and rename are
-   not a kernel CAS. No implicit commands, formatting, parents or rollback.
+   not a kernel CAS. No implicit commands, formatting or rollback. Coordinated
+   patches may create only explicitly requested destination parents.
 5. Before a command, save its new 32-hex execution ID, machine, absolute cwd,
    explicit argv, expected HEAD and intended effect in the task. Use the project's
    selected interpreter. Call start_execution once, optionally linking task_id.
@@ -124,7 +125,7 @@ Facts absent from formats 1-3 remain null; format-4 facts stay intact. New reade
 do not strengthen historical guarantees.
 
 Use the transition-capable CLI and the selected installation's actual contract.
-Prepare protocol-5 SSH endpoints explicitly alongside original archives. Pass an
+Prepare protocol-6 SSH endpoints explicitly alongside original archives. Pass an
 explicit `update --candidate-config` when changing endpoint routes; do not edit
 the active configuration in advance. Preserve service-owned configuration
 snapshots. Candidate local/remote readers must accept retained state before stop;
@@ -179,7 +180,7 @@ stdin approval. Never send passwords/tokens or automate prompts. Terminal echo
 can appear in raw logs, even though control receipts retain only a fingerprint.
 Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
 or restart a process merely to clear a busy control. New readers preserve v4
-lifecycle facts and all older bytes; state contract 4 and SSH protocol 5 are not
+lifecycle facts and all older bytes; state contract 5 and SSH protocol 6 are not
 release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.
 
 After a controller transition, read capabilities, then the original execution
@@ -197,9 +198,10 @@ is available only at a known boundary. range_complete describes available select
 bytes; has_more describes the whole source. Never skip remaining text or infer
 complete negative search from incomplete coverage. Filtered Git discovery omits
 ignored/nested source; direct permitted ignored-file reads remain available.
-Multi-file patching remains W3. New range values can make a retained format-1
-receipt unreadable to W1: require its actual candidate reader to pass, never alter
-history to enable rollback. Current remote selectors require protocol 5 endpoints;
+W3 adds strict coordinated patches. New range values can make a retained format-1
+receipt unreadable to W1, and format-2 patches cannot be read by W1/W2: require the
+actual candidate reader to pass, never alter history to enable rollback.
+Current new workspace calls require protocol-6 endpoints;
 prepare them only under explicit authorization alongside original worker archives.
 Typed writes use workspace_write_enabled independently of commands. Omitted/null
 inherits the legacy execution grant; explicit false denies editing. Preview and
@@ -219,3 +221,24 @@ let the original owner finish rather than replacing lock files or bypassing busy
 Retained local/target change records require actual compatible readers before
 service stop. W1 source/SDK tests do not establish refreshed Chat, live SSH or
 managed-transition acceptance; record those separately under W4.
+
+
+For W3, check `patch_language=om_patch_v1` before using apply_workspace_patch.
+Supply exactly one precondition for every touched path, including both move
+endpoints. Use observed raw hashes and explicit absence, never displayed text or
+an assumed destination. Keep one workspace/target and saved change ID per patch.
+The strict LF grammar supports add/update/delete/move, exact unique original-line
+hunks with bare @@, and optional exact End of File. It rejects fuzzy matches,
+move chains/overwrites and ambiguous path spellings. Pure moves preserve bytes
+and ordinary modes; updates retain BOM, line endings and final-newline presence.
+
+Preview creates no receipt or directory. Parent creation is explicit, only for
+add/move destinations, bounded to 16 directories and eight missing levels.
+Patch payloads remain 128 KiB, 32 paths, 64 hunks and 8 MiB aggregate original plus
+prepared bytes. Whole-plan preflight is not a multi-file transaction. A move can
+leave both files if source removal fails; directories are also separate effects.
+Partial/unknown results retain known applied effects and stop before remaining
+operations. Never auto-rollback, replay the batch or call the proposed diff an
+applied result. Read the same original ID; current.files observations are not
+historical proof. Format-1 receipts remain unchanged and format-2 patch history
+requires a compatible actual reader before a software transition.

@@ -18,15 +18,20 @@ from openmachine.foundation.files import MAX_TEXT_FILE, TEXT_PAGE, file_parts
 from openmachine.foundation.sanitize import Fault, redact
 from openmachine.foundation.state import lease, private_directory, save_json
 
-from .files import MAX_SOURCE, digest, publish_file, root_for, snapshot
+from .files import MAX_SOURCE, digest, publish_file, publish_path, root_for, snapshot
+from . import patch
 from .git import context, lock_root
 
-CHANGE_FORMAT = 1
+CHANGE_FORMAT = 2
+READ_CHANGE_FORMATS = (1, 2)
+MAX_PREPARED = 8 * 1024 * 1024
+MAX_PARENTS = 16
+MAX_PARENT_DEPTH = 8
 MAX_RECORD = 65536
 MAX_CHANGES = 10000
 MAX_EDITS = 64
 MAX_WORKSPACE_RESULT = 512 * 1024
-TERMINAL = {"applied", "unchanged", "rejected", "outcome_unknown"}
+TERMINAL = {"applied", "unchanged", "rejected", "partial", "outcome_unknown"}
 
 
 def _hash(value: dict) -> str:
@@ -142,9 +147,9 @@ def _prepare(config, machine, workspace, root: Path, request: dict) -> tuple[dic
     return source, desired, plan
 
 
-def _diff(source: dict, desired: bytes, ranges: list[dict]) -> dict:
+def _diff(source: dict, desired: bytes | None, ranges: list[dict], destination: str | None = None) -> dict:
     """Render changed line windows directly from prepared spans, without fuzzy comparison."""
-    before, after = source["raw"] or b"", desired
+    before, after = source["raw"] or b"", desired or b""
     if before == after:
         return {"diff": "", "diff_omitted": False, "truncated": False, "content_redacted": False}
     originals = [before.decode(), after.decode()]
@@ -167,7 +172,9 @@ def _diff(source: dict, desired: bytes, ranges: list[dict]) -> dict:
             windows.append(pair)
     def pieces(streams):
         positions = [0, 0]
-        yield f"--- a/{source['path']}\n+++ b/{source['path']}\n"
+        old = "/dev/null" if source["raw"] is None else "a/" + source["path"]
+        new = "/dev/null" if desired is None else "b/" + (destination or source["path"])
+        yield f"--- {old}\n+++ {new}\n"
         for a, b, c, d in windows:
             yield f"@@ -{a + 1 if b > a else a},{b - a} +{c + 1 if d > c else c},{d - c} @@\n"
             for index, (prefix, first, last) in enumerate((("-", a, b), ("+", c, d))):
@@ -191,6 +198,324 @@ def _diff(source: dict, desired: bytes, ranges: list[dict]) -> dict:
                 break
     return {"diff": result.decode("utf-8", errors="ignore"), "diff_omitted": False,
             "truncated": truncated, "content_redacted": safe != originals}
+
+
+def _patch_request(text, preconditions, identity, head, create_parents, plan_sha):
+    operations = patch.parse(text)
+    touched = patch.paths(operations)
+    if type(create_parents) is not bool or not (_hex(identity, 64) and _hex(head, 40, empty=True)
+                                                and _hex(plan_sha, 64, empty=True)):
+        raise Fault("invalid_precondition", "Supply the observed context, optional plan hash and a boolean parent choice.")
+    if (not isinstance(preconditions, list) or len(preconditions) != len(touched) or
+        any(not isinstance(item, dict) or set(item) != {"path", "expected_sha256"} or
+            not isinstance(item["path"], str) or not _hex(item["expected_sha256"], 64, empty=True)
+            for item in preconditions)):
+        raise Fault("invalid_precondition", "Preconditions must exactly cover every unique touched path.")
+    names = [item["path"] for item in preconditions]
+    if len(set(names)) != len(names) or set(names) != set(touched):
+        raise Fault("invalid_precondition", "Reject missing, duplicate or surplus path preconditions.")
+    request = {"operation": "patch", "payload": text, "preconditions": sorted(preconditions, key=lambda item: item["path"]),
+               "expected_workspace_identity": identity, "expected_head_sha": head,
+               "expected_plan_sha256": plan_sha, "create_parents": create_parents}
+    if len(json.dumps(request, ensure_ascii=True).encode()) > 1024 * 1024:
+        raise Fault("request_limit", "The encoded patch request exceeds one MiB.")
+    return request, operations
+
+
+def _ancestry(source):
+    return {"path": source["path"], "ancestors": [list(item) for item in source["ancestors"]],
+            "missing_parents": list(source.get("missing_parents", []))}
+
+
+def _prepare_patch(config, machine, workspace, root, request, operations):
+    expected = {item["path"]: item["expected_sha256"] for item in request["preconditions"]}
+    sources, desired, total = {}, {}, 0
+    observed = None
+    for path in patch.paths(operations):
+        source = snapshot(root, path, max_bytes=min(MAX_SOURCE, MAX_PREPARED - total), allow_missing=True)
+        ctx = _context(source)
+        if (root_for(config, machine, workspace) != root or ctx["workspace_identity"] != request["expected_workspace_identity"]
+            or (ctx["head_sha"] or "") != request["expected_head_sha"] or observed is not None and ctx != observed):
+            raise Fault("context_mismatch", "Every source must share the originally observed workspace and HEAD.")
+        observed = ctx
+        if digest(source["raw"]) != expected[path]:
+            raise Fault("content_mismatch", "A complete original source no longer matches its precondition.")
+        if len(source["missing_parents"]) > MAX_PARENT_DEPTH:
+            raise Fault("request_limit", "A destination may have at most eight missing parent levels.")
+        if source["missing_parents"] and not request["create_parents"]:
+            raise Fault("parent_missing", "Missing parents require explicit create_parents=true.")
+        total += len(source["raw"] or b"")
+        sources[path] = source
+    parents, prepared_operations, modes = {}, [], {}
+    for operation in operations:
+        path, kind = operation["path"], operation["kind"]
+        source = sources[path]
+        result, ranges = patch.prepare(operation, source["raw"], min(MAX_SOURCE, MAX_PREPARED - total))
+        total += len(result or b"")
+        mode = stat.S_IMODE(source["metadata"].st_mode) if source["metadata"] else 0o644
+        item = {"kind": kind, "path": path, "ranges": ranges}
+        destination = operation.get("destination", path)
+        if kind == "move":
+            if sources[destination]["raw"] is not None:
+                raise Fault("destination_exists", "A move requires an absent destination.")
+            item["destination"] = destination
+            desired[path], modes[path] = None, None
+        desired[destination] = result
+        modes[destination] = mode if result is not None else None
+        if kind in {"add", "move"}:
+            for parent in sources[destination]["missing_parents"]:
+                if parent not in parents:
+                    if len(parents) >= MAX_PARENTS:
+                        raise Fault("request_limit", "A patch may create at most sixteen parent directories.")
+                    parent_source = snapshot(root, parent, max_bytes=0, allow_missing=True)
+                    if parent_source["raw"] is not None or _context(parent_source) != observed:
+                        raise Fault("context_mismatch", "A proposed parent changed during preflight.")
+                    parents[parent] = parent_source
+        prepared_operations.append(item)
+    entries = []
+    for path, source in sources.items():
+        before, after = source["raw"], desired[path]
+        entries.append(_ancestry(source) | {"before_sha256": digest(before), "after_sha256": digest(after),
+            "before_size": len(before or b""), "after_size": len(after or b""),
+            "before_mode": stat.S_IMODE(source["metadata"].st_mode) if source["metadata"] else None,
+            "after_mode": modes[path]})
+    plan = {"context": observed, "operations": prepared_operations, "files": entries,
+            "parents": [_ancestry(source) for source in parents.values()]}
+    if request["expected_plan_sha256"] and request["expected_plan_sha256"] != _hash(plan):
+        raise Fault("plan_mismatch", "The recomputed patch differs from the approved preview.")
+    return plan, sources | parents, desired
+
+
+def _prepared(config, machine, workspace, root, request, operations):
+    if operations is not None:
+        return _prepare_patch(config, machine, workspace, root, request, operations)
+    source, desired, plan = _prepare(config, machine, workspace, root, request)
+    return plan, {source["path"]: source}, {source["path"]: desired}
+
+
+def _effect_specs(plan):
+    if "operations" not in plan:
+        return [("publish", plan["path"])]
+    specs, created = [], set()
+    for operation in plan["operations"]:
+        kind, path = operation["kind"], operation["path"]
+        destination = operation.get("destination", path)
+        if kind in {"add", "move"}:
+            for parent in plan["parents"]:
+                name = parent["path"]
+                if name not in created and destination.startswith(name + "/"):
+                    specs.append(("mkdir", name))
+                    created.add(name)
+        if kind == "move":
+            specs.extend((("publish", destination), ("remove", path)))
+        else:
+            specs.append(("remove" if kind == "delete" else "publish", path))
+    return specs
+
+
+def _effects(plan, change_id):
+    effects = []
+    patching = "operations" in plan
+    for index, (kind, path) in enumerate(_effect_specs(plan)):
+        temporary = ".openmachine-change-" + change_id + (f"-{index:02x}" if patching else "") if kind == "publish" else None
+        effect = {"path": path, "temporary": temporary, "stage": "not_attempted", "result_sha256": None,
+                  "synced": False, "readback_verified": False, "error": None, "cleanup": "not_created"}
+        if patching:
+            effect.update(kind=kind, result_identity=None, result_mode=None)
+        effects.append(effect)
+    return effects
+
+
+def _display(plan, sources, desired):
+    if "operations" not in plan:
+        path = plan["path"]
+        return _diff(sources[path], desired[path], plan["ranges"])
+    result = {"diff": "", "truncated": False, "diff_omitted": False, "content_redacted": False}
+    used = 0
+    for operation in plan["operations"]:
+        path, destination = operation["path"], operation.get("destination", operation["path"])
+        view = _diff(sources[path], desired[destination], operation["ranges"], destination)
+        raw = view["diff"].encode()
+        room = TEXT_PAGE - used
+        piece = raw[:room].decode("utf-8", errors="ignore")
+        result["diff"] += piece
+        used += len(piece.encode())
+        result["truncated"] |= view["truncated"] or len(raw) > room
+        result["diff_omitted"] |= view["diff_omitted"]
+        result["content_redacted"] |= view["content_redacted"]
+    return result
+
+
+def _record_budget(record):
+    """Reserve bounded room for every possible effect/error before any target IO."""
+    largest = json.loads(json.dumps(record))
+    largest.update(revision=2**63 - 1, status="outcome_unknown", error="x" * 128, finished_at=1.2345678901234567e+100)
+    for effect in largest["effects"]:
+        effect.update(stage="failed_no_effect", result_sha256="f" * 64, error="x" * 128, cleanup="not_created")
+        if "kind" in effect:
+            effect.update(result_identity=[2**64 - 1, 2**64 - 1], result_mode=511)
+    # A 64 KiB complete record also leaves ample room for both escaped MCP
+    # representations, identity metadata and a separately bounded 32 KiB diff.
+    if len(json.dumps(largest, sort_keys=True).encode()) + 1024 > MAX_RECORD:
+        raise Fault("request_limit", "The complete plan and worst-case effect evidence exceed the record budget.")
+
+
+def _bound_source(source, effects):
+    if not source.get("missing_parents"):
+        return source
+    created = {effect["path"]: effect["result_identity"] for effect in effects
+               if effect.get("kind") == "mkdir" and effect["stage"] == "applied"}
+    if any(path not in created for path in source["missing_parents"]):
+        raise Fault("parent_unverified", "Every new ancestor needs its original verified creation effect.")
+    return source | {"ancestors": source["ancestors"] + [tuple(created[path]) for path in source["missing_parents"]]}
+
+
+def _validate_patch(record):
+    expected = record["expected"]
+    if (set(expected) != {"workspace_identity", "head_sha", "plan_sha256", "preconditions", "create_parents"}
+        or not _hex(expected["workspace_identity"], 64) or not _hex(expected["head_sha"], 40, empty=True)
+        or not _hex(expected["plan_sha256"], 64, empty=True) or type(expected["create_parents"]) is not bool
+        or not isinstance(expected["preconditions"], list) or not 1 <= len(expected["preconditions"]) <= patch.MAX_PATHS):
+        raise ValueError
+    preconditions = expected["preconditions"]
+    if any(set(item) != {"path", "expected_sha256"} or not _hex(item["expected_sha256"], 64, empty=True) for item in preconditions):
+        raise ValueError
+    names = [item["path"] for item in preconditions]
+    patch.checked_paths(names)
+    if names != sorted(names):
+        raise ValueError
+    if record["error"] is not None and (not isinstance(record["error"], str) or len(record["error"]) > 128):
+        raise ValueError
+    plan, effects, status = record["plan"], record["effects"], record["status"]
+    if plan is None:
+        if record["plan_sha256"] is not None or effects or status not in {"accepted", "rejected", "outcome_unknown"}:
+            raise ValueError
+        return
+    if (set(plan) != {"context", "operations", "files", "parents"} or plan["context"] != record["context"]
+        or _hash(plan) != record["plan_sha256"] or plan["context"]["workspace_identity"] != expected["workspace_identity"]
+        or (plan["context"]["head_sha"] or "") != expected["head_sha"]
+        or not isinstance(plan["files"], list) or len(plan["files"]) != len(names)
+        or not isinstance(plan["parents"], list) or len(plan["parents"]) > MAX_PARENTS
+        or not isinstance(plan["operations"], list) or not 1 <= len(plan["operations"]) <= patch.MAX_PATHS):
+        raise ValueError
+    def ancestry(item):
+        parts = file_parts(item["path"])
+        ancestors, missing = item["ancestors"], item["missing_parents"]
+        if (len(item["path"].encode()) > 1024 or not isinstance(ancestors, list) or not ancestors
+            or ancestors[0] != plan["context"]["root_id"]
+            or any(not isinstance(pair, list) or len(pair) != 2 or any(type(v) is not int or v < 0 for v in pair) for pair in ancestors)
+            or not isinstance(missing, list) or len(missing) > MAX_PARENT_DEPTH
+            or len(ancestors) + len(missing) != len(parts)
+            or missing != ["/".join(parts[:depth]) for depth in range(len(ancestors), len(parts))]):
+            raise ValueError
+    files = {}
+    for item in plan["files"]:
+        if set(item) != {"path", "ancestors", "missing_parents", "before_sha256", "after_sha256", "before_size", "after_size", "before_mode", "after_mode"}:
+            raise ValueError
+        ancestry(item)
+        if item["path"] in files:
+            raise ValueError
+        files[item["path"]] = item
+        for side in ("before", "after"):
+            sha, mode, size = item[side + "_sha256"], item[side + "_mode"], item[side + "_size"]
+            if (not _hex(sha, 64, empty=True) or (mode is None) != (sha == "")
+                or mode is not None and (type(mode) is not int or not 0 <= mode <= 0o777)
+                or type(size) is not int or not 0 <= size <= MAX_SOURCE or sha == "" and size != 0):
+                raise ValueError
+    if (set(files) != set(names) or any(files[item["path"]]["before_sha256"] != item["expected_sha256"] for item in preconditions)
+        or sum(item["before_size"] + item["after_size"] for item in files.values()) > MAX_PREPARED):
+        raise ValueError
+    touched, needed = [], set()
+    for operation in plan["operations"]:
+        kind = operation["kind"]
+        if (kind not in {"add", "update", "delete", "move"} or
+            set(operation) != ({"kind", "path", "ranges", "destination"} if kind == "move" else {"kind", "path", "ranges"})):
+            raise ValueError
+        path, destination = operation["path"], operation.get("destination", operation["path"])
+        before, after = files[path], files[destination]
+        touched.append(path)
+        if kind == "move":
+            touched.append(destination)
+        if (kind == "add" and (before["before_sha256"] != "" or after["after_mode"] != 0o644)
+            or kind != "add" and not before["before_sha256"]
+            or kind in {"delete", "move"} and before["after_sha256"] != ""
+            or kind in {"add", "update", "move"} and not after["after_sha256"]
+            or kind in {"update", "move"} and before["before_mode"] != after["after_mode"]
+            or kind == "move" and after["before_sha256"] != ""):
+            raise ValueError
+        if kind in {"add", "move"}:
+            needed.update(after["missing_parents"])
+        elif before["missing_parents"]:
+            raise ValueError
+        ranges, old_end, new_end = operation["ranges"], 0, 0
+        if not isinstance(ranges, list) or len(ranges) > patch.MAX_HUNKS + 1 or not ranges and kind != "move":
+            raise ValueError
+        for span in ranges:
+            if (set(span) != {"old_start", "old_end", "new_start", "new_end"}
+                or any(type(value) is not int for value in span.values())
+                or not old_end <= span["old_start"] <= span["old_end"] <= before["before_size"]
+                or not new_end <= span["new_start"] <= span["new_end"] <= after["after_size"]):
+                raise ValueError
+            old_end, new_end = span["old_end"], span["new_end"]
+    if touched != list(files) or len(set(touched)) != len(touched):
+        raise ValueError
+    parents = set()
+    for item in plan["parents"]:
+        if set(item) != {"path", "ancestors", "missing_parents"} or item["path"] in parents:
+            raise ValueError
+        ancestry(item)
+        if any(path not in parents for path in item["missing_parents"]):
+            raise ValueError
+        parents.add(item["path"])
+    if parents != needed or parents and not expected["create_parents"]:
+        raise ValueError
+    templates = _effects(plan, record["change_id"])
+    if not isinstance(effects, list) or len(effects) != len(templates):
+        raise ValueError
+    stopped = False
+    for effect, template in zip(effects, templates):
+        if set(effect) != set(template) or any(effect[key] != template[key] for key in ("path", "temporary", "kind")):
+            raise ValueError
+        stage, kind = effect["stage"], effect["kind"]
+        if (stage not in {"not_attempted", "attempting", "applied", "unchanged", "failed_no_effect", "unknown"}
+            or stopped and stage != "not_attempted"
+            or type(effect["synced"]) is not bool or type(effect["readback_verified"]) is not bool
+            or effect["cleanup"] not in {"not_created", "pending", "removed", "unknown"}
+            or effect["error"] is not None and (not isinstance(effect["error"], str) or len(effect["error"]) > 128)
+            or effect["result_sha256"] is not None and not _hex(effect["result_sha256"], 64, empty=True)):
+            raise ValueError
+        stopped |= stage not in {"applied", "unchanged"}
+        identity, mode = effect["result_identity"], effect["result_mode"]
+        if (identity is not None and (kind != "mkdir" or not isinstance(identity, list) or len(identity) != 2
+                                     or any(type(value) is not int or value < 0 for value in identity))
+            or mode is not None and (kind != "mkdir" or type(mode) is not int or not 0 <= mode <= 0o777)):
+            raise ValueError
+        if stage in {"not_attempted", "attempting"} and effect != template | {"stage": stage}:
+            raise ValueError
+        if stage in {"applied", "unchanged"}:
+            if not effect["readback_verified"] or effect["error"] is not None:
+                raise ValueError
+            if stage == "applied" and (not effect["synced"] or effect["cleanup"] != ("removed" if kind == "publish" else "not_created")):
+                raise ValueError
+            if kind == "mkdir":
+                if stage != "applied" or identity is None or mode is None or effect["result_sha256"] is not None:
+                    raise ValueError
+            elif effect["result_sha256"] != files[effect["path"]]["after_sha256"]:
+                raise ValueError
+            if stage == "unchanged" and (kind != "publish" or effect["cleanup"] != "not_created"
+                or files[effect["path"]]["before_sha256"] != files[effect["path"]]["after_sha256"]):
+                raise ValueError
+    stages = [effect["stage"] for effect in effects]
+    uncertain = any(effect["stage"] in {"unknown", "attempting"} or effect["cleanup"] == "unknown" for effect in effects)
+    if (status == "accepted" or status == "prepared" and any(stage != "not_attempted" for stage in stages)
+        or status == "applying" and any(stage in {"unknown", "failed_no_effect"} for stage in stages)
+        or status == "applied" and (any(stage not in {"applied", "unchanged"} for stage in stages) or "applied" not in stages)
+        or status == "unchanged" and any(stage != "unchanged" for stage in stages)
+        or status == "rejected" and ("applied" in stages or uncertain)
+        or status == "partial" and ("applied" not in stages or uncertain or all(stage in {"applied", "unchanged"} for stage in stages))
+        or status in {"applied", "unchanged"} and record["error"] is not None):
+        raise ValueError
+
 
 
 def _private(path: Path, *, directory: bool = False) -> os.stat_result:
@@ -235,7 +560,7 @@ def _store(state: Path) -> Path | None:
 
 def _validate(record: dict, change_id: str) -> None:
     try:
-        if type(record.get("format")) is not int or record["format"] != CHANGE_FORMAT:
+        if type(record.get("format")) is not int or record["format"] not in READ_CHANGE_FORMATS:
             raise Fault("unsupported_change_format", "The retained change format requires a compatible reader.")
         if set(record) != {"format", "change_id", "writer_version", "owner_sha256", "request_sha256", "operation",
                            "created_at", "revision", "context", "expected", "plan", "plan_sha256", "effects",
@@ -243,7 +568,8 @@ def _validate(record: dict, change_id: str) -> None:
             raise ValueError
         if (record["change_id"] != change_id or not _hex(change_id, 32) or
             not _hex(record["owner_sha256"], 64) or not _hex(record["request_sha256"], 64) or
-            record["operation"] not in {"edit", "write"} or
+            record["operation"] not in {"edit", "write", "patch"} or
+            (record["operation"] == "patch") != (record["format"] == 2) or
             not isinstance(record["writer_version"], str) or not 1 <= len(record["writer_version"]) <= 100 or
             type(record["revision"]) is not int or record["revision"] < 1 or
             record["status"] not in TERMINAL | {"accepted", "prepared", "applying"}):
@@ -262,6 +588,14 @@ def _validate(record: dict, change_id: str) -> None:
             or not _hex(ctx["workspace_identity"], 64)
             or ctx["git_state"] not in {"worktree", "detached", "unborn", "non_git"}
             or ctx["head_sha"] is not None and not _hex(ctx["head_sha"], 40)):
+            raise ValueError
+        if record["format"] == 2:
+            try:
+                _validate_patch(record)
+            except Fault as error:
+                raise ValueError from error
+            return
+        if record["status"] == "partial":
             raise ValueError
         expected = record["expected"]
         if (set(expected) != {"path", "workspace_identity", "head_sha", "sha256", "plan_sha256"}
@@ -467,7 +801,19 @@ def read_change(config, state: Path, machine: str, change_id: str, observe_curre
         raise Fault("change_history_unavailable", "The original allocation is incomplete; never reuse this ID.") from error
     name = _scope(config, state, machine, record)
     result = record | {"machine": machine, "workspace": name}
-    if observe_current:
+    if observe_current and record["format"] == 2:
+        current, total = [], 0
+        for item in record["expected"]["preconditions"]:
+            try:
+                source = snapshot(Path(record["context"]["root"]), item["path"],
+                                  max_bytes=min(MAX_SOURCE, MAX_PREPARED - total), allow_missing=True)
+                total += len(source["raw"] or b"")
+                current.append({"path": item["path"], "exists": source["raw"] is not None,
+                                "sha256": digest(source["raw"]), "context": _context(source)})
+            except (OSError, Fault) as error:
+                current.append({"path": item["path"], "error": error.code if isinstance(error, Fault) else type(error).__name__})
+        result["current"] = {"files": current, "observed_at": time.time(), "complete": all("error" not in item for item in current)}
+    elif observe_current:
         try:
             source = snapshot(Path(record["context"]["root"]), record["expected"]["path"])
             result["current"] = {"exists": source["raw"] is not None, "sha256": digest(source["raw"]),
@@ -480,7 +826,7 @@ def read_change(config, state: Path, machine: str, change_id: str, observe_curre
 def check_change_state(state: Path) -> dict:
     """Public, read-only format validation for candidate/target compatibility checks."""
     store = _store(state)
-    count = 0
+    count, formats = 0, set()
     if store is not None:
         owner = _owner(state)
         for directory in _entries(store):
@@ -491,22 +837,41 @@ def check_change_state(state: Path) -> dict:
             if record["owner_sha256"] != owner:
                 raise Fault("change_store_corrupt", "A retained change belongs to a different state owner.")
             count += 1
-    return {"workspace_change_format": CHANGE_FORMAT, "workspace_change_records": count,
+            formats.add(record["format"])
+    return {"workspace_change_format": CHANGE_FORMAT, "workspace_change_read_formats": list(READ_CHANGE_FORMATS),
+            "workspace_change_formats_present": sorted(formats), "workspace_change_records": count,
             "workspace_change_store_present": store is not None}
 
 
-def _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new):
+def _initial_record(request, change_id, observed_context, owner, fingerprint):
+    expected = {"workspace_identity": request["expected_workspace_identity"], "head_sha": request["expected_head_sha"],
+                "plan_sha256": request["expected_plan_sha256"]}
+    patching = request["operation"] == "patch"
+    expected.update({"preconditions": request["preconditions"], "create_parents": request["create_parents"]} if patching else
+                    {"path": request["path"], "sha256": request["expected_sha256"]})
+    return {"format": CHANGE_FORMAT if patching else 1, "change_id": change_id, "writer_version": __version__,
+            "owner_sha256": owner, "request_sha256": fingerprint, "operation": request["operation"],
+            "created_at": time.time(), "revision": 0, "context": observed_context, "expected": expected,
+            "plan": None, "plan_sha256": None, "effects": [], "status": "accepted", "finished_at": None, "error": None}
+
+
+def _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations=None):
     root = root_for(config, machine, workspace)
     if dry_run:
-        source, desired, plan = _prepare(config, machine, workspace, root, request)
+        plan, sources, desired = _prepared(config, machine, workspace, root, request, operations)
+        # Use the actual record shape for pure preview sizing without allocating
+        # a state owner, change identity, lease, temporary file or parent.
+        sizing = _initial_record(request, "0" * 32, plan["context"], "0" * 64, "0" * 64)
+        sizing.update(plan=plan, plan_sha256=_hash(plan), effects=_effects(plan, "0" * 32), status="prepared")
+        _record_budget(sizing)
         target = config.machine(machine)
         grant = target.workspace_write_enabled
         effective = target.execution_enabled if grant is None else grant
         return {"machine": machine, "workspace": workspace, "status": "preview", "plan": plan,
                 "plan_sha256": _hash(plan), "workspace_write_enabled": effective, "diff_kind": "proposed",
-                **_diff(source, desired, plan["ranges"])}
+                **_display(plan, sources, desired)}
     fingerprint = _hash(request | {"root": str(root)})
-    # Existing IDs are reconciled before new permissions, leases or mutable source checks.
+    # Reconcile retained identities before mutable source, grants or new leases.
     store = _store(state)
     if store is not None and os.path.lexists(store / change_id):
         original = read_change(config, state, machine, change_id)
@@ -517,61 +882,93 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
     observed = context(root)
     if observed["workspace_identity"] is None:
         raise Fault("context_unavailable", "Workspace identity is unavailable; no change was admitted.")
+    patching = operations is not None
     with _own(state, change_id) as (directory, existing):
         if existing:
             original = read_change(config, state, machine, change_id)
             if original["request_sha256"] != fingerprint:
                 raise Fault("change_id_conflict", "This change ID belongs to a different request.")
             return original
-        record = {"format": CHANGE_FORMAT, "change_id": change_id, "writer_version": __version__,
-                  "owner_sha256": _owner(state), "request_sha256": fingerprint, "operation": request["operation"],
-                  "created_at": time.time(), "revision": 0,
-                  "context": _context({"root": root, "context": observed}),
-                  "expected": {"path": request["path"], "workspace_identity": request["expected_workspace_identity"],
-                               "head_sha": request["expected_head_sha"], "sha256": request["expected_sha256"],
-                               "plan_sha256": request["expected_plan_sha256"]},
-                  "plan": None, "plan_sha256": None, "effects": [], "status": "accepted", "finished_at": None, "error": None}
+        record = _initial_record(request, change_id, _context({"root": root, "context": observed}),
+                                 _owner(state), fingerprint)
         _save(directory, record)
         try:
             if validate_new is not None:
                 validate_new(root)
             key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
             with lease(state / "locks" / f"workspace-{key}.lock"):
-                source, desired, plan = _prepare(config, machine, workspace, root, request)
+                plan, sources, desired = _prepared(config, machine, workspace, root, request, operations)
                 if plan["context"] != record["context"]:
                     raise Fault("context_mismatch", "Workspace context changed after request admission.")
-                effect = {"path": request["path"], "temporary": ".openmachine-change-" + change_id,
-                          "stage": "not_attempted", "result_sha256": None, "synced": False,
-                          "readback_verified": False, "error": None, "cleanup": "not_created"}
-                record.update(plan=plan, plan_sha256=_hash(plan), effects=[effect], status="prepared")
+                prepared = record | {"plan": plan, "plan_sha256": _hash(plan), "effects": _effects(plan, change_id), "status": "prepared"}
+                _record_budget(prepared)
+                record.update(prepared)
                 _save(directory, record)
-                display = _diff(source, desired, plan["ranges"])
-                if source["raw"] == desired:
-                    effect.update(stage="unchanged", result_sha256=digest(desired), readback_verified=True)
-                    record["status"] = "unchanged"
+                display = _display(plan, sources, desired)
+                modes = {item["path"]: item["after_mode"] for item in plan["files"]} if patching else {}
+                for effect in record["effects"]:
+                    kind, path = effect.get("kind", "publish"), effect["path"]
+                    source = _bound_source(sources[path], record["effects"])
+                    if kind == "publish" and source["raw"] == desired[path]:
+                        effect.update(stage="unchanged", result_sha256=digest(desired[path]), readback_verified=True)
+                    else:
+                        record["status"] = "applying"
+                        effect["stage"] = "attempting"
+                        _save(directory, record)
+                        if kind == "publish":
+                            arguments = {"mode": modes[path]} if patching else {}
+                            observation = publish_file(config, machine, workspace, source, desired[path], effect["temporary"], **arguments)
+                        else:
+                            observation = publish_path(config, machine, workspace, source, kind)
+                        effect.update(observation)
+                        if effect["stage"] != "applied" or effect["cleanup"] not in {"removed", "not_created"}:
+                            record["error"] = effect["error"]
+                            break
+                    if patching:
+                        record["status"] = "applying"
+                        _save(directory, record)
+                effects = record["effects"]
+                if any(effect["stage"] in {"unknown", "attempting"} or effect["cleanup"] == "unknown" for effect in effects):
+                    outcome = "outcome_unknown"
+                elif all(effect["stage"] in {"applied", "unchanged"} for effect in effects):
+                    outcome = "applied" if any(effect["stage"] == "applied" for effect in effects) else "unchanged"
                 else:
-                    record["status"] = "applying"
-                    effect["stage"] = "attempting"
-                    _save(directory, record)
-                    effect.update(publish_file(config, machine, workspace, source, desired, effect["temporary"]))
-                    record["status"] = "applied" if effect["stage"] == "applied" and effect["cleanup"] == "removed" else (
-                        "rejected" if effect["stage"] == "failed_no_effect" and effect["cleanup"] != "unknown" else "outcome_unknown")
-                    record["error"] = effect["error"]
-                record["finished_at"] = time.time()
+                    outcome = "partial" if any(effect["stage"] == "applied" for effect in effects) else "rejected"
+                record.update(status=outcome, finished_at=time.time())
                 _save(directory, record)
                 result = _observed(directory, record, owned=True) | {"machine": machine, "workspace": workspace}
-                if record["status"] in {"applied", "unchanged"}:
+                if outcome in {"applied", "unchanged"}:
                     result.update(display, diff_kind="applied")
+                else:
+                    result.update(diff_omitted=True)
                 return result
         except (OSError, Fault) as error:
             code = error.code if isinstance(error, Fault) else type(error).__name__
-            uncertain = code == "change_record_unverified" or any(e["stage"] != "not_attempted" for e in record["effects"])
-            record.update(status="outcome_unknown" if uncertain else "rejected", error=code, finished_at=time.time())
+            uncertain = code == "change_record_unverified" or any(e["stage"] in {"attempting", "unknown"} or
+                        e["cleanup"] == "unknown" for e in record["effects"])
+            applied = any(e["stage"] == "applied" for e in record["effects"])
+            record.update(status="outcome_unknown" if uncertain else "partial" if applied else "rejected",
+                          error=code, finished_at=time.time())
             if not uncertain:
                 _save(directory, record)
                 return _observed(directory, record, owned=True) | {"machine": machine, "workspace": workspace}
             raise Fault("change_outcome_unknown", "Read this original change and current files; never replay uncertain effects.",
                         record | {"record_persistence": "unverified", "machine": machine, "workspace": workspace}) from error
+
+
+def apply_patch(config, state: Path, machine: str, workspace: str, patch_text: str,
+                expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
+                create_parents: bool = False, change_id: str = "", dry_run: bool = False,
+                expected_plan_sha256: str = "", *, validate_new=None) -> dict:
+    try:
+        if type(dry_run) is not bool or (change_id != "" if dry_run else not _hex(change_id, 32)):
+            raise Fault("invalid_change_id", "Preview requires no ID; apply requires a new 32-lowercase-hex ID.")
+        request, operations = _patch_request(patch_text, preconditions, expected_workspace_identity,
+                                             expected_head_sha, create_parents, expected_plan_sha256)
+        return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations)
+    except Fault as error:
+        error.evidence = {"machine": machine, "workspace": workspace, "change_id": change_id, **(error.evidence or {})}
+        raise
 
 
 def edit_text_file(config, state: Path, machine: str, workspace: str, path: str, edits: list[dict],
