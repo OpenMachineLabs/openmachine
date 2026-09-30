@@ -2,25 +2,20 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.1.0
+## v0.2.0
 
-Open Machine connects ChatGPT to your local and SSH-connected machines through
-an operator-controlled MCP runtime. It supports an end-to-end workflow: read
-instructions and code, edit files, run tests, inspect the result, collaborate on
-GitHub, and continue an interrupted task from its original evidence.
+Open Machine v0.2.0 completes the modular runtime architecture accepted in
+[Spec #18](https://github.com/OpenMachineLabs/openmachine/issues/18). Since
+v0.1.0, the runtime is reorganized around explicit foundation, execution,
+workspace, task, application-routing, SSH, and GitHub-provider boundaries.
+The public MCP tool contract, configuration schema, persisted task/execution
+state, and lifecycle protocol remain compatible.
 
-This first versioned release completes [Spec #2](https://github.com/OpenMachineLabs/openmachine/issues/2).
-It includes local execution, Linux SSH workers, reusable Skills, durable task
-checkpoints, optional GitHub collaboration, and managed macOS service updates
-and rollback. ChatGPT plans the work; Open Machine executes explicit tool calls.
-No Codex, private Brain package, hidden agent loop, or model inference API is
-required by the runtime.
-
-Read the [v0.1.0 release notes and download artifacts](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.1.0)
-for the feature overview, supported environments, validation and known limits.
-Version `0.1.0` is an initial-development release, not a stable 1.x API promise.
-Release tags identify fixed commits; the package, CLI, MCP service and newly
-built SSH worker all report `0.1.0` from one version source.
+Read the [v0.2.0 release notes and download artifacts](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.0)
+for the release delta, compatibility notes, upgrade requirements, and validation.
+Version `0.2.0` remains an initial-development release, not a stable 1.x API
+promise. Release tags identify fixed commits; the package, CLI, MCP service and
+newly built SSH worker all report `0.2.0` from one version source.
 
 Managed services are supported for logged-in macOS controllers. Linux supports
 manual `serve` and configured SSH workers; managed Linux services and Windows
@@ -33,12 +28,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.0 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.1.0-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.0-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -96,7 +91,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.1.0-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.2.0-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
@@ -163,13 +158,13 @@ Cooperative locks are not a sandbox or a fence against external native commands.
 A brief MCP disconnect is possible; reconnect and read the same task/execution IDs.
 Do not repeat a test, commit or external write merely because a reply was lost.
 
-For an upgrade from the development builds to `0.1.0`, new SSH requests require
-a matching `0.1.0` worker. Run `worker-bundle` from the newly installed release,
-explicitly copy the checksum-named archive to each enabled target, update its
-`ssh_worker` path, and verify the pinned target with `doctor --machine NAME`.
-Retain the previous archive and interpreter for original executions. Controller
-update and rollback never provision or replace remote workers automatically;
-a rollback also requires a worker matching the selected controller for new calls.
+For an upgrade from `v0.1.0` to `v0.2.0`, new SSH requests require a matching
+`0.2.0` worker. Run `worker-bundle` from the newly installed release, explicitly
+copy the checksum-named archive to each enabled target, update its `ssh_worker`
+path, and verify the pinned target with `doctor --machine NAME`. Retain previous
+archives and interpreters for original executions. Controller update and rollback
+never provision or replace remote workers automatically; a rollback also requires
+a worker matching the selected controller for new calls.
 
 Managed transitions require the same lifecycle/state contract and successful
 candidate-owned validation of current configuration, task and execution formats.
