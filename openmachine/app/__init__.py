@@ -18,6 +18,7 @@ from openmachine.foundation.state import lease, private_directory
 from .machines import Machines
 
 MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
+MAX_SOURCE = workspace.MAX_SOURCE
 bound_workspace_result = workspace.bound_result
 
 
@@ -65,7 +66,9 @@ class Application:
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
                           "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
             "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
-                          "patch": False, "max_edits": workspace.MAX_EDITS, "source_bytes": MAX_TEXT_FILE,
+                          "patch": False, "max_edits": workspace.MAX_EDITS, "source_bytes": workspace.MAX_SOURCE,
+                          "line_windows": True, "max_lines": workspace.MAX_LINES,
+                          "path_glob": {"recursive": False, "case_sensitive": True, "scope": "workspace_relative"},
                           "payload_bytes": MAX_TEXT_FILE, "change_record_bytes": workspace.MAX_RECORD,
                           "retained_change_ids": workspace.MAX_CHANGES, "result_bytes": workspace.MAX_WORKSPACE_RESULT},
             "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
@@ -75,7 +78,8 @@ class Application:
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
                        "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": MAX_SCAN_ENTRIES,
                        "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,
-                       "text_file_bytes": MAX_TEXT_FILE, "text_page_bytes": TEXT_PAGE,
+                       "text_file_bytes": workspace.MAX_SOURCE, "text_page_bytes": TEXT_PAGE,
+                       "skill_text_file_bytes": MAX_TEXT_FILE,
                        "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         }
@@ -83,17 +87,19 @@ class Application:
     def inspect_workspace(self, machine: str, workspace_name: str,
                           action: Literal["files", "read", "search", "status", "diff"], path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
-                          expected_snapshot: str = "") -> dict:
+                          expected_snapshot: str = "", path_glob: str = "") -> dict:
         return self.machines.inspect_workspace(machine, workspace_name, action, path, offset, limit, query,
-                                               staged, expected_snapshot)
+                                               staged, expected_snapshot, path_glob)
 
     def inspect_skills(self, action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
                        query: str = "", offset: int = 0, limit: int = 100, expected_snapshot: str = "") -> dict:
         return skills.inspect(self.config, action, skill, path, query, offset, limit, expected_snapshot)
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str, offset: int = 0,
-                            expected_sha256: str = "") -> dict:
-        return self.machines.read_workspace_file(machine, workspace_name, path, offset, expected_sha256)
+                            expected_sha256: str = "", start_line: int | None = None,
+                            line_count: int = 200) -> dict:
+        return self.machines.read_workspace_file(machine, workspace_name, path, offset, expected_sha256,
+                                                 start_line, line_count)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",

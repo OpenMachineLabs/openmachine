@@ -282,3 +282,27 @@ Run wheel/sdist-derived installation and the curated target archive outside the
 checkout; target code must still import under `-I -S` without controller dependencies.
 W1 deliberately advertises 128 KiB sources, change format 1, state 4 and SSH 4;
 execution format 5 and the pinned MCP SDK remain unchanged.
+
+## Spec #13 W2
+
+The existing workspace group covers 2 MiB sources with small edits beyond the
+old 128 KiB boundary, full hashes, preview and original-ID readback, exact bytes
+and index preservation, EOF/Unicode/CRLF line windows, long-line byte continuation,
+full-context redaction and independent payload/Skill limits. Filtered discovery
+cases cover Git/non-Git selection, ignored/untracked source, strict segment globs,
+nested repositories, clipped enumeration and names, changing snapshots and safe
+Git capture. Target dispatch uses the same reader/search owners without commands.
+
+Installed SDK checks cover the approved read/filter schema delta in all four
+catalogs, a large-file edit/receipt path and worst-case escaped source/search
+responses. Bounded result pages must advance by returned entries, not discarded
+ones. The legacy raw-read fixture now verifies complete 32 KiB continuation.
+No new tool, production module, dependency or test framework is introduced.
+
+Use actual separately installed W1 and W2 readers to verify old receipt acceptance
+and refusal of incompatible large-range receipts before a service stop. This is
+reader/gate evidence, not native launchd rollback. Workspace record format 1/state
+contract 4 remain; SSH protocol 5 distinguishes W2 selectors and source limits.
+Build direct/sdist-derived wheels and the curated target archive outside the
+checkout. Live SSH transport, refreshed Chat and native managed transitions remain
+W4; mocked transport or installed SDK sessions cannot satisfy those gates.

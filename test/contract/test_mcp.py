@@ -331,7 +331,17 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 result = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example",
                                                                          "action": "read", "path": "large.txt", "offset": 131072})
                 self.assertFalse(result.isError, result)
-                self.assertEqual(result.structuredContent["next_offset"], 180000)
+                page = result.structuredContent
+                self.assertEqual(page["next_offset"], 163840)
+                self.assertTrue(page["has_more"])
+                self.assertEqual(len(page["text"].encode()), 32768)
+                tail = await session.call_tool("inspect_workspace", {
+                    "machine": "desktop", "workspace_name": "example", "action": "read",
+                    "path": "large.txt", "offset": page["next_offset"]})
+                self.assertFalse(tail.isError, tail)
+                self.assertEqual(tail.structuredContent["next_offset"], 180000)
+                self.assertFalse(tail.structuredContent["has_more"])
+                self.assertEqual(page["text"] + tail.structuredContent["text"], "x" * (180000 - 131072))
 
     async def test_disabled_write_and_invalid_origin_fail_closed(self):
         self.stop(self.processes[0])
@@ -992,6 +1002,87 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(result.isError)
                     self.assertNotEqual(result.structuredContent["error"]["code"], "execution_not_found")
                 self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
+
+
+    async def test_large_line_window_small_edit_and_receipt_through_sdk(self):
+        file = self.work / "large.py"
+        original = b"padding\n" * 20000 + b"answer = 41\n"
+        file.write_bytes(original)
+        scope = {"machine": "desktop", "workspace_name": "example", "path": "large.py"}
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                read = await session.call_tool("read_workspace_file", scope | {"start_line": 20001, "line_count": 1})
+                self.assertFalse(read.isError, read)
+                page = read.structuredContent
+                self.assertEqual(page["text"], "answer = 41\n")
+                self.assertGreater(page["offset"], 131072)
+                byte_page = await session.call_tool("read_workspace_file", scope | {"offset": page["offset"], "expected_sha256": page["sha256"]})
+                self.assertFalse(byte_page.isError, byte_page)
+                identity = uuid.uuid4().hex
+                args = scope | {"edits": [{"old_text": "41", "new_text": "42"}],
+                    "expected_workspace_identity": page["context"]["workspace_identity"],
+                    "expected_head_sha": "", "expected_sha256": page["sha256"]}
+                preview = await session.call_tool("edit_workspace_file", args | {"dry_run": True})
+                self.assertFalse(preview.isError, preview)
+                self.assertEqual(file.read_bytes(), original)
+                changed = await session.call_tool("edit_workspace_file", args | {"change_id": identity,
+                    "expected_plan_sha256": preview.structuredContent["plan_sha256"]})
+                self.assertFalse(changed.isError, changed)
+                self.assertEqual(file.read_bytes(), original.replace(b"41", b"42"))
+                receipt = await session.call_tool("read_workspace_change", {"machine": "desktop", "change_id": identity, "observe_current": True})
+                self.assertFalse(receipt.isError, receipt)
+                self.assertEqual(receipt.structuredContent["current"]["sha256"], changed.structuredContent["plan"]["after_sha256"])
+                for invalid in ({"start_line": True}, {"line_count": "2"}, {"line_count": 501}, {"start_line": 1, "offset": 1}):
+                    result = await session.call_tool("read_workspace_file", scope | invalid)
+                    self.assertTrue(result.isError, invalid)
+
+    async def test_bounded_search_pages_do_not_skip_captured_matches(self):
+        file = self.work / "escaped.txt"
+        file.write_text(("needle " + "\x01" * 315 + "\n") * 300)
+        scope = {"machine": "desktop", "workspace_name": "example", "action": "search",
+                 "query": "needle", "path_glob": "*.txt", "limit": 200}
+        offset, lines, snapshot = 0, [], ""
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                while True:
+                    result = await session.call_tool("inspect_workspace", scope | {"offset": offset, "expected_snapshot": snapshot})
+                    self.assertFalse(result.isError, result)
+                    encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
+                    self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
+                    page = result.structuredContent
+                    self.assertEqual(json.loads(result.content[0].text), page)
+                    lines.extend(item["line"] for item in page["matches"])
+                    snapshot = page["snapshot"]
+                    if not page["has_more"]:
+                        break
+                    self.assertEqual(page["next_offset"], offset + len(page["matches"]))
+                    self.assertGreater(page["next_offset"], offset)
+                    offset = page["next_offset"]
+        self.assertEqual(lines, list(range(1, 301)))
+
+    async def test_escaped_raw_read_pages_remain_bounded_and_lossless(self):
+        file = self.work / "escaped.txt"
+        original = "\x01" * 100000
+        file.write_text(original)
+        scope = {"machine": "desktop", "workspace_name": "example", "path": "escaped.txt"}
+        offset, parts = 0, []
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                while True:
+                    result = await session.call_tool("read_workspace_file", scope | {"offset": offset})
+                    self.assertFalse(result.isError, result)
+                    self.assertLessEqual(len(json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()),
+                                         server.MAX_WORKSPACE_RESULT - 1024)
+                    page = result.structuredContent
+                    parts.append(page["text"])
+                    if not page["has_more"]:
+                        break
+                    self.assertEqual(page["next_offset"], offset + len(page["text"].encode()))
+                    offset = page["next_offset"]
+        self.assertEqual("".join(parts), original)
 
 
 

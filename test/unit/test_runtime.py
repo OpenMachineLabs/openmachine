@@ -275,7 +275,7 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
             if not page["has_more"]:
                 break
         self.assertEqual("".join(parts), content)
-        self.assertEqual(len(parts), 3)
+        self.assertEqual(len(parts), 6)
         for name in ("a", "b", "c"):
             (self.work / name).touch()
         page = workspace.inspect(self.config, "my-laptop", "project", "files", limit=2)

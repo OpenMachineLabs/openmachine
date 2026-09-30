@@ -21,8 +21,10 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    failed approaches and next safe step. Do not save secrets, transcripts, hidden
    reasoning or bulk source/logs. Private state is not an independent approval.
 4. Inspect status/search and relevant source, including applicable nested
-   AGENTS.md. Prefer read_workspace_file then edit_workspace_file for exact small
-   changes. Retain whole-source hash, HEAD and workspace identity. All old fragments
+   AGENTS.md. Optional path_glob filters workspace-relative paths for files/search;
+   * never crosses / and ** is unsupported. Omission preserves traversal coverage.
+   Prefer read_workspace_file with start_line/line_count, then edit_workspace_file
+   for exact small changes. Retain whole-source hash, HEAD and workspace identity. All old fragments
    must match uniquely in the same original bytes. Use an empty ID for pure
    dry_run; save a caller-generated change_id before applying, optionally binding
    the preview plan SHA. After uncertainty, read_workspace_change on the original
@@ -122,7 +124,7 @@ Facts absent from formats 1-3 remain null; format-4 facts stay intact. New reade
 do not strengthen historical guarantees.
 
 Use the transition-capable CLI and the selected installation's actual contract.
-Prepare protocol-4 SSH endpoints explicitly alongside original archives. Pass an
+Prepare protocol-5 SSH endpoints explicitly alongside original archives. Pass an
 explicit `update --candidate-config` when changing endpoint routes; do not edit
 the active configuration in advance. Preserve service-owned configuration
 snapshots. Candidate local/remote readers must accept retained state before stop;
@@ -177,7 +179,7 @@ stdin approval. Never send passwords/tokens or automate prompts. Terminal echo
 can appear in raw logs, even though control receipts retain only a fingerprint.
 Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
 or restart a process merely to clear a busy control. New readers preserve v4
-lifecycle facts and all older bytes; state contract 4 and SSH protocol 4 are not
+lifecycle facts and all older bytes; state contract 4 and SSH protocol 5 are not
 release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.
 
 After a controller transition, read capabilities, then the original execution
@@ -186,8 +188,19 @@ cursor; do not reset the sequence, relaunch the terminal or replace its runtime.
 A compatible rollback preserves live work, not permission to replay uncertain
 effects. An identical installation update is a no-op, not proof of a transition.
 
-W1 sources and combined edit strings remain limited to 128 KiB, with 1..64 exact
-replacements; large-source line views and multi-file patching are not delivered.
+W2 reads/edits sources up to 2 MiB; full-content writes and combined edit strings
+remain 128 KiB, with 1..64 exact replacements. Start lines are 1-based, require
+offset=0, and line_count is 1..500 (default 200). Pages/diffs remain 32 KiB; raw
+byte cursors and whole-source hashes do not refer to redacted text. For a truncated
+long line, continue in byte mode with next_offset and the original SHA. next_line
+is available only at a known boundary. range_complete describes available selected
+bytes; has_more describes the whole source. Never skip remaining text or infer
+complete negative search from incomplete coverage. Filtered Git discovery omits
+ignored/nested source; direct permitted ignored-file reads remain available.
+Multi-file patching remains W3. New range values can make a retained format-1
+receipt unreadable to W1: require its actual candidate reader to pass, never alter
+history to enable rollback. Current remote selectors require protocol 5 endpoints;
+prepare them only under explicit authorization alongside original worker archives.
 Typed writes use workspace_write_enabled independently of commands. Omitted/null
 inherits the legacy execution grant; explicit false denies editing. Preview and
 scoped receipt reads need no write grant. New init/examples disable both grants.

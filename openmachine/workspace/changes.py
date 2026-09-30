@@ -2,6 +2,8 @@
 
 from contextlib import contextmanager, ExitStack
 import hashlib
+import io
+import itertools
 import json
 import math
 import os
@@ -16,7 +18,7 @@ from openmachine.foundation.files import MAX_TEXT_FILE, TEXT_PAGE, file_parts
 from openmachine.foundation.sanitize import Fault, redact
 from openmachine.foundation.state import lease, private_directory, save_json
 
-from .files import digest, publish_file, root_for, snapshot
+from .files import MAX_SOURCE, digest, publish_file, root_for, snapshot
 from .git import context, lock_root
 
 CHANGE_FORMAT = 1
@@ -40,7 +42,7 @@ def _text(value: str) -> bytes:
     except (ValueError, UnicodeError) as error:
         raise Fault("invalid_content", "Supply valid UTF-8 scalar text without NUL.") from error
     if len(raw) > MAX_TEXT_FILE:
-        raise Fault("invalid_content", "Text payloads and W1 sources are limited to 128 KiB.")
+        raise Fault("invalid_content", "Text payloads remain limited to 128 KiB.")
     return raw
 
 
@@ -92,18 +94,17 @@ def _replace(raw: bytes, edits: list[dict]) -> tuple[bytes, list[dict]]:
     spans.sort(key=lambda span: span[0])
     end = shift = 0
     chunks, ranges = [], []
-    resulting_size = len(raw)
+    resulting_size = len(raw) + sum(len(new) - (stop - start) for start, stop, new in spans)
+    if resulting_size > MAX_SOURCE:
+        raise Fault("source_limit", "The resulting source exceeds 2 MiB.")
     for start, stop, new in spans:
         if start < end:
             raise Fault("match_overlap", "Replacement ranges overlap in the original source.")
-        resulting_size += len(new) - (stop - start)
         ranges.append({"old_start": start, "old_end": stop,
                        "new_start": start + shift, "new_end": start + shift + len(new)})
         chunks.extend((raw[end:start], new))
         shift += len(new) - (stop - start)
         end = stop
-    if resulting_size > MAX_TEXT_FILE:
-        raise Fault("source_limit", "The resulting W1 source exceeds 128 KiB.")
     chunks.append(raw[end:])
     return b"".join(chunks), ranges
 
@@ -150,10 +151,6 @@ def _diff(source: dict, desired: bytes, ranges: list[dict]) -> dict:
     safe = [redact(value) for value in originals]
     if any(a.count("\n") != b.count("\n") for a, b in zip(originals, safe)):
         return {"diff": "", "diff_omitted": True, "truncated": False, "content_redacted": True}
-    lines = []
-    for value in safe:
-        pieces = value.split("\n")
-        lines.append([part + "\n" for part in pieces[:-1]] + ([pieces[-1]] if pieces[-1] else []))
     windows = []
     for span in ranges:
         pair = []
@@ -168,19 +165,32 @@ def _diff(source: dict, desired: bytes, ranges: list[dict]) -> dict:
             windows[-1][3] = max(windows[-1][3], pair[3])
         else:
             windows.append(pair)
-    result = [f"--- a/{source['path']}\n+++ b/{source['path']}\n"]
-    for a, b, c, d in windows:
-        result.append(f"@@ -{a + 1 if b > a else a},{b - a} +{c + 1 if d > c else c},{d - c} @@\n")
-        for prefix, selected in (("-", lines[0][a:b]), ("+", lines[1][c:d])):
-            for line in selected:
-                result.append(prefix + line)
-                if not line.endswith("\n"):
-                    result.append("\n\\ No newline at end of file\n")
-        if sum(len(value.encode()) for value in result) > TEXT_PAGE:
-            break
-    raw = "".join(result).encode()
-    return {"diff": raw[:TEXT_PAGE].decode("utf-8", errors="ignore"), "diff_omitted": False,
-            "truncated": len(raw) > TEXT_PAGE, "content_redacted": safe != originals}
+    def pieces(streams):
+        positions = [0, 0]
+        yield f"--- a/{source['path']}\n+++ b/{source['path']}\n"
+        for a, b, c, d in windows:
+            yield f"@@ -{a + 1 if b > a else a},{b - a} +{c + 1 if d > c else c},{d - c} @@\n"
+            for index, (prefix, first, last) in enumerate((("-", a, b), ("+", c, d))):
+                for _ in itertools.islice(streams[index], first - positions[index]):
+                    pass
+                for line in itertools.islice(streams[index], last - first):
+                    yield prefix
+                    yield line
+                    if not line.endswith("\n"):
+                        yield "\n\\ No newline at end of file\n"
+                positions[index] = last
+
+    result, truncated = bytearray(), False
+    with io.StringIO(safe[0]) as old, io.StringIO(safe[1]) as new:
+        for piece in pieces((old, new)):
+            raw = piece.encode()
+            room = TEXT_PAGE - len(result)
+            result.extend(raw[:room])
+            if len(raw) > room:
+                truncated = True
+                break
+    return {"diff": result.decode("utf-8", errors="ignore"), "diff_omitted": False,
+            "truncated": truncated, "content_redacted": safe != originals}
 
 
 def _private(path: Path, *, directory: bool = False) -> os.stat_result:
@@ -289,7 +299,7 @@ def _validate(record: dict, change_id: str) -> None:
             raise ValueError
         prior_old = prior_new = 0
         for span in plan["ranges"]:
-            if set(span) != {"old_start", "old_end", "new_start", "new_end"} or any(type(v) is not int or not 0 <= v <= MAX_TEXT_FILE for v in span.values()):
+            if set(span) != {"old_start", "old_end", "new_start", "new_end"} or any(type(v) is not int or not 0 <= v <= MAX_SOURCE for v in span.values()):
                 raise ValueError
             if (span["old_start"] > span["old_end"] or span["new_start"] > span["new_end"] or
                 span["old_start"] < prior_old or span["new_start"] < prior_new):
@@ -621,14 +631,20 @@ def write_text_file(config, state: Path, machine: str, workspace: str, path: str
 
 
 def bound_result(payload: dict, encoded_size, limit: int = MAX_WORKSPACE_RESULT) -> dict:
-    """Trim optional presentation only; never discard identity or effect evidence."""
+    """Bound presentation without skipping source bytes or captured entries."""
     result = dict(payload)
-    for field in ("diff", "text"):
-        while encoded_size(result) > limit and result.get(field):
-            raw = result[field].encode()
-            result[field] = raw[:len(raw) // 2].decode("utf-8", errors="ignore")
-            result["truncated"] = True
+    while encoded_size(result) > limit and result.get("diff"):
+        raw = result["diff"].encode()
+        result["diff"] = raw[:len(raw) // 2].decode("utf-8", errors="ignore")
+        result["truncated"] = True
+    for field in ("matches", "entries"):
+        while encoded_size(result) > limit and len(result.get(field, [])) > 1:
+            result[field] = result[field][:len(result[field]) // 2]
+            result.update(next_offset=result["offset"] + len(result[field]), has_more=True,
+                          presentation_truncated=True)
+    # Text pages are already bounded by their source owner. Further clipping here
+    # would lose the raw cursor mapping after redaction; reject without advancing.
     if encoded_size(result) > limit:
-        raise Fault("workspace_response_limit", "Mandatory workspace evidence exceeds its response budget.",
-                    {"change_id": result.get("change_id"), "status": "outcome_unknown"})
+        evidence = {"change_id": result["change_id"], "status": "outcome_unknown"} if result.get("change_id") else None
+        raise Fault("workspace_response_limit", "Workspace metadata exceeds its response budget; narrow the observation.", evidence)
     return result

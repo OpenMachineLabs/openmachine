@@ -12,6 +12,9 @@ from openmachine.foundation.sanitize import Fault
 
 from .git import context
 
+MAX_SOURCE = 2 * 1024 * 1024
+MAX_LINES = 500
+
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
@@ -43,22 +46,60 @@ def digest(raw: bytes | None) -> str:
 
 
 def read_text_file(config: "Settings", machine: str, workspace: str, path: str,
-                   offset: int = 0, expected_sha256: str = "") -> dict:
+                   offset: int = 0, expected_sha256: str = "", start_line: int | None = None,
+                   line_count: int = 200) -> dict:
+    if (type(offset) is not int or offset < 0 or type(line_count) is not int or not 1 <= line_count <= MAX_LINES or
+        start_line is not None and (type(start_line) is not int or start_line < 1 or offset != 0)):
+        raise Fault("invalid_range", "Use 1-based lines, 1..500 lines per request, and offset zero in line mode.")
     parts = file_parts(path)
+    if len(path.encode("utf-8")) > 1024:
+        raise Fault("request_limit", "Use a path of at most 1024 UTF-8 bytes.")
     root = root_for(config, machine, workspace)
     if not re.fullmatch(r"(?:[0-9a-f]{64})?", expected_sha256):
         raise Fault("invalid_hash", "Use the complete raw-byte SHA256 returned by the original read.")
     observed = context(root)
     with file_parent(root, parts) as parent:
-        raw, _ = file_bytes(parent, parts[-1])
+        raw, metadata = file_bytes(parent, parts[-1], max_bytes=MAX_SOURCE)
     current = context(root)
     if (observed["workspace_identity"], observed["head_sha"]) != (current["workspace_identity"], current["head_sha"]):
         raise Fault("source_changed", "The workspace changed during observation.")
     sha = digest(raw)
     if expected_sha256 and sha != expected_sha256:
         raise Fault("source_changed", "The file changed between pages; inspect its current version.")
+    for depth in range(1, len(parts)):
+        instruction = root.joinpath(*parts[:depth], "AGENTS.md")
+        if instruction.is_file() and not instruction.is_symlink():
+            current["agents_files"].append(str(instruction))
+    source = raw or b""
+    stop = len(source)
+    if start_line is not None:
+        offset = 0
+        for _ in range(start_line - 1):
+            newline = source.find(b"\n", offset)
+            if newline < 0:
+                offset = len(source)
+                break
+            offset = newline + 1
+        stop = offset
+        for _ in range(line_count):
+            newline = source.find(b"\n", stop)
+            if newline < 0:
+                stop = len(source)
+                break
+            stop = newline + 1
+    page = text_page(source, offset, end=stop)
+    end = page["next_offset"]
+    page.update(start_line=source.count(b"\n", 0, offset) + 1 if end > offset else None,
+                end_line=source.count(b"\n", 0, end - 1) + 1 if end > offset else None,
+                line_truncated=0 < end < len(source) and source[end - 1] != 10,
+                range_complete=end == stop)
+    if end < len(source) and (end == 0 or source[end - 1] == 10):
+        page["next_line"] = source.count(b"\n", 0, end) + 1
+    if start_line is not None:
+        page.update(requested_start_line=start_line, requested_line_count=line_count)
     return {"machine": machine, "workspace": workspace, "path": path, "context": current,
-            "exists": raw is not None, "sha256": sha, **text_page(raw or b"", offset)}
+            "exists": raw is not None, "sha256": sha, "chunk_sha256": digest(source[offset:end]),
+            "mtime_ns": metadata.st_mtime_ns if metadata else None, **page}
 
 
 def _metadata(info: os.stat_result | None) -> tuple | None:
@@ -92,7 +133,7 @@ def snapshot(root: Path, path: str) -> dict:
         raise Fault(observed.get("context_error", "context_unavailable"), "Workspace identity is unavailable.")
     ancestors = []
     with file_parent(root, parts, identities=ancestors) as parent:
-        raw, metadata = file_bytes(parent, parts[-1])
+        raw, metadata = file_bytes(parent, parts[-1], max_bytes=MAX_SOURCE)
         _ordinary_metadata(parent, parts[-1], metadata)
     # A nested repository is a separate configured workspace, not a descendant edit.
     parent_context = context(root.joinpath(*parts[:-1]))
@@ -120,7 +161,7 @@ def _recheck(source: dict, parent: int, config, machine: str, workspace: str) ->
     with file_parent(root, parts, identities=ancestors) as attached:
         if ancestors != source["ancestors"] or os.fstat(attached).st_ino != os.fstat(parent).st_ino:
             raise Fault("context_mismatch", "A containing directory was replaced or detached.")
-    raw, info = file_bytes(parent, parts[-1])
+    raw, info = file_bytes(parent, parts[-1], max_bytes=MAX_SOURCE)
     if raw != source["raw"] or _metadata(info) != _metadata(source["metadata"]):
         raise Fault("content_mismatch", "The original bytes or file metadata changed before publication.")
     _ordinary_metadata(parent, parts[-1], info)
@@ -161,7 +202,7 @@ def publish_file(config, machine: str, workspace: str, source: dict, desired: by
             effect["cleanup"] = "removed"
             os.fsync(parent)
             effect["synced"] = True
-            actual, info = file_bytes(parent, name)
+            actual, info = file_bytes(parent, name, max_bytes=MAX_SOURCE)
             effect["result_sha256"] = digest(actual)
             if (actual != desired or info is None or stat.S_IMODE(info.st_mode) != desired_mode or
                 (info.st_dev, info.st_ino) != (created.st_dev, created.st_ino)):

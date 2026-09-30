@@ -26,20 +26,22 @@ class Machines:
 
     def inspect_workspace(self, machine: str, workspace_name: str, action: str, path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
-                          expected_snapshot: str = "") -> dict:
+                          expected_snapshot: str = "", path_glob: str = "") -> dict:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "inspect_workspace", workspace=workspace_name, action=action,
                              path=path, offset=offset, limit=limit, query=query, staged=staged,
-                             expected_snapshot=expected_snapshot)
+                             expected_snapshot=expected_snapshot, path_glob=path_glob)
         return workspace.inspect(self.config, machine, workspace_name, action, path, offset, limit,
-                                 query=query, staged=staged, expected_snapshot=expected_snapshot)
+                                 query=query, staged=staged, expected_snapshot=expected_snapshot, path_glob=path_glob)
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str,
-                            offset: int = 0, expected_sha256: str = "") -> dict:
+                            offset: int = 0, expected_sha256: str = "", start_line: int | None = None,
+                            line_count: int = 200) -> dict:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "read_workspace_file", workspace=workspace_name, path=path,
-                             offset=offset, expected_sha256=expected_sha256)
-        return workspace.read_text_file(self.config, machine, workspace_name, path, offset, expected_sha256)
+                             offset=offset, expected_sha256=expected_sha256, start_line=start_line, line_count=line_count)
+        return workspace.read_text_file(self.config, machine, workspace_name, path, offset, expected_sha256,
+                                        start_line, line_count)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
