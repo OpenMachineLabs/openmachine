@@ -1,4 +1,12 @@
 {
+  "approved_deltas": [
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/28#issuecomment-5906412464",
+      "base_commit": "169d1c4e3329c641b2e401e7993300dd27293bcd",
+      "change": "E1 adds only the optional bounded termination_grace_seconds input. The retained release baseline and all other tool schemas/annotations remain unchanged; real installed SDK discovery verifies the approved delta.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
+    }
+  ],
   "baseline": {
     "commit": "d5c4a825720fef69ece073841a8ea8813a86e704",
     "mcp": "1.30.0",
@@ -922,6 +930,20 @@
             "default": "",
             "title": "Task Id",
             "type": "string"
+          },
+          "termination_grace_seconds": {
+            "anyOf": [
+              {
+                "maximum": 30,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Termination Grace Seconds"
           },
           "timeout_seconds": {
             "default": 600,

@@ -20,7 +20,8 @@ from openmachine.workspace.git import context
 
 from . import logs
 from .logs import MAX_READ
-from .records import MAX_TIMEOUT, TERMINAL, read_record
+from .process import supported
+from .records import FORMAT, MAX_TIMEOUT, TERMINAL, effective_request, is_remote, read_record, termination_grace
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -35,7 +36,8 @@ def _directory(state: Path, execution_id: str) -> Path:
 
 
 def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_head_sha: str,
-                   workspace_access: str, resource_keys: list[str] | None, task_id: str) -> list[str]:
+                   workspace_access: str, resource_keys: list[str] | None, task_id: str,
+                   termination_grace_seconds: float | None = None) -> list[str]:
     """Check the shared start request before controller routing or target admission."""
     if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
         raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
@@ -45,6 +47,7 @@ def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_hea
         raise Fault("invalid_timeout", "Use 1-86400 seconds; the default remains 600 seconds.")
     if workspace_access not in ("exclusive", "shared"):
         raise Fault("invalid_access", "Use exclusive, or shared only for cooperating read-only commands.")
+    termination_grace(termination_grace_seconds)
     keys = resource_keys or []
     if len(keys) > 16 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", k) for k in keys):
         raise Fault("invalid_resources", "Use at most 16 stable resource names of 1-128 letters, digits, _, ., :, or -.")
@@ -58,12 +61,17 @@ def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_hea
 def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
           workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
+          termination_grace_seconds: float | None = None,
           *, remote_worker: Path | None = None, validate_new: Callable[[], object] | None = None) -> dict:
     target = config.machine(machine, write=True)
-    keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id)
+    keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id,
+                          termination_grace_seconds)
     if target.transport != "local":
         raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
-    working = Path(cwd).resolve(strict=True)
+    try:
+        working = Path(cwd).resolve(strict=True)
+    except OSError as error:
+        raise Fault("context_unavailable", "The original cwd is unavailable; read the original execution directly.") from error
     if not working.is_dir() or not any(
         working.is_relative_to(Path(item.root).resolve())
         for item in config.workspaces.values() if item.machine == machine
@@ -75,13 +83,17 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     directory = _directory(state, execution_id)
     request = {"machine": machine, "cwd": str(working), "argv": argv,
                "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha,
-               "workspace_access": workspace_access, "resource_keys": sorted(set(keys)), "task_id": task_id}
+               "workspace_access": workspace_access, "resource_keys": sorted(set(keys)), "task_id": task_id,
+               "termination_grace_seconds": termination_grace(termination_grace_seconds)}
     with lease(locks / f"{execution_id}.lock"):
         if directory.exists():
-            original = {"workspace_access": "exclusive", "resource_keys": [], "task_id": "", **read_record(directory)["request"]}
+            original = effective_request(read_record(directory))
+            if termination_grace_seconds is None:
+                request["termination_grace_seconds"] = original["termination_grace_seconds"]
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
+        supported()
         if validate_new is not None:
             validate_new()  # Only new admissions need controller reference validation.
         observed = context(working)
@@ -96,11 +108,17 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             if expected_head_sha and observed["head_sha"] != expected_head_sha:
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
             private_directory(directory)
-            record = {"request": request, "context": observed, "version": __version__, "format_version": 2,
+            record = {"request": request, "context": observed, "version": __version__, "format_version": FORMAT,
                       "status": "accepted", "exit_code": None, "created_at": time.time(),
-                      "log_truncated": False, "output_incomplete": False}
+                      "log_truncated": False, "output_incomplete": False, "io_mode": "pipe",
+                      "command": {"spawned": False, "exited": False, "started_at": None,
+                                  "exited_at": None, "exit_signal": None},
+                      "stop": {"reason": None, "requested_at": None,
+                               "grace_seconds": request["termination_grace_seconds"], "force_used": False},
+                      "cleanup": {"containment": "systemd_scope" if remote_worker else "posix_session",
+                                  "status": "pending", "error": None}}
             if remote_worker is not None:
-                record.update(format_version=3, scope_unit=f"openmachine-{execution_id}.scope")
+                record.update(scope_unit=f"openmachine-{execution_id}.scope")
                 observed.update(target_identity=machine, worker_archive=str(remote_worker),
                                 worker_sha256=remote_worker.stem)
             with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
@@ -110,7 +128,8 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 if remote_worker is not None:
                     launcher = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
                                 "--expand-environment=no", "--unit=" + record["scope_unit"],
-                                "--property=TimeoutStopSec=2s", f"--property=RuntimeMaxSec={timeout_seconds + 30}s",
+                                f"--property=TimeoutStopSec={request['termination_grace_seconds'] + 7}s",
+                                f"--property=RuntimeMaxSec={timeout_seconds + request['termination_grace_seconds'] + 30}s",
                                 sys.executable, "-I", str(remote_worker), "worker"]
                 try:
                     process = subprocess.Popen(
@@ -122,6 +141,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                     threading.Thread(target=process.wait, daemon=True).start()
                 except OSError as error:
                     record.update(status="failed", error="worker_launch_failed", finished_at=time.time())
+                    record["cleanup"]["status"] = "verified"
                     save_json(directory / "record.json", record)
                     raise Fault("worker_launch_failed", "The worker could not start; inspect this execution ID.") from error
     return read(config, state, machine, execution_id)
@@ -148,12 +168,19 @@ def _receipt(directory: Path, machine: str) -> tuple[dict, str]:
                     raise
             except OSError:
                 status = "outcome_unknown"
-        if status in TERMINAL and record.get("format_version") == 3:
+        if status in TERMINAL and is_remote(record):
             try:
-                if _scope_state(record["scope_unit"]) not in {"inactive", "not-found"}:
+                cleaned = _scope_state(record["scope_unit"]) in {"inactive", "not-found"}
+                if not cleaned:
                     status = "finishing"
+                if record.get("format_version") == FORMAT:
+                    record = record | {"cleanup": record["cleanup"] | {
+                        "status": "verified" if cleaned else "pending", "source": "systemd_scope"}}
             except Fault:
                 status = "outcome_unknown"
+                if record.get("format_version") == FORMAT:
+                    record = record | {"cleanup": record["cleanup"] | {
+                        "status": "unverified", "source": "systemd_scope", "error": "scope_unavailable"}}
         return record, status
 
 
@@ -183,6 +210,12 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
             "exit_code": record["exit_code"], "context": record["context"], "version": record["version"],
             "created_at": record["created_at"], "finished_at": record.get("finished_at"),
             "task_id": record["request"].get("task_id", ""),
+            "format_version": record.get("format_version", 1), "io_mode": "pipe",
+            "command": record.get("command") if record.get("format_version") == FORMAT else None,
+            "stop": record.get("stop") if record.get("format_version") == FORMAT else None,
+            "cleanup": record.get("cleanup") if record.get("format_version") == FORMAT else None,
+            "observed_at": time.time(), "control": None,
+            "termination_grace_seconds": effective_request(record)["termination_grace_seconds"],
             "workspace_access": record["request"].get("workspace_access", "exclusive"),
             "resource_keys": record["request"].get("resource_keys", []),
             "cancel_requested": (directory / "cancel.request").is_file(),
@@ -226,7 +259,7 @@ def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> 
         raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     directory = _directory(state, execution_id)
     record, status = _receipt(directory, machine)
-    if status == "finishing":
+    if status == "finishing" and is_remote(record) and record["status"] in TERMINAL:
         # Only a mutation tool may request cleanup again; reads never stop a scope.
         try:
             subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
@@ -235,10 +268,10 @@ def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> 
         except (OSError, subprocess.SubprocessError) as error:
             raise Fault("outcome_unknown", "Scope cleanup is unverified; read the original execution.") from error
         return read(config, state, machine, execution_id)
-    if status in TERMINAL:
-        return read(config, state, machine, execution_id)
     if status == "outcome_unknown":
         raise Fault("outcome_unknown", "Worker ownership is unverified; cancellation cannot claim termination.")
+    if status in TERMINAL:
+        return read(config, state, machine, execution_id)
     if record.get("format_version", 1) < 2:
         raise Fault("unsupported_operation", "This legacy worker does not support cancellation; preserve its runtime.")
     with lease(directory / "control.lock", wait=True, create=False):

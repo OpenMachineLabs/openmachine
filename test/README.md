@@ -45,7 +45,7 @@ on the refreshed candidate connection before marking M2 accepted.
 
 SSH unit checks cover configured routing, bounded structured transport, identity
 and file preconditions, controller-only task references, shared target locks,
-format-3 cleanup observations and dependency-free deterministic worker bundles.
+legacy format-3 and new format-4 cleanup observations and dependency-free deterministic worker bundles.
 Mocked transport is explicitly not live SSH evidence. The SDK checks verify
 remote metadata and local independence without contacting an unconfigured host.
 
@@ -110,7 +110,7 @@ the controller and retains cancellation after execution is disabled.
 The SSH suite checks the exact nested archive members and starts the actual
 archive with `-I -S`, without third-party site packages. A short command also
 runs through the actual archive worker entry, using inherited leases and a
-format-2 fixture with a controller-only task reference. Its terminal record,
+format-4 fixture with a controller-only task reference. Its terminal record,
 output and single counter increment are verified; this is not a live Linux
 scope or SSH transport test. Scope observations use the public execution reader
 with a mocked user manager. Torn task saves inject failure into the actual store
@@ -152,3 +152,24 @@ diff. Do not update it merely to silence a failed comparison. Descriptions and
 runtime values are not snapshots; existing behavior tests retain responsibility for
 errors, results, limits, state integrity, CLI and lifecycle behavior. S0 evidence and
 the caller/move map remain in [Spec #18](https://github.com/OpenMachineLabs/openmachine/issues/18).
+
+## Spec #28 E1
+
+The focused execution suite uses real short pipe processes for launch/exit facts,
+TERM handlers writing more than pipe capacity, distinct stop reasons, owned
+session groups, late/repeated cancellation, missing cwd and bounded fault windows.
+It preserves old-receipt bytes and original-ID effects. Service tests cover
+explicit directional contracts, exact configuration restoration and pre-stop
+refusal; mocked launchctl/SSH tests are not native acceptance.
+
+The MCP fixture retains its original released baseline provenance and records
+only the approved E1 grace-input delta separately. Installed discovery in all
+four integration configurations checks the entire catalog without normalizing
+actual output. E1 advertises format 4 and pipes only, not E2 waits or E3 controls.
+
+Retain actual macOS managed transitions and Linux/Python/systemd SSH evidence
+against the exact candidate artifact. Check original old-worker identity across
+new readers, completed-v4 downgrade refusal before stopping a healthy service,
+and an active v4 worker through compatible controller update/rollback. Separate
+that product evidence from hosted Linux unit checks and real Chat acceptance.
+No production job, GPU, NAS workload or additional test framework is required.

@@ -78,7 +78,7 @@ class SSHTests(unittest.TestCase):
                               "integrations/ssh/endpoint.py", "integrations/ssh/bundle.py",
                               "openmachine/__init__.py", "openmachine/execution/__init__.py",
                               "openmachine/execution/__main__.py", "openmachine/execution/api.py",
-                              "openmachine/execution/worker.py", "openmachine/execution/records.py",
+                              "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
                               "openmachine/execution/logs.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
                               "openmachine/workspace/files.py", "openmachine/foundation/__init__.py",
@@ -98,14 +98,18 @@ class SSHTests(unittest.TestCase):
         state = private_directory(self.root / "state")
         directory = private_directory(state / "executions" / ("c" * 32))
         locks = private_directory(state / "locks")
-        record = {"format_version": 2, "version": __version__, "status": "accepted", "exit_code": None,
+        record = {"format_version": 4, "version": __version__, "status": "accepted", "exit_code": None,
                   "created_at": 1, "log_truncated": False, "output_incomplete": False,
                   "context": {"worktree": str(self.project)},
                   "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
                               "argv": [sys.executable, "-I", "-S", "-c",
                                        'from pathlib import Path; p=Path("count.txt"); '
                                        'p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print("worker-complete")'],
-                              "timeout_seconds": 10, "task_id": "controller-only-task"}}
+                              "timeout_seconds": 10, "task_id": "controller-only-task", "termination_grace_seconds": 5},
+                  "io_mode": "pipe",
+                  "command": {"spawned": False, "exited": False, "started_at": None, "exited_at": None, "exit_signal": None},
+                  "stop": {"reason": None, "requested_at": None, "grace_seconds": 5, "force_used": False},
+                  "cleanup": {"containment": "posix_session", "status": "pending", "error": None}}
         with lease(directory / "control.lock"):
             save_json(directory / "record.json", record)
         key = hashlib.sha256(str(self.project).encode()).hexdigest()
@@ -290,3 +294,31 @@ class SSHTests(unittest.TestCase):
             with self.assertRaises(Fault) as caught:
                 client.call(self.settings, "build-machine", "write_workspace_file", content="x" * MAX_MESSAGE)
         self.assertEqual(caught.exception.code, "request_limit")
+
+
+    def test_v4_scope_observation_is_separate_and_never_rewrites_worker_facts(self):
+        state = self.root / "state"
+        directory = private_directory(state / "executions" / ("d" * 32))
+        record = {"format_version": 4, "version": __version__, "status": "succeeded", "exit_code": 0,
+                  "created_at": 1, "finished_at": 3, "log_truncated": False, "output_incomplete": False,
+                  "scope_unit": "openmachine-" + "d" * 32 + ".scope", "io_mode": "pipe",
+                  "context": {"target_identity": self.identity, "worker_sha256": self.digest},
+                  "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
+                              "argv": ["true"], "timeout_seconds": 10, "termination_grace_seconds": 5},
+                  "command": {"spawned": True, "exited": True, "started_at": 1, "exited_at": 2, "exit_signal": None},
+                  "stop": {"reason": None, "requested_at": None, "grace_seconds": 5, "force_used": False},
+                  "cleanup": {"containment": "systemd_scope", "status": "pending", "error": None}}
+        with lease(directory / "control.lock"):
+            save_json(directory / "record.json", record)
+        original = (directory / "record.json").read_bytes()
+        config = endpoint._RemoteConfig(self.identity, {}, False)
+        for observed, status, cleanup in (("active", "finishing", "pending"), ("not-found", "succeeded", "verified")):
+            with patch.object(execution_api, "_scope_state", return_value=observed):
+                result = execution.read(config, state, self.identity, directory.name)
+            self.assertEqual((result["status"], result["cleanup"]["status"]), (status, cleanup))
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual((directory / "record.json").read_bytes(), original)
+        with patch.object(execution_api, "_scope_state", side_effect=Fault("scope_unavailable", "fixture")):
+            result = execution.read(config, state, self.identity, directory.name)
+        self.assertEqual((result["status"], result["cleanup"]["status"]), ("outcome_unknown", "unverified"))
+        self.assertEqual((directory / "record.json").read_bytes(), original)

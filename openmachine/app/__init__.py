@@ -52,6 +52,9 @@ class Application:
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "transport": "private_unix_socket",
+            "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe"], "controls": [],
+                          "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
+                          "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
             "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": SEGMENT_BYTES,
@@ -99,10 +102,12 @@ class Application:
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: Literal["exclusive", "shared"] = "exclusive",
-                        resource_keys: list[str] | None = None, task_id: str = "") -> dict:
+                        resource_keys: list[str] | None = None, task_id: str = "",
+                        termination_grace_seconds: float | None = None) -> dict:
         with self._admit():
             return self.machines.start_execution(machine, execution_id, cwd, argv, timeout_seconds,
-                                                 expected_head_sha, workspace_access, resource_keys, task_id)
+                                                 expected_head_sha, workspace_access, resource_keys, task_id,
+                                                 termination_grace_seconds)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0, max_bytes: int = 65536) -> dict:
         return self.machines.read_execution(machine, execution_id, offset, max_bytes)

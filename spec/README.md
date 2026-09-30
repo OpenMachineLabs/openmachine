@@ -11,6 +11,8 @@ No product Spec is approved by the repository scaffold.
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [implementation authorization and acceptance](https://github.com/OpenMachineLabs/openmachine/issues/6) | Minimal GitHub provenance footers for configured Issue/PR/comment/review body writes; broader GitHub collaboration remains in #2 M4. |
 | [#18](https://github.com/OpenMachineLabs/openmachine/issues/18) | `direct_issue_contract`, [approved architecture and increments](https://github.com/OpenMachineLabs/openmachine/issues/18#classification) | S0-S5 are accepted as of 2026-09-30 and form the `v0.2.0` modular-runtime release baseline. PRs #21-#27 own the architecture, final acceptance, and repository index; the Issue owns the exact A1-A10 evidence and closure receipt. The current maintainer request authorizes `v0.2.0` release preparation/publication and matching SSH-worker refresh. Production deployment and later capabilities remain separately scoped. |
 
+| [#28](https://github.com/OpenMachineLabs/openmachine/issues/28) | `direct_issue_contract`, [E1 authorization](https://github.com/OpenMachineLabs/openmachine/issues/28#issuecomment-5906412464) | E1 only: precise lifecycle/result facts, graceful draining cancellation, owned-session/scope cleanup and required state/service/SSH compatibility. Preserve default pipes and original executions. E2/E3, full E4 acceptance, production deployment and release remain separate. The Issue owns exact acceptance evidence. |
+
 ## Survey Issues
 
 | Survey Issue | Evidence or question | Current use |

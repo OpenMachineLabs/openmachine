@@ -100,7 +100,7 @@ class ServiceTests(unittest.TestCase):
                 "closed", "observed-time", "f" * 40)
         cases = [
             ("write_workspace_file", ("local", "project", "file", "text", "", ""), app.machines, "write_workspace_file"),
-            ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, ""),
+            ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, "", None),
              app.machines, "start_execution"),
             ("cancel_execution", ("local", "c" * 32), app.machines, "cancel_execution"),
             ("save_task", ("task", 0, "Title", "Body", []), tasks, "save"),
@@ -122,7 +122,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 1)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 2)
                 dispatch.assert_not_called()
 
                 def admitted(*args):
@@ -249,6 +249,89 @@ class ServiceTests(unittest.TestCase):
             stop.assert_not_called()
             start.assert_not_called()
         self.assertEqual(service._record(self.state), self.record)
+
+
+    def test_directional_metadata_and_candidate_contract_are_explicit(self):
+        path = self.state / "service/versions" / self.b / "installation.json"
+        original = service._json(path)
+        for contract in (1, 2):
+            save_json(path, original | {"state_contract": contract})
+            self.assertEqual(service._installed(self.state, self.b)["state_contract"], contract)
+            reply = {"protocol": 1, "state_contract": contract}
+            with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(reply), "")):
+                self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
+                self.assert_fault("incompatible_state", lambda: service._candidate_state(
+                    Path(sys.executable), self.config, self.state, 3 - contract))
+        for contract in (0, 3, True, "2"):
+            save_json(path, original | {"state_contract": contract})
+            self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.b))
+
+    def test_explicit_configuration_survives_update_and_exact_rollback(self):
+        self.activation_mocks()
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(original + b"# explicitly selected candidate configuration\n")
+        service._activate(self.state, self.record, self.b, candidate)
+        self.assertEqual(self.config.read_bytes(), candidate.read_bytes())
+        selected = service._record(self.state)
+        self.assertEqual(set(selected["configurations"]), {self.a, self.b})
+        service._activate(self.state, selected, self.a)
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(service._record(self.state)["current"], self.a)
+
+    def test_failed_activation_restores_exact_configuration_bytes(self):
+        _, stop, start = self.activation_mocks()
+        start.side_effect = [Fault("service_unready", "fixture"), {"status": "ready"}]
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(original + b"# candidate configuration\n")
+        self.assert_fault("activation_failed_restored", lambda: service._activate(
+            self.state, self.record, self.b, candidate))
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(service._record(self.state), self.record)
+        self.assertEqual(stop.call_count, 2)
+
+    def test_changed_configuration_is_preserved_during_uncertain_recovery(self):
+        _, stop, start = self.activation_mocks()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes() + b"# candidate\n")
+        manual = self.config.read_bytes() + b"# independent user edit\n"
+        def fail_with_edit(*_):
+            self.config.write_bytes(manual)
+            raise Fault("service_unready", "fixture")
+        start.side_effect = fail_with_edit
+        self.assert_fault("recovery_required", lambda: service._activate(
+            self.state, self.record, self.b, candidate))
+        self.assertEqual(self.config.read_bytes(), manual)
+        self.assertIsNotNone(service._record(self.state)["pending"])
+        self.assertEqual(stop.call_count, 1)
+
+    def test_remote_candidate_must_validate_retained_receipts_before_stop(self):
+        verify, stop, start = self.activation_mocks()
+        candidate = self.root / "candidate.toml"
+        candidate.write_text(self.config.read_text() + '\n[machines.remote]\ntransport="ssh"\n'
+                             'ssh_alias="uncontacted-target"\nssh_worker="/remote/' + 'a' * 64 + '.pyz"\n')
+        def reject_remote(*args, **kwargs):
+            if kwargs.get("check_remote"):
+                raise Fault("incompatible_remote_state", "Old candidate cannot read v4 receipts")
+        verify.side_effect = reject_remote
+        original = self.config.read_bytes()
+        self.assert_fault("incompatible_remote_state", lambda: service._activate(
+            self.state, self.record, self.b, candidate))
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(service._record(self.state), self.record)
+
+    def test_corrupt_configuration_snapshot_cannot_be_selected(self):
+        self.activation_mocks()
+        service._activate(self.state, self.record, self.b)
+        selected = service._record(self.state)
+        digest = selected["configurations"][self.a]
+        path = service._saved_configuration(self.state, digest)
+        path.write_text("corrupt")
+        self.assert_fault("configuration_unavailable", lambda: service._activate(self.state, selected, self.a))
+        self.assertEqual(service._record(self.state), selected)
 
 
 if __name__ == "__main__":

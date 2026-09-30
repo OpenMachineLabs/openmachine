@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 1
+STATE_CONTRACT = 2
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -71,6 +71,12 @@ def _record(state: Path) -> dict:
             raise ValueError("invalid readiness probe")
         if not Path(record["launch_python"]).is_absolute() or not isinstance(record["path_environment"], str):
             raise ValueError("invalid launcher")
+        configurations = record.get("configurations")
+        if configurations is not None:
+            if (not isinstance(configurations, dict) or len(configurations) > 3 or record["current"] not in configurations
+                    or any(not re.fullmatch(r"[0-9a-f]{64}", key) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                           for key, value in configurations.items())):
+                raise ValueError("invalid configuration snapshots")
         pending = record["pending"]
         if pending is not None:
             if set(pending) != {"from", "to", "previous"}:
@@ -93,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or result.get("state_contract") != STATE_CONTRACT or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -146,11 +152,13 @@ def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
         raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
 
 
-def _candidate_state(python: Path, config_path: Path, state: Path) -> dict:
+def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None) -> dict:
     result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)])
     try:
         value = json.loads(result.stdout)
-        if result.returncode or value["protocol"] != PROTOCOL or value["state_contract"] != STATE_CONTRACT:
+        if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
+                or value["state_contract"] not in (1, 2)
+                or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         return value
     except (ValueError, KeyError, TypeError) as error:
@@ -211,14 +219,15 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
     if observed["version"] != version or observed["prefix"] != str(destination):
         raise Fault("installation_identity_mismatch", "Wheel metadata, installed runtime and environment identity disagree.")
     save_json(destination / "installation.json", {
-        "identity": digest, "version": version, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+        "identity": digest, "version": version, "protocol": observed["protocol"], "state_contract": observed["state_contract"],
         "wheel_sha256": wheel_hash, "requirements_sha256": hashlib.sha256(locked).hexdigest(),
     })
     return digest
 
 
 async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_version: str,
-                 expected_pid: int | None = None) -> dict:
+                 expected_pid: int | None = None, *, expected_contract: int = STATE_CONTRACT,
+                 check_remote: bool = False) -> dict:
     import httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
@@ -227,9 +236,10 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
     selected = config.workspaces.get(probe["workspace"])
     if selected is None or config.machine(selected.machine).transport != "local":
         raise Fault("invalid_service_probe", "Select one configured local workspace and a permitted existing text file.")
+    remote_targets = [name for name, item in config.machines.items() if item.transport == "ssh"] if check_remote else []
     try:
-        async with asyncio.timeout(8):
-            async with httpx.AsyncClient(trust_env=False, timeout=5,
+        async with asyncio.timeout(8 + 30 * len(remote_targets)):
+            async with httpx.AsyncClient(trust_env=False, timeout=30 if remote_targets else 5,
                     transport=httpx.AsyncHTTPTransport(uds=str(socket_path))) as client:
                 async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer, _):
                     async with ClientSession(reader, writer) as session:
@@ -239,7 +249,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         fingerprint = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
                         if (capabilities.isError or initialized.serverInfo.version != expected_version
                                 or caps["version"] != expected_version or caps["configuration_sha256"] != fingerprint
-                                or caps["lifecycle"]["protocol"] != PROTOCOL or caps["lifecycle"]["state_contract"] != STATE_CONTRACT
+                                or caps["lifecycle"]["protocol"] != PROTOCOL or caps["lifecycle"]["state_contract"] != expected_contract
                                 or (expected_pid is not None and caps["lifecycle"]["pid"] != expected_pid)):
                             raise Fault("service_identity_mismatch", "The live service does not match the selected version, configuration or process.")
                         result = await session.call_tool("read_workspace_file", {
@@ -247,7 +257,27 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         read = result.structuredContent
                         if result.isError or not read["exists"] or read.get("content_redacted"):
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
+                        remote_records = {}
+                        for name in remote_targets:
+                            cursor, count = "", 0
+                            while True:
+                                response = await session.call_tool("list_executions", {
+                                    "machine": name, "cursor": cursor, "limit": 100})
+                                page = response.structuredContent
+                                if response.isError or not isinstance(page, dict) or page.get("unreadable"):
+                                    raise Fault("incompatible_remote_state", "The candidate cannot validate retained target receipts.")
+                                if page.get("target_identity") != config.machines[name].ssh_identity:
+                                    raise Fault("incompatible_remote_state", "The candidate did not verify the configured target identity.")
+                                count += len(page["executions"])
+                                following = page["next_cursor"]
+                                if following is None:
+                                    break
+                                if not isinstance(following, str) or following <= cursor:
+                                    raise Fault("incompatible_remote_state", "Target receipt pagination made no progress.")
+                                cursor = following
+                            remote_records[name] = count
                         return {"status": "ready", "version": expected_version, "configuration_sha256": fingerprint,
+                                "ssh_records_checked": remote_records,
                                 "pid": caps["lifecycle"]["pid"], "file_sha256": read["sha256"],
                                 "tunnel": "not_probed", "chatgpt": "not_probed"}
     except Exception as error:
@@ -266,14 +296,16 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
         raise Fault("service_unready", "MCP initialization or file-read verification failed; inspect service status and permissions.") from None
 
 
-def probe_service(state: Path, config_path: Path, probe: dict, version: str, pid: int | None = None) -> dict:
-    return asyncio.run(_probe(state / "mcp.sock", config_path, probe, version, pid))
+def probe_service(state: Path, config_path: Path, probe: dict, version: str, pid: int | None = None,
+                  *, expected_contract: int = STATE_CONTRACT, check_remote: bool = False) -> dict:
+    return asyncio.run(_probe(state / "mcp.sock", config_path, probe, version, pid,
+                              expected_contract=expected_contract, check_remote=check_remote))
 
 
-def _verify_candidate(state: Path, record: dict, identity: str) -> None:
+def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote: bool = False) -> None:
     installed = _installed(state, identity)
     python = _runtime(state, identity) / "bin/python"
-    observed = _candidate_state(python, Path(record["config"]), state)
+    observed = _candidate_state(python, Path(record["config"]), state, installed["state_contract"])
     if observed["version"] != installed["version"] or observed["prefix"] != str(python.parent.parent):
         raise Fault("installation_identity_mismatch", "The retained runtime changed identity; it will not be activated.")
     with tempfile.TemporaryDirectory(prefix="om-ready-", dir="/tmp") as temporary:
@@ -287,7 +319,8 @@ def _verify_candidate(state: Path, record: dict, identity: str) -> None:
                 if process.poll() is not None or time.monotonic() >= deadline:
                     raise Fault("candidate_unready", "The candidate did not create its private MCP listener; the active service is untouched.")
                 time.sleep(0.05)
-            probe_service(test_state, Path(record["config"]), record["probe"], installed["version"], process.pid)
+            probe_service(test_state, Path(record["config"]), record["probe"], installed["version"], process.pid,
+                          expected_contract=installed["state_contract"], check_remote=check_remote)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -384,7 +417,8 @@ def _start(state: Path, record: dict) -> dict:
         if observed["pid"] is not None:
             try:
                 return probe_service(state, Path(record["config"]), record["probe"],
-                                     _installed(state, record["current"])["version"], observed["pid"])
+                                     _installed(state, record["current"])["version"], observed["pid"],
+                                     expected_contract=_installed(state, record["current"])["state_contract"])
             except Fault as error:
                 if error.code != "service_unready":
                     raise
@@ -392,37 +426,137 @@ def _start(state: Path, record: dict) -> dict:
     raise Fault("service_unready", "The managed service did not pass MCP/file readiness; inspect its last exit and OS permissions.")
 
 
-def _activate(state: Path, record: dict, target: str) -> dict:
-    _verify_candidate(state, record, target)
+def _saved_configuration(state: Path, digest: str) -> Path:
+    path = state / "service/configurations" / (digest + ".toml")
+    try:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or info.st_nlink != 1 or info.st_size > 65536
+                or hashlib.sha256(path.read_bytes()).hexdigest() != digest):
+            raise ValueError("invalid snapshot")
+    except (OSError, ValueError) as error:
+        raise Fault("configuration_unavailable", "The exact retained configuration is unavailable; preserve transition state.") from error
+    return path
+
+
+def _snapshot_configuration(state: Path, source: Path) -> str:
+    load(source)
+    data = source.read_bytes()
+    if len(data) > 65536:
+        raise Fault("invalid_service_configuration", "Managed configuration snapshots are bounded to 64 KiB.")
+    digest = hashlib.sha256(data).hexdigest()
+    root = private_directory(state / "service/configurations")
+    destination = root / (digest + ".toml")
+    fd, temporary = tempfile.mkstemp(prefix=".config-", dir=root)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            pass
+        os.unlink(temporary)
+        _saved_configuration(state, digest)
+        fd = os.open(root, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return digest
+
+
+def _configuration_for(state: Path, record: dict, identity: str) -> Path:
+    snapshots = record.get("configurations")
+    if snapshots is None:
+        # Legacy selection did not change configuration during activation.
+        return Path(record["config"])
+    if identity not in snapshots:
+        raise Fault("configuration_unavailable", "No exact configuration is retained for the requested installation.")
+    return _saved_configuration(state, snapshots[identity])
+
+
+def _select_configuration(state: Path, path: Path, digest: str, allowed: set[str]) -> None:
+    data = _saved_configuration(state, digest).read_bytes()
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
+            or info.st_size > 65536 or hashlib.sha256(path.read_bytes()).hexdigest() not in allowed):
+        raise Fault("configuration_changed", "The registered configuration changed outside this transition; do not overwrite it.")
+    if path.read_bytes() == data:
+        return
+    fd, temporary = tempfile.mkstemp(prefix=".openmachine-config-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            os.fchmod(output.fileno(), stat.S_IMODE(info.st_mode))
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None) -> dict:
+    candidate_path = candidate_config or _configuration_for(state, record, target)
+    candidate_digest = _snapshot_configuration(state, candidate_path)
+    candidate_path = _saved_configuration(state, candidate_digest)
+    candidate_record = record | {"config": str(candidate_path)}
+    _verify_candidate(state, candidate_record, target)
     with lease(state / "locks/lifecycle.lock"):
-        # Freeze new cooperating MCP mutations, then check the candidate's readers again.
-        _candidate_state(_runtime(state, target) / "bin/python", Path(record["config"]), state)
+        installed = _installed(state, target)
+        _candidate_state(_runtime(state, target) / "bin/python", candidate_path, state, installed["state_contract"])
+        # The actual candidate MCP/SSH readers must also accept all retained remote
+        # records under the admission lock, including completed newer-format records.
+        if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
+            _verify_candidate(state, candidate_record, target, check_remote=True)
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
         previous_previous = pending["previous"] if pending is not None else record["previous"]
         if previous is None:
             raise Fault("recovery_required", "There is no verified prior installation to restore.")
-        record = {**record, "current": target,
+        config_path = Path(record["config"])
+        if pending is None and _live_socket(state / "mcp.sock"):
+            prior = _installed(state, previous)
+            probe_service(state, config_path, record["probe"], prior["version"],
+                          expected_contract=prior["state_contract"])
+        prior_digest = _snapshot_configuration(state, _configuration_for(state, record, previous))
+        configurations = {**record.get("configurations", {}), previous: prior_digest, target: candidate_digest}
+        allowed = set(configurations.values())
+        record = {**record, "current": target, "configurations": configurations,
                   "pending": {"from": previous, "to": target, "previous": previous_previous}}
         save_json(state / "service/service.json", record)
         try:
+            _select_configuration(state, config_path, candidate_digest, allowed)
             _stop(state)
             ready = _start(state, record)
-        except Fault as error:
+        except (Fault, OSError) as error:
             restored = {**original, "current": previous, "previous": previous_previous,
+                        "configurations": configurations,
                         "pending": {"from": previous, "to": target, "previous": previous_previous}}
             save_json(state / "service/service.json", restored)
             try:
-                _verify_candidate(state, restored, previous)
+                _select_configuration(state, config_path, prior_digest, allowed)
+                _verify_candidate(state, restored, previous, check_remote=True)
                 _stop(state)
                 _start(state, restored)
-            except Fault:
-                raise Fault("recovery_required", "Activation and restoration are unverified; selection intent is retained. Inspect status, then explicitly roll back.") from None
-            restored["pending"] = None
+            except (Fault, OSError):
+                raise Fault("recovery_required", "Activation and restoration are unverified; exact configuration/selection intent is retained.") from None
+            restored = {**original, "current": previous, "previous": previous_previous, "pending": None}
             save_json(state / "service/service.json", restored)
-            raise Fault("activation_failed_restored", "The candidate failed readiness; the previous service was restored. No task was replayed. Cause: " + error.code) from None
+            cause = error.code if isinstance(error, Fault) else type(error).__name__
+            raise Fault("activation_failed_restored", "The previous service and exact configuration were restored. No task was replayed. Cause: " + cause) from None
         record.update(previous=previous if previous != target else previous_previous, pending=None)
+        retained = {record["current"], record["previous"]} - {None}
+        record["configurations"] = {key: value for key, value in configurations.items() if key in retained}
         save_json(state / "service/service.json", record)
         return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
 
@@ -442,7 +576,8 @@ def status(config_path: Path, state: Path) -> dict:
               "tunnel": "not_probed", "chatgpt": "not_probed"}
     if observed["pid"] is not None:
         try:
-            result.update(probe_service(state, config_path, record["probe"], result["version"], observed["pid"]))
+            result.update(probe_service(state, config_path, record["probe"], result["version"], observed["pid"],
+                                        expected_contract=_installed(state, record["current"])["state_contract"]))
         except Fault as error:
             result.update(status="unready", error=error.code)
     if record["pending"] is not None:
@@ -451,7 +586,8 @@ def status(config_path: Path, state: Path) -> dict:
 
 
 def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None = None,
-            requirements: Path | None = None, workspace: str = "", path: str = "") -> dict:
+            requirements: Path | None = None, workspace: str = "", path: str = "",
+            candidate_config: Path | None = None) -> dict:
     if sys.platform != "darwin" or os.getuid() == 0:
         raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serve and SSH workers remain separate.")
     if not config_path.is_absolute() or not state.is_absolute():
@@ -505,10 +641,13 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
         if action == "update":
             if wheel is None or requirements is None:
                 raise Fault("invalid_service_request", "Update requires a trusted local wheel and pinned requirements.")
-            target = _prepare(state, wheel, requirements, config_path)
+            selected_config = candidate_config.resolve(strict=True) if candidate_config is not None else config_path
+            target = _prepare(state, wheel, requirements, selected_config)
             if target == record["current"]:
+                if selected_config.read_bytes() != config_path.read_bytes():
+                    raise Fault("same_installation", "Configuration changes require an explicit distinct candidate installation.")
                 return status(config_path, state)
-            return _activate(state, record, target)
+            return _activate(state, record, target, selected_config)
         with lease(state / "locks/lifecycle.lock"):
             if action in ("start", "restart"):
                 _candidate_state(_runtime(state, record["current"]) / "bin/python", config_path, state)
