@@ -21,7 +21,7 @@ import uvicorn
 
 from openmachine import __version__, service
 from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
-from openmachine.app import MAX_WORKSPACE_RESULT, bound_workspace_result
+from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, bound_workspace_result
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -117,9 +117,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
                           path: str = ".", offset: Annotated[int, Field(ge=0)] = 0,
                           limit: Annotated[int, Field(ge=1, le=200)] = 100, query: str = "",
-                          staged: bool = False, expected_snapshot: str = "") -> CallToolResult:
-        """Read files, literal-search, or inspect Git status/diff. Echo snapshot between pages; heed skipped/truncated results."""
-        return _reply(lambda: application.inspect_workspace(machine, workspace_name, action, path, offset, limit, query, staged, expected_snapshot))
+                          staged: bool = False, expected_snapshot: str = "",
+                          path_glob: Annotated[str, Field(max_length=1024)] = "") -> CallToolResult:
+        """Read files, literal-search, or inspect Git status/diff. Optional path_glob selects workspace-relative, case-sensitive file discovery/search (* never crosses /; no **). Git discovery includes tracked and ordinary untracked source; omitted filter preserves traversal. Echo snapshot between pages; heed skipped/truncated results."""
+        return _reply(lambda: application.inspect_workspace(machine, workspace_name, action, path, offset, limit, query, staged, expected_snapshot, path_glob), workspace_output=True)
 
     @mcp.tool(annotations=READ, structured_output=False)
     def inspect_skills(action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
@@ -130,10 +131,12 @@ def create_server(config: Settings, state: Path) -> FastMCP:
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def read_workspace_file(machine: str, workspace_name: str, path: str,
-                            offset: Annotated[int, Field(ge=0, le=131072)] = 0,
-                            expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
-        """Read one configured-workspace text file, including untracked source, with whole-file SHA256, Git context and explicit absence. Follow next_offset and echo expected_sha256 until has_more=false; never overwrite a file from partial/redacted text. Bounded UTF-8 pages; no writes or submitted-content execution. Configured SSH workspaces are read on their pinned remote target."""
-        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256), workspace_output=True)
+                            offset: Annotated[int, Field(ge=0, le=MAX_SOURCE)] = 0,
+                            expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
+                            start_line: Annotated[int | None, Field(strict=True, ge=1)] = None,
+                            line_count: Annotated[int, Field(strict=True, ge=1, le=500)] = 200) -> CallToolResult:
+        """Read up to 2 MiB of configured UTF-8 source with whole-file SHA256/context and 32 KiB pages. Optional 1-based start_line requires offset=0; line_count is 1..500. range_complete describes available requested bytes, while has_more describes remaining source. A long line continues in byte mode at next_offset with the same SHA; next_line exists only at a known boundary. Numbers remain metadata, not source text. Redaction uses full bounded source. Never reconstruct full files from partial/redacted pages. SSH reads occur only on the pinned target."""
+        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256, start_line, line_count), workspace_output=True)
 
     @mcp.tool(annotations=file_write, structured_output=False)
     async def write_workspace_file(machine: str, workspace_name: str, path: str,
@@ -157,7 +160,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                             dry_run: Annotated[bool, Field(strict=True)] = False,
                             expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
-        """Replace exact non-overlapping fragments located in the same original UTF-8 file. Preview requires empty ID and has no writes; apply requires a caller-generated ID. Echo observed whole-file hash, HEAD and workspace identity; optionally bind preview plan SHA. Same ID/request observes, never replays; ambiguous matches fail. W1 sources/payloads remain 128 KiB. File changes are not test results."""
+        """Replace exact non-overlapping fragments located in the same original UTF-8 file. Preview requires empty ID and has no writes; apply requires a caller-generated ID. Echo observed whole-file hash, HEAD and workspace identity; optionally bind preview plan SHA. Same ID/request observes, never replays; ambiguous matches fail. Sources/results support 2 MiB; combined replacement strings remain 128 KiB. File changes are not test results."""
         operation = partial(_reply, lambda: application.edit_workspace_file(machine, workspace_name, path,
             [edit.model_dump() for edit in edits], expected_workspace_identity, expected_head_sha, expected_sha256,
             change_id, dry_run, expected_plan_sha256), workspace_output=True, workspace_mutation=True, change_id=change_id)

@@ -24,6 +24,12 @@
       "base_commit": "687fb00c1b0414c981984a11d710546ffe53ef2b",
       "change": "W1 adds edit_workspace_file and read_workspace_change, plus optional change_id/expected_workspace_identity on the existing writer. Every other baseline schema and annotation is unchanged. Expectations are authored from the approved contract and verified against installed SDK discovery in all four integration configurations.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
+    },
+    {
+      "approval": "Current maintainer explicitly approved the preceding W2 plan, implementation, self-review, merge and Spec13 body update.",
+      "base_commit": "5c1d22639237fe53184d66197b7245d65cee212e",
+      "change": "W2 adds optional start_line/line_count and expands the raw read offset to 2 MiB; inspect_workspace adds optional path_glob. No tools or annotations change. Expectations are authored from the approved contract, not regenerated from actual SDK output.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
     }
   ],
   "baseline": {
@@ -882,6 +888,12 @@
             "title": "Path",
             "type": "string"
           },
+          "path_glob": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Path Glob",
+            "type": "string"
+          },
           "query": {
             "default": "",
             "title": "Query",
@@ -1053,13 +1065,20 @@
             "title": "Expected Sha256",
             "type": "string"
           },
+          "line_count": {
+            "default": 200,
+            "maximum": 500,
+            "minimum": 1,
+            "title": "Line Count",
+            "type": "integer"
+          },
           "machine": {
             "title": "Machine",
             "type": "string"
           },
           "offset": {
             "default": 0,
-            "maximum": 131072,
+            "maximum": 2097152,
             "minimum": 0,
             "title": "Offset",
             "type": "integer"
@@ -1067,6 +1086,19 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Line"
           },
           "workspace_name": {
             "title": "Workspace Name",

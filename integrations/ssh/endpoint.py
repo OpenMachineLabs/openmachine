@@ -125,8 +125,12 @@ def _dispatch(request: dict, archive: Path) -> dict:
             raise Fault("invalid_request", "Use only the documented execution-control fields.")
         result = execution.control_execution(config, state, identity, **arguments)
     elif operation == "inspect_workspace":
+        if set(arguments) - {"workspace", "action", "path", "offset", "limit", "query", "staged", "expected_snapshot", "path_glob"}:
+            raise Fault("invalid_request", "Use only the documented inspection fields.")
         result = workspace.inspect(config, identity, **arguments)
     elif operation == "read_workspace_file":
+        if set(arguments) - {"workspace", "path", "offset", "expected_sha256", "start_line", "line_count"}:
+            raise Fault("invalid_request", "Use only the documented source-read fields.")
         result = workspace.read_text_file(config, identity, **arguments)
     elif operation == "write_workspace_file":
         if set(arguments) - {"workspace", "path", "content", "expected_head_sha", "expected_sha256", "change_id", "expected_workspace_identity"}:
@@ -151,7 +155,7 @@ def _dispatch(request: dict, archive: Path) -> dict:
             result, lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1,
             MAX_MESSAGE,
         )
-    if operation in {"read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change"}:
+    if operation in {"inspect_workspace", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change"}:
         response["result"] = workspace.bound_result(result,
             lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1)
     return response

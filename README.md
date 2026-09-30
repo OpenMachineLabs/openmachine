@@ -25,11 +25,11 @@ sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI
 ## Development after v0.2.0
 
 The current development tree includes the accepted Spec #28 interactive execution
-and Spec #13 W1 guarded single-file editing: exact replacements, pure preview and
-original-ID change receipts. W1 retains 128 KiB source/payload limits; larger
-sources, line windows and multi-file patching remain separate increments.
+and Spec #13 W1/W2 guarded single-file editing: exact replacements, pure preview,
+original-ID change receipts, 2 MiB sources, line windows and filtered discovery.
+Full-content or combined edit payloads remain 128 KiB; multi-file patching is W3.
 Execution records remain format 5; workspace changes use format 1, state contract
-4 and SSH protocol 4. These internal numbers are not release versions, and W1 is
+4 and SSH protocol 5. These internal numbers are not release versions, and W1/W2 are
 not part of the immutable releases above. Inspect installed capabilities before
 using new fields. Pipe remains the default; PTY is explicit. Source/SDK acceptance
 is separate from actual refreshed Chat, live SSH and managed-transition acceptance.
@@ -191,7 +191,10 @@ candidate without its reader, even if an old check silently ignores that directo
 Completed execution/change receipts still count. Never delete history to permit a
 downgrade; `0.1.0a6` and earlier are not managed rollback targets.
 
-W1 SSH uses strict protocol 4. Explicitly prepare the matching endpoint alongside
+W2 uses strict SSH protocol 5 for its read selectors and larger-source semantics;
+W1 used protocol 4. The record shape remains format 1. An actual W1 reader rejects
+retained ranges beyond 128 KiB before a transition; no receipt is rewritten to
+make old software pass. Explicitly prepare the matching endpoint alongside
 old worker archives. For a managed upgrade that changes endpoint paths, leave the
 active configuration untouched and pass `update --candidate-config /absolute/new.toml`.
 The existing service owner snapshots the exact old/new bytes; it validates the
@@ -269,9 +272,9 @@ change. A socket or a tool list does not prove that write tools work.
 | Tool | Current input and result |
 | --- | --- |
 | `get_capabilities` | Version, configuration hash, configured machines/workspaces and implemented limits; health remains `not_probed`. |
-| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`. |
+| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`; optional `path_glob` enables filtered file discovery/search. |
 | `inspect_skills` | `list/read/files`, exact discovered `skill`, relative resource `path`, query/range and `expected_snapshot`; bundled and explicit user sources only. |
-| `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256; UTF-8-safe pages, raw hash, versioned workspace identity, Git classification and explicit absence. |
+| `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256, or `start_line`/`line_count`; 2 MiB source, 32 KiB UTF-8-safe pages, raw hash/context and explicit absence. |
 | `write_workspace_file` | Complete bounded text, observed HEAD/hash; optional `change_id` requires `expected_workspace_identity` and retains the original change result. No-ID behavior stays legacy. |
 | `edit_workspace_file` | Exact `old_text/new_text` replacements in one original file, observed workspace identity/HEAD/hash; empty ID for `dry_run`, original caller-generated ID for apply; optional approved plan SHA. |
 | `read_workspace_change` | Original machine/change ID; historical receipt and owner observation, with optional separate current hashes. Never applies, repairs or initializes history. |
@@ -301,18 +304,58 @@ the exact tested source and refresh changed tool metadata in a new conversation.
 
 ### Workspace inspection bounds
 
-File/diff reads return at most 64 KiB. Listing/status/search pages contain up to
-200 entries; offsets count entries except file/diff offsets, which count raw
-bytes. Echo `snapshot` as `expected_snapshot` between search/status/diff pages;
-a changed snapshot rejects continuation. These inspections are not atomic source
-snapshots: recheck status when external writers may have changed the workspace.
+Workspace file/diff pages return at most 32 KiB of text. Listing/status/search
+pages contain up to 200 entries; offsets still count entries except file/diff
+offsets, which count raw bytes. Final encoded response bounds can shorten an
+entry page, but its next offset counts only returned entries. Echo `snapshot`
+as `expected_snapshot` between search/status/diff and filtered-discovery pages;
+a changed snapshot rejects continuation. Unfiltered listing retains filesystem
+order and its mtime warning. Observations are not atomic filesystem transactions.
 
-Literal search scans at most 2,000 entries and 8 MiB per call, at most 1 MiB per
-file and 1,000 matching lines. It does not follow descendant symlinks or build an
-index. Skipped credentials, binary, oversized and unreadable files are explicit;
-`complete=false` is not a complete negative search. Narrow the path when limits
-are reached. Git commands have a five-second/1 MiB capture bound; a captured
-prefix may be paged, but `truncated=true` requires a narrower path for completeness.
+Literal search scans at most 2,000 entries, 8 MiB and 1,000 matching lines per call.
+Omitting `path_glob` retains the existing traversal selection and 1 MiB per-file
+scan limit. An explicit relative filter enables Git tracked-plus-ordinary-untracked
+discovery (excluding ignored source), or bounded traversal for a confirmed non-Git
+root, and a 2 MiB per-file scan limit. Direct permitted reads of ignored files
+remain available. Git enumeration failure is not a traversal fallback. Filtered
+results are sorted workspace-relative file names; nested repositories/submodules
+need a separately configured workspace. `*`, `?` and character classes match each
+path segment case-sensitively; `*` never crosses `/`, and `**` is unsupported.
+For example, `path_glob="openmachine/workspace/*.py"` narrows files or literal search,
+not mutation paths. A path filter is invalid for read/status/diff actions.
+
+Search shares one backend and creates no index. Skipped credentials, links,
+binary/oversized/unreadable sources and unsupported names are explicit;
+`complete=false` is not a complete negative search. A clipped final logical line
+is omitted rather than exposing a snippet without its redaction context. Source
+changes, byte/entry limits and clipped NUL-delimited names remain incomplete.
+Git commands keep the five-second/1 MiB capture bound. Narrow the path/filter
+when capture is incomplete; paging a captured prefix does not finish enumeration.
+
+### Focused source windows
+
+`read_workspace_file` observes a bounded complete source locally, hashes original
+bytes and returns only the selected page. `start_line=null` retains raw-byte mode.
+A 1-based `start_line` requires `offset=0`; `line_count` defaults to 200 and accepts
+1..500. Returned start/end lines and requested range are metadata, never prefixes
+inserted into source text. The legacy inspection `read` action uses this same
+guarded 2 MiB source reader and 32 KiB pages, retaining its raw offset/chunk hash
+fields; it is not an unbounded large-file or binary reader.
+
+`range_complete` means all available bytes of the requested range were covered,
+including when that range reaches EOF. A request beyond EOF returns empty text,
+raw offset equal to file size and null actual line bounds. `has_more` independently
+means bytes remain in the source. An oversized line returns `line_truncated=true`;
+continue in byte mode with `next_offset` and the same `expected_sha256`, not the
+next line number. `next_line` appears only at a known line boundary with bytes
+remaining. UTF-8, BOM, CRLF and final-newline bytes are not normalized.
+
+Redaction is best effort, applied using complete bounded source context before
+page/snippet slicing, including multiline key blocks. Source hashes and cursors
+never use redacted-text lengths. Response clipping cannot silently skip raw source
+or captured hits. Source text remains partial even when its whole-file hash is
+known. Read applicable nested `AGENTS.md` paths reported in context explicitly;
+those instructions are not automatically loaded or executed.
 
 Git status distinguishes staged, unstaged and untracked changes. Diff defaults
 to the worktree; `staged=true` compares the index, including staged deletions.
@@ -622,9 +665,9 @@ Preview and scoped historical reads require no write grant. New example/init
 configurations explicitly disable both grants. Editing scripts is not a sandbox
 for commands that may later execute them; platform approval remains independent.
 
-W1 bounds sources/results and complete text or combined edit strings to 128 KiB,
-read pages/diffs to 32 KiB, records to 64 KiB and encoded workspace responses to
-512 KiB, including duplicated MCP representations. Each target retains at most
+W2 bounds sources/results to 2 MiB while complete text or combined edit strings
+remain 128 KiB. Read pages/diffs stay 32 KiB, records 64 KiB and encoded workspace
+responses 512 KiB, including duplicated MCP representations. Each target retains at most
 10,000 change identities without automatic eviction. The existing 1 MiB transport
 limit still applies. Receipts contain context, request/plan fingerprints and actual
 effects, not raw edit payloads or a source archive. Historical diffs are not
