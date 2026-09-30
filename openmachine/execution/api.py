@@ -189,8 +189,15 @@ def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = Fals
             for item in related
         ):
             continue
-        selected = observed["worktree"] if legacy_candidate else lock_root(config, related[0].machine, cwd, observed)
         original = observed.get("workspace_lock_root", observed["worktree"])
+        try:
+            selected = observed["worktree"] if legacy_candidate else lock_root(config, related[0].machine, cwd, observed)
+        except Fault as error:
+            if error.code != "ambiguous_workspace":
+                raise
+            # Historical roots need not admit new work, but their original lease
+            # must be verifiably free before a transition or another admission.
+            selected = None
         if selected == original:
             continue
         old_key = hashlib.sha256(original.encode()).hexdigest()
