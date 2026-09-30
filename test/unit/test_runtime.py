@@ -47,23 +47,74 @@ class RuntimeTests(unittest.TestCase):
             time.sleep(0.03)
         self.fail(f"Execution did not finish: {result['execution_id']}")
 
-    def test_foundation_imports_only_itself_and_standard_library(self):
-        package = "openmachine.foundation"
-        for source in files(package).iterdir():
-            if not source.name.endswith(".py"):
+    def test_capability_and_ssh_import_boundaries(self):
+        sources = {}
+        for root in ("openmachine", "integrations"):
+            for path in Path(str(files(root))).rglob("*.py"):
+                relative = path.relative_to(Path(str(files(root))))
+                module = root + "." + ".".join(relative.with_suffix("").parts)
+                module = module.removesuffix(".__init__")
+                sources[module] = path
+        boundaries = {
+            "openmachine.foundation": ("openmachine.foundation",),
+            "openmachine.execution": ("openmachine", "openmachine.execution", "openmachine.foundation", "openmachine.workspace.git"),
+            "openmachine.workspace": ("openmachine.workspace", "openmachine.foundation"),
+            "openmachine.tasks": ("openmachine.tasks", "openmachine.foundation"),
+            "integrations.ssh": ("integrations.ssh",),
+            "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation"),
+            "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation"),
+            "integrations.ssh.endpoint": ("openmachine", "openmachine.execution", "openmachine.workspace",
+                                          "openmachine.foundation", "integrations.ssh", "integrations.ssh.bundle"),
+        }
+        for module, source in sources.items():
+            owner = module if module in boundaries else module.rpartition(".")[0]
+            if owner not in boundaries:
                 continue
-            for node in ast.walk(ast.parse(source.read_text())):
+            package = module if source.name == "__init__.py" else module.rpartition(".")[0]
+            tree = ast.parse(source.read_text())
+            # TYPE_CHECKING imports do not run in the dependency-free target.
+            for node in ast.walk(tree):
+                if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                    node.body = []
+            for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
-                    modules = [item.name for item in node.names]
+                    imports = [item.name for item in node.names]
                 elif isinstance(node, ast.ImportFrom):
-                    modules = [resolve_name("." * node.level + (node.module or ""), package)]
+                    base = resolve_name("." * node.level + (node.module or ""), package)
+                    imports = [base + "." + item.name if base + "." + item.name in sources else base for item in node.names]
                 else:
                     continue
-                for module in modules:
-                    with self.subTest(source=source.name, line=node.lineno, module=module):
-                        self.assertTrue(module == package or module.startswith(package + ".")
-                                        or module.split(".")[0] in sys.stdlib_module_names,
-                                        f"Foundation must not depend on {module}.")
+                for dependency in imports:
+                    allowed = dependency.split(".")[0] in sys.stdlib_module_names or any(
+                        dependency == prefix or (prefix not in {"openmachine", "integrations.ssh"}
+                                                  and dependency.startswith(prefix + "."))
+                        for prefix in boundaries[owner])
+                    with self.subTest(module=module, line=node.lineno, dependency=dependency):
+                        self.assertTrue(allowed, f"{module} must not depend on {dependency}")
+
+    def test_disabled_integrations_are_not_imported_or_probed_by_composition(self):
+        code = r'''import builtins
+from pathlib import Path
+import sys
+from openmachine.config import Settings
+original_import = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name == "integrations" or name.startswith("integrations.") or name == "openmachine.github":
+        raise AssertionError("Disabled integration imported: " + name)
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = guarded
+from openmachine.bootstrap import create_application
+config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}}})
+state = Path(sys.argv[1])
+app = create_application(config, state)
+assert app.get_capabilities()["integrations"] == []
+assert app.find_tasks()["status"] == "uninitialized"
+assert not state.exists()
+assert not any(name in sys.modules for name in ("openmachine.github", "integrations.ssh.client", "mcp"))
+'''
+        result = subprocess.run([sys.executable, "-I", "-c", code, str(self.state)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_configuration_rejects_unknown_or_invalid_fields(self):
         path = self.root / "config.toml"

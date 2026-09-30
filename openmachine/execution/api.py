@@ -1,5 +1,6 @@
 """Execution admission, receipt observation and cancellation."""
 
+from collections.abc import Callable
 from contextlib import ExitStack
 import hashlib
 import heapq
@@ -33,11 +34,9 @@ def _directory(state: Path, execution_id: str) -> Path:
     return state / "executions" / execution_id
 
 
-def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
-          argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
-          workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
-          *, remote_worker: Path | None = None) -> dict:
-    target = config.machine(machine, write=True)
+def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_head_sha: str,
+                   workspace_access: str, resource_keys: list[str] | None, task_id: str) -> list[str]:
+    """Check the shared start request before controller routing or target admission."""
     if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
         raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
     if not argv or not argv[0] or len(argv) > 100 or any("\0" in a or len(a) > 4096 for a in argv):
@@ -53,11 +52,17 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
         raise Fault("invalid_head", "expected_head_sha must be a full lowercase Git commit SHA.")
     if not Path(cwd).is_absolute():
         raise Fault("invalid_cwd", "Select an existing absolute working directory.")
-    if target.transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
-                    timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
-                    workspace_access=workspace_access, resource_keys=keys, task_id=task_id)
+    return keys
+
+
+def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
+          argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
+          workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
+          *, remote_worker: Path | None = None, validate_new: Callable[[], object] | None = None) -> dict:
+    target = config.machine(machine, write=True)
+    keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id)
+    if target.transport != "local":
+        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     working = Path(cwd).resolve(strict=True)
     if not working.is_dir() or not any(
         working.is_relative_to(Path(item.root).resolve())
@@ -77,9 +82,8 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
-        if task_id and remote_worker is None:
-            from openmachine.tasks import read as read_task
-            read_task(state, task_id)  # Verify a reference, not permission or task completion.
+        if validate_new is not None:
+            validate_new()  # Only new admissions need controller reference validation.
         observed = context(working)
         if observed["git_status"] == "unavailable":
             raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
@@ -170,9 +174,8 @@ def _scope_state(unit: str) -> str:
 
 def read(config: "Settings", state: Path, machine: str, execution_id: str,
          offset: int = 0, max_bytes: int = MAX_READ) -> dict:
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "read_execution", execution_id=execution_id, offset=offset, max_bytes=max_bytes)
+    if config.machine(machine).transport != "local":
+        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     directory = _directory(state, execution_id)
     record, status = _receipt(directory, machine)
     output = logs.read(directory, offset, max_bytes, legacy=record.get("format_version", 1) == 1)
@@ -190,9 +193,8 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
 
 def list_records(config: "Settings", state: Path, machine: str, cursor: str = "", limit: int = 20) -> dict:
     """Page stable IDs, not guessed logical tasks; inspect at most limit receipts."""
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "list_executions", cursor=cursor, limit=limit)
+    if config.machine(machine).transport != "local":
+        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     if cursor:
         _directory(state, cursor)
     if not 1 <= limit <= 100:
@@ -220,9 +222,8 @@ def list_records(config: "Settings", state: Path, machine: str, cursor: str = ""
 
 
 def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
-    if config.machine(machine).transport == "ssh":
-        from integrations.ssh import call
-        return call(config, state, machine, "cancel_execution", execution_id=execution_id)
+    if config.machine(machine).transport != "local":
+        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     directory = _directory(state, execution_id)
     record, status = _receipt(directory, machine)
     if status == "finishing":

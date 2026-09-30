@@ -1,6 +1,5 @@
 """Explicit local tools and optional GitHub operations on a private MCP service."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,10 +15,10 @@ from mcp.types import CallToolRequest, CallToolResult, TextContent, ToolAnnotati
 from pydantic import Field
 import uvicorn
 
-from openmachine import __version__, execution, github, service, skills, tasks, workspace
-from openmachine.execution.logs import SEGMENT_BYTES
+from openmachine import __version__, service
+from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT
+from openmachine.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
@@ -45,6 +44,7 @@ def _reply(operation) -> CallToolResult:
 
 
 def create_server(config: Settings, state: Path) -> FastMCP:
+    application = create_application(config, state)
     mcp = FastMCP(
         "Open Machine", instructions="Read inspect_skills(action='read') before operating this runtime.",
         stateless_http=True, json_response=True, max_request_body_size=1048576,
@@ -58,13 +58,6 @@ def create_server(config: Settings, state: Path) -> FastMCP:
 
     private_directory(state / "locks")
 
-    def mutate(operation) -> CallToolResult:
-        def locked():
-            with lease(state / "locks/lifecycle.lock", shared=True):
-                service.guard_writes(state)
-                return operation()
-        return _reply(locked)
-
     has_ssh = any(item.transport == "ssh" for item in config.machines.values())
     machine_read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=has_ssh)
     file_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=has_ssh)
@@ -72,25 +65,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     @mcp.tool(annotations=READ, structured_output=False)
     def get_capabilities() -> CallToolResult:
         """Report implemented limits and configured targets, not live health or future features."""
-        return _reply(lambda: {
-            "version": __version__, "configuration_sha256": hashlib.sha256(config.model_dump_json().encode()).hexdigest(),
-            "machines": {name: {**item.model_dump(), "probe_status": "not_probed"} for name, item in config.machines.items()},
-            "workspaces": {name: item.model_dump() for name, item in config.workspaces.items()},
-            "skills": ["openmachine"], "skill_roots": config.skills.roots, "task_continuity": True,
-            "integrations": (["github"] if config.github is not None else []) + (["ssh"] if has_ssh else []),
-            "github": None if config.github is None else {**config.github.model_dump(), "backend": "gh",
-                                                           "probe_status": "not_probed", "read_and_merge": True},
-            "transport": "private_unix_socket",
-            "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
-            "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
-                       "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": SEGMENT_BYTES,
-                       "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
-                       "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": MAX_SCAN_ENTRIES,
-                       "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,
-                       "text_file_bytes": MAX_TEXT_FILE, "text_page_bytes": TEXT_PAGE,
-                       "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX},
-            "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
-        })
+        return _reply(lambda: application.get_capabilities())
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
@@ -98,22 +73,21 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                           limit: Annotated[int, Field(ge=1, le=200)] = 100, query: str = "",
                           staged: bool = False, expected_snapshot: str = "") -> CallToolResult:
         """Read files, literal-search, or inspect Git status/diff. Echo snapshot between pages; heed skipped/truncated results."""
-        return _reply(lambda: workspace.inspect(config, machine, workspace_name, action, path, offset, limit,
-                                                 query=query, staged=staged, expected_snapshot=expected_snapshot))
+        return _reply(lambda: application.inspect_workspace(machine, workspace_name, action, path, offset, limit, query, staged, expected_snapshot))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def inspect_skills(action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
                        query: Annotated[str, Field(max_length=200)] = "", offset: Annotated[int, Field(ge=0)] = 0,
                        limit: Annotated[int, Field(ge=1, le=100)] = 100, expected_snapshot: str = "") -> CallToolResult:
         """Read the bundled Skill or explicit user sources. Select exact discovered identities, not names. Sources are a Skill directory or a collection of immediate Skill directories, including whole-directory links. Resource reads never execute scripts or escape the selected Skill. Follow pages/snapshots and warnings; empty skill with action=read selects the bundled operating Skill."""
-        return _reply(lambda: skills.inspect(config, action, skill, path, query, offset, limit, expected_snapshot))
+        return _reply(lambda: application.inspect_skills(action, skill, path, query, offset, limit, expected_snapshot))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def read_workspace_file(machine: str, workspace_name: str, path: str,
                             offset: Annotated[int, Field(ge=0, le=131072)] = 0,
                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
         """Read one configured-workspace text file, including untracked source, with whole-file SHA256, Git context and explicit absence. Follow next_offset and echo expected_sha256 until has_more=false; never overwrite a file from partial/redacted text. Bounded UTF-8 pages; no writes or submitted-content execution. Configured SSH workspaces are read on their pinned remote target."""
-        return _reply(lambda: workspace.read_text_file(config, machine, workspace_name, path, offset, expected_sha256))
+        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256))
 
     @mcp.tool(annotations=file_write, structured_output=False)
     def write_workspace_file(machine: str, workspace_name: str, path: str,
@@ -121,8 +95,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]) -> CallToolResult:
         """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, submitted-content execution, deletion, parent creation or permission-change interface. Configured SSH writes use the pinned target and its own preconditions and locks. Read back any unknown outcome; platform approval remains independent."""
-        return mutate(lambda: workspace.write_text_file(config, state, machine, workspace_name, path, content,
-                                                        expected_head_sha, expected_sha256))
+        return _reply(lambda: application.write_workspace_file(machine, workspace_name, path, content, expected_head_sha, expected_sha256))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],
@@ -130,12 +103,12 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                    limit: Annotated[int, Field(ge=1, le=50)] = 20,
                    expected_generation: Annotated[int, Field(ge=-1)] = -1) -> CallToolResult:
         """Find private checkpoints by exact task/anchors or title/ID keywords. Anchor filters intersect; descriptive results are candidates, never continuation authority. Follow pagination/generation. Reads do not initialize state or start work; missing/corrupt history is explicit."""
-        return _reply(lambda: tasks.find(state, query, anchors, task_id, offset, limit, expected_generation))
+        return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_task(task_id: str) -> CallToolResult:
         """Read the original bounded checkpoint and revision, verify its index hash, then recheck current authority, Git and execution receipts before continuation. This does not resume an agent or execute work."""
-        return _reply(lambda: tasks.read(state, task_id))
+        return _reply(lambda: application.read_task(task_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
     def save_task(task_id: str, expected_revision: Annotated[int, Field(ge=0)],
@@ -143,36 +116,36 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                   body: Annotated[str, Field(min_length=1, max_length=32768)],
                   anchors: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
         """Save one private material checkpoint and lookup metadata. Expected revision zero creates; updates compare the observed revision under a store lock. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Lookup anchors are additive; omitting them preserves prior references. Keep goals, authority references, original executions, evidence and next action, not credentials, transcripts or hidden reasoning. No code execution, external publication or automatic resume. Torn two-file saves are reported, not silently repaired."""
-        return mutate(lambda: tasks.save(state, task_id, expected_revision, title, body, anchors))
+        return _reply(lambda: application.save_task(task_id, expected_revision, title, body, anchors))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     def start_execution(machine: str, execution_id: str, cwd: str,
                         argv: Annotated[list[str], Field(min_length=1, max_length=100)],
-                        timeout_seconds: Annotated[int, Field(ge=1, le=execution.MAX_TIMEOUT)] = execution.DEFAULT_TIMEOUT,
+                        timeout_seconds: Annotated[int, Field(ge=1, le=MAX_TIMEOUT)] = DEFAULT_TIMEOUT,
                         expected_head_sha: str = "", workspace_access: Literal["exclusive", "shared"] = "exclusive",
                         resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "") -> CallToolResult:
         """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return mutate(lambda: execution.start(config, state, machine, execution_id, cwd, argv,
-                                              timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id))
+        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
                        max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536) -> CallToolResult:
         """Read the original local or remote receipt and bounded output. finishing means remote scope cleanup is pending. Unreachable targets or missing worker evidence are unknown, never success or permission to retry."""
-        return _reply(lambda: execution.read(config, state, machine, execution_id, offset, max_bytes))
+        return _reply(lambda: application.read_execution(machine, execution_id, offset, max_bytes))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def list_executions(machine: str, cursor: str = "",
                         limit: Annotated[int, Field(ge=1, le=100)] = 20) -> CallToolResult:
         """Find original execution IDs in stable ID order. Follow next_cursor and unreadable records; this is not task recovery."""
-        return _reply(lambda: execution.list_records(config, state, machine, cursor, limit))
+        return _reply(lambda: application.list_executions(machine, cursor, limit))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
-        return mutate(lambda: execution.cancel(config, state, machine, execution_id))
+        return _reply(lambda: application.cancel_execution(machine, execution_id))
 
     if config.github is not None:
+        github = application.github
         @mcp.tool(annotations=GITHUB_READ, structured_output=False)
         def github_read(action: github.ReadAction, repository: str = "", number: Annotated[int, Field(ge=0)] = 0,
                         ref: str = "", path: str = "", page: Annotated[int, Field(ge=1, le=1000)] = 1,
@@ -180,8 +153,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                         expected_head_sha: str = "", expected_base_sha: str = "",
                         offset: Annotated[int, Field(ge=0, le=1048576)] = 0) -> CallToolResult:
             """Read scoped GitHub identity, repositories, Issues and version-bound PR evidence. Read pull_request before candidate pages; echo both HEAD/base on continuation. Follow next_page/next_cursor and evidence gaps. checks uses an exact commit ref. file uses a fixed commit and 16 KiB UTF-8 byte pages; no symlink/credential reads. API patches are not proof of complete diffs. status probes the existing gh identity without credentials or login changes. merge_context observes gates and never merges. No arbitrary endpoint or mutation dispatch."""
-            return _reply(lambda: github.read(config, action, repository, number, ref, path, page, limit, cursor,
-                                              expected_head_sha, expected_base_sha, offset))
+            return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_issue(action: Literal["create", "update"], repository: str,
@@ -190,7 +162,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                          number: Annotated[int, Field(ge=0)] = 0,
                          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "") -> CallToolResult:
             """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
-            return mutate(lambda: github.issue(config, action, repository, title, body, number, state, expected_updated_at))
+            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_pull_request(action: Literal["create", "update"], repository: str,
@@ -201,15 +173,14 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                                 state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                                 expected_head_sha: str = "") -> CallToolResult:
             """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
-            return mutate(lambda: github.pull_request(config, action, repository, title, body, number, head, base, draft,
-                                                      state, expected_updated_at, expected_head_sha))
+            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_comment(action: Literal["create", "update"], repository: str,
                            body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
                            comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "") -> CallToolResult:
             """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. updated_at detects an observed edit conflict without promising atomic CAS."""
-            return mutate(lambda: github.comment(config, action, repository, body, number, comment_id, expected_updated_at))
+            return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_review(action: Literal["create", "update"], repository: str,
@@ -218,7 +189,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                           expected_head_sha: str = "",
                           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT") -> CallToolResult:
             """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. Uncertain writes require original-review readback, never blind retry."""
-            return mutate(lambda: github.review(config, action, repository, body, number, review_id, expected_head_sha, event))
+            return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_merge(repository: str, number: Annotated[int, Field(ge=1)],
@@ -227,8 +198,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                          commit_title: Annotated[str, Field(max_length=256)] = "",
                          commit_message: Annotated[str, Field(max_length=60000)] = "") -> CallToolResult:
             """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
-            return mutate(lambda: github.merge(config, repository, number, expected_head_sha, expected_base_sha,
-                                               method, commit_title, commit_message))
+            return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message))
 
     sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
 

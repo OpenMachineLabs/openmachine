@@ -617,11 +617,14 @@ automatically migrate production workloads or grant OS permissions.
 
 ## Development and review
 
-The current core has three capability packages and one shared foundation:
+The runtime has one application boundary, local capabilities and explicit integrations:
 
 | Package | Ownership |
 | --- | --- |
-| `openmachine/execution/` | API admission and live observations; worker process lifecycle; persisted record validation; bounded logs. |
+| `openmachine/app/` | Typed operations, shared lifecycle admission, configured local/SSH routing and controller task-reference checks. |
+| `openmachine/bootstrap.py` | Assemble only configured components without probing, executing work or creating state. |
+| `integrations/ssh/` | Bounded controller transport, identity-checked target endpoint and immutable worker archives. |
+| `openmachine/execution/` | Local execution admission and live observations; worker process lifecycle; persisted record validation; bounded logs. |
 | `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
 | `openmachine/tasks/` | Lock-coordinated checkpoint saves/reads; index metadata and checkpoint integrity. |
 | `openmachine/foundation/` | Shared filesystem primitives, durable writes, cooperative locks and safe errors; no domain schemas or policy. |
@@ -632,10 +635,25 @@ operations; workers retain `python -m openmachine.execution`. These internal
 paths do not change MCP/CLI contracts, persisted locations, lock identities or
 save ordering. The checkpoint/index pair is still not a two-file transaction.
 
-Local/SSH routing and controller task-reference checks remain in their existing
-call paths until Spec #18 S3. The SSH archive includes the same target-capable
-execution/workspace code, not the controller task store. No second executor,
-compatibility implementation or new integration is introduced by packaging.
+MCP operations and explicit CLI integration probes use the application assembled
+by `bootstrap.py`. Every application mutation acquires the existing shared
+lifecycle lease and selected-runtime guard once around dispatch, not for the
+background command's lifetime. CLI service management still enters `service.py`
+directly. Reads and already-running workers retain their existing behavior.
+
+Machine routing is controller-owned. Local execution/workspace code never calls
+SSH; the target endpoint invokes those same local APIs. Original execution IDs
+are reconciled before a new task reference is required. A remote pre-read does
+not replace the target's final normalized-request comparison. Checkpoints stay
+on the controller; files, hashes, worktree locks and execution receipts stay on
+the selected target. Transport loss never causes local fallback or replay.
+
+The curated archive contains the endpoint and dependency-free target closure,
+not the SSH client, app, controller tasks, service or optional provider code.
+Disabled integrations are not imported by application assembly. GitHub operations
+currently remain in `openmachine/github.py`; complete provider packaging is the
+separate S4 increment in Spec #18. There is no second executor, task store or
+public plugin/DI framework.
 
 Repository-authored documentation, comments, Issues, PRs, commits, labels and CI
 remain English. Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md)
