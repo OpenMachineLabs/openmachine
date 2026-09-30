@@ -99,7 +99,9 @@ class ServiceTests(unittest.TestCase):
         pull = ("update", "example/project", "Title", "Body", 1, "topic", "main", False,
                 "closed", "observed-time", "f" * 40)
         cases = [
-            ("write_workspace_file", ("local", "project", "file", "text", "", ""), app.machines, "write_workspace_file"),
+            ("edit_workspace_file", ("local", "project", "file", [{"old_text": "a", "new_text": "b"}],
+                                     "a" * 64, "", "b" * 64, "c" * 32, False, ""), app.machines, "edit_workspace_file"),
+            ("write_workspace_file", ("local", "project", "file", "text", "", "", "", ""), app.machines, "write_workspace_file"),
             ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, "", None, False, None),
              app.machines, "start_execution"),
             ("cancel_execution", ("local", "c" * 32), app.machines, "cancel_execution"),
@@ -123,7 +125,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 3)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 4)
                 dispatch.assert_not_called()
 
                 def admitted(*args):
@@ -254,7 +256,7 @@ class ServiceTests(unittest.TestCase):
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service._json(path)
-        for contract in (1, 2, 3):
+        for contract in (1, 2, 3, 4):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
@@ -262,7 +264,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service._candidate_state(
                     Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
-        for contract in (0, 4, True, "3"):
+        for contract in (0, 5, True, "3"):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.b))
 
@@ -368,6 +370,68 @@ class ServiceTests(unittest.TestCase):
         self.assert_fault("configuration_unavailable", lambda: service._activate(self.state, selected, self.a))
         self.assertEqual(service._record(self.state), selected)
 
+
+    def test_remote_workspace_reader_uses_exact_candidate_and_validates_complete_proof(self):
+        pin, archive = "d" * 64, "e" * 64
+        with self.config.open("a") as file:
+            file.write('\n[machines.remote]\ntransport="ssh"\nssh_alias="fixture"\nssh_identity="' + pin +
+                       '"\nssh_worker="/target/' + archive + '.pyz"\n')
+        proof = {"identity_verified": True, "target_identity": pin, "worker_sha256": archive,
+                 "workspace_change_format": 1, "workspace_change_records": 1,
+                 "workspace_change_store_present": True, "legacy_workspace_compatible": True,
+                 "unavailable_workspaces": []}
+        python = self.root / "candidate/bin/python"
+        with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")) as call:
+            self.assertEqual(service._remote_workspace_state(python, self.config, "remote"), proof)
+            self.assertEqual(call.call_args.args[0], [str(python), "-I", "-m", "openmachine.cli", "--config", str(self.config),
+                                                       "doctor", "--machine", "remote"])
+        for delta in ({"workspace_change_format": True}, {"workspace_change_store_present": False},
+                      {"target_identity": "f" * 64}, {"legacy_workspace_compatible": None}):
+            with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_remote_state", lambda: service._remote_workspace_state(python, self.config, "remote"))
+        # Missing unrelated source is not unreadable target history or a reason to disrupt a healthy service.
+        missing = proof | {"unavailable_workspaces": ["unrelated"]}
+        with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 1, json.dumps(missing), "")):
+            self.assertEqual(service._remote_workspace_state(python, self.config, "remote"), missing)
+
+    def test_retained_remote_workspace_state_blocks_old_selection_before_stop(self):
+        pin, archive = "d" * 64, "e" * 64
+        with self.config.open("a") as file:
+            file.write('\n[machines.remote]\ntransport="ssh"\nssh_alias="fixture"\nssh_identity="' + pin +
+                       '"\nssh_worker="/target/' + archive + '.pyz"\n')
+        installation = self.state / "service/versions" / self.a / "installation.json"
+        save_json(installation, service._json(installation) | {"state_contract": 4})
+        _, stop, start = self.activation_mocks()
+        for present, compatible in ((True, True), (False, False)):
+            proof = {"workspace_change_store_present": present, "legacy_workspace_compatible": compatible}
+            with patch.object(service, "_remote_workspace_state", return_value=proof) as read:
+                self.assert_fault("incompatible_remote_state", lambda: service._activate(self.state, self.record, self.b))
+                self.assertEqual(read.call_args.args, (service._runtime(self.state, self.a) / "bin/python", self.config, "remote"))
+            self.assertEqual(service._record(self.state), self.record)
+            stop.assert_not_called()
+            start.assert_not_called()
+
+    def test_actual_local_change_reader_blocks_old_candidate_that_ignores_store(self):
+        from openmachine import workspace
+        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nexecution_enabled=true\n'
+                               '[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
+        config = service.load(self.config)
+        file = self.root / "source.py"
+        file.write_text("answer = 41")
+        read = workspace.read_text_file(config, "local", "project", "source.py")
+        changed = workspace.edit_text_file(config, self.state, "local", "project", "source.py",
+            [{"old_text": "41", "new_text": "42"}], read["context"]["workspace_identity"], "", read["sha256"], "d" * 32)
+        self.assertEqual(changed["status"], "applied")
+        record = self.state / "workspace-changes" / ("d" * 32) / "record.json"
+        retained = record.read_bytes()
+        ignored = subprocess.CompletedProcess([], 0, json.dumps({"protocol": 1, "state_contract": 1}), "")
+        with patch.object(service, "_verify_candidate"), patch.object(service, "_run", return_value=ignored), \
+             patch.object(service, "_stop") as stop, patch.object(service, "_start") as start:
+            self.assert_fault("incompatible_state", lambda: service._activate(self.state, self.record, self.b))
+            stop.assert_not_called()
+            start.assert_not_called()
+        self.assertEqual(record.read_bytes(), retained)
+        self.assertEqual(service._record(self.state), self.record)
 
 if __name__ == "__main__":
     unittest.main()
