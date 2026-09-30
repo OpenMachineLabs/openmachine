@@ -1,5 +1,6 @@
-"""Execution receipt formats and validation, without process observation or writes."""
+"""Execution request/receipt contracts, without process observation or writes."""
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -8,9 +9,13 @@ import re
 from openmachine.foundation.sanitize import Fault
 
 MAX_TIMEOUT = 86400
-FORMAT = 4
+FORMAT = 5
 DEFAULT_GRACE = 5.0
 LEGACY_GRACE = 0.5
+CONTROL_PROTOCOL = 1
+MAX_CONTROL_SEQ = 2**53 - 1
+MAX_INPUT = 16384
+CONTROL_ACTIONS = {"write_stdin", "interrupt", "resize"}
 TERMINAL = {"succeeded", "failed", "timed_out", "cancelled", "interrupted", "outcome_unknown"}
 STOP_STATUS = {"cancel": "cancelled", "timeout": "timed_out", "worker_signal": "interrupted"}
 
@@ -27,10 +32,56 @@ def termination_grace(value: float | None) -> float:
     return float(value)
 
 
+def resolve_terminal_size(tty: bool, value: dict | None) -> dict | None:
+    if type(tty) is not bool:
+        raise Fault("invalid_tty", "tty must be an explicit boolean.")
+    if not tty:
+        if value is not None:
+            raise Fault("invalid_terminal_size", "Pipe execution has no terminal dimensions.")
+        return None
+    if value is None:
+        return {"rows": 24, "cols": 80}
+    if (not isinstance(value, dict) or set(value) != {"rows", "cols"}
+            or any(type(v) is not int or not 1 <= v <= 1000 for v in value.values())):
+        raise Fault("invalid_terminal_size", "Use integer rows and cols from 1 to 1000, with no extra fields.")
+    return dict(value)
+
+
+def control_request(expected_control_seq: int, action: str, text: str | None = None,
+                    terminal_size: dict | None = None) -> dict:
+    if type(expected_control_seq) is not int or not 0 <= expected_control_seq < MAX_CONTROL_SEQ:
+        raise Fault("invalid_control_seq", "Use the previously observed sequence from 0 through 2^53-2.")
+    if not isinstance(action, str) or action not in CONTROL_ACTIONS:
+        raise Fault("invalid_control_action", "Use write_stdin, interrupt or resize.")
+    if action == "write_stdin":
+        if not isinstance(text, str) or "\0" in text or terminal_size is not None:
+            raise Fault("invalid_input", "Supply UTF-8 text without NUL and no terminal_size.")
+        try:
+            size = len(text.encode("utf-8"))
+        except UnicodeError as error:
+            raise Fault("invalid_input", "Input must encode as valid UTF-8 without unpaired surrogates.") from error
+        if not 1 <= size <= MAX_INPUT:
+            raise Fault("invalid_input", "Supply 1 through 16384 UTF-8 bytes; no newline is added.")
+    elif action == "resize":
+        if text is not None or terminal_size is None:
+            raise Fault("invalid_control", "Resize requires terminal_size and no text.")
+        terminal_size = resolve_terminal_size(True, terminal_size)
+    elif text is not None or terminal_size is not None:
+        raise Fault("invalid_control", "Interrupt accepts neither text nor terminal_size.")
+    return {"expected_control_seq": expected_control_seq, "action": action,
+            "text": text, "terminal_size": terminal_size}
+
+
+def control_fingerprint(request: dict) -> str:
+    return hashlib.sha256(json.dumps(request, sort_keys=True, ensure_ascii=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
 def effective_request(record: dict) -> dict:
     """Legacy omission means its original behavior, never a new writer's default."""
     return {"workspace_access": "exclusive", "resource_keys": [], "task_id": "",
-            "termination_grace_seconds": LEGACY_GRACE, **record["request"]}
+            "termination_grace_seconds": LEGACY_GRACE, "tty": False, "terminal_size": None,
+            **record["request"]}
 
 
 def is_remote(record: dict) -> bool:
@@ -39,7 +90,8 @@ def is_remote(record: dict) -> bool:
 
 def _validate_facts(record: dict) -> None:
     command, stop, cleanup = record["command"], record["stop"], record["cleanup"]
-    if record["io_mode"] != "pipe":
+    modes = {"pipe", "pty"} if record["format_version"] == FORMAT else {"pipe"}
+    if record["io_mode"] not in modes:
         raise ValueError("unsupported IO mode")
     grace = record["request"]["termination_grace_seconds"]
     if (not _number(grace) or not 0 <= grace <= 30 or not _number(stop["grace_seconds"])
@@ -77,15 +129,59 @@ def _validate_facts(record: dict) -> None:
         raise ValueError("unverified terminal cleanup")
 
 
+def _validate_interactive(record: dict) -> None:
+    request = record["request"]
+    tty = request["tty"]
+    if resolve_terminal_size(tty, request["terminal_size"]) != request["terminal_size"]:
+        raise ValueError("unresolved initial terminal size")
+    if resolve_terminal_size(tty, record["terminal_size"]) != record["terminal_size"]:
+        raise ValueError("invalid current terminal size")
+    if record["io_mode"] != ("pty" if tty else "pipe") or type(record["control_ready"]) is not bool:
+        raise ValueError("inconsistent terminal facts")
+    control = record["control"]
+    if control is None:
+        if tty or record["control_ready"]:
+            raise ValueError("missing terminal control")
+        return
+    if (not isinstance(control, dict) or set(control) != {"protocol", "seq", "last"}
+            or type(control["protocol"]) is not int or control["protocol"] != CONTROL_PROTOCOL
+            or type(control["seq"]) is not int or not 0 <= control["seq"] <= MAX_CONTROL_SEQ):
+        raise ValueError("invalid control contract")
+    last = control["last"]
+    if control["seq"] == 0:
+        if last is not None:
+            raise ValueError("unexpected control receipt")
+        return
+    if (not isinstance(last, dict) or set(last) != {"seq", "action", "request_sha256", "status",
+                                                  "bytes_written", "accepted_at", "completed_at", "error"}
+            or type(last["seq"]) is not int or last["seq"] != control["seq"]
+            or last["action"] not in CONTROL_ACTIONS
+            or not re.fullmatch(r"[0-9a-f]{64}", last["request_sha256"])
+            or last["status"] not in {"pending", "applied", "not_applied", "partial", "outcome_unknown"}
+            or not _number(last["accepted_at"])
+            or (last["error"] is not None and (not isinstance(last["error"], str) or len(last["error"]) > 128))):
+        raise ValueError("invalid last control")
+    if not (last["completed_at"] is None if last["status"] == "pending" else _number(last["completed_at"])):
+        raise ValueError("invalid control publication")
+    written = last["bytes_written"]
+    if last["action"] != "write_stdin" or last["status"] in {"pending", "outcome_unknown"}:
+        if written is not None:
+            raise ValueError("unverified byte count")
+    elif type(written) is not int or not 0 <= written <= MAX_INPUT:
+        raise ValueError("invalid delivered byte count")
+    elif (last["status"] == "not_applied") != (written == 0):
+        raise ValueError("inconsistent input effect")
+
+
 def read_record(directory: Path) -> dict:
-    """Validate an original execution record without rewriting or observing its process."""
+    """Validate all accepted formats without rewriting or observing the process."""
     try:
         with (directory / "record.json").open() as stream:
             record = json.load(stream)
         version = record.get("format_version", 1)
-        if type(version) is not int or version not in (1, 2, 3, FORMAT):
+        if type(version) is not int or version not in (1, 2, 3, 4, FORMAT):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
-        states = TERMINAL | {"accepted", "preparing", "running", "stopping", "finishing"} if version == FORMAT else (
+        states = TERMINAL | {"accepted", "preparing", "running", "stopping", "finishing"} if version >= 4 else (
             TERMINAL - {"outcome_unknown"}) | {"accepted", "preparing", "running"}
         if record["status"] not in states:
             raise ValueError("invalid state")
@@ -115,13 +211,18 @@ def read_record(directory: Path) -> dict:
         if record["status"] in TERMINAL and not _number(record["finished_at"]):
             raise ValueError("missing terminal receipt")
         if version == 3 or is_remote(record):
-            if (version not in (3, FORMAT) or record.get("scope_unit") != f"openmachine-{directory.name}.scope"
+            if (version not in (3, 4, FORMAT) or record.get("scope_unit") != f"openmachine-{directory.name}.scope"
                     or not re.fullmatch(r"[0-9a-f]{64}", request["machine"])
                     or record["context"].get("target_identity") != request["machine"]
                     or not re.fullmatch(r"[0-9a-f]{64}", record["context"].get("worker_sha256", ""))):
                 raise ValueError("invalid remote ownership")
-        if version == FORMAT:
+        if version >= 4:
             _validate_facts(record)
+        if version == FORMAT:
+            try:
+                _validate_interactive(record)
+            except Fault as error:
+                raise ValueError("invalid interactive receipt") from error
         return record
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error

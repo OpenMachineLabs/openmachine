@@ -100,9 +100,10 @@ class ServiceTests(unittest.TestCase):
                 "closed", "observed-time", "f" * 40)
         cases = [
             ("write_workspace_file", ("local", "project", "file", "text", "", ""), app.machines, "write_workspace_file"),
-            ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, "", None),
+            ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, "", None, False, None),
              app.machines, "start_execution"),
             ("cancel_execution", ("local", "c" * 32), app.machines, "cancel_execution"),
+            ("control_execution", ("local", "c" * 32, 0, "interrupt", None, None), app.machines, "control_execution"),
             ("save_task", ("task", 0, "Title", "Body", []), tasks, "save"),
             ("github_issue", issue, app.github, "issue"),
             ("github_pull_request", pull, app.github, "pull_request"),
@@ -122,7 +123,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 2)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 3)
                 dispatch.assert_not_called()
 
                 def admitted(*args):
@@ -253,15 +254,15 @@ class ServiceTests(unittest.TestCase):
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service._json(path)
-        for contract in (1, 2):
+        for contract in (1, 2, 3):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
             with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(reply), "")):
                 self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service._candidate_state(
-                    Path(sys.executable), self.config, self.state, 3 - contract))
-        for contract in (0, 3, True, "2"):
+                    Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
+        for contract in (0, 4, True, "3"):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.b))
 

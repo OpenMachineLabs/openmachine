@@ -18,10 +18,11 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.workspace.git import context
 
-from . import logs
+from . import control as controls, logs
 from .logs import MAX_READ
 from .process import supported
-from .records import FORMAT, MAX_TIMEOUT, TERMINAL, effective_request, is_remote, read_record, termination_grace
+from .records import (CONTROL_PROTOCOL, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
+                      effective_request, is_remote, read_record, resolve_terminal_size, termination_grace)
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -39,7 +40,8 @@ def _directory(state: Path, execution_id: str) -> Path:
 
 def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_head_sha: str,
                    workspace_access: str, resource_keys: list[str] | None, task_id: str,
-                   termination_grace_seconds: float | None = None) -> list[str]:
+                   termination_grace_seconds: float | None = None, tty: bool = False,
+                   terminal_size: dict | None = None) -> list[str]:
     """Check the shared start request before controller routing or target admission."""
     if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
         raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
@@ -50,6 +52,7 @@ def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_hea
     if workspace_access not in ("exclusive", "shared"):
         raise Fault("invalid_access", "Use exclusive, or shared only for cooperating read-only commands.")
     termination_grace(termination_grace_seconds)
+    resolve_terminal_size(tty, terminal_size)
     keys = resource_keys or []
     if len(keys) > 16 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", k) for k in keys):
         raise Fault("invalid_resources", "Use at most 16 stable resource names of 1-128 letters, digits, _, ., :, or -.")
@@ -63,11 +66,11 @@ def validate_start(cwd: str, argv: list[str], timeout_seconds: int, expected_hea
 def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd: str,
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
           workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
-          termination_grace_seconds: float | None = None,
+          termination_grace_seconds: float | None = None, tty: bool = False, terminal_size: dict | None = None,
           *, remote_worker: Path | None = None, validate_new: Callable[[], object] | None = None) -> dict:
     target = config.machine(machine, write=True)
     keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id,
-                          termination_grace_seconds)
+                          termination_grace_seconds, tty, terminal_size)
     if target.transport != "local":
         raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     try:
@@ -86,7 +89,8 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
     request = {"machine": machine, "cwd": str(working), "argv": argv,
                "timeout_seconds": timeout_seconds, "expected_head_sha": expected_head_sha,
                "workspace_access": workspace_access, "resource_keys": sorted(set(keys)), "task_id": task_id,
-               "termination_grace_seconds": termination_grace(termination_grace_seconds)}
+               "termination_grace_seconds": termination_grace(termination_grace_seconds),
+               "tty": tty, "terminal_size": resolve_terminal_size(tty, terminal_size)}
     with lease(locks / f"{execution_id}.lock"):
         if directory.exists():
             original = effective_request(read_record(directory))
@@ -96,6 +100,16 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
         supported()
+        try:
+            control_path = controls.socket_path(state, execution_id)
+        except Fault as error:
+            if tty or error.code != "control_path_too_long":
+                raise
+            control_path = None
+        if control_path is not None:
+            private_directory(control_path.parent)
+            if control_path.exists() or control_path.is_symlink():
+                raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
         if validate_new is not None:
             validate_new()  # Only new admissions need controller reference validation.
         observed = context(working)
@@ -112,7 +126,9 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             private_directory(directory)
             record = {"request": request, "context": observed, "version": __version__, "format_version": FORMAT,
                       "status": "accepted", "exit_code": None, "created_at": time.time(),
-                      "log_truncated": False, "output_incomplete": False, "io_mode": "pipe",
+                      "log_truncated": False, "output_incomplete": False, "io_mode": "pty" if tty else "pipe",
+                      "terminal_size": request["terminal_size"], "control_ready": False,
+                      "control": {"protocol": CONTROL_PROTOCOL, "seq": 0, "last": None} if control_path else None,
                       "command": {"spawned": False, "exited": False, "started_at": None,
                                   "exited_at": None, "exit_signal": None},
                       "stop": {"reason": None, "requested_at": None,
@@ -176,16 +192,16 @@ def _receipt(directory: Path, machine: str, *, wait: bool = True, deadline: floa
     if status in TERMINAL and is_remote(record):
         try:
             cleaned = _scope_state(record["scope_unit"], deadline=deadline, cancelled=cancelled) in {"inactive", "not-found"}
-            if not cleaned:
+            if not cleaned and status != "outcome_unknown":
                 status = "finishing"
-            if record.get("format_version") == FORMAT:
+            if record.get("format_version", 1) >= 4:
                 record = record | {"cleanup": record["cleanup"] | {
                     "status": "verified" if cleaned else "pending", "source": "systemd_scope"}}
         except Fault as error:
             if error.code == "observation_cancelled":
                 raise
             status = "outcome_unknown"
-            if record.get("format_version") == FORMAT:
+            if record.get("format_version", 1) >= 4:
                 record = record | {"cleanup": record["cleanup"] | {
                     "status": "unverified", "source": "systemd_scope", "error": "scope_unavailable"}}
     return record, status
@@ -241,11 +257,15 @@ def _snapshot(directory: Path, machine: str, execution_id: str, offset: int, max
             "exit_code": record["exit_code"], "context": record["context"], "version": record["version"],
             "created_at": record["created_at"], "finished_at": record.get("finished_at"),
             "task_id": record["request"].get("task_id", ""),
-            "format_version": record.get("format_version", 1), "io_mode": "pipe",
-            "command": record.get("command") if record.get("format_version") == FORMAT else None,
-            "stop": record.get("stop") if record.get("format_version") == FORMAT else None,
-            "cleanup": record.get("cleanup") if record.get("format_version") == FORMAT else None,
-            "observed_at": time.time(), "control": None,
+            "format_version": record.get("format_version", 1), "io_mode": record.get("io_mode", "pipe"),
+            "command": record.get("command") if record.get("format_version", 1) >= 4 else None,
+            "stop": record.get("stop") if record.get("format_version", 1) >= 4 else None,
+            "cleanup": record.get("cleanup") if record.get("format_version", 1) >= 4 else None,
+            "observed_at": time.time(), "control": controls.observed(record, status),
+            "control_ready": bool(record.get("control_ready") and status == "running" and not record.get("error")),
+            "control_actions": ([] if record.get("control") is None else
+                                ["write_stdin", "interrupt", "resize"] if record.get("io_mode") == "pty" else ["interrupt"]),
+            "terminal_size": record.get("terminal_size"),
             "termination_grace_seconds": effective_request(record)["termination_grace_seconds"],
             "workspace_access": record["request"].get("workspace_access", "exclusive"),
             "resource_keys": record["request"].get("resource_keys", []),
@@ -283,7 +303,7 @@ def read(config: "Settings", state: Path, machine: str, execution_id: str,
             continue
         # Timestamps such as observed_at change on every read, not on progress.
         facts = tuple(result[key] for key in ("status", "exit_code", "command", "stop", "cleanup",
-                      "cancel_requested", "finished_at", "error", "output_incomplete", "control"))
+                      "cancel_requested", "finished_at", "error", "output_incomplete", "control", "control_ready", "terminal_size"))
         wake = (result["next_offset"] != offset or result["output_gap"] or result["status"] in TERMINAL
                 or (result["output_unavailable"] and result["status"] not in {"accepted", "preparing"})
                 or (previous is not None and facts != previous))
@@ -365,3 +385,28 @@ def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> 
                 finally:
                     os.close(fd)
     return read(config, state, machine, execution_id)
+
+
+def control_execution(config: "Settings", state: Path, machine: str, execution_id: str,
+            expected_control_seq: int, action: str, text: str | None = None,
+            terminal_size: dict | None = None) -> dict:
+    request = control_request(expected_control_seq, action, text, terminal_size)
+    if config.machine(machine, write=action in {"write_stdin", "resize"}).transport != "local":
+        raise Fault("remote_path", "Use application routing for a remote control.")
+    directory = _directory(state, execution_id)
+    record, status = _receipt(directory, machine, wait=False, deadline=time.monotonic() + MAX_WAIT)
+    previous = controls.retained(record, status, request)
+    if previous is not None:
+        return controls.reply(record, execution_id, status, previous)
+    if status == "outcome_unknown":
+        raise Fault("outcome_unknown", "The original worker ownership is unavailable; no input was replayed.")
+    if status in TERMINAL or status in {"stopping", "finishing"}:
+        raise Fault("execution_finished", "The original execution is no longer accepting controls.")
+    if not record.get("control_ready") or status != "running":
+        raise Fault("control_not_ready", "Observe the original worker; no sequence was reserved.")
+    if action != "interrupt" and record["io_mode"] != "pty":
+        raise Fault("unsupported_operation", "Input and resize require an explicitly started PTY.")
+    result = controls.exchange(controls.socket_path(state, execution_id), execution_id, request)
+    if result.get("machine") != machine:
+        raise Fault("outcome_unknown", "The original control target identity was not verified.")
+    return result

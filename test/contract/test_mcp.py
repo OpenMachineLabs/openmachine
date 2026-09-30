@@ -24,7 +24,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ListToolsResult
 
 import openmachine
-from openmachine import server
+from openmachine import execution, server
 from openmachine.config import Settings
 from openmachine.foundation.state import lease
 
@@ -103,17 +103,17 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(result.isError, value)
                     self.assertFalse((self.state / "executions" / identity).exists())
                 caps = (await session.call_tool("get_capabilities", {})).structuredContent
-                self.assertEqual(caps["execution"]["receipt_format"], 4)
-                self.assertEqual(caps["execution"]["io_modes"], ["pipe"])
-                self.assertEqual(caps["execution"]["controls"], [])
+                self.assertEqual(caps["execution"]["receipt_format"], 5)
+                self.assertEqual(caps["execution"]["io_modes"], ["pipe", "pty"])
+                self.assertEqual(caps["execution"]["controls"], ["interrupt", "resize", "write_stdin"])
 
     def assert_tool_contract(self, result: ListToolsResult, *, github: bool, ssh: bool):
         expected = json.loads(Path(__file__).with_name("mcp_contract.json").read_text())["tools"]
         if not github:
             expected = {name: tool for name, tool in expected.items() if not name.startswith("github_")}
-        # Only these five annotations vary with configured SSH; never normalize actual results.
+        # Only these six annotations vary with configured SSH; never normalize actual results.
         for name in ("inspect_workspace", "read_workspace_file", "write_workspace_file",
-                     "read_execution", "list_executions"):
+                     "read_execution", "list_executions", "control_execution"):
             expected[name]["annotations"]["openWorldHint"] = ssh
         self.assertIsNone(result.nextCursor, "The baseline tool catalog is a single complete page")
         actual = {tool.name: tool for tool in result.tools}
@@ -183,11 +183,13 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
                 self.assertFalse(tools["cancel_execution"].annotations.readOnlyHint)
+                self.assertFalse(tools["control_execution"].annotations.readOnlyHint)
+                self.assertFalse(tools["control_execution"].annotations.idempotentHint)
                 self.assertFalse(tools["github_issue"].annotations.readOnlyHint)
                 self.assertTrue(tools["github_read"].annotations.readOnlyHint)
                 self.assertTrue(tools["github_read"].annotations.openWorldHint)
@@ -729,6 +731,86 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     await control.call_tool("cancel_execution", identity)
 
 
+    async def execution_until(self, session, identity, predicate):
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            response = await session.call_tool("read_execution", identity | {"wait_seconds": 0.25})
+            self.assertFalse(response.isError)
+            observed = response.structuredContent
+            if predicate(observed):
+                return observed
+            await asyncio.sleep(0.02)
+        self.fail("The original SDK execution did not reach the required observation")
+
+    async def test_interactive_worker_continues_across_real_sdk_connections_without_replay(self):
+        identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+        code = ('import time; from pathlib import Path; p=Path("start-count"); '
+                'p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); '
+                'print("ready",flush=True); x=input(); print("first-read",flush=True); '
+                'y=input(); print("same-process",x,y,flush=True); time.sleep(8)')
+        try:
+            async with self.client() as (reader, writer, _):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    started = await session.call_tool("start_execution", identity | {
+                        "cwd": str(self.work), "argv": [sys.executable, "-c", code], "timeout_seconds": 15, "tty": True})
+                    self.assertFalse(started.isError)
+                    ready = await self.execution_until(session, identity, lambda r: r["control_ready"] and "ready" in r["output"])
+                    sent = await session.call_tool("control_execution", identity | {
+                        "expected_control_seq": 0, "action": "write_stdin", "text": "41\n"})
+                    self.assertFalse(sent.isError)
+                    receipt = sent.structuredContent["control_result"]
+                    self.assertEqual(receipt["status"], "applied")
+                    self.assertNotIn("output", sent.structuredContent)
+                    await self.execution_until(session, identity, lambda r: "first-read" in r["output"])
+            async with self.client() as (reader, writer, _):
+                async with ClientSession(reader, writer) as fresh:
+                    await fresh.initialize()
+                    observed = await self.execution_until(fresh, identity, lambda r: r["control"]["seq"] == 1)
+                    self.assertEqual(observed["created_at"], ready["created_at"])
+                    duplicate = await fresh.call_tool("control_execution", identity | {
+                        "expected_control_seq": 0, "action": "write_stdin", "text": "41\n"})
+                    self.assertFalse(duplicate.isError)
+                    self.assertEqual(duplicate.structuredContent["control_result"], receipt)
+                    second = await fresh.call_tool("control_execution", identity | {
+                        "expected_control_seq": 1, "action": "write_stdin", "text": "1\n"})
+                    self.assertFalse(second.isError)
+                    await self.execution_until(fresh, identity, lambda r: "same-process 41 1" in r["output"])
+                    self.assertEqual((self.work / "start-count").read_text(), "1")
+                    self.assertFalse((await fresh.call_tool("cancel_execution", identity)).isError)
+                    final = await self.execution_until(fresh, identity, lambda r: r["status"] == "cancelled")
+                    self.assertEqual(final["cleanup"]["status"], "verified")
+                    self.assertEqual(final["control"]["seq"], 2)
+        finally:
+            async with self.client() as (reader, writer, _):
+                async with ClientSession(reader, writer) as cleanup:
+                    await cleanup.initialize()
+                    await cleanup.call_tool("cancel_execution", identity)
+
+    async def test_interactive_sdk_schema_rejects_invalid_effects_before_admission(self):
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                for delta in ({"tty": 1}, {"tty": "true"}, {"tty": True, "terminal_size": {"rows": True, "cols": 80}},
+                              {"tty": True, "terminal_size": {"rows": 24, "cols": 80, "extra": 1}},
+                              {"terminal_size": {"rows": 24, "cols": 80}}):
+                    identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+                    result = await session.call_tool("start_execution", identity | {
+                        "cwd": str(self.work), "argv": [sys.executable, "-c", "pass"]} | delta)
+                    self.assertTrue(result.isError)
+                    self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
+                identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+                for delta in ({"expected_control_seq": True}, {"expected_control_seq": 2**53 - 1},
+                              {"action": "close_stdin"}, {"action": "write_stdin", "text": "\0"},
+                              {"action": "write_stdin", "text": "é" * 8193},
+                              {"action": "resize", "terminal_size": {"rows": 1, "cols": 1001}}):
+                    result = await session.call_tool("control_execution", identity | {
+                        "expected_control_seq": 0, "action": "interrupt"} | delta)
+                    self.assertTrue(result.isError)
+                    self.assertNotEqual(result.structuredContent["error"]["code"], "execution_not_found")
+                self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
+
+
 
 class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_waiter_cap_and_cancelled_await_retain_the_actual_thread_slot(self):
@@ -739,6 +821,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             application = Mock()
             application.get_capabilities.return_value = {"alive": True}
             application.cancel_execution.return_value = {"cancel_requested": True}
+            application.control_execution.return_value = {"control_result": {"status": "applied"}}
             admitted = threading.Event()
             release = threading.Event()
             counter_lock = threading.Lock()
@@ -806,6 +889,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
 
             application.read_execution.side_effect = blocked_read
             application.cancel_execution.return_value = {"cancel_requested": True}
+            application.control_execution.return_value = {"control_result": {"status": "applied"}}
             with patch.object(server, "create_application", return_value=application):
                 mcp = server.create_server(config, root / "state")
             asyncio.get_running_loop().set_default_executor(server.ThreadPoolExecutor(max_workers=2))
@@ -820,6 +904,9 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result.isError)
                 self.assertTrue(result.structuredContent["cancel_requested"])
                 application.cancel_execution.assert_called_once_with("local", "b" * 32)
+                controlled = await asyncio.wait_for(mcp.call_tool("control_execution", args | {"expected_control_seq": 0, "action": "interrupt"}), 1)
+                self.assertEqual(controlled.structuredContent["control_result"]["status"], "applied")
+                application.control_execution.assert_called_once_with("local", "b" * 32, 0, "interrupt", None, None)
                 self.assertFalse(any(task.done() for task in readers))
             finally:
                 release.set()

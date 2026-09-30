@@ -202,3 +202,35 @@ observer cancellation preserves the original worker/counter, and a new immutable
 endpoint reads the original E1 worker without replacing its archive. Keep the
 existing user-manager lifetime prerequisite explicit. No production workload,
 account-policy change, service migration or repeated Spec #18 acceptance is needed.
+
+
+## Spec #28 E3
+
+The interactive unit group reuses the existing disposable process fixture. It
+exercises real controlling terminals, dimensions and exact input; Python REPL
+and shell foreground interruption; resize, independent cursors and idle leases;
+concurrent/stale/retired controls; lost acknowledgements, partial/backpressured
+input and bounded malformed frames; intent/final-publication failures and actual
+worker-loss windows. EOF is not counted as application input in crash fixtures.
+Native session tests retain an unrelated sentinel and never touch production.
+
+New writers use format 5/state contract 3/SSH protocol 3. Retained v4 lifecycle
+facts and formats 1-3 remain read-only; unsupported old controls never adopt a
+process. The service tests cover the added mutation's lifecycle gate and actual
+candidate-reader requirements. SSH checks retain old scope contracts, protocol
+rejection before effects, uncertainty after incomplete control responses, and
+pending controls with lost worker ownership even when the scope is still active.
+
+The frozen MCP fixture preserves its released baseline and approved E1/E2 deltas;
+E3 adds only `tty`, `terminal_size`, and one non-idempotent control tool. Full
+installed SDK discovery verifies all four configured catalogs. Real private-socket
+SDK sessions verify original-process continuation and input receipts across a
+fresh connection, strict schemas and independent stopping/control capacity.
+These are SDK tests, not actual ChatGPT acceptance.
+
+Build/install direct and sdist-derived wheels outside the checkout and verify the
+curated standard-library archive, including `control.py`. Record actual macOS and
+disposable Linux SSH terminal/session behavior, original IDs/sequence/cursors and
+artifact hashes separately. Preserve the target's existing user-manager policy
+and original worker archives. E4 owns whole-candidate managed transitions and
+actual Chat/fresh-conversation acceptance; missing evidence is never called PASS.

@@ -11,7 +11,7 @@ from typing import Literal
 
 from openmachine import __version__, execution, service, skills, tasks, workspace
 from openmachine.config import Settings
-from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output
+from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
@@ -53,7 +53,10 @@ class Application:
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "transport": "private_unix_socket",
-            "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe"], "controls": [],
+            "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
+                          "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
+                          "control_frame_bytes": execution.MAX_FRAME, "control_seconds": execution.CONTROL_SECONDS,
+                          "terminal_dimensions": {"default": {"rows": 24, "cols": 80}, "min": 1, "max": 1000},
                           "wait_seconds": {"default": 0, "min": 0, "max": execution.MAX_WAIT},
                           "max_waiting_readers": execution.MAX_WAITERS,
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
@@ -107,11 +110,12 @@ class Application:
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: Literal["exclusive", "shared"] = "exclusive",
                         resource_keys: list[str] | None = None, task_id: str = "",
-                        termination_grace_seconds: float | None = None) -> dict:
+                        termination_grace_seconds: float | None = None, tty: bool = False,
+                        terminal_size: dict | None = None) -> dict:
         with self._admit():
             return self.machines.start_execution(machine, execution_id, cwd, argv, timeout_seconds,
                                                  expected_head_sha, workspace_access, resource_keys, task_id,
-                                                 termination_grace_seconds)
+                                                 termination_grace_seconds, tty, terminal_size)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0, max_bytes: int = 65536,
                        wait_seconds: float = 0, *, cancelled: threading.Event | None = None) -> dict:
@@ -165,3 +169,9 @@ class Application:
         with self._admit():
             return self._provider().merge(self.config, repository, number, expected_head_sha, expected_base_sha,
                                           method, commit_title, commit_message)
+
+    def control_execution(self, machine: str, execution_id: str, expected_control_seq: int,
+                          action: Literal["write_stdin", "interrupt", "resize"], text: str | None = None,
+                          terminal_size: dict | None = None) -> dict:
+        with self._admit():
+            return self.machines.control_execution(machine, execution_id, expected_control_seq, action, text, terminal_size)

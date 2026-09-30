@@ -52,11 +52,12 @@ class Machines:
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
-                        task_id: str = "", termination_grace_seconds: float | None = None) -> dict:
+                        task_id: str = "", termination_grace_seconds: float | None = None,
+                        tty: bool = False, terminal_size: dict | None = None) -> dict:
         target = self.config.machine(machine, write=True)
         if target.transport == "ssh":
             keys = execution.validate_start(cwd, argv, timeout_seconds, expected_head_sha,
-                                            workspace_access, resource_keys, task_id, termination_grace_seconds)
+                                            workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size)
             if task_id:
                 # A pre-read only decides whether a new controller reference is needed.
                 # The target start must still compare the original normalized request.
@@ -69,9 +70,9 @@ class Machines:
             return self._ssh(machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
                              timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
                              workspace_access=workspace_access, resource_keys=keys, task_id=task_id,
-                             termination_grace_seconds=termination_grace_seconds)
+                             termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
-                               expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds,
+                               expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
                                validate_new=(lambda: tasks.read(self.state, task_id)) if task_id else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
@@ -93,3 +94,10 @@ class Machines:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "cancel_execution", execution_id=execution_id)
         return execution.cancel(self.config, self.state, machine, execution_id)
+
+    def control_execution(self, machine: str, execution_id: str, expected_control_seq: int,
+                          action: str, text: str | None = None, terminal_size: dict | None = None) -> dict:
+        arguments = execution.control_request(expected_control_seq, action, text, terminal_size)
+        if self.config.machine(machine, write=action in {"write_stdin", "resize"}).transport == "ssh":
+            return self._ssh(machine, "control_execution", execution_id=execution_id, **arguments)
+        return execution.control_execution(self.config, self.state, machine, execution_id, **arguments)

@@ -84,10 +84,15 @@ def _dispatch(request: dict, archive: Path) -> dict:
     if operation == "probe":
         result = {"identity_verified": bool(expected), "python": platform.python_version(), "systemd": _scope_ready(),
                   "state_directory": str(state), "version": __version__,
+                  "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"],
+                                "controls": sorted(execution.CONTROL_ACTIONS), "control_protocol": execution.CONTROL_PROTOCOL},
                   "unavailable_workspaces": [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]}
     elif not expected:
         raise Fault("identity_required", "Probe and explicitly pin this identity before workspace access.")
     elif operation == "start_execution":
+        if set(arguments) - {"execution_id", "cwd", "argv", "timeout_seconds", "expected_head_sha",
+                             "workspace_access", "resource_keys", "task_id", "termination_grace_seconds", "tty", "terminal_size"}:
+            raise Fault("invalid_request", "Use only the documented execution-start fields.")
         _scope_ready()
         result = execution.start(config, state, identity, **arguments, remote_worker=archive)
     elif operation == "read_execution":
@@ -98,6 +103,10 @@ def _dispatch(request: dict, archive: Path) -> dict:
         result = execution.list_records(config, state, identity, **arguments)
     elif operation == "cancel_execution":
         result = execution.cancel(config, state, identity, **arguments)
+    elif operation == "control_execution":
+        if set(arguments) - {"execution_id", "expected_control_seq", "action", "text", "terminal_size"}:
+            raise Fault("invalid_request", "Use only the documented execution-control fields.")
+        result = execution.control_execution(config, state, identity, **arguments)
     elif operation == "inspect_workspace":
         result = workspace.inspect(config, identity, **arguments)
     elif operation == "read_workspace_file":

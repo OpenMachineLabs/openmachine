@@ -11,6 +11,13 @@
       "base_commit": "2e82b1f2b65917eb1522413fd2c61e82cd7b5e1f",
       "change": "E2 adds only the optional finite wait_seconds input (0..5, default 0) to read_execution. Existing tool names and annotations remain unchanged; complete installed SDK discovery verifies the approved delta.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/28#issuecomment-5909307488",
+      "base_commit": "5d690e5456f9d0d004313138190bf2110d66f5f4",
+      "capture_wheel_sha256": "c0e45880461ee9d57ca88536abfea17d6fa8f1fd535e0a2382d6a953a4650975",
+      "change": "E3 adds only tty/terminal_size to start_execution and one non-idempotent control_execution tool. The release baseline, E1/E2 deltas and every unrelated field/annotation are preserved; installed private-socket SDK discovery captures the approved additions and tests all four integration catalogs.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
     }
   ],
   "baseline": {
@@ -44,6 +51,98 @@
           "execution_id"
         ],
         "title": "cancel_executionArguments",
+        "type": "object"
+      }
+    },
+    "control_execution": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TerminalSize": {
+            "additionalProperties": false,
+            "properties": {
+              "cols": {
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Cols",
+                "type": "integer"
+              },
+              "rows": {
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Rows",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "rows",
+              "cols"
+            ],
+            "title": "TerminalSize",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "action": {
+            "enum": [
+              "write_stdin",
+              "interrupt",
+              "resize"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "expected_control_seq": {
+            "maximum": 9007199254740990,
+            "minimum": 0,
+            "title": "Expected Control Seq",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "terminal_size": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TerminalSize"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id",
+          "expected_control_seq",
+          "action"
+        ],
+        "title": "control_executionArguments",
         "type": "object"
       }
     },
@@ -903,6 +1002,31 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TerminalSize": {
+            "additionalProperties": false,
+            "properties": {
+              "cols": {
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Cols",
+                "type": "integer"
+              },
+              "rows": {
+                "maximum": 1000,
+                "minimum": 1,
+                "title": "Rows",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "rows",
+              "cols"
+            ],
+            "title": "TerminalSize",
+            "type": "object"
+          }
+        },
         "properties": {
           "argv": {
             "items": {
@@ -944,6 +1068,17 @@
             "title": "Task Id",
             "type": "string"
           },
+          "terminal_size": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TerminalSize"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "termination_grace_seconds": {
             "anyOf": [
               {
@@ -964,6 +1099,11 @@
             "minimum": 1,
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "tty": {
+            "default": false,
+            "title": "Tty",
+            "type": "boolean"
           },
           "workspace_access": {
             "default": "exclusive",

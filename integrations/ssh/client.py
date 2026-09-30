@@ -19,7 +19,7 @@ from . import MAX_MESSAGE, PROTOCOL
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MUTATIONS = {"start_execution", "write_workspace_file", "cancel_execution"}
+MUTATIONS = {"start_execution", "write_workspace_file", "cancel_execution", "control_execution"}
 
 
 def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:
@@ -70,7 +70,8 @@ def call(config: "Settings", machine: str, operation: str, *,
         raise Fault("invalid_request", "Observer cancellation is only valid for execution reads.")
     if cancelled is not None and cancelled.is_set():
         raise Fault("observation_cancelled", "The observation was cancelled before contacting the target.")
-    target = config.machine(machine, write=operation in {"start_execution", "write_workspace_file"})
+    target = config.machine(machine, write=(operation in {"start_execution", "write_workspace_file"}
+                                              or operation == "control_execution" and arguments.get("action") in {"write_stdin", "resize"}))
     if target.transport != "ssh":
         raise Fault("not_ssh", "Select a configured SSH target, or omit the explicit doctor target.")
     if not target.ssh_identity and operation != "probe":

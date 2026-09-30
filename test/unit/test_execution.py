@@ -78,8 +78,9 @@ class ExecutionTests(unittest.TestCase):
         code = 'import sys; from pathlib import Path; p=Path("count"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print(repr(sys.stdin.read())); print("stderr",file=sys.stderr)'
         result = self.finish(self.start(code))
         identity = result["execution_id"]
-        self.assertEqual((result["status"], result["exit_code"], result["format_version"]), ("succeeded", 0, 4))
-        self.assertEqual((result["io_mode"], result["termination_grace_seconds"], result["control"]), ("pipe", 5, None))
+        self.assertEqual((result["status"], result["exit_code"], result["format_version"]), ("succeeded", 0, execution.FORMAT))
+        self.assertEqual((result["io_mode"], result["termination_grace_seconds"], result["control"]), ("pipe", 5, {"protocol": 1, "seq": 0, "last": None}))
+        self.assertFalse(result["control_ready"])
         self.assertIn("''", result["output"])
         self.assertIn("stderr", result["output"])
         for grace in (None, 5):
