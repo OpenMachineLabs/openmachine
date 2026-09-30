@@ -9,6 +9,7 @@ No product Spec is approved by the repository scaffold.
 | --- | --- | --- |
 | [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Accepted M1-M6 plus the shared state/file primitive refactor form the `v0.1.0` release baseline. The current maintainer request authorizes release preparation, publication and subsequent closure; the exact release and closure receipts remain in Issue #2. Specialized/browser workflows, broader architecture, native GitHub onboarding and production migration remain separate. |
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [implementation authorization and acceptance](https://github.com/OpenMachineLabs/openmachine/issues/6) | Minimal GitHub provenance footers for configured Issue/PR/comment/review body writes; broader GitHub collaboration remains in #2 M4. |
+| [#18](https://github.com/OpenMachineLabs/openmachine/issues/18) | `direct_issue_contract`, [approved architecture and increment](https://github.com/OpenMachineLabs/openmachine/issues/18#classification) | S0 only: reconcile the completed #2 / `v0.1.0` baseline and freeze MCP schemas and annotations across local, SSH and GitHub configurations. The maintainer authorized this increment, self-review, merge and the Issue body update. S1-S5 implementation, deployment, release and closure remain separate. |
 
 ## Survey Issues
 
