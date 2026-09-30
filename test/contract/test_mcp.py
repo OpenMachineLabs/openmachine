@@ -1121,6 +1121,46 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 caps = (await session.call_tool("get_capabilities",{})).structuredContent
                 self.assertEqual(caps["workspace"]["patch_language"],"om_patch_v1")
                 self.assertEqual(caps["workspace"]["change_read_formats"],[1,2])
+                self.assertFalse((self.state / "executions").exists(), "Patch must not run hidden commands")
+                validation_id, task_id = uuid.uuid4().hex, "patch-validation"
+                post_hashes = {item["path"]: item["after_sha256"] for item in first["plan"]["files"]}
+                command = [sys.executable, "-I", "-c",
+                    "from pathlib import Path; import runpy; "
+                    "p=Path('validation-count'); assert not p.exists(); p.write_text('1'); "
+                    "assert runpy.run_path('new/source.py')['answer']==int(Path('new/expected').read_text()); "
+                    "print('PATCH_VALIDATION_OK')"]
+                evidence = {"change_id": identity, "execution_id": validation_id, "head_sha": "",
+                            "post_hashes": post_hashes, "argv": command, "cwd": str(self.work), "status": "planned"}
+                saved = await session.call_tool("save_task", {"task_id": task_id, "expected_revision": 0,
+                    "title": "Validate original patch", "body": json.dumps(evidence),
+                    "anchors": [f"change=desktop/{identity}", f"execution=desktop/{validation_id}"]})
+                self.assertFalse(saved.isError, saved)
+                for path, sha in post_hashes.items():
+                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structuredContent
+                    self.assertEqual(current["sha256"], sha)
+                started = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": validation_id,
+                    "cwd": str(self.work), "argv": command, "expected_head_sha": "", "task_id": task_id})
+                self.assertFalse(started.isError, started)
+                deadline = time.monotonic() + 10
+                while True:
+                    observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": validation_id,
+                        "wait_seconds": 0.2})
+                    self.assertFalse(observed.isError, observed)
+                    validation = observed.structuredContent
+                    if validation["status"] in {"succeeded", "failed", "cancelled", "timed_out", "outcome_unknown"}:
+                        break
+                    self.assertLess(time.monotonic(), deadline)
+                self.assertEqual((validation["status"], validation["exit_code"], validation["cleanup"]["status"]),
+                                 ("succeeded", 0, "verified"))
+                self.assertIn("PATCH_VALIDATION_OK", validation["output"])
+                for path, sha in post_hashes.items():
+                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structuredContent
+                    self.assertEqual(current["sha256"], sha)
+                evidence.update(status="succeeded", execution_created_at=validation["created_at"])
+                saved = await session.call_tool("save_task", {"task_id": task_id, "expected_revision": 1,
+                    "title": "Validate original patch", "body": json.dumps(evidence)})
+                self.assertFalse(saved.isError, saved)
+                self.assertEqual(saved.structuredContent["revision"], 2)
         self.stop(self.processes[-1])
         record = self.state / "workspace-changes" / identity / "record.json"
         retained = record.read_bytes()
@@ -1132,6 +1172,16 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 read = await session.call_tool("read_workspace_change",{"machine":"desktop","change_id":identity,"observe_current":True})
                 self.assertFalse(read.isError,read)
                 self.assertEqual((read.structuredContent["created_at"],read.structuredContent["revision"]),(first["created_at"],first["revision"]))
+                task = (await session.call_tool("read_task", {"task_id": task_id})).structuredContent
+                self.assertEqual(task["revision"], 2)
+                self.assertEqual(json.loads(task["body"]), evidence)
+                original_execution = (await session.call_tool("read_execution", {
+                    "machine": "desktop", "execution_id": validation_id})).structuredContent
+                self.assertEqual((original_execution["created_at"], original_execution["status"], original_execution["exit_code"]),
+                                 (evidence["execution_created_at"], "succeeded", 0))
+                current_hashes = {item["path"]: item["sha256"] for item in read.structuredContent["current"]["files"]}
+                self.assertNotEqual(current_hashes["new/source.py"], evidence["post_hashes"]["new/source.py"],
+                                    "Historical test success must not validate subsequent source drift")
                 again = await session.call_tool("apply_workspace_patch",request)
                 self.assertFalse(again.isError,again)
                 self.assertEqual(again.structuredContent["revision"],first["revision"])
@@ -1140,7 +1190,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(conflict.isError)
                 self.assertEqual(conflict.structuredContent["error"]["code"],"change_id_conflict")
         self.assertEqual(record.read_bytes(),retained)
-        self.assertFalse((self.state / "executions").exists(),"Patch operations must never run hidden commands")
+        self.assertEqual((self.work / "validation-count").read_text(), "1")
+        self.assertEqual([p.name for p in (self.state / "executions").iterdir()], [validation_id])
 
     async def test_patch_strict_schema_independent_grant_and_escaped_response(self):
         self.stop(self.processes[-1])

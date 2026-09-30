@@ -882,6 +882,11 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
     observed = context(root)
     if observed["workspace_identity"] is None:
         raise Fault("context_unavailable", "Workspace identity is unavailable; no change was admitted.")
+    record = _initial_record(request, change_id, _context({"root": root, "context": observed}),
+                             "0" * 64, fingerprint)
+    # Reject oversized admission/rejection evidence before reserving an identity.
+    # The actual owner has the same encoded width; prepared plans are sized later.
+    _record_budget(record)
     patching = operations is not None
     with _own(state, change_id) as (directory, existing):
         if existing:
@@ -889,8 +894,7 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
             if original["request_sha256"] != fingerprint:
                 raise Fault("change_id_conflict", "This change ID belongs to a different request.")
             return original
-        record = _initial_record(request, change_id, _context({"root": root, "context": observed}),
-                                 _owner(state), fingerprint)
+        record["owner_sha256"] = _owner(state)
         _save(directory, record)
         try:
             if validate_new is not None:
