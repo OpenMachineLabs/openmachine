@@ -16,8 +16,8 @@ import time
 from typing import TYPE_CHECKING
 
 from openmachine import __version__, logs
-from openmachine.sanitize import Fault
-from openmachine.state import lease, private_directory, save_json
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.workspace import context
 
 if TYPE_CHECKING:

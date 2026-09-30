@@ -20,8 +20,8 @@ import zipfile
 
 from openmachine import __version__, execution, tasks
 from openmachine.config import load
-from openmachine.sanitize import Fault
-from openmachine.state import lease, private_directory, save_json
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.

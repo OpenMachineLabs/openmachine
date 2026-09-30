@@ -14,8 +14,8 @@ import uuid
 
 from openmachine import execution, skills, tasks, workspace
 from openmachine.config import Settings, SkillSources
-from openmachine.sanitize import Fault
-from openmachine.state import lease
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease
 
 
 class ContinuityTests(unittest.TestCase):

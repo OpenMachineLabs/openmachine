@@ -13,8 +13,8 @@ import zipfile
 from integrations import ssh
 from openmachine import __version__, execution, tasks
 from openmachine.config import Settings
-from openmachine.sanitize import Fault
-from openmachine.state import lease, private_directory, save_json
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, private_directory, save_json
 
 
 class SSHTests(unittest.TestCase):
@@ -74,8 +74,9 @@ class SSHTests(unittest.TestCase):
         with zipfile.ZipFile(artifact) as archive:
             self.assertEqual(set(archive.namelist()), {"__main__.py", "integrations/__init__.py", "integrations/ssh.py",
                               "openmachine/__init__.py", "openmachine/execution.py", "openmachine/workspace.py",
-                              "openmachine/state.py", "openmachine/files.py",
-                              "openmachine/logs.py", "openmachine/sanitize.py"})
+                              "openmachine/logs.py", "openmachine/foundation/__init__.py",
+                              "openmachine/foundation/state.py", "openmachine/foundation/files.py",
+                              "openmachine/foundation/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
         result = subprocess.run([sys.executable, "-I", "-S", str(artifact), "rpc"], input="{}",
                                 text=True, capture_output=True, check=True)

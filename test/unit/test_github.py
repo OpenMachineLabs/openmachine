@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from openmachine import github
 from openmachine.config import Settings
-from openmachine.sanitize import Fault
+from openmachine.foundation.sanitize import Fault
 
 REPO = "Owner/repo"
 ROOT = f"repos/{REPO}"

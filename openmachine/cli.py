@@ -8,7 +8,7 @@ import sys
 
 from openmachine import __version__
 from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE, load
-from openmachine.sanitize import Fault
+from openmachine.foundation.sanitize import Fault
 
 
 def main() -> int:

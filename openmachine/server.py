@@ -18,9 +18,9 @@ import uvicorn
 
 from openmachine import __version__, execution, github, service, skills, tasks, workspace
 from openmachine.config import Settings
-from openmachine.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
-from openmachine.sanitize import Fault
-from openmachine.state import lease, private_directory
+from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
+from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, private_directory
 
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)

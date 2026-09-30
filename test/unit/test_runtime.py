@@ -1,5 +1,8 @@
 """Local contracts with disposable directories and real short commands."""
 
+import ast
+from importlib.resources import files
+from importlib.util import resolve_name
 import json
 import os
 from pathlib import Path
@@ -12,7 +15,7 @@ import uuid
 
 from openmachine import execution, logs, workspace
 from openmachine.config import Settings, Workspace, load
-from openmachine.sanitize import Fault, redact
+from openmachine.foundation.sanitize import Fault, redact
 
 
 class RuntimeTests(unittest.TestCase):
@@ -40,6 +43,24 @@ class RuntimeTests(unittest.TestCase):
                 return result
             time.sleep(0.03)
         self.fail(f"Execution did not finish: {result['execution_id']}")
+
+    def test_foundation_imports_only_itself_and_standard_library(self):
+        package = "openmachine.foundation"
+        for source in files(package).iterdir():
+            if not source.name.endswith(".py"):
+                continue
+            for node in ast.walk(ast.parse(source.read_text())):
+                if isinstance(node, ast.Import):
+                    modules = [item.name for item in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [resolve_name("." * node.level + (node.module or ""), package)]
+                else:
+                    continue
+                for module in modules:
+                    with self.subTest(source=source.name, line=node.lineno, module=module):
+                        self.assertTrue(module == package or module.startswith(package + ".")
+                                        or module.split(".")[0] in sys.stdlib_module_names,
+                                        f"Foundation must not depend on {module}.")
 
     def test_configuration_rejects_unknown_or_invalid_fields(self):
         path = self.root / "config.toml"

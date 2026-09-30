@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import zipfile
 
 from openmachine import __version__, execution, workspace
-from openmachine.sanitize import Fault
+from openmachine.foundation.sanitize import Fault
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -51,11 +51,12 @@ def build_bundle(directory: Path) -> dict:
     output = io.BytesIO()
     members = {"__main__.py": b"from integrations.ssh import main\nmain()\n"}
     for package, names in {
-        "openmachine": ("__init__.py", "execution.py", "workspace.py", "logs.py", "sanitize.py", "state.py", "files.py"),
+        "openmachine": ("__init__.py", "execution.py", "workspace.py", "logs.py"),
+        "openmachine.foundation": ("__init__.py", "state.py", "files.py", "sanitize.py"),
         "integrations": ("__init__.py", "ssh.py"),
     }.items():
         for name in names:
-            members[f"{package}/{name}"] = files(package).joinpath(name).read_bytes()
+            members[f"{package.replace('.', '/')}/{name}"] = files(package).joinpath(name).read_bytes()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, content in sorted(members.items()):
             entry = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))

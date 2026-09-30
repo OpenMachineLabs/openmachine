@@ -13,9 +13,9 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-from openmachine.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, excluded, file_bytes, file_parent, file_parts, text_page
-from openmachine.sanitize import Fault, redact
-from openmachine.state import lease, private_directory
+from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, excluded, file_bytes, file_parent, file_parts, text_page
+from openmachine.foundation.sanitize import Fault, redact
+from openmachine.foundation.state import lease, private_directory
 
 if TYPE_CHECKING:
     from openmachine.config import Settings

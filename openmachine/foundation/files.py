@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import stat
 
-from openmachine.sanitize import Fault, redact
+from openmachine.foundation.sanitize import Fault, redact
 
 
 MAX_SCAN_ENTRIES = 2000
