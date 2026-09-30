@@ -83,10 +83,13 @@ No production services or private CI runners are needed.
 
 ## Capability and application boundaries
 
-The existing runtime suite checks foundation, capability and SSH import boundaries,
+The existing runtime suite checks foundation, capability, SSH and GitHub import boundaries,
 including relative/function-local imports and package re-exports. Runtime-only
 checks exclude `TYPE_CHECKING` imports; isolated assembly also rejects disabled
-integration imports and verifies that it creates no controller state.
+integration imports and verifies that it creates no controller state. GitHub's
+existing cases exercise the packaged facade and owning modules through the single
+`connection.request` seam; subprocess-failure cases still run that actual backend.
+Provider imports cannot reverse the connection/client/evidence/operations order.
 
 Direct application checks cover all nine mutations against pending selection,
 wrong-runtime identity and an exclusive lifecycle lease. Successful dispatch holds
@@ -106,7 +109,7 @@ with a mocked user manager. Torn task saves inject failure into the actual store
 owner rather than a facade re-export.
 
 Build wheel and sdist artifacts and test outside the checkout so source files
-cannot hide omitted capability, application or SSH package resources. These checks do not
+cannot hide omitted capability, application, SSH or GitHub package resources. These checks do not
 claim final whole-runtime DAG or live SSH/managed-transition acceptance.
 
 ## Frozen MCP contract

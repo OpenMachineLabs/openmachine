@@ -47,7 +47,7 @@ class RuntimeTests(unittest.TestCase):
             time.sleep(0.03)
         self.fail(f"Execution did not finish: {result['execution_id']}")
 
-    def test_capability_and_ssh_import_boundaries(self):
+    def test_capability_and_integration_import_boundaries(self):
         sources = {}
         for root in ("openmachine", "integrations"):
             for path in Path(str(files(root))).rglob("*.py"):
@@ -60,6 +60,13 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.execution": ("openmachine", "openmachine.execution", "openmachine.foundation", "openmachine.workspace.git"),
             "openmachine.workspace": ("openmachine.workspace", "openmachine.foundation"),
             "openmachine.tasks": ("openmachine.tasks", "openmachine.foundation"),
+            "integrations.github": ("integrations.github.operations",),
+            "integrations.github.connection": ("openmachine.config", "openmachine.foundation"),
+            "integrations.github.client": ("integrations.github.connection", "openmachine.foundation"),
+            "integrations.github.evidence": ("integrations.github.client", "integrations.github.connection",
+                                             "openmachine.foundation"),
+            "integrations.github.operations": ("integrations.github.client", "integrations.github.connection",
+                                               "integrations.github.evidence", "openmachine.config", "openmachine.foundation"),
             "integrations.ssh": ("integrations.ssh",),
             "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation"),
             "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation"),
@@ -99,7 +106,7 @@ import sys
 from openmachine.config import Settings
 original_import = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name == "integrations" or name.startswith("integrations.") or name == "openmachine.github":
+    if name == "integrations" or name.startswith("integrations."):
         raise AssertionError("Disabled integration imported: " + name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded
@@ -110,7 +117,7 @@ app = create_application(config, state)
 assert app.get_capabilities()["integrations"] == []
 assert app.find_tasks()["status"] == "uninitialized"
 assert not state.exists()
-assert not any(name in sys.modules for name in ("openmachine.github", "integrations.ssh.client", "mcp"))
+assert not any(name in sys.modules for name in ("integrations.github", "integrations.ssh.client", "mcp"))
 '''
         result = subprocess.run([sys.executable, "-I", "-c", code, str(self.state)],
                                 capture_output=True, text=True, timeout=15)
