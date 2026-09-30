@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+import threading
 
 from openmachine import execution, tasks, workspace
 from openmachine.config import Settings
@@ -74,10 +75,14 @@ class Machines:
                                validate_new=(lambda: tasks.read(self.state, task_id)) if task_id else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
-                       max_bytes: int = execution.MAX_READ) -> dict:
+                       max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,
+                       *, cancelled: threading.Event | None = None) -> dict:
+        execution.validate_read(offset, max_bytes, wait_seconds)
         if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "read_execution", execution_id=execution_id, offset=offset, max_bytes=max_bytes)
-        return execution.read(self.config, self.state, machine, execution_id, offset, max_bytes)
+            return self._ssh(machine, "read_execution", execution_id=execution_id, offset=offset,
+                             max_bytes=max_bytes, wait_seconds=wait_seconds, cancelled=cancelled)
+        return execution.read(self.config, self.state, machine, execution_id, offset, max_bytes,
+                              wait_seconds, cancelled=cancelled)
 
     def list_executions(self, machine: str, cursor: str = "", limit: int = 20) -> dict:
         if self.config.machine(machine).transport == "ssh":

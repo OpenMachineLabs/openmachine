@@ -1,5 +1,8 @@
 """Explicit local tools and optional GitHub operations on a private MCP service."""
 
+import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -7,6 +10,7 @@ import socket
 import stat
 import signal
 import sys
+import threading
 from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -16,7 +20,7 @@ from pydantic import Field
 import uvicorn
 
 from openmachine import __version__, service
-from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT
+from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -29,22 +33,42 @@ GITHUB_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempote
 GITHUB_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
 
-def _reply(operation) -> CallToolResult:
-    try:
-        payload = operation()
-        failed = False
-    except Fault as error:
-        payload = {"error": {"code": error.code, "message": str(error)}}
-        failed = True
-    except OSError as error:
-        payload = {"error": {"code": "source_unavailable", "message": type(error).__name__}}
-        failed = True
+def _result(payload: dict, failed: bool = False) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))],
                           structuredContent=payload, isError=failed)
 
 
+def _reply(operation, *, execution_output: bool = False) -> CallToolResult:
+    try:
+        payload = operation()
+        if execution_output:
+            payload = bound_output(
+                payload, lambda value: len(json.dumps(_result(value).model_dump(
+                    mode="json", by_alias=True, exclude_none=True)).encode()),
+                MAX_RESULT_BYTES - 1024,
+            )
+        return _result(payload)
+    except Fault as error:
+        payload = {"error": {"code": error.code, "message": str(error)}}
+    except OSError as error:
+        payload = {"error": {"code": "source_unavailable", "message": type(error).__name__}}
+    return _result(payload, True)
+
+
+def _submit_owned(operation) -> Future:
+    """Keep one request independent of observation saturation and SDK lifespans."""
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="om-execution")
+    try:
+        return pool.submit(operation)
+    finally:
+        # Existing work finishes; no persistent pool or cross-request cleanup.
+        pool.shutdown(wait=False)
+
+
 def create_server(config: Settings, state: Path) -> FastMCP:
     application = create_application(config, state)
+    waiting = threading.BoundedSemaphore(MAX_WAITERS)
+
     mcp = FastMCP(
         "Open Machine", instructions="Read inspect_skills(action='read') before operating this runtime.",
         stateless_http=True, json_response=True, max_request_body_size=1048576,
@@ -126,13 +150,32 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                         resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "",
                         termination_grace_seconds: Annotated[float | None, Field(strict=True, ge=0, le=30, allow_inf_nan=False)] = None) -> CallToolResult:
         """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds))
+        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds), execution_output=True)
 
     @mcp.tool(annotations=machine_read, structured_output=False)
-    def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
-                       max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536) -> CallToolResult:
-        """Read the original local or remote receipt and bounded output. finishing means remote scope cleanup is pending. Unreachable targets or missing worker evidence are unknown, never success or permission to retry."""
-        return _reply(lambda: application.read_execution(machine, execution_id, offset, max_bytes))
+    async def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
+                             max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536,
+                             wait_seconds: Annotated[float, Field(strict=True, ge=0, le=MAX_WAIT, allow_inf_nan=False)] = 0) -> CallToolResult:
+        """Read the original receipt and raw-byte-cursor output. Optional 0..5-second waiting wakes on output/state/exit, never changes command timeout. At most 16 waiting readers per server; reader_busy rejects overflow. Cancellation/disconnect affects observation only. Observe output loss/presentation flags; unknown target/worker evidence never permits replay."""
+        if wait_seconds and not waiting.acquire(blocking=False):
+            return _result({"error": {"code": "reader_busy", "message": "At most 16 waiting readers are admitted; immediate reads and cancellation remain available."}}, True)
+        cancelled = threading.Event()
+        operation = partial(_reply, lambda: application.read_execution(
+            machine, execution_id, offset, max_bytes, wait_seconds, cancelled=cancelled), execution_output=True)
+        try:
+            if wait_seconds:
+                try:
+                    future = _submit_owned(operation)
+                except BaseException:
+                    waiting.release()
+                    raise
+                # A cancelled asyncio wrapper is not evidence that its thread stopped.
+                # This callback runs only on real completion or pre-start cancellation.
+                future.add_done_callback(lambda _: waiting.release())
+                return await asyncio.wrap_future(future)
+            return await asyncio.to_thread(operation)
+        finally:
+            cancelled.set()
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def list_executions(machine: str, cursor: str = "",
@@ -141,9 +184,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         return _reply(lambda: application.list_executions(machine, cursor, limit))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
-    def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
+    async def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
-        return _reply(lambda: application.cancel_execution(machine, execution_id))
+        operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
+        return await asyncio.wrap_future(_submit_owned(operation))
 
     if config.github is not None:
         github = application.github

@@ -5,12 +5,13 @@ from contextlib import contextmanager
 import hashlib
 import os
 from pathlib import Path
+import threading
 from types import ModuleType
 from typing import Literal
 
 from openmachine import __version__, execution, service, skills, tasks, workspace
 from openmachine.config import Settings
-from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, SEGMENT_BYTES
+from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
@@ -53,10 +54,13 @@ class Application:
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe"], "controls": [],
+                          "wait_seconds": {"default": 0, "min": 0, "max": execution.MAX_WAIT},
+                          "max_waiting_readers": execution.MAX_WAITERS,
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
                           "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
             "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
+                       "max_execution_result_bytes": execution.MAX_RESULT_BYTES,
                        "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": SEGMENT_BYTES,
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
                        "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": MAX_SCAN_ENTRIES,
@@ -109,8 +113,9 @@ class Application:
                                                  expected_head_sha, workspace_access, resource_keys, task_id,
                                                  termination_grace_seconds)
 
-    def read_execution(self, machine: str, execution_id: str, offset: int = 0, max_bytes: int = 65536) -> dict:
-        return self.machines.read_execution(machine, execution_id, offset, max_bytes)
+    def read_execution(self, machine: str, execution_id: str, offset: int = 0, max_bytes: int = 65536,
+                       wait_seconds: float = 0, *, cancelled: threading.Event | None = None) -> dict:
+        return self.machines.read_execution(machine, execution_id, offset, max_bytes, wait_seconds, cancelled=cancelled)
 
     def list_executions(self, machine: str, cursor: str = "", limit: int = 20) -> dict:
         return self.machines.list_executions(machine, cursor, limit)

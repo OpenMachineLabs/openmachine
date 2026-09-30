@@ -1,6 +1,9 @@
 """Execution lifecycle contracts using small real processes and owned fault windows."""
 
+from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
+import threading
 import signal
 import subprocess
 import sys
@@ -12,10 +15,10 @@ import uuid
 
 from openmachine import execution
 from openmachine.config import Settings, Workspace
-from openmachine.execution import api
+from openmachine.execution import api, logs
 from openmachine.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory, save_json
+from openmachine.foundation.state import lease, private_directory, save_json
 
 
 class ExecutionTests(unittest.TestCase):
@@ -277,6 +280,164 @@ while True: time.sleep(0.05)
         final = self.finish(result)
         self.assertEqual((final["status"], final["exit_code"], final["stop"]["reason"]), ("timed_out", 0, "timeout"))
         self.assertFalse(final["stop"]["force_used"])
+
+
+    def test_wait_inputs_reject_invalid_values_without_observation(self):
+        for value in (True, False, None, "1", -1, 5.01, float("nan"), float("inf"), 10 ** 1000):
+            with self.subTest(value=str(value)[:20]), self.assertRaises(Fault) as caught:
+                execution.validate_read(0, 1, value)
+            self.assertEqual(caught.exception.code, "invalid_wait")
+        for offset, size in ((True, 1), (0, False), (-1, 1), (0, 0), (0, 65537), (0.5, 1)):
+            with self.subTest(offset=offset, size=size), self.assertRaises(Fault):
+                execution.validate_read(offset, size, 0)
+        for value in (0, 0.1, 5):
+            execution.validate_read(0, 65536, value)
+        self.assertFalse(self.state.exists())
+
+    def test_quiet_wait_expires_without_changing_command_or_receipt(self):
+        identity = self.start('import time; time.sleep(3)')["execution_id"]
+        before = self.until(identity, lambda value: value["status"] == "running")
+        path = self.state / "executions" / identity / "record.json"
+        original = path.read_bytes()
+        started = time.monotonic()
+        result = execution.read(self.config, self.state, "local", identity, wait_seconds=0.12)
+        self.assertGreaterEqual(time.monotonic() - started, 0.1)
+        self.assertEqual((result["status"], result["exit_code"], result["wait_expired"]), ("running", None, True))
+        self.assertEqual(result["created_at"], before["created_at"])
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(execution.read(self.config, self.state, "local", identity)["wait_expired"])
+        with self.assertRaises(Fault) as caught:
+            execution.read(self.config, self.state, "local", identity, offset=1, wait_seconds=5)
+        self.assertEqual(caught.exception.code, "invalid_range")
+
+    def test_independent_waiters_wake_on_delayed_output_and_keep_cursors(self):
+        gate = self.root / "emit"
+        code = ('import time; from pathlib import Path; print("ready", flush=True)\n'
+                f'while not Path({str(gate)!r}).exists(): time.sleep(.01)\n'
+                'print("progress", flush=True); time.sleep(.2)')
+        identity = self.start(code)["execution_id"]
+        ready = self.until(identity, lambda value: "ready" in value["output"])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(execution.read, self.config, self.state, "local", identity,
+                                   ready["next_offset"], 65536, 2) for _ in range(2)]
+            time.sleep(0.1)
+            gate.touch()
+            results = [future.result(timeout=3) for future in futures]
+        for result in results:
+            self.assertEqual(result["output"], "progress\n")
+            self.assertFalse(result["wait_expired"])
+            self.assertEqual(result["offset"], ready["next_offset"])
+        self.assertEqual(results[0]["next_offset"], results[1]["next_offset"])
+        again = execution.read(self.config, self.state, "local", identity, ready["next_offset"], 65536, 2)
+        self.assertEqual(again["output"], "progress\n")
+        self.assertFalse(again["wait_expired"])
+        self.finish(again)
+
+    def test_zero_output_exit_wakes_without_requiring_log_growth(self):
+        gate = self.root / "exit"
+        code = ('import time; from pathlib import Path; print("ready", flush=True)\n'
+                f'while not Path({str(gate)!r}).exists(): time.sleep(.01)\n')
+        identity = self.start(code)["execution_id"]
+        ready = self.until(identity, lambda value: "ready" in value["output"])
+        timer = threading.Timer(0.1, gate.touch)
+        timer.start()
+        try:
+            result = execution.read(self.config, self.state, "local", identity, ready["next_offset"], wait_seconds=2)
+        finally:
+            timer.join()
+        self.assertFalse(result["wait_expired"])
+        self.assertTrue(result["command"]["exited"])
+        self.assertEqual((result["output"], result["next_offset"]), ("", ready["next_offset"]))
+        self.assertEqual(self.finish(result)["status"], "succeeded")
+
+    def test_observer_cancellation_leaves_original_command_and_other_reader_live(self):
+        identity = self.start('import time; time.sleep(3)')["execution_id"]
+        before = self.until(identity, lambda value: value["status"] == "running")
+        cancelled = threading.Event()
+        timer = threading.Timer(0.1, cancelled.set)
+        timer.start()
+        try:
+            with self.assertRaises(Fault) as caught:
+                execution.read(self.config, self.state, "local", identity, wait_seconds=5, cancelled=cancelled)
+        finally:
+            timer.join()
+        self.assertEqual(caught.exception.code, "observation_cancelled")
+        result = execution.read(self.config, self.state, "local", identity, wait_seconds=0.08)
+        self.assertEqual((result["status"], result["wait_expired"], result["cancel_requested"]), ("running", True, False))
+        self.assertEqual(result["created_at"], before["created_at"])
+        self.assertFalse((self.state / "executions" / identity / "cancel.request").exists())
+
+    def test_wait_wakes_for_explicit_cancellation_and_never_holds_control_lock(self):
+        identity = self.start('import time; time.sleep(3)')["execution_id"]
+        self.until(identity, lambda value: value["status"] == "running")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(execution.read, self.config, self.state, "local", identity, 0, 65536, 2)
+            time.sleep(0.1)
+            requested = execution.cancel(self.config, self.state, "local", identity)
+            result = future.result(timeout=3)
+        self.assertTrue(requested["cancel_requested"])
+        self.assertTrue(result["cancel_requested"])
+        self.assertFalse(result["wait_expired"])
+        self.assertEqual(self.finish(result)["status"], "cancelled")
+
+    def test_contended_read_locks_share_the_original_bounded_budget(self):
+        identity = self.start('import time; time.sleep(3)')["execution_id"]
+        self.until(identity, lambda value: value["status"] == "running")
+        directory = self.state / "executions" / identity
+        for name in ("control.lock", "output.lock"):
+            with self.subTest(lock=name), lease(directory / name, create=False):
+                with self.assertRaises(Fault) as caught:
+                    execution.read(self.config, self.state, "local", identity, wait_seconds=0.08)
+                self.assertEqual(caught.exception.code, "observation_busy")
+        self.assertEqual(execution.read(self.config, self.state, "local", identity)["status"], "running")
+
+    def test_preparing_without_logs_waits_but_unknown_or_terminal_does_not(self):
+        result = self.finish(self.start('raise SystemExit(0)'))
+        identity = result["execution_id"]
+        self.assertFalse(execution.read(self.config, self.state, "local", identity, wait_seconds=5)["wait_expired"])
+        preparing = result | {"status": "preparing", "output_unavailable": True, "finished_at": None,
+                              "exit_code": None, "command": {"spawned": False, "exited": False}}
+        with patch.object(api, "_snapshot", side_effect=lambda *args: preparing | {"observed_at": time.time()}):
+            observed = execution.read(self.config, self.state, "local", identity, wait_seconds=0.08)
+        self.assertTrue(observed["wait_expired"])
+        with patch.object(api, "_snapshot", return_value=preparing | {"status": "outcome_unknown"}):
+            observed = execution.read(self.config, self.state, "local", identity, wait_seconds=5)
+        self.assertEqual(observed["status"], "outcome_unknown")
+        self.assertFalse(observed["wait_expired"])
+
+    def test_output_presentation_flags_preserve_raw_bytes_and_rereads(self):
+        directory = self.root / "presentation"
+        directory.mkdir()
+        data = "\u00e9\ufffd\n\t\x1b]52;c;fixture\x07\r\u0085".encode() + b"\xff" + b"token" + b"=fixture"
+        with logs.Writer(directory) as writer:
+            writer.write(data)
+        page = logs.read(directory, 0, 65536)
+        self.assertEqual(page["next_offset"], len(data))
+        self.assertTrue(page["output_decode_replaced"] and page["output_redacted"] and page["output_controls_escaped"])
+        self.assertFalse(page["output_gap"] or page["output_presentation_truncated"])
+        self.assertIn("\\x1b]52", page["output"])
+        self.assertNotIn("\x1b", page["output"])
+        self.assertNotIn("\r", page["output"])
+        self.assertIn("\n\t", page["output"])
+        self.assertEqual(logs.read(directory, 0, 65536), page)
+        for offset in (0, 1):
+            part = logs.read(directory, offset, 1)
+            self.assertTrue(part["output_decode_replaced"])
+            self.assertEqual(part["next_offset"], offset + 1)
+        self.assertFalse(logs.read(directory, 2, 3)["output_decode_replaced"])
+
+    def test_serialized_output_bound_never_changes_consumed_offsets(self):
+        original = {"output": "\ufffd" * 100, "offset": 9, "next_offset": 109,
+                    "output_presentation_truncated": False}
+        measure = lambda value: len(json.dumps(value).encode())
+        bounded = execution.bound_output(original, measure, 200)
+        self.assertLessEqual(measure(bounded), 200)
+        self.assertEqual((bounded["offset"], bounded["next_offset"]), (9, 109))
+        self.assertTrue(bounded["output_presentation_truncated"])
+        self.assertFalse(original["output_presentation_truncated"])
+        with self.assertRaises(Fault) as caught:
+            execution.bound_output(original | {"context": "x" * 1000}, measure, 200)
+        self.assertEqual(caught.exception.code, "response_limit")
 
 
 if __name__ == "__main__":

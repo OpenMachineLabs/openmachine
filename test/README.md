@@ -178,3 +178,27 @@ Actual SSH tests must keep the target's existing user manager alive without
 changing host policy. Record independent fixture-login conditions explicitly;
 the original execution SSH request still disconnects. Last-login manager teardown
 is a separate environment failure, not successful cancellation or durable recovery.
+
+## Spec #28 E2
+
+Execution tests cover immediate/unread output, delayed independent readers,
+zero-output exits, quiet expiry, strict finite inputs, preparing versus lost
+owners, cancellation isolation, bounded lock contention, source-byte cursors,
+UTF-8 replacement and visible control/redaction flags. Existing rotation and
+E1 lifecycle cases remain intact. Only the approved `wait_seconds` input is added
+to the frozen MCP fixture; no tool name or annotation is changed.
+
+Real SDK/private-socket tests cover fresh-connection observation, unrelated
+request responsiveness and original command survival after dropping a waiter.
+A deterministic SDK-tool admission fixture fills all 16 slots and proves that
+cancelling the asyncio await cannot release a still-running observer's slot.
+A saturated default executor cannot queue command cancellation behind immediate
+reads; cancellation owns independent per-request execution capacity.
+Serialized-result tests include both MCP representations and the target envelope.
+These checks are not actual ChatGPT/Tunnel acceptance.
+
+Record affected live Linux SSH tests separately: one request waits on the target,
+observer cancellation preserves the original worker/counter, and a new immutable
+endpoint reads the original E1 worker without replacing its archive. Keep the
+existing user-manager lifetime prerequisite explicit. No production workload,
+account-policy change, service migration or repeated Spec #18 acceptance is needed.

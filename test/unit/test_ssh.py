@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -312,7 +314,10 @@ class SSHTests(unittest.TestCase):
         original = (directory / "record.json").read_bytes()
         config = endpoint._RemoteConfig(self.identity, {}, False)
         for observed, status, cleanup in (("active", "finishing", "pending"), ("not-found", "succeeded", "verified")):
-            with patch.object(execution_api, "_scope_state", return_value=observed):
+            def inspect_scope(*args, **kwargs):
+                with lease(directory / "control.lock", create=False):
+                    return observed
+            with patch.object(execution_api, "_scope_state", side_effect=inspect_scope):
                 result = execution.read(config, state, self.identity, directory.name)
             self.assertEqual((result["status"], result["cleanup"]["status"]), (status, cleanup))
             self.assertEqual(result["exit_code"], 0)
@@ -321,3 +326,56 @@ class SSHTests(unittest.TestCase):
             result = execution.read(config, state, self.identity, directory.name)
         self.assertEqual((result["status"], result["cleanup"]["status"]), ("outcome_unknown", "unverified"))
         self.assertEqual((directory / "record.json").read_bytes(), original)
+
+
+    def test_wait_routes_once_and_observer_event_never_enters_wire(self):
+        app = create_application(self.settings, self.root / "controller")
+        cancelled = threading.Event()
+        with patch.object(client, "_exchange", return_value=self.response({"status": "running", "wait_expired": True})) as exchange:
+            result = app.read_execution("build-machine", "c" * 32, 7, 100, 0.25, cancelled=cancelled)
+        self.assertTrue(result["wait_expired"])
+        self.assertEqual(exchange.call_count, 1)
+        self.assertIs(exchange.call_args.kwargs["cancelled"], cancelled)
+        request = json.loads(exchange.call_args.args[1])
+        self.assertEqual(request["arguments"], {"execution_id": "c" * 32, "offset": 7, "max_bytes": 100, "wait_seconds": 0.25})
+        with patch.object(client, "_exchange", side_effect=AssertionError("Invalid waits must not contact the target")):
+            with self.assertRaises(Fault) as caught:
+                app.read_execution("build-machine", "c" * 32, wait_seconds=True)
+        self.assertEqual(caught.exception.code, "invalid_wait")
+        cancelled.set()
+        with patch.object(client, "_exchange", side_effect=AssertionError("Cancelled reads must not contact the target")):
+            with self.assertRaises(Fault) as caught:
+                app.read_execution("build-machine", "c" * 32, wait_seconds=1, cancelled=cancelled)
+        self.assertEqual(caught.exception.code, "observation_cancelled")
+        with self.assertRaises(Fault) as caught:
+            self.dispatch("read_execution", execution_id="c" * 32, cancelled=True)
+        self.assertEqual(caught.exception.code, "invalid_request")
+
+    def test_observation_exchange_cancellation_ends_only_its_owned_transport(self):
+        for close_streams in (False, True):
+            with self.subTest(close_streams=close_streams):
+                cancelled = threading.Event()
+                timer = threading.Timer(0.1, cancelled.set)
+                timer.start()
+                started = time.monotonic()
+                code = "import os,sys,time; sys.stdin.buffer.read(); "
+                if close_streams:
+                    code += "os.close(0); os.close(1); os.close(2); "
+                code += "time.sleep(10)"
+                try:
+                    with self.assertRaises(Fault) as caught:
+                        client._exchange([sys.executable, "-c", code], b"{}", cancelled=cancelled)
+                finally:
+                    timer.join()
+                self.assertEqual(caught.exception.code, "observation_cancelled")
+                self.assertLess(time.monotonic() - started, 3)
+
+    def test_endpoint_bounds_escaped_output_without_moving_raw_cursor(self):
+        result = {"execution_id": "c" * 32, "output": "\ufffd" * 200000, "offset": 0,
+                  "next_offset": 200000, "output_presentation_truncated": False}
+        with patch.object(execution, "read", return_value=result):
+            observed = self.dispatch("read_execution", execution_id="c" * 32, wait_seconds=1)
+        self.assertTrue(observed["output_presentation_truncated"])
+        self.assertEqual(observed["next_offset"], 200000)
+        self.assertLess(len(json.dumps(observed).encode()), MAX_MESSAGE)
+        self.assertFalse(result["output_presentation_truncated"])

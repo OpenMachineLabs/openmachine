@@ -12,15 +12,20 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 import unittest
+from unittest.mock import Mock, patch
 import uuid
 
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ListToolsResult
 
 import openmachine
+from openmachine import server
+from openmachine.config import Settings
 from openmachine.foundation.state import lease
 
 
@@ -629,6 +634,208 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 caps = await session.call_tool("get_capabilities", {})
                 self.assertEqual(caps.structuredContent["lifecycle"]["pid"], self.processes[-1].pid)
 
+
+
+    async def test_wait_schema_and_quiet_expiry_keep_original_execution(self):
+        identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                for value in (True, False, "1", -0.1, 5.1):
+                    result = await session.call_tool("read_execution", identity | {"wait_seconds": value})
+                    self.assertTrue(result.isError)
+                    self.assertEqual(result.structuredContent["error"]["code"], "invalid_tool_call")
+                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                self.assertEqual(caps["execution"]["wait_seconds"], {"default": 0, "min": 0, "max": 5})
+                self.assertEqual(caps["execution"]["max_waiting_readers"], 16)
+                started = await session.call_tool("start_execution", identity | {
+                    "cwd": str(self.work), "argv": [sys.executable, "-c", 'import time; print("ready",flush=True); time.sleep(10)'],
+                    "timeout_seconds": 15})
+                self.assertFalse(started.isError)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        ready = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        if "ready" in ready.get("output", ""):
+                            break
+                    self.assertIn("ready", ready["output"])
+                    path = self.state / "executions" / identity["execution_id"] / "record.json"
+                    original = path.read_bytes()
+                    observed = await session.call_tool("read_execution", identity | {"offset": ready["next_offset"], "wait_seconds": 0.1})
+                    self.assertFalse(observed.isError)
+                    self.assertTrue(observed.structuredContent["wait_expired"])
+                    self.assertEqual(observed.structuredContent["status"], "running")
+                    self.assertEqual(path.read_bytes(), original)
+                finally:
+                    await session.call_tool("cancel_execution", identity)
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        result = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        if result.get("status") == "cancelled":
+                            break
+                    self.assertEqual(result["status"], "cancelled")
+
+    async def test_disconnected_waiter_preserves_command_and_other_operations(self):
+        identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+        gate = self.work / "emit"
+        code = ('import time; from pathlib import Path; p=Path("counter"); p.write_text("once"); print("ready",flush=True)\n'
+                'while not Path("emit").exists(): time.sleep(.01)\n'
+                'print("continued",flush=True)')
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as control:
+                await control.initialize()
+                started = await control.call_tool("start_execution", identity | {
+                    "cwd": str(self.work), "argv": [sys.executable, "-c", code], "timeout_seconds": 15})
+                self.assertFalse(started.isError)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        ready = (await control.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        if "ready" in ready.get("output", ""):
+                            break
+                    self.assertIn("ready", ready["output"])
+                    async with self.client() as (other_reader, other_writer, _):
+                        async with ClientSession(other_reader, other_writer) as other:
+                            await other.initialize()
+                            waiting = asyncio.create_task(other.call_tool("read_execution", identity | {
+                                "offset": ready["next_offset"], "wait_seconds": 5}))
+                            await asyncio.sleep(0.1)
+                            self.assertFalse(waiting.done())
+                            caps = await asyncio.wait_for(control.call_tool("get_capabilities", {}), 2)
+                            self.assertFalse(caps.isError)
+                            now = await asyncio.wait_for(control.call_tool("read_execution", identity), 2)
+                            self.assertEqual(now.structuredContent["status"], "running")
+                            waiting.cancel()
+                            with self.assertRaises(asyncio.CancelledError):
+                                await waiting
+                    # A new connection observes the original worker rather than a replacement.
+                    async with self.client() as (fresh_reader, fresh_writer, _):
+                        async with ClientSession(fresh_reader, fresh_writer) as fresh:
+                            await fresh.initialize()
+                            observed = await fresh.call_tool("read_execution", identity)
+                            self.assertEqual(observed.structuredContent["created_at"], started.structuredContent["created_at"])
+                            self.assertFalse(observed.structuredContent["cancel_requested"])
+                            self.assertEqual((self.work / "counter").read_text(), "once")
+                            gate.touch()
+                            deadline = time.monotonic() + 5
+                            while time.monotonic() < deadline:
+                                result = (await fresh.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                                if result.get("status") == "succeeded":
+                                    break
+                            self.assertEqual((result["status"], result["exit_code"]), ("succeeded", 0))
+                            self.assertIn("continued", result["output"])
+                finally:
+                    gate.touch()
+                    await control.call_tool("cancel_execution", identity)
+
+
+
+class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_waiter_cap_and_cancelled_await_retain_the_actual_thread_slot(self):
+        with tempfile.TemporaryDirectory(prefix="om-read-limit-", dir="/tmp") as directory:
+            root = Path(directory)
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+                                              "workspaces": {"work": {"machine": "local", "root": str(root)}}})
+            application = Mock()
+            application.get_capabilities.return_value = {"alive": True}
+            application.cancel_execution.return_value = {"cancel_requested": True}
+            admitted = threading.Event()
+            release = threading.Event()
+            counter_lock = threading.Lock()
+            calls = []
+
+            def read(machine, identity, offset, size, wait_seconds, *, cancelled):
+                if wait_seconds:
+                    with counter_lock:
+                        calls.append(cancelled)
+                        if len(calls) == 16:
+                            admitted.set()
+                    if not release.wait(5):
+                        raise AssertionError("The test did not release its admitted observers")
+                return {"status": "running", "wait_expired": bool(wait_seconds)}
+
+            application.read_execution.side_effect = read
+            with patch.object(server, "create_application", return_value=application):
+                mcp = server.create_server(config, root / "state")
+            args = {"machine": "local", "execution_id": "a" * 32, "wait_seconds": 5}
+            with patch.object(server, "ThreadPoolExecutor", side_effect=OSError("fixture unavailable")):
+                with self.assertRaises(ToolError):
+                    await mcp.call_tool("read_execution", args)
+            readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(16)]
+            try:
+                self.assertTrue(await asyncio.to_thread(admitted.wait, 3))
+                overflow = await mcp.call_tool("read_execution", args)
+                self.assertEqual(overflow.structuredContent["error"]["code"], "reader_busy")
+                self.assertFalse((await mcp.call_tool("get_capabilities", {})).isError)
+                self.assertFalse((await mcp.call_tool("read_execution", args | {"wait_seconds": 0})).isError)
+                self.assertFalse((await mcp.call_tool("cancel_execution", {"machine": "local", "execution_id": "a" * 32})).isError)
+                readers[0].cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await readers[0]
+                self.assertTrue(any(event.is_set() for event in calls))
+                # The fake observer intentionally has not exited yet. Its slot
+                # cannot be reused just because the asyncio await was cancelled.
+                overflow = await mcp.call_tool("read_execution", args)
+                self.assertEqual(overflow.structuredContent["error"]["code"], "reader_busy")
+            finally:
+                release.set()
+                await asyncio.gather(*readers, return_exceptions=True)
+            result = await mcp.call_tool("read_execution", args)
+            self.assertFalse(result.isError)
+
+    async def test_cancellation_has_capacity_when_immediate_reads_fill_default_executor(self):
+        with tempfile.TemporaryDirectory(prefix="om-cancel-capacity-", dir="/tmp") as directory:
+            root = Path(directory)
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+                                              "workspaces": {"work": {"machine": "local", "root": str(root)}}})
+            application = Mock()
+            release = threading.Event()
+            filled = threading.Event()
+            lock = threading.Lock()
+            count = 0
+
+            def blocked_read(*args, **kwargs):
+                nonlocal count
+                with lock:
+                    count += 1
+                    if count == 2:
+                        filled.set()
+                if not release.wait(5):
+                    raise AssertionError("The test did not release its immediate readers")
+                return {"status": "running"}
+
+            application.read_execution.side_effect = blocked_read
+            application.cancel_execution.return_value = {"cancel_requested": True}
+            with patch.object(server, "create_application", return_value=application):
+                mcp = server.create_server(config, root / "state")
+            asyncio.get_running_loop().set_default_executor(server.ThreadPoolExecutor(max_workers=2))
+            args = {"machine": "local", "execution_id": "b" * 32}
+            readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(2)]
+            try:
+                deadline = time.monotonic() + 3
+                while not filled.is_set() and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                self.assertTrue(filled.is_set())
+                result = await asyncio.wait_for(mcp.call_tool("cancel_execution", args), 1)
+                self.assertFalse(result.isError)
+                self.assertTrue(result.structuredContent["cancel_requested"])
+                application.cancel_execution.assert_called_once_with("local", "b" * 32)
+                self.assertFalse(any(task.done() for task in readers))
+            finally:
+                release.set()
+                await asyncio.gather(*readers, return_exceptions=True)
+
+    async def test_execution_reply_counts_both_json_representations(self):
+        payload = {"output": "\ufffd" * 200000, "offset": 0, "next_offset": 200000,
+                   "output_presentation_truncated": False}
+        result = server._reply(lambda: payload, execution_output=True)
+        encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
+        self.assertFalse(result.isError)
+        self.assertLessEqual(len(encoded), server.MAX_RESULT_BYTES - 1024)
+        self.assertTrue(result.structuredContent["output_presentation_truncated"])
+        self.assertEqual(result.structuredContent["next_offset"], 200000)
+        self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+        self.assertFalse(payload["output_presentation_truncated"])
 
 
 if __name__ == "__main__":

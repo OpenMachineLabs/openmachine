@@ -91,6 +91,8 @@ def _dispatch(request: dict, archive: Path) -> dict:
         _scope_ready()
         result = execution.start(config, state, identity, **arguments, remote_worker=archive)
     elif operation == "read_execution":
+        if set(arguments) - {"execution_id", "offset", "max_bytes", "wait_seconds"}:
+            raise Fault("invalid_request", "Use only the documented execution-read fields.")
         result = execution.read(config, state, identity, **arguments)
     elif operation == "list_executions":
         result = execution.list_records(config, state, identity, **arguments)
@@ -104,8 +106,14 @@ def _dispatch(request: dict, archive: Path) -> dict:
         result = workspace.write_text_file(config, state, identity, **arguments)
     else:
         raise Fault("unsupported_operation", "Select a documented remote workspace or execution operation.")
-    return {"protocol": PROTOCOL, "version": __version__, "identity": identity,
-            "worker_sha256": archive.stem, "result": result}
+    response = {"protocol": PROTOCOL, "version": __version__, "identity": identity,
+                "worker_sha256": archive.stem, "result": result}
+    if operation in {"start_execution", "read_execution", "cancel_execution"}:
+        response["result"] = execution.bound_output(
+            result, lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1,
+            MAX_MESSAGE,
+        )
+    return response
 
 
 def main() -> None:
