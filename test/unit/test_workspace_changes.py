@@ -475,6 +475,42 @@ class WorkspaceChangeTests(unittest.TestCase):
             self.assertEqual(separate["status"], "applied")
         self.assertEqual(self.apply(args)["status"], "applied")
 
+    def test_ambiguous_historical_non_git_root_requires_free_original_lease(self):
+        nested = self.work / "nested"
+        nested.mkdir()
+        identity = uuid.uuid4().hex
+        result = self.app.start_execution("local", identity, str(nested), [sys.executable, "-I", "-c", "pass"])
+        deadline = time.monotonic() + 10
+        while result["status"] != "succeeded":
+            self.assertLess(time.monotonic(), deadline)
+            result = self.app.read_execution("local", identity, wait_seconds=0.2)
+        self.assertEqual((result["exit_code"], result["cleanup"]["status"]), (0, "verified"))
+        path = self.state / "executions" / identity / "record.json"
+        record = json.loads(path.read_text())
+        record["context"].pop("workspace_lock_root")
+        path.write_text(json.dumps(record))
+        retained = path.read_bytes()
+        old_key = hashlib.sha256(str(nested).encode()).hexdigest()
+        old_lock = self.state / "locks" / f"workspace-{old_key}.lock"
+        self.config.workspaces["outer"] = Workspace(machine="local", root=str(self.root))
+        fingerprint = self.config.configuration_sha256()
+        with lease(old_lock):
+            inode = old_lock.stat().st_ino
+            # A terminal label alone must not bypass an original lease still held.
+            self.fault("legacy_workspace_busy", lambda: execution_api.check_workspace_leases(self.config, self.state))
+        execution_api.check_workspace_leases(self.config, self.state)
+        execution_api.check_workspace_leases(self.config, self.state, legacy_candidate=True)
+        self.assertEqual((path.read_bytes(), old_lock.stat().st_ino), (retained, inode))
+        self.assertEqual(self.config.configuration_sha256(), fingerprint)
+        self.assertEqual(self.apply()["error"], "ambiguous_workspace", "New ambiguous writes still reject")
+        self.fault("ambiguous_workspace", lambda: self.app.start_execution(
+            "local", uuid.uuid4().hex, str(nested), [sys.executable, "-I", "-c", "pass"]))
+        self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
+        old_lock.unlink()
+        self.fault("legacy_workspace_busy", lambda: execution_api.check_workspace_leases(self.config, self.state))
+        self.assertFalse(old_lock.exists(), "Missing old evidence must never be recreated")
+        self.assertEqual(path.read_bytes(), retained)
+
     def test_old_candidate_ignoring_new_store_is_rejected_by_actual_gate(self):
         self.apply()
         ignored = {"protocol": 1, "state_contract": 3}
