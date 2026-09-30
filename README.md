@@ -121,8 +121,9 @@ the service unready. The probe must name a configured **local** workspace.
 The user LaunchAgent is `~/Library/LaunchAgents/co.openmachine.runtime.<state-id>.plist`.
 Its state-derived label prevents separate configured instances from controlling
 each other. The stable launcher and immutable environments live below
-`<state-dir>/service/`; `service.json` owns the selected/previous installation, probe, unfinished
-activation and exact configuration-snapshot references used by E1 transitions. Configuration, user Skills,
+`<state-dir>/service/`; `service.json` owns the selected/previous installation,
+probe, unfinished activation and exact configuration-snapshot references used by
+E1 transitions. Configuration, user Skills,
 `tasks/`, `executions/` and their locks keep their original owners and locations.
 The launcher uses the selected base Python at installation time; preserve that
 interpreter as well as the version environments. Do not move virtual environments.
@@ -190,8 +191,9 @@ The existing service owner snapshots the exact old/new bytes; it validates the
 candidate's local and target readers under admission before selecting them. An
 offline, unprepared, unpinned or unreadable target defers the transition. Successful
 activation selects the explicit configuration; failed activation restores the
-original bytes and verifies the old route. Independently edited configuration is
-preserved with `recovery_required`, never overwritten by guessing. Retain the
+actual pre-transition bytes and verifies the old route, including valid edits
+since the last activation. A conflicting edit observed during the transition is
+preserved with `recovery_required`; these checks do not fence uncooperative editors. Retain the
 private `service/configurations/` snapshots with both immutable installations.
 Use the transition-capable CLI for these transitions; an old CLI may reject them.
 
@@ -566,6 +568,14 @@ owned scopes, not a scheduler or an installed background agent.
 New remote receipts use format 4 and identify `systemd_scope` independently of the
 format number. Original format-3 workers retain their original scope behavior.
 A returned scope observation enriches a copy, never the original worker receipt.
+The systemd user manager must remain active for the intended command lifetime,
+for example through an existing login or an operator-established lingering policy.
+A successful probe during an SSH login does not prove that lifetime: with lingering
+disabled, ending the last login can shut down the manager and its scopes. OM does
+not change login/linger policy or promise recovery after that shutdown. Tests must
+state how this prerequisite was maintained separately from the execution's own
+SSH connection, which may disconnect and reconnect.
+
 Preserve original archives, receipts and target state. Account-session teardown,
 reboot, disk loss, arbitrary same-account tampering and deliberately moving a
 process out of its cgroup are not recovery guarantees. Native access and locks

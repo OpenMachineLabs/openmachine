@@ -250,7 +250,6 @@ class ServiceTests(unittest.TestCase):
             start.assert_not_called()
         self.assertEqual(service._record(self.state), self.record)
 
-
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service._json(path)
@@ -322,6 +321,41 @@ class ServiceTests(unittest.TestCase):
         start.assert_not_called()
         self.assertEqual(self.config.read_bytes(), original)
         self.assertEqual(service._record(self.state), self.record)
+
+    def test_failed_update_restores_current_bytes_not_a_stale_snapshot(self):
+        _, _, start = self.activation_mocks()
+        service._activate(self.state, self.record, self.b)
+        current = service._record(self.state)
+        edited = self.config.read_bytes() + b"# valid edit since the previous activation\n"
+        self.config.write_bytes(edited)
+        start.side_effect = [Fault("service_unready", "fixture"), {"status": "ready"}]
+        self.assert_fault("activation_failed_restored", lambda: service._activate(
+            self.state, current, self.a, self.config))
+        self.assertEqual(self.config.read_bytes(), edited)
+        restored = service._record(self.state)
+        saved = service._configuration_for(self.state, restored, self.b)
+        self.assertEqual(saved.read_bytes(), edited)
+
+    def test_unrelated_retained_configuration_is_not_an_allowed_racing_edit(self):
+        _, _, start = self.activation_mocks()
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(original + b"# first explicit configuration\n")
+        service._activate(self.state, self.record, self.b, candidate)
+        current = service._record(self.state)
+        third = "c" * 64
+        directory = private_directory(self.state / "service/versions" / third)
+        save_json(directory / "installation.json", {
+            "identity": third, "version": "0.1.0a7", "protocol": 1, "state_contract": 1})
+        candidate.write_bytes(original + b"# next explicit configuration\n")
+        def independently_restore_older_bytes(*_):
+            self.config.write_bytes(original)
+            raise Fault("service_unready", "fixture")
+        start.side_effect = independently_restore_older_bytes
+        self.assert_fault("recovery_required", lambda: service._activate(
+            self.state, current, third, candidate))
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertIsNotNone(service._record(self.state)["pending"])
 
     def test_corrupt_configuration_snapshot_cannot_be_selected(self):
         self.activation_mocks()

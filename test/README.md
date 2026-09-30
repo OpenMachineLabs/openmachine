@@ -173,3 +173,8 @@ new readers, completed-v4 downgrade refusal before stopping a healthy service,
 and an active v4 worker through compatible controller update/rollback. Separate
 that product evidence from hosted Linux unit checks and real Chat acceptance.
 No production job, GPU, NAS workload or additional test framework is required.
+
+Actual SSH tests must keep the target's existing user manager alive without
+changing host policy. Record independent fixture-login conditions explicitly;
+the original execution SSH request still disconnects. Last-login manager teardown
+is a separate environment failure, not successful cancellation or durable recovery.

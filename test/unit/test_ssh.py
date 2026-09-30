@@ -295,7 +295,6 @@ class SSHTests(unittest.TestCase):
                 client.call(self.settings, "build-machine", "write_workspace_file", content="x" * MAX_MESSAGE)
         self.assertEqual(caught.exception.code, "request_limit")
 
-
     def test_v4_scope_observation_is_separate_and_never_rewrites_worker_facts(self):
         state = self.root / "state"
         directory = private_directory(state / "executions" / ("d" * 32))

@@ -33,8 +33,9 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    selected interpreter. Call start_execution once, optionally linking task_id.
    After uncertainty, read that original ID; do not invent a retry ID. Lookup or
    checkpoint tools never launch work. Keep commands and returned logs secret-free.
-6. Read original receipts and bounded log pages. Success requires `status=succeeded`, a verified zero exit and actual
-   output/readback; cancelled/timed-out work can also return zero. An output_gap means expired logs, not complete
+6. Read original receipts and bounded log pages. Success requires
+   `status=succeeded`, a verified zero exit and actual output/readback;
+   cancelled/timed-out work can also return zero. An output_gap means expired logs, not complete
    evidence. Run the project's relevant tests, inspect real exit/output and diff,
    then verify changed and unrelated files. Save material progress and pending
    decisions under the current revision, not on every poll. A stale revision or
@@ -123,3 +124,9 @@ the active configuration in advance. Preserve service-owned configuration
 snapshots. Candidate local/remote readers must accept retained state before stop;
 completed v4 receipts also block incompatible rollback. Recovery restores the
 exact prior configuration or reports uncertainty, without replay or provisioning.
+
+SSH scope durability requires a user manager that outlives the command's SSH
+connection. A reachable manager alone is insufficient when last-login logout
+stops it. Preserve existing login/linger policy; do not enable lingering or create
+an account/service as an execution side effect. State the maintained prerequisite
+in acceptance, and keep account-manager teardown distinct from executor recovery.

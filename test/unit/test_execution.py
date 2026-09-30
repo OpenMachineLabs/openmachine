@@ -241,7 +241,6 @@ while True: time.sleep(0.05)
             self.start("pass", execution_id=result["execution_id"])
         self.assertEqual(caught.exception.code, "context_unavailable")
 
-
     def test_unavailable_membership_never_infers_success(self):
         setup = 'def fail(*_): raise w.Fault("cleanup_unverified", "injected membership failure")\nw.Process.members=fail'
         with self.injected_worker(setup):

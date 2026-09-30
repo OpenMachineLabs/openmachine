@@ -528,9 +528,14 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             prior = _installed(state, previous)
             probe_service(state, config_path, record["probe"], prior["version"],
                           expected_contract=prior["state_contract"])
-        prior_digest = _snapshot_configuration(state, _configuration_for(state, record, previous))
+        # A normal update snapshots the current registered bytes, including valid
+        # edits since the last activation. Recovery uses the already saved intent.
+        prior_path = config_path if pending is None else _configuration_for(state, record, previous)
+        prior_digest = _snapshot_configuration(state, prior_path)
         configurations = {**record.get("configurations", {}), previous: prior_digest, target: candidate_digest}
-        allowed = set(configurations.values())
+        allowed = {prior_digest, candidate_digest}
+        if pending is not None and pending["to"] in configurations:
+            allowed.add(configurations[pending["to"]])
         record = {**record, "current": target, "configurations": configurations,
                   "pending": {"from": previous, "to": target, "previous": previous_previous}}
         save_json(state / "service/service.json", record)
@@ -551,6 +556,10 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             except (Fault, OSError):
                 raise Fault("recovery_required", "Activation and restoration are unverified; exact configuration/selection intent is retained.") from None
             restored = {**original, "current": previous, "previous": previous_previous, "pending": None}
+            if "configurations" in restored:
+                restored["configurations"] = {key: value for key, value in {
+                    **restored["configurations"], previous: prior_digest}.items()
+                    if key in {previous, previous_previous}}
             save_json(state / "service/service.json", restored)
             cause = error.code if isinstance(error, Fault) else type(error).__name__
             raise Fault("activation_failed_restored", "The previous service and exact configuration were restored. No task was replayed. Cause: " + cause) from None
