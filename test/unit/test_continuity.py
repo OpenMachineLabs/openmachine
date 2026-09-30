@@ -13,6 +13,9 @@ from unittest.mock import patch
 import uuid
 
 from openmachine import execution, skills, tasks, workspace
+from openmachine.execution.records import TERMINAL
+from openmachine.foundation.files import MAX_TEXT_FILE
+from openmachine.tasks import store as task_store
 from openmachine.config import Settings, SkillSources
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
@@ -43,7 +46,7 @@ class ContinuityTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             result = execution.read(self.config, self.state, "desktop", result["execution_id"])
-            if result["status"] in execution.TERMINAL | {"outcome_unknown"}:
+            if result["status"] in TERMINAL | {"outcome_unknown"}:
                 return result
             time.sleep(0.03)
         self.fail("Owned fixture command did not terminate")
@@ -109,7 +112,7 @@ class ContinuityTests(unittest.TestCase):
     def test_torn_checkpoint_index_save_is_reported_and_preserved(self):
         self.save()
         index = (self.state / "tasks/index.json").read_bytes()
-        with patch.object(tasks, "save_json", side_effect=OSError("fixture interrupted index write")):
+        with patch.object(task_store, "save_json", side_effect=OSError("fixture interrupted index write")):
             self.fault("task_write_unverified", self.save, revision=1, body="Updated material progress.\n")
         self.assertEqual((self.state / "tasks/index.json").read_bytes(), index)
         self.assertEqual((self.state / "tasks/task-one/task.md").read_text(), "Updated material progress.\n")
@@ -289,7 +292,7 @@ class ContinuityTests(unittest.TestCase):
         for name in ("../outside.py", ".git/config", ".ENV", "link.py", "hard.py", "pipe.py", "missing/child.py"):
             with self.subTest(name=name), self.assertRaises((Fault, OSError)):
                 workspace.write_text_file(self.config, self.state, "desktop", "project", name, "new", "", "")
-        for value in ("bad\0", "x" * (workspace.MAX_TEXT_FILE + 1)):
+        for value in ("bad\0", "x" * (MAX_TEXT_FILE + 1)):
             self.fault("invalid_content", workspace.write_text_file, self.config, self.state, "desktop", "project", "bad.txt", value, "", "")
         content = "sample \u00e9 \u20ac\n" * 5000
         (self.work / "pages.txt").write_text(content)

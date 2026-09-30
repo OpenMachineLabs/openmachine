@@ -17,6 +17,7 @@ from pydantic import Field
 import uvicorn
 
 from openmachine import __version__, execution, github, service, skills, tasks, workspace
+from openmachine.execution.logs import SEGMENT_BYTES
 from openmachine.config import Settings
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.foundation.sanitize import Fault
@@ -82,7 +83,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             "transport": "private_unix_socket",
             "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
-                       "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": execution.logs.SEGMENT_BYTES,
+                       "log_bytes": execution.MAX_LOG, "log_retention": "rotating", "log_segments": 4, "log_segment_bytes": SEGMENT_BYTES,
                        "workspace_access": ["exclusive", "shared"], "max_resource_keys": 16,
                        "git_capture_bytes": workspace.MAX_CAPTURE, "search_entries": MAX_SCAN_ENTRIES,
                        "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,

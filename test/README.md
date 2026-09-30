@@ -86,9 +86,16 @@ No production services or private CI runners are needed.
 The existing runtime suite checks every foundation source import, including
 function-local and relative imports, against the standard-library-only boundary.
 The SSH suite checks the exact nested archive members and starts the actual
-archive with `-I -S`, without third-party site packages. Build wheel and sdist
-artifacts and test outside the checkout so source files cannot hide omitted
-package resources. These checks do not claim the later whole-runtime dependency
+archive with `-I -S`, without third-party site packages. A short command also
+runs through the actual archive worker entry, using inherited leases and a
+format-2 fixture with a controller-only task reference. Its terminal record,
+output and single counter increment are verified; this is not a live Linux
+scope or SSH transport test. Scope observations use the public execution reader
+with a mocked user manager. Torn task saves inject failure into the actual store
+owner rather than a facade re-export.
+
+Build wheel and sdist artifacts and test outside the checkout so source files
+cannot hide omitted execution/workspace/tasks package resources. These checks do not claim the later whole-runtime dependency
 DAG or live SSH/managed-transition acceptance.
 
 ## Frozen MCP contract
