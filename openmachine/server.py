@@ -101,6 +101,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     # The pinned FastMCP constructor does not expose the low-level version field.
     mcp._mcp_server.version = __version__
 
+    private_directory(state)
     private_directory(state / "locks")
 
     has_ssh = any(item.transport == "ssh" for item in config.machines.values())

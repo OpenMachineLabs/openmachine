@@ -623,8 +623,13 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 "workspaces": {"p": {"machine": "local", "root": str(root)}}})
             app = create_application(config, root / "state")
             read = app.read_workspace_file("local", "p", "source.py")
-            with patch.object(server, "create_application", return_value=app):
-                mcp = server.create_server(config, root / "state")
+            previous_umask = os.umask(0o022)
+            try:
+                with patch.object(server, "create_application", return_value=app):
+                    mcp = server.create_server(config, root / "state")
+            finally:
+                os.umask(previous_umask)
+            self.assertEqual((root / "state").stat().st_mode & 0o777, 0o700)
             identity = uuid.uuid4().hex
             args = {"machine": "local", "workspace_name": "p", "path": "source.py",
                     "edits": [{"old_text": "41", "new_text": "42"}], "expected_head_sha": "",
@@ -641,8 +646,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 mutation = asyncio.create_task(mcp.call_tool("edit_workspace_file", args))
                 try:
                     deadline = time.monotonic() + 3
-                    while not entered.is_set() and time.monotonic() < deadline:
+                    while not entered.is_set() and not mutation.done() and time.monotonic() < deadline:
                         await asyncio.sleep(0.01)
+                    if mutation.done():
+                        self.fail(f"Edit returned before fixture publication: {mutation.result()!r}")
                     self.assertTrue(entered.is_set())
                     observed = await asyncio.wait_for(mcp.call_tool("read_workspace_change", {
                         "machine": "local", "change_id": identity}), 1)
