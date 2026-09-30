@@ -783,6 +783,48 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             result = await mcp.call_tool("read_execution", args)
             self.assertFalse(result.isError)
 
+    async def test_cancellation_has_capacity_when_immediate_reads_fill_default_executor(self):
+        with tempfile.TemporaryDirectory(prefix="om-cancel-capacity-", dir="/tmp") as directory:
+            root = Path(directory)
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+                                              "workspaces": {"work": {"machine": "local", "root": str(root)}}})
+            application = Mock()
+            release = threading.Event()
+            filled = threading.Event()
+            lock = threading.Lock()
+            count = 0
+
+            def blocked_read(*args, **kwargs):
+                nonlocal count
+                with lock:
+                    count += 1
+                    if count == 2:
+                        filled.set()
+                if not release.wait(5):
+                    raise AssertionError("The test did not release its immediate readers")
+                return {"status": "running"}
+
+            application.read_execution.side_effect = blocked_read
+            application.cancel_execution.return_value = {"cancel_requested": True}
+            with patch.object(server, "create_application", return_value=application):
+                mcp = server.create_server(config, root / "state")
+            asyncio.get_running_loop().set_default_executor(server.ThreadPoolExecutor(max_workers=2))
+            args = {"machine": "local", "execution_id": "b" * 32}
+            readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(2)]
+            try:
+                deadline = time.monotonic() + 3
+                while not filled.is_set() and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                self.assertTrue(filled.is_set())
+                result = await asyncio.wait_for(mcp.call_tool("cancel_execution", args), 1)
+                self.assertFalse(result.isError)
+                self.assertTrue(result.structuredContent["cancel_requested"])
+                application.cancel_execution.assert_called_once_with("local", "b" * 32)
+                self.assertFalse(any(task.done() for task in readers))
+            finally:
+                release.set()
+                await asyncio.gather(*readers, return_exceptions=True)
+
     async def test_execution_reply_counts_both_json_representations(self):
         payload = {"output": "\ufffd" * 200000, "offset": 0, "next_offset": 200000,
                    "output_presentation_truncated": False}

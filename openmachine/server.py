@@ -1,7 +1,7 @@
 """Explicit local tools and optional GitHub operations on a private MCP service."""
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 import json
 import os
@@ -53,6 +53,16 @@ def _reply(operation, *, execution_output: bool = False) -> CallToolResult:
     except OSError as error:
         payload = {"error": {"code": "source_unavailable", "message": type(error).__name__}}
     return _result(payload, True)
+
+
+def _submit_owned(operation) -> Future:
+    """Keep one request independent of observation saturation and SDK lifespans."""
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="om-execution")
+    try:
+        return pool.submit(operation)
+    finally:
+        # Existing work finishes; no persistent pool or cross-request cleanup.
+        pool.shutdown(wait=False)
 
 
 def create_server(config: Settings, state: Path) -> FastMCP:
@@ -154,18 +164,11 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             machine, execution_id, offset, max_bytes, wait_seconds, cancelled=cancelled), execution_output=True)
         try:
             if wait_seconds:
-                pool = None
                 try:
-                    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="om-read")
-                    future = pool.submit(operation)
+                    future = _submit_owned(operation)
                 except BaseException:
                     waiting.release()
                     raise
-                finally:
-                    # A stateless SDK lifespan belongs to one HTTP request, not
-                    # this server. Retire only this admitted observer's executor.
-                    if pool is not None:
-                        pool.shutdown(wait=False)
                 # A cancelled asyncio wrapper is not evidence that its thread stopped.
                 # This callback runs only on real completion or pre-start cancellation.
                 future.add_done_callback(lambda _: waiting.release())
@@ -183,7 +186,8 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     @mcp.tool(annotations=WRITE, structured_output=False)
     async def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
-        return await asyncio.to_thread(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
+        operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
+        return await asyncio.wrap_future(_submit_owned(operation))
 
     if config.github is not None:
         github = application.github

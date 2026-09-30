@@ -358,7 +358,8 @@ was observed before this read's deadline, never that the command timed out.
 
 Waiting runs outside the MCP event loop. Each server admits at most 16 concurrent
 waiting reads; excess requests return `reader_busy` without a persistent queue.
-Immediate reads and cancellation do not consume those waiting slots. Cancelling
+Immediate reads do not consume waiting slots; command cancellation has its own
+per-request executor rather than competing with immediate reads. Cancelling
 an observer releases its own resources when its actual work ends; it never sends
 command cancellation, changes leases, or advances another reader's cursor.
 Receipt/output lock contention shares the observation's finite budget and can
