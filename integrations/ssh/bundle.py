@@ -35,7 +35,7 @@ def build_bundle(directory: Path) -> dict:
     members = {"__main__.py": b"from integrations.ssh.endpoint import main\nmain()\n"}
     for package, names in {
         "openmachine": ("__init__.py",),
-        "openmachine.execution": ("__init__.py", "__main__.py", "api.py", "worker.py", "records.py", "logs.py"),
+        "openmachine.execution": ("__init__.py", "__main__.py", "api.py", "worker.py", "process.py", "records.py", "logs.py"),
         "openmachine.workspace": ("__init__.py", "inspect.py", "git.py", "files.py"),
         "openmachine.foundation": ("__init__.py", "state.py", "files.py", "sanitize.py"),
         "integrations": ("__init__.py",),

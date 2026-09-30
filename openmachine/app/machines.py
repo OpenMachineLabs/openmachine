@@ -51,11 +51,11 @@ class Machines:
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
-                        task_id: str = "") -> dict:
+                        task_id: str = "", termination_grace_seconds: float | None = None) -> dict:
         target = self.config.machine(machine, write=True)
         if target.transport == "ssh":
             keys = execution.validate_start(cwd, argv, timeout_seconds, expected_head_sha,
-                                            workspace_access, resource_keys, task_id)
+                                            workspace_access, resource_keys, task_id, termination_grace_seconds)
             if task_id:
                 # A pre-read only decides whether a new controller reference is needed.
                 # The target start must still compare the original normalized request.
@@ -67,9 +67,10 @@ class Machines:
                     tasks.read(self.state, task_id)
             return self._ssh(machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
                              timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
-                             workspace_access=workspace_access, resource_keys=keys, task_id=task_id)
+                             workspace_access=workspace_access, resource_keys=keys, task_id=task_id,
+                             termination_grace_seconds=termination_grace_seconds)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
-                               expected_head_sha, workspace_access, resource_keys, task_id,
+                               expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds,
                                validate_new=(lambda: tasks.read(self.state, task_id)) if task_id else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,

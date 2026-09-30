@@ -33,8 +33,9 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    selected interpreter. Call start_execution once, optionally linking task_id.
    After uncertainty, read that original ID; do not invent a retry ID. Lookup or
    checkpoint tools never launch work. Keep commands and returned logs secret-free.
-6. Read original receipts and bounded log pages. Success requires a terminal zero
-   exit and actual output/readback. An output_gap means expired logs, not complete
+6. Read original receipts and bounded log pages. Success requires
+   `status=succeeded`, a verified zero exit and actual output/readback;
+   cancelled/timed-out work can also return zero. An output_gap means expired logs, not complete
    evidence. Run the project's relevant tests, inspect real exit/output and diff,
    then verify changed and unrelated files. Save material progress and pending
    decisions under the current revision, not on every poll. A stale revision or
@@ -85,7 +86,7 @@ change. Worker preparation is explicit, never hidden in reads or execution.
 
 Remote receipts/logs/locks belong to the target; checkpoints and user Skills stay
 on the controller. Preserve the original target identity, execution ID and worker
-archive when reconnecting. `finishing` means scope cleanup is not yet confirmed;
+archive when reconnecting. `finishing` means required cleanup/drain is still pending;
 an unreachable host or missing scope evidence is unknown. Read the same ID, never
 relaunch completed work. Alternate aliases share the target's canonical state and
 worktree locks. Do not install, update or remove another task's worker/runtime to
@@ -102,3 +103,30 @@ workers continue. activation_pending/recovery_required require original selectio
 readback and explicit compatible rollback, not another update or workload replay.
 Distinguish candidate rejection, verified restoration and unknown recovery. Keep
 source merge, service activation and any ChatGPT metadata refresh separate.
+
+E1 keeps pipes as the default and only IO mode; no PTY, input controls or waiting
+reads are advertised. New format-4 receipts separate command launch/exit, first
+stop reason, force use and cleanup. `termination_grace_seconds` accepts null or
+finite 0..30: null means 5 seconds for a new execution and the original effective
+value on an identical-ID retry. Old workers retain 0.5 seconds, not a retroactive
+upgrade. Do not change a start request to recover the same execution.
+
+TERM grace continues draining output. A handled stop returning exit zero remains
+cancelled/timed-out; an already observed natural exit cannot be relabeled. Native
+cleanup covers verified POSIX-session work, not detached sessions or a sandbox.
+Unknown cleanup/ownership never authorizes another ID or arbitrary PID signaling.
+Legacy facts remain null; new readers do not strengthen historical guarantees.
+
+Use E1's transition-capable CLI and the selected installation's actual contract.
+Prepare protocol-2 SSH endpoints explicitly alongside original archives. Pass an
+explicit `update --candidate-config` when changing endpoint routes; do not edit
+the active configuration in advance. Preserve service-owned configuration
+snapshots. Candidate local/remote readers must accept retained state before stop;
+completed v4 receipts also block incompatible rollback. Recovery restores the
+exact prior configuration or reports uncertainty, without replay or provisioning.
+
+SSH scope durability requires a user manager that outlives the command's SSH
+connection. A reachable manager alone is insufficient when last-login logout
+stops it. Preserve existing login/linger policy; do not enable lingering or create
+an account/service as an execution side effect. State the maintained prerequisite
+in acceptance, and keep account-manager teardown distinct from executor recovery.

@@ -543,7 +543,7 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
         child = 'import signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1.5); Path("escaped").touch(); time.sleep(10)'
         command = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(10)'
-        owned = self.start(command)
+        owned = self.start(command, termination_grace_seconds=0.1)
         independent = self.start('import time; from pathlib import Path; time.sleep(0.7); Path("done").touch()', cwd=other)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

@@ -41,6 +41,7 @@ def main() -> int:
     update = commands.add_parser("update", help="Verify and activate an explicit wheel; retain the original installation")
     update.add_argument("--wheel", type=Path, required=True)
     update.add_argument("--requirements", type=Path, required=True)
+    update.add_argument("--candidate-config", type=Path, help="Explicit candidate configuration; preserve and restore the original on activation failure")
     commands.add_parser("rollback", help="Verify and restore the retained compatible installation, never user work")
     args = parser.parse_args()
     try:
@@ -67,7 +68,8 @@ def main() -> int:
             result = operate(args.config, args.state_dir,
                              args.service_action if args.command == "service" else args.command,
                              wheel=getattr(args, "wheel", None), requirements=getattr(args, "requirements", None),
-                             workspace=getattr(args, "probe_workspace", ""), path=getattr(args, "probe_path", ""))
+                             workspace=getattr(args, "probe_workspace", ""), path=getattr(args, "probe_path", ""),
+                             candidate_config=getattr(args, "candidate_config", None))
             print(json.dumps(result))
             return int(result["status"] in {"unready", "activation_pending"})
         config = load(args.config)

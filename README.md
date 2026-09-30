@@ -22,6 +22,15 @@ manual `serve` and configured SSH workers; managed Linux services and Windows
 are not included. Native execution is disabled by default and is **not a
 sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI.
 
+## Development after v0.2.0
+
+The current development tree includes Spec #28 E1: format-4 execution facts,
+graceful draining termination, and directional service/SSH compatibility. These
+changes are **not** part of the immutable v0.2.0 release linked above. The E1
+contracts below apply to a build from the approved E1 commit; inspect actual
+capabilities before using new fields. Release installation commands remain pinned.
+PTY, input control and waiting reads are not implemented in E1.
+
 ## Install
 
 Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
@@ -112,8 +121,9 @@ the service unready. The probe must name a configured **local** workspace.
 The user LaunchAgent is `~/Library/LaunchAgents/co.openmachine.runtime.<state-id>.plist`.
 Its state-derived label prevents separate configured instances from controlling
 each other. The stable launcher and immutable environments live below
-`<state-dir>/service/`; `service.json` owns only the selected installation, previous
-installation, probe and any unfinished activation. Configuration, user Skills,
+`<state-dir>/service/`; `service.json` owns the selected/previous installation,
+probe, unfinished activation and exact configuration-snapshot references used by
+E1 transitions. Configuration, user Skills,
 `tasks/`, `executions/` and their locks keep their original owners and locations.
 The launcher uses the selected base Python at installation time; preserve that
 interpreter as well as the version environments. Do not move virtual environments.
@@ -166,12 +176,30 @@ archives and interpreters for original executions. Controller update and rollbac
 never provision or replace remote workers automatically; a rollback also requires
 a worker matching the selected controller for new calls.
 
-Managed transitions require the same lifecycle/state contract and successful
-candidate-owned validation of current configuration, task and execution formats.
-`0.1.0a6` and earlier do not implement that contract and are not managed rollback
-targets. Unknown formats, corrupt state or an unsafe downgrade are refused; no
-migration or deletion is attempted. Rollback does not undo user work or GitHub
-side effects. A successful identical update is a no-op, not a service restart.
+E1 keeps lifecycle protocol 1 and uses state contract 2. The transition-capable
+CLI explicitly recognizes contracts 1/2, but a number alone never proves
+compatibility: the candidate's real readers must validate all retained state.
+Readiness checks the selected installation's actual contract, not the caller's.
+Any unreadable format-4 record, including a completed execution, blocks an older
+candidate **before** the healthy service is stopped. Do not delete receipts to
+make rollback pass. `0.1.0a6` and earlier are not managed rollback targets.
+
+E1 SSH uses strict protocol 2. Explicitly prepare the matching endpoint alongside
+old worker archives. For a managed upgrade that changes endpoint paths, leave the
+active configuration untouched and pass `update --candidate-config /absolute/new.toml`.
+The existing service owner snapshots the exact old/new bytes; it validates the
+candidate's local and target readers under admission before selecting them. An
+offline, unprepared, unpinned or unreadable target defers the transition. Successful
+activation selects the explicit configuration; failed activation restores the
+actual pre-transition bytes and verifies the old route, including valid edits
+since the last activation. A conflicting edit observed during the transition is
+preserved with `recovery_required`; these checks do not fence uncooperative editors. Retain the
+private `service/configurations/` snapshots with both immutable installations.
+Use the transition-capable CLI for these transitions; an old CLI may reject them.
+
+No state migration, remote provisioning or worker relaunch is performed. Rollback
+does not undo user work or GitHub effects. An identical update is a no-op, not a
+service restart; changing configuration alone is not disguised as such an update.
 
 ### Diagnose and recover
 
@@ -226,8 +254,8 @@ change. A socket or a tool list does not prove that write tools work.
 | `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
 | `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
-| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys` and an existing `task_id`. |
-| `read_execution` | Original machine/ID and absolute byte offset; observed state, exit code, context, bounded output and next offset. |
+| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, and `termination_grace_seconds` (E1). |
+| `read_execution` | Original machine/ID and absolute byte offset; observed state, command/stop/cleanup facts, exit code, context, bounded output and next offset. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
 | `github_read` | Conditional on `[github]`; identity/status, scoped objects, pinned source and paged PR/check/discussion observations; never dispatches arbitrary endpoints. |
@@ -288,15 +316,28 @@ workspaces. Busy resources are reported, never bypassed. Git must be available
 for trustworthy workspace identity; no environment selection or installation is
 implicit. Locks do not coordinate manual edits or another runtime/state store.
 
-Only the worker writes lifecycle receipts. Cancellation writes a separate durable
-request; completed executions keep their original terminal result. An observed
-normal completion wins over a later cancellation. Cancellation/timeout clean up
-the owned process group, not arbitrary PIDs or independent services, and do not
-undo previous side effects. Graceful worker interruption is distinct from failed,
-timed-out and cancelled work. Intentionally detached processes, host reboot,
-sleep, disk loss and session teardown are not recovery promises. Local execution
-retains this process-group contract; configured SSH execution uses the target
-user-scope lifecycle described below.
+Only the worker publishes command/lifecycle facts. Cancellation writes the same
+durable request; repetitions neither extend grace nor relabel an observed natural
+exit. E1 distinguishes `stopping`, command-exited-but-cleanup-pending `finishing`,
+and the final outcome. A program handling TERM and returning zero remains
+`cancelled`/`timed_out` when that reason initiated stopping; `exit_code=0` is not
+by itself execution success. Launch failure is distinct from a program exiting 127.
+
+`termination_grace_seconds` is null or a finite number from 0 to 30. New executions
+resolve null to **5 seconds**. Identical-ID retries resolve null to the original
+value, including **0.5 seconds** for legacy workers; an explicit different value
+conflicts. Pipes remain the only mode, with closed stdin and combined stdout/stderr.
+The worker drains output during TERM grace, then forces remaining owned work and
+bounds final observation/drain. Command runtime excludes this bounded cleanup.
+
+Native E1 workers retain an unreaped child identity while signaling verified
+process groups in its POSIX session; Linux uses waitid/WNOWAIT and macOS uses
+kqueue. The native session is not a sandbox: deliberate new sessions and external
+supervisors can escape it. The SSH systemd scope is a different containment boundary.
+Unknown ownership or cleanup is reported, not converted into success or a PID
+adoption. Disk-log failure is an execution infrastructure error; retention gaps and
+bounded output incompleteness remain separate from a known command exit. Stop is
+not undo, and process completion is not logical-task completion.
 
 Output rotates through **four 1 MiB segments** without stopping the command.
 Readers use absolute byte offsets across rotations; expired offsets report
@@ -305,11 +346,12 @@ when a UTF-8 character is split. Full durable output belongs in an explicit
 artifact, not this bounded console cache. A zero process exit alone does not mark
 a logical task complete.
 
-Format-1 (`0.1.0a1`) receipts and prefix-only logs remain readable without rewriting
-history. New receipts identify format 2. Legacy active workers cannot acquire the
-new cancellation protocol; their original installed runtime and records must be
-preserved. This is read compatibility, not managed upgrade/rollback or permission
-to downgrade a format-2 state store. Task references default to empty for older receipts; old records are never rewritten. Automatic resumption remains excluded.
+New local and SSH executions write format 4. Original formats 1/2/3 and prefix
+logs remain readable without rewriting. Legacy command/stop/cleanup facts are
+null rather than invented; legacy workers keep their original cancellation
+capability and guarantees. The original runtime/archive remains their owner.
+All execution IDs, lock names, task references and raw-byte log cursors retain
+their existing meaning. There is no automatic resume or control takeover.
 
 ## GitHub collaboration
 
@@ -518,12 +560,22 @@ children that changed process groups. A durable process receipt is reported as
 `finishing` until scope cleanup is observed; a missing user manager is unknown,
 not success. Reads never stop units. Reissuing cancellation can request cleanup
 of a finishing owned scope. Scope lifetime is bounded by the command timeout
-plus 30 seconds, with a two-second systemd stop bound. These are owned scopes,
-not a scheduler or installed background agent.
+plus effective grace and 30 seconds; systemd's stop budget is grace plus seven
+seconds. Preparation, force observation, final drain and publication have finite
+budgets, not hard real-time guarantees under kernel/storage stalls. These are
+owned scopes, not a scheduler or an installed background agent.
 
-New remote receipts use format 3 so older runtimes reject rather than misread
-the scope-cleanup contract. Existing local format-1/2 receipts remain readable;
-local writes retain format 2. This is not managed update or downgrade support.
+New remote receipts use format 4 and identify `systemd_scope` independently of the
+format number. Original format-3 workers retain their original scope behavior.
+A returned scope observation enriches a copy, never the original worker receipt.
+The systemd user manager must remain active for the intended command lifetime,
+for example through an existing login or an operator-established lingering policy.
+A successful probe during an SSH login does not prove that lifetime: with lingering
+disabled, ending the last login can shut down the manager and its scopes. OM does
+not change login/linger policy or promise recovery after that shutdown. Tests must
+state how this prerequisite was maintained separately from the execution's own
+SSH connection, which may disconnect and reconnect.
+
 Preserve original archives, receipts and target state. Account-session teardown,
 reboot, disk loss, arbitrary same-account tampering and deliberately moving a
 process out of its cgroup are not recovery guarantees. Native access and locks

@@ -123,9 +123,10 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                         argv: Annotated[list[str], Field(min_length=1, max_length=100)],
                         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_TIMEOUT)] = DEFAULT_TIMEOUT,
                         expected_head_sha: str = "", workspace_access: Literal["exclusive", "shared"] = "exclusive",
-                        resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "") -> CallToolResult:
+                        resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "",
+                        termination_grace_seconds: Annotated[float | None, Field(strict=True, ge=0, le=30, allow_inf_nan=False)] = None) -> CallToolResult:
         """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id))
+        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,

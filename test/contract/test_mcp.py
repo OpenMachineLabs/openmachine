@@ -85,6 +85,23 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with streamable_http_client("http://localhost/mcp", http_client=client) as streams:
                 yield streams
 
+    async def test_grace_schema_rejects_invalid_values_before_admission(self):
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                for value in (True, False, "5", -1, 31):
+                    identity = uuid.uuid4().hex
+                    result = await session.call_tool("start_execution", {
+                        "machine": "desktop", "execution_id": identity, "cwd": str(self.work),
+                        "argv": [sys.executable, "-c", "raise SystemExit(0)"],
+                        "termination_grace_seconds": value})
+                    self.assertTrue(result.isError, value)
+                    self.assertFalse((self.state / "executions" / identity).exists())
+                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                self.assertEqual(caps["execution"]["receipt_format"], 4)
+                self.assertEqual(caps["execution"]["io_modes"], ["pipe"])
+                self.assertEqual(caps["execution"]["controls"], [])
+
     def assert_tool_contract(self, result: ListToolsResult, *, github: bool, ssh: bool):
         expected = json.loads(Path(__file__).with_name("mcp_contract.json").read_text())["tools"]
         if not github:
