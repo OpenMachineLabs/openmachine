@@ -214,6 +214,8 @@ while True: time.sleep(0.05)
         self.assertFalse((self.work / "effect").exists())
 
     def test_legacy_retry_preserves_grace_and_never_rewrites_the_receipt(self):
+        private_directory(self.state)
+        private_directory(self.state / "executions")
         directory = private_directory(self.state / "executions" / uuid.uuid4().hex)
         code = 'print("legacy")'
         record = {"version": "0.1.0", "status": "succeeded", "exit_code": 0, "created_at": 1,
