@@ -175,3 +175,9 @@ Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
 or restart a process merely to clear a busy control. New readers preserve v4
 lifecycle facts and all older bytes; state contract 3 and SSH protocol 3 are not
 release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.
+
+After a controller transition, read capabilities, then the original execution
+and last control receipt before deciding on another input. Keep the original
+cursor; do not reset the sequence, relaunch the terminal or replace its runtime.
+A compatible rollback preserves live work, not permission to replay uncertain
+effects. An identical installation update is a no-op, not proof of a transition.

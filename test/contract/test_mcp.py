@@ -742,10 +742,11 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
         self.fail("The original SDK execution did not reach the required observation")
 
-    async def test_interactive_worker_continues_across_real_sdk_connections_without_replay(self):
+    async def test_interactive_worker_survives_controller_restart_without_replay(self):
         identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
-        code = ('import time; from pathlib import Path; p=Path("start-count"); '
+        code = ('import os,time; from pathlib import Path; p=Path("start-count"); '
                 'p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); '
+                'Path("process-identity").write_text(f"{os.getpid()} {os.getppid()}"); '
                 'print("ready",flush=True); x=input(); print("first-read",flush=True); '
                 'y=input(); print("same-process",x,y,flush=True); time.sleep(8)')
         try:
@@ -762,12 +763,31 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     receipt = sent.structuredContent["control_result"]
                     self.assertEqual(receipt["status"], "applied")
                     self.assertNotIn("output", sent.structuredContent)
-                    await self.execution_until(session, identity, lambda r: "first-read" in r["output"])
+                    before = await self.execution_until(session, identity, lambda r: "first-read" in r["output"])
+            original = execution.read_record(self.state / "executions" / identity["execution_id"])
+            original_processes = (self.work / "process-identity").read_text()
+            self.stop(self.processes[0])
+            self.assertFalse(self.socket.exists())
+            restarted = self.launch()
+            self.assertNotEqual(restarted.pid, self.processes[0].pid)
             async with self.client() as (reader, writer, _):
                 async with ClientSession(reader, writer) as fresh:
                     await fresh.initialize()
                     observed = await self.execution_until(fresh, identity, lambda r: r["control"]["seq"] == 1)
                     self.assertEqual(observed["created_at"], ready["created_at"])
+                    self.assertEqual(observed["context"], ready["context"])
+                    retained = execution.read_record(self.state / "executions" / identity["execution_id"])
+                    self.assertEqual((self.work / "process-identity").read_text(), original_processes)
+                    for pid in map(int, original_processes.split()):
+                        os.kill(pid, 0)
+                    self.assertEqual(retained["command"], original["command"])
+                    self.assertEqual(retained["request"], original["request"])
+                    self.assertEqual(observed["control"]["last"], receipt)
+                    cursor = (await fresh.call_tool("read_execution", identity | {
+                        "offset": before["next_offset"]})).structuredContent
+                    self.assertEqual(cursor["next_offset"], before["next_offset"])
+                    self.assertFalse(cursor["output_gap"])
+                    self.assertEqual(cursor["output"], "")
                     duplicate = await fresh.call_tool("control_execution", identity | {
                         "expected_control_seq": 0, "action": "write_stdin", "text": "41\n"})
                     self.assertFalse(duplicate.isError)
