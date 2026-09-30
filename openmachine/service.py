@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 2
+STATE_CONTRACT = 3
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -157,7 +157,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2)
+                or value["state_contract"] not in (1, 2, 3)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         return value

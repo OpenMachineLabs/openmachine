@@ -1,4 +1,4 @@
-"""Sole post-admission writer: command lifecycle, draining and final publication."""
+"""Sole post-admission writer: command/control lifecycle, drain and publication."""
 
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
 from openmachine.workspace.git import context
 
-from . import logs
+from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process
 from .records import FORMAT, STOP_STATUS, is_remote, read_record
@@ -30,81 +30,89 @@ def _publish(directory: Path, record: dict) -> bool:
         return False
 
 
-def _run(directory: Path, record: dict, process: Process, output, interrupted) -> None:
-    """Advance stop deadlines while consuming bounded output on every iteration."""
+def _run(directory: Path, record: dict, process: Process, output, interrupted,
+         selector: selectors.BaseSelector, controls: control.Server | None) -> None:
+    """Advance stop/control deadlines and consume bounded output each iteration."""
     command, stop, cleanup = record["command"], record["stop"], record["cleanup"]
-    deadline = process.started_monotonic + record["request"]["timeout_seconds"]
+    deadline = (process.started_monotonic if process.spawned else time.monotonic()) + record["request"]["timeout_seconds"]
     term_deadline = force_deadline = drain_deadline = None
     term_groups = set()
-    logging_failed = False
-    observation_failed = False
-    with selectors.DefaultSelector() as selector:
-        selector.register(process.child.stdout, selectors.EVENT_READ)
-        while True:
-            now = time.monotonic()
-            if not observation_failed:
-                try:
-                    exited = process.observe_exit()
-                    if exited and not command["exited"]:
-                        command.update(exited=True, exited_at=time.time())
-                        record["status"] = "finishing"
-                        _publish(directory, record)
-                    # A late request cannot relabel an already observed natural exit.
-                    if not exited and stop["reason"] is None and term_deadline is None:
-                        reason = ("worker_signal" if interrupted() else "cancel" if (directory / "cancel.request").exists()
-                                  else "timeout" if now >= deadline else None)
-                        if reason:
-                            stop.update(reason=reason, requested_at=time.time())
-                    if term_deadline is None and (exited or stop["reason"] or record.get("error")):
-                        record["status"] = "finishing" if exited else "stopping"
-                        term_deadline = now + stop["grace_seconds"]
-                        force_deadline = term_deadline + FORCE_SECONDS
-                        _publish(directory, record)
-                    if term_deadline is not None and drain_deadline is None:
-                        members = process.members(time.monotonic() + min(1, max(0.05, force_deadline - now)))
-                        if not members and exited:
-                            cleanup["status"] = "verified"
-                            drain_deadline = time.monotonic() + DRAIN_SECONDS
-                        elif now >= force_deadline:
-                            cleanup.update(status="unverified", error="owned_processes_remain")
-                            drain_deadline = time.monotonic() + DRAIN_SECONDS
-                        elif now >= term_deadline:
-                            if process.signal_groups(members, signal.SIGKILL):
-                                if not stop["force_used"]:
-                                    stop["force_used"] = True
-                                    _publish(directory, record)
-                        else:
-                            fresh = {pid: group for pid, group in members.items() if group not in term_groups}
-                            term_groups.update(process.signal_groups(fresh, signal.SIGTERM))
-                except (OSError, ValueError, IndexError, Fault, subprocess.SubprocessError) as error:
-                    cleanup.update(status="unverified", error=error.code if isinstance(error, Fault) else "process_observation_failed")
-                    # Lost ownership is not permission to broaden signaling or adopt PIDs.
-                    drain_deadline = time.monotonic() + DRAIN_SECONDS
-                    observation_failed = True
-            if drain_deadline is not None and (not selector.get_map() or time.monotonic() >= drain_deadline):
-                record["output_incomplete"] |= bool(selector.get_map())
-                break
-            for key, _ in selector.select(0.05):
-                try:
-                    chunk = os.read(key.fd, MAX_READ)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                    elif not logging_failed:
-                        output.write(chunk)
-                except (OSError, ValueError):
-                    # Keep draining during failure cleanup, but never claim retained output.
-                    logging_failed = True
-                    record.update(error="output_io_failed", output_incomplete=True)
-        if selector.get_map():
-            record["output_incomplete"] = True
+    logging_failed = observation_failed = False
+    output_open = True
+    selector.register(process.output_fd, selectors.EVENT_READ)
+    while True:
+        now = time.monotonic()
+        if not observation_failed:
+            try:
+                exited = process.observe_exit()
+                if exited and process.spawned and not command["exited"]:
+                    command.update(exited=True, exited_at=time.time())
+                    record.update(status="finishing", control_ready=False)
+                    _publish(directory, record)
+                # A late request cannot relabel an already observed natural exit.
+                if not exited and stop["reason"] is None and term_deadline is None:
+                    reason = ("worker_signal" if interrupted() else "cancel" if (directory / "cancel.request").exists()
+                              else "timeout" if process.spawned and now >= deadline else None)
+                    if reason:
+                        stop.update(reason=reason, requested_at=time.time())
+                if term_deadline is None and (exited or stop["reason"] or record.get("error")):
+                    record.update(status="finishing" if exited else "stopping", control_ready=False)
+                    term_deadline = now + stop["grace_seconds"]
+                    force_deadline = term_deadline + FORCE_SECONDS
+                    _publish(directory, record)
+                if term_deadline is not None and drain_deadline is None:
+                    members = process.members(time.monotonic() + min(1, max(0.05, force_deadline - now)))
+                    if not members and exited:
+                        cleanup["status"] = "verified"
+                        drain_deadline = time.monotonic() + DRAIN_SECONDS
+                    elif now >= force_deadline:
+                        cleanup.update(status="unverified", error="owned_processes_remain")
+                        drain_deadline = time.monotonic() + DRAIN_SECONDS
+                    elif now >= term_deadline:
+                        if process.signal_groups(members, signal.SIGKILL) and not stop["force_used"]:
+                            stop["force_used"] = True
+                            _publish(directory, record)
+                    else:
+                        fresh = {pid: group for pid, group in members.items() if group not in term_groups}
+                        term_groups.update(process.signal_groups(fresh, signal.SIGTERM))
+            except (OSError, ValueError, IndexError, Fault, subprocess.SubprocessError) as error:
+                cleanup.update(status="unverified", error=error.code if isinstance(error, Fault) else "process_observation_failed")
+                record["control_ready"] = False
+                # Lost ownership never permits broader signaling or PID adoption.
+                drain_deadline = time.monotonic() + DRAIN_SECONDS
+                observation_failed = True
+        if controls is not None:
+            controls.advance(stopping=term_deadline is not None or observation_failed)
+        # Control descriptors are not output: a listener cannot prevent output EOF.
+        if drain_deadline is not None and (not output_open or time.monotonic() >= drain_deadline):
+            record["output_incomplete"] |= output_open
+            break
+        for key, _ in selector.select(0.05):
+            if key.fd != process.output_fd:
+                if controls is not None:
+                    controls.handle(key)
+                continue
+            try:
+                chunk = process.read_output(MAX_READ)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    output_open = False
+                elif not logging_failed:
+                    output.write(chunk)
+            except BlockingIOError:
+                pass
+            except (OSError, ValueError):
+                logging_failed = True
+                record.update(error="output_io_failed", output_incomplete=True)
     if process.exited:
         try:
             code = process.reap()
-            record["exit_code"] = code
-            command["exit_signal"] = -code if code < 0 else None
+            if process.spawned:
+                record["exit_code"] = code
+                command["exit_signal"] = -code if code < 0 else None
         except (OSError, Fault):
             cleanup.update(status="unverified", error="exit_reap_unverified")
-    if cleanup["status"] != "verified":
+    if cleanup["status"] != "verified" or process.launch_uncertain:
         record["status"] = "outcome_unknown"
     else:
         record["status"] = STOP_STATUS.get(stop["reason"]) or (
@@ -114,14 +122,15 @@ def _run(directory: Path, record: dict, process: Process, output, interrupted) -
 def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     for fd in (worker_fd, *owned_fds):
         os.fstat(fd)
+    # The command inherits workspace/resource leases, never the worker's identity lease.
+    os.set_inheritable(worker_fd, False)
     record = read_record(directory)
     if record.get("format_version") != FORMAT:
         raise Fault("unsupported_state_version", "Only the original runtime may start a legacy worker.")
     request = record["request"]
     original_worktree = record["context"]["worktree"]
     process = None
-    interrupted = False
-    scope_owned = False
+    interrupted = scope_owned = False
     preparation_deadline = time.monotonic() + PREPARE_SECONDS
 
     def interrupt(*_):
@@ -154,34 +163,48 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                 record["status"] = STOP_STATUS[reason]
             else:
                 process = Process()
-                try:
-                    process.launch(request["argv"], request["cwd"], owned_fds)
-                except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
-                    record["error"] = error.code if isinstance(error, Fault) else type(error).__name__
-                if process.child is not None:
-                    record["command"].update(spawned=True, started_at=process.started_at)
-                    record.update(status="running", started_at=record["command"]["started_at"])
-                    if time.monotonic() >= preparation_deadline:
-                        record["error"] = "preparation_timeout"
-                    _publish(directory, record)
-                    _run(directory, record, process, output, lambda: interrupted)
-                else:
-                    record["status"] = "failed"
-                    record["cleanup"]["status"] = "verified"
+                with selectors.DefaultSelector() as selector:
+                    controls = None
+                    try:
+                        if record["control"] is not None:
+                            controls = control.Server(control.socket_path(directory.parent.parent, directory.name),
+                                                      directory, record, process, selector, _publish)
+                        try:
+                            process.launch(request["argv"], request["cwd"], owned_fds, tty=request["tty"],
+                                           terminal_size=request["terminal_size"], deadline=preparation_deadline)
+                        except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
+                            record["error"] = ("launch_unverified" if process.launch_uncertain else
+                                               error.code if isinstance(error, Fault) else type(error).__name__)
+                        if process.pid is not None:
+                            if process.spawned:
+                                record["command"].update(spawned=True, started_at=process.started_at)
+                                record.update(status="running", started_at=process.started_at,
+                                              control_ready=controls is not None and not record.get("error"))
+                            if time.monotonic() >= preparation_deadline:
+                                record["error"] = "preparation_timeout"
+                            _publish(directory, record)
+                            _run(directory, record, process, output, lambda: interrupted, selector, controls)
+                        else:
+                            record["status"] = "failed"
+                            record["cleanup"]["status"] = "verified"
+                    finally:
+                        if controls is not None:
+                            controls.advance(stopping=True)
+                            controls.close()
             record["log_truncated"] = output.total > MAX_LOG
     except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
         record.update(error=error.code if isinstance(error, Fault) else type(error).__name__)
-        if process is None or process.child is None:
+        if process is None or process.pid is None:
             record["cleanup"]["status"] = "verified"
         elif record["cleanup"]["status"] != "verified":
             record["cleanup"].update(status="unverified", error="worker_cleanup_unverified")
         record["status"] = "failed" if record["cleanup"]["status"] == "verified" else "outcome_unknown"
         record["output_incomplete"] |= record["command"]["spawned"]
     finally:
+        record["control_ready"] = False
         if process is not None:
             process.close()
     if is_remote(record) and scope_owned:
-        # The worker cannot observe its own cgroup disappearance. The reader checks it.
         record["cleanup"]["status"] = "pending"
     # Readers cannot observe the lease-release/publication gap as a lost worker.
     with lease(directory / "control.lock", wait=True, create=False):
@@ -193,7 +216,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             record["status"] = "failed" if record["cleanup"]["status"] == "verified" else "outcome_unknown"
             _publish(directory, record)
     if scope_owned:
-        # Keep inherited leases until systemd removes the entire original scope.
+        # Retain inherited leases until systemd removes the original scope.
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         try:
             subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
@@ -203,6 +226,5 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             with lease(directory / "control.lock", wait=True, create=False):
                 record.update(status="outcome_unknown", error="scope_cleanup_unverified")
                 _publish(directory, record)
-        # RuntimeMaxSec is the outer bound if the stop request was lost.
         while True:
             signal.pause()

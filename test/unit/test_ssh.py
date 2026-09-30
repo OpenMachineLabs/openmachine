@@ -81,7 +81,7 @@ class SSHTests(unittest.TestCase):
                               "openmachine/__init__.py", "openmachine/execution/__init__.py",
                               "openmachine/execution/__main__.py", "openmachine/execution/api.py",
                               "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
-                              "openmachine/execution/logs.py", "openmachine/workspace/__init__.py",
+                              "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
                               "openmachine/workspace/files.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
@@ -100,15 +100,16 @@ class SSHTests(unittest.TestCase):
         state = private_directory(self.root / "state")
         directory = private_directory(state / "executions" / ("c" * 32))
         locks = private_directory(state / "locks")
-        record = {"format_version": 4, "version": __version__, "status": "accepted", "exit_code": None,
+        record = {"format_version": execution.FORMAT, "version": __version__, "status": "accepted", "exit_code": None,
                   "created_at": 1, "log_truncated": False, "output_incomplete": False,
                   "context": {"worktree": str(self.project)},
                   "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
                               "argv": [sys.executable, "-I", "-S", "-c",
                                        'from pathlib import Path; p=Path("count.txt"); '
                                        'p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print("worker-complete")'],
-                              "timeout_seconds": 10, "task_id": "controller-only-task", "termination_grace_seconds": 5},
-                  "io_mode": "pipe",
+                              "timeout_seconds": 10, "task_id": "controller-only-task", "termination_grace_seconds": 5,
+                              "tty": False, "terminal_size": None},
+                  "io_mode": "pipe", "terminal_size": None, "control": None, "control_ready": False,
                   "command": {"spawned": False, "exited": False, "started_at": None, "exited_at": None, "exit_signal": None},
                   "stop": {"reason": None, "requested_at": None, "grace_seconds": 5, "force_used": False},
                   "cleanup": {"containment": "posix_session", "status": "pending", "error": None}}
@@ -379,3 +380,72 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(observed["next_offset"], 200000)
         self.assertLess(len(json.dumps(observed).encode()), MAX_MESSAGE)
         self.assertFalse(result["output_presentation_truncated"])
+
+
+    def test_lost_remote_owner_keeps_pending_control_unknown_even_with_live_scope(self):
+        state = self.root / "state"
+        directory = private_directory(state / "executions" / ("e" * 32))
+        from openmachine.execution.records import control_fingerprint
+        request = execution.control_request(0, "interrupt")
+        record = {"format_version": 5, "version": __version__, "status": "running", "exit_code": None,
+                  "created_at": 1, "log_truncated": False, "output_incomplete": False,
+                  "scope_unit": "openmachine-" + "e" * 32 + ".scope", "io_mode": "pipe",
+                  "context": {"target_identity": self.identity, "worker_sha256": self.digest},
+                  "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
+                              "argv": ["true"], "timeout_seconds": 10, "termination_grace_seconds": 5,
+                              "tty": False, "terminal_size": None},
+                  "command": {"spawned": True, "exited": False, "started_at": 1, "exited_at": None, "exit_signal": None},
+                  "stop": {"reason": None, "requested_at": None, "grace_seconds": 5, "force_used": False},
+                  "cleanup": {"containment": "systemd_scope", "status": "pending", "error": None},
+                  "terminal_size": None, "control_ready": True,
+                  "control": {"protocol": 1, "seq": 1, "last": {
+                      "seq": 1, "action": "interrupt", "request_sha256": control_fingerprint(request),
+                      "status": "pending", "bytes_written": None, "accepted_at": 2, "completed_at": None, "error": None}}}
+        with lease(directory / "control.lock"), lease(directory / "worker.lock"):
+            save_json(directory / "record.json", record)
+        before = (directory / "record.json").read_bytes()
+        config = endpoint._RemoteConfig(self.identity, {}, False)
+        with patch.object(execution_api, "_scope_state", return_value="active"):
+            observed = execution.read(config, state, self.identity, directory.name)
+            self.assertEqual(observed["status"], "outcome_unknown")
+            self.assertEqual(observed["control"]["last"]["status"], "outcome_unknown")
+            self.assertFalse(observed["control_ready"])
+            duplicate = execution.control_execution(config, state, self.identity, directory.name, **request)
+            self.assertEqual(duplicate["control_result"]["status"], "outcome_unknown")
+            with self.assertRaises(Fault) as caught:
+                execution.control_execution(config, state, self.identity, directory.name, 1, "interrupt")
+            self.assertEqual(caught.exception.code, "control_unresolved")
+        self.assertEqual((directory / "record.json").read_bytes(), before)
+
+    def test_control_routes_once_and_never_replays_an_unknown_ssh_effect(self):
+        app = create_application(self.settings, self.root / "controller")
+        with patch.object(client, "_exchange", return_value=self.response({"status": "running"})) as exchange:
+            app.control_execution("build-machine", "c" * 32, 0, "write_stdin", "literal\n")
+        self.assertEqual(exchange.call_count, 1)
+        frame = json.loads(exchange.call_args.args[1])
+        self.assertEqual(frame["operation"], "control_execution")
+        self.assertEqual(frame["arguments"], {"execution_id": "c" * 32, "expected_control_seq": 0,
+                                              "action": "write_stdin", "text": "literal\n", "terminal_size": None})
+        with patch.object(client, "_exchange", side_effect=TimeoutError) as exchange:
+            with self.assertRaises(Fault) as caught:
+                app.control_execution("build-machine", "c" * 32, 0, "interrupt")
+            self.assertEqual(caught.exception.code, "outcome_unknown")
+            self.assertEqual(exchange.call_count, 1)
+        self.settings.machines["build-machine"].execution_enabled = False
+        with patch.object(client, "_exchange", return_value=self.response({})) as exchange:
+            with self.assertRaises(Fault) as caught:
+                app.control_execution("build-machine", "c" * 32, 0, "write_stdin", "denied")
+            self.assertEqual(caught.exception.code, "execution_disabled")
+            exchange.assert_not_called()
+            app.control_execution("build-machine", "c" * 32, 0, "interrupt")
+            self.assertEqual(exchange.call_count, 1)
+        with self.assertRaises(Fault) as caught:
+            self.dispatch("control_execution", execution_id="c" * 32, expected_control_seq=0,
+                          action="interrupt", unapproved=True)
+        self.assertEqual(caught.exception.code, "invalid_request")
+
+    def test_old_wire_rejects_new_controls_before_target_admission(self):
+        with patch.object(endpoint, "_identity", side_effect=AssertionError("Protocol rejection precedes target access")):
+            with self.assertRaises(Fault) as caught:
+                endpoint._dispatch(self.request | {"protocol": 2, "operation": "control_execution"}, self.archive)
+        self.assertEqual(caught.exception.code, "protocol_mismatch")

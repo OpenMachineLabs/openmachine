@@ -16,11 +16,11 @@ from typing import Annotated, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolRequest, CallToolResult, TextContent, ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
 from openmachine import __version__, service
-from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output
+from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -31,6 +31,12 @@ LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempote
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
 GITHUB_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 GITHUB_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+
+
+class TerminalSize(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rows: Annotated[int, Field(strict=True, ge=1, le=1000)]
+    cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
 
 
 def _result(payload: dict, failed: bool = False) -> CallToolResult:
@@ -148,9 +154,11 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_TIMEOUT)] = DEFAULT_TIMEOUT,
                         expected_head_sha: str = "", workspace_access: Literal["exclusive", "shared"] = "exclusive",
                         resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "",
-                        termination_grace_seconds: Annotated[float | None, Field(strict=True, ge=0, le=30, allow_inf_nan=False)] = None) -> CallToolResult:
+                        termination_grace_seconds: Annotated[float | None, Field(strict=True, ge=0, le=30, allow_inf_nan=False)] = None,
+                        tty: Annotated[bool, Field(strict=True)] = False,
+                        terminal_size: TerminalSize | None = None) -> CallToolResult:
         """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds), execution_output=True)
+        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size.model_dump() if terminal_size is not None else None), execution_output=True)
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     async def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
@@ -187,6 +195,18 @@ def create_server(config: Settings, state: Path) -> FastMCP:
     async def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
         operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
+        return await asyncio.wrap_future(_submit_owned(operation))
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=has_ssh), structured_output=False)
+    async def control_execution(machine: str, execution_id: str,
+                                expected_control_seq: Annotated[int, Field(strict=True, ge=0, le=MAX_CONTROL_SEQ - 1)],
+                                action: Literal["write_stdin", "interrupt", "resize"],
+                                text: Annotated[str | None, Field(max_length=MAX_INPUT)] = None,
+                                terminal_size: TerminalSize | None = None) -> CallToolResult:
+        """Control the original worker using its observed sequence. PTY input is exact UTF-8, with no added newline or automatic confirmation. Interrupt is not cancellation. Identical retained retries return receipts; stale/conflicting or uncertain effects never replay. Read output separately. Launch permission is not blanket authority for later input; never send credentials."""
+        operation = partial(_reply, lambda: application.control_execution(
+            machine, execution_id, expected_control_seq, action, text,
+            terminal_size.model_dump() if terminal_size is not None else None))
         return await asyncio.wrap_future(_submit_owned(operation))
 
     if config.github is not None:

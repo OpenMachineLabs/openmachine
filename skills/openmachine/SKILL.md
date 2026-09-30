@@ -104,8 +104,7 @@ readback and explicit compatible rollback, not another update or workload replay
 Distinguish candidate rejection, verified restoration and unknown recovery. Keep
 source merge, service activation and any ChatGPT metadata refresh separate.
 
-E1/E2 keep pipes as the default and only IO mode; no PTY or input controls are
-advertised. New format-4 receipts separate command launch/exit, first
+E1-E3 keep pipes as the default; PTY is explicit. New format-5 receipts separate command launch/exit, first
 stop reason, force use and cleanup. `termination_grace_seconds` accepts null or
 finite 0..30: null means 5 seconds for a new execution and the original effective
 value on an identical-ID retry. Old workers retain 0.5 seconds, not a retroactive
@@ -115,14 +114,15 @@ TERM grace continues draining output. A handled stop returning exit zero remains
 cancelled/timed-out; an already observed natural exit cannot be relabeled. Native
 cleanup covers verified POSIX-session work, not detached sessions or a sandbox.
 Unknown cleanup/ownership never authorizes another ID or arbitrary PID signaling.
-Legacy facts remain null; new readers do not strengthen historical guarantees.
+Facts absent from formats 1-3 remain null; format-4 facts stay intact. New readers
+do not strengthen historical guarantees.
 
-Use E1's transition-capable CLI and the selected installation's actual contract.
-Prepare protocol-2 SSH endpoints explicitly alongside original archives. Pass an
+Use the transition-capable CLI and the selected installation's actual contract.
+Prepare protocol-3 SSH endpoints explicitly alongside original archives. Pass an
 explicit `update --candidate-config` when changing endpoint routes; do not edit
 the active configuration in advance. Preserve service-owned configuration
 snapshots. Candidate local/remote readers must accept retained state before stop;
-completed v4 receipts also block incompatible rollback. Recovery restores the
+completed v5 receipts also block incompatible rollback. Recovery restores the
 exact prior configuration or reports uncertainty, without replay or provisioning.
 
 SSH scope durability requires a user manager that outlives the command's SSH
@@ -146,3 +146,32 @@ output. A consumed byte is not necessarily displayed. Use a smaller read from
 the same source offset when presentation was truncated; do not reconstruct a
 source file from sanitized console output. SSH waiting happens in one target
 request and does not change the original worker archive or user-manager policy.
+
+For E3, request `tty=true` only for an authorized interactive program. Dimensions
+are `{rows,cols}`, each 1..1000, default 24x80; pipe mode has no dimensions. Initial
+mode/size are immutable start identity. Read the same execution until its actual
+`control_ready` and actions are available; old workers cannot acquire new controls.
+The original worker owns the terminal through client disconnects, not host death.
+
+Use `control_execution` with the observed `expected_control_seq` and exactly one
+action. `write_stdin` sends 1..16384 UTF-8 bytes as-is, without implicit newline or
+confirmation. `resize` changes this terminal; `interrupt` sends SIGINT to its
+verified foreground operation and does not cancel the execution or erase REPL
+state. Pipes keep closed stdin but new control-capable workers support interrupt.
+Read output separately using retained byte cursors; no control consumes output.
+
+Persist control identity and receipt references, never input bodies/credentials,
+in task evidence. Reconcile lost acknowledgements by original execution/sequence.
+Exact retained duplicates return their existing receipt without effects; conflicts
+and retired results never replay. `applied` is OS acceptance, not application
+completion; `partial` is the known prefix and must not cause an automatic suffix
+send. Pending control with lost ownership is unknown. Do not clear uncertainty or
+replace a worker/socket; read or explicitly cancel when ownership permits it.
+
+Later input needs its own current authorization; launch approval is not blanket
+stdin approval. Never send passwords/tokens or automate prompts. Terminal echo
+can appear in raw logs, even though control receipts retain only a fingerprint.
+Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
+or restart a process merely to clear a busy control. New readers preserve v4
+lifecycle facts and all older bytes; state contract 3 and SSH protocol 3 are not
+release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.

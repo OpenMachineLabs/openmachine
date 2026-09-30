@@ -24,12 +24,13 @@ sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI
 
 ## Development after v0.2.0
 
-The current development tree includes Spec #28 E1/E2: format-4 execution facts,
-graceful draining termination, directional service/SSH compatibility, and bounded
-observation with safe output presentation. These changes are **not** part of the
+The current development tree includes Spec #28 E1-E3: lifecycle facts, graceful
+draining termination, bounded observation, and worker-owned interactive PTY
+control. New executions use format 5, state contract 3 and SSH protocol 3. These changes are **not** part of the
 immutable v0.2.0 release linked above. Inspect the selected build's capabilities
 before using new fields; release installation commands remain pinned.
-PTY and input control are not implemented.
+Pipe remains the default; request PTY explicitly and inspect the original worker's
+control capabilities. These internal contract numbers are not release versions.
 
 ## Install
 
@@ -176,15 +177,15 @@ archives and interpreters for original executions. Controller update and rollbac
 never provision or replace remote workers automatically; a rollback also requires
 a worker matching the selected controller for new calls.
 
-E1 keeps lifecycle protocol 1 and uses state contract 2. The transition-capable
-CLI explicitly recognizes contracts 1/2, but a number alone never proves
+E3 keeps lifecycle protocol 1 and uses state contract 3. The transition-capable
+CLI explicitly recognizes contracts 1/2/3, but a number alone never proves
 compatibility: the candidate's real readers must validate all retained state.
 Readiness checks the selected installation's actual contract, not the caller's.
-Any unreadable format-4 record, including a completed execution, blocks an older
+Any unreadable format-5 record, including a completed execution, blocks an older
 candidate **before** the healthy service is stopped. Do not delete receipts to
 make rollback pass. `0.1.0a6` and earlier are not managed rollback targets.
 
-E1 SSH uses strict protocol 2. Explicitly prepare the matching endpoint alongside
+E3 SSH uses strict protocol 3. Explicitly prepare the matching endpoint alongside
 old worker archives. For a managed upgrade that changes endpoint paths, leave the
 active configuration untouched and pass `update --candidate-config /absolute/new.toml`.
 The existing service owner snapshots the exact old/new bytes; it validates the
@@ -254,10 +255,11 @@ change. A socket or a tool list does not prove that write tools work.
 | `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
 | `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
-| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, and `termination_grace_seconds` (E1). |
+| `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, `termination_grace_seconds`, explicit `tty=false/true` and optional `terminal_size={rows,cols}`. |
 | `read_execution` | Original machine/ID, absolute byte offset and optional `wait_seconds=0..5`; observed state, command/stop/cleanup facts, output/presentation flags and next offset. Waiting never changes command lifetime. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
+| `control_execution` | Original machine/ID, observed `expected_control_seq`, `action=write_stdin/interrupt/resize`, optional exact `text` or `terminal_size`; one retained control receipt, without consuming output. |
 | `github_read` | Conditional on `[github]`; identity/status, scoped objects, pinned source and paged PR/check/discussion observations; never dispatches arbitrary endpoints. |
 | `github_issue` | Create/update a scoped Issue, including open/closed state, with field readback and retained provenance. |
 | `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request with Created via attribution on eligible new artifacts. |
@@ -326,7 +328,7 @@ by itself execution success. Launch failure is distinct from a program exiting 1
 `termination_grace_seconds` is null or a finite number from 0 to 30. New executions
 resolve null to **5 seconds**. Identical-ID retries resolve null to the original
 value, including **0.5 seconds** for legacy workers; an explicit different value
-conflicts. Pipes remain the only mode, with closed stdin and combined stdout/stderr.
+conflicts. Pipes remain the default, with closed stdin and combined stdout/stderr.
 The worker drains output during TERM grace, then forces remaining owned work and
 bounds final observation/drain. Command runtime excludes this bounded cleanup.
 
@@ -388,15 +390,68 @@ oversized metadata-only result returns `response_limit`. A truncation flag means
 some consumed bytes were not displayed. Read a smaller page from the same source
 offset when needed; producer-owned artifacts remain the full-output authority.
 MCP request IDs and HTTP headers are outside the execution-result size contract.
-No event subscription, automatic task continuation, terminal emulator or new
-persisted format is introduced.
+E2 adds no event subscription, automatic task continuation or terminal emulator.
+E3 extends the persisted contract explicitly as described below.
 
-New local and SSH executions write format 4. Original formats 1/2/3 and prefix
-logs remain readable without rewriting. Legacy command/stop/cleanup facts are
-null rather than invented; legacy workers keep their original cancellation
+New local and SSH executions write format 5. Original formats 1/2/3/4 and prefix
+logs remain readable without rewriting. Format-4 lifecycle facts remain intact;
+facts missing in formats 1/2/3 are null rather than invented; legacy workers keep their original cancellation
 capability and guarantees. The original runtime/archive remains their owner.
 All execution IDs, lock names, task references and raw-byte log cursors retain
 their existing meaning. There is no automatic resume or control takeover.
+
+### Interactive execution (E3)
+
+Set `tty=true` to create a real controlling terminal owned by the original worker,
+not by the Chat/MCP or SSH connection. `terminal_size` defaults to `{rows:24,cols:80}`;
+both dimensions must be integers from 1 to 1000. Dimensions with `tty=false` are
+invalid. Pipe/PTY mode and initial dimensions belong to immutable start identity;
+resize changes only the current terminal. PTY failure never silently falls back.
+
+Read the original execution's `control_ready`, `control_actions`, `control.seq`,
+last receipt and current `terminal_size` before interacting. A new worker can be
+preparing and return `control_not_ready` without reserving a sequence. Old workers
+return `unsupported_operation`; a newer controller does not adopt their PIDs or
+replace their runtime. Pipe workers with a usable control path support interrupt
+only. An overlong AF_UNIX path rejects explicit PTY before launch; default pipes
+can run with controls explicitly unavailable. No shared `/tmp` fallback is used.
+
+Call `control_execution` with the observed `expected_control_seq` (0 through
+2^53-2). `write_stdin` accepts 1..16384 UTF-8 bytes without NUL or unpaired
+surrogates, on PTY only. It adds no newline, shell quoting, normalization or
+confirmation. `resize` requires dimensions and no text. `interrupt` accepts
+neither; it sends SIGINT to the verified original foreground group (or the pipe
+command group). It neither cancels the execution nor guarantees that the program
+exits. A REPL can keep its state and continue. There is no portable PTY half-close
+operation; control characters are deliberate input, not a guaranteed EOF API.
+
+The worker serializes controls and persists one pending intent in `record.json`
+before any effect. Exact retained duplicates return the original result, even
+after command exit/socket removal. A conflicting same-sequence payload fails;
+older retired sequences return `control_result_unavailable` and never execute.
+Only the last receipt is retained, not an input journal. `applied` means bytes
+accepted by the OS or a successful signal/ioctl, not application-level completion.
+`partial` reports the known byte prefix; do not automatically send its suffix.
+A lost response is reconciled by the original ID/sequence. A crash after possible
+effect leaves explicit uncertainty, not permission to type or signal again.
+Subsequent input/resize is blocked while a control is unresolved; cancellation
+remains separately available when original ownership can be verified.
+
+One private owner-only socket carries bounded 128 KiB frames. Framing/effects use
+a two-second worker deadline; at most one control is admitted, with no persistent
+queue or extra daemon. The local response budget and SSH's 30-second exchange
+budget are distinct, not hard real-time guarantees. Slow/partial input does not
+block output draining, timeout or cancellation. Reads keep independent raw-byte
+cursors and wake on control-state changes; they never consume a shared buffer.
+
+Launching a terminal is not blanket approval for later input. Apply current user
+and platform authorization to every control; never automate confirmations or
+send credentials. Input bodies are not stored in control receipts, but a program
+may echo them into retained output. Hashes/redaction are not secret protection.
+An idle terminal keeps its workspace/resource leases; use a separately authorized
+independent worktree rather than weakening them. Disconnects preserve a live
+worker; actual worker/host death cannot restore terminal memory. No terminal UI,
+autonomous resume, MCP Events, new model loop or deployment is included.
 
 ## GitHub collaboration
 
@@ -610,8 +665,8 @@ seconds. Preparation, force observation, final drain and publication have finite
 budgets, not hard real-time guarantees under kernel/storage stalls. These are
 owned scopes, not a scheduler or an installed background agent.
 
-New remote receipts use format 4 and identify `systemd_scope` independently of the
-format number. Original format-3 workers retain their original scope behavior.
+New remote receipts use format 5 and identify `systemd_scope` independently of the
+format number. Original format-3/4 workers retain their original scope behavior.
 A returned scope observation enriches a copy, never the original worker receipt.
 The systemd user manager must remain active for the intended command lifetime,
 for example through an existing login or an operator-established lingering policy.
@@ -718,7 +773,7 @@ The runtime has one application boundary, local capabilities and explicit integr
 | `openmachine/bootstrap.py` | Assemble only configured components without probing, executing work or creating state. |
 | `integrations/ssh/` | Bounded controller transport, identity-checked target endpoint and immutable worker archives. |
 | `integrations/github/` | One gh connection backend, bounded API pagination, pinned review/merge evidence and scoped collaboration with destination reconciliation. |
-| `openmachine/execution/` | Local execution admission and live observations; worker process lifecycle; persisted record validation; bounded logs. |
+| `openmachine/execution/` | Local execution admission and observations; pipe/PTY lifecycle and bounded control IPC; persisted record validation and logs. |
 | `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
 | `openmachine/tasks/` | Lock-coordinated checkpoint saves/reads; index metadata and checkpoint integrity. |
 | `openmachine/foundation/` | Shared filesystem primitives, durable writes, cooperative locks and safe errors; no domain schemas or policy. |
