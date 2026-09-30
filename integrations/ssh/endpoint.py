@@ -23,11 +23,12 @@ class _RemoteConfig:
 
     transport = "local"
 
-    def __init__(self, identity: str, roots: dict, enabled: bool):
-        if type(enabled) is not bool or not isinstance(roots, dict):
+    def __init__(self, identity: str, roots: dict, enabled: bool, workspace_write_enabled: bool):
+        if type(enabled) is not bool or type(workspace_write_enabled) is not bool or not isinstance(roots, dict):
             raise Fault("invalid_request", "Invalid remote workspace configuration.")
         self.identity = identity
         self.execution_enabled = enabled
+        self.workspace_write_enabled = workspace_write_enabled
         self.workspaces = {}
         for name, root in roots.items():
             if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name)
@@ -40,6 +41,13 @@ class _RemoteConfig:
             raise Fault("identity_mismatch", "The configured target identity does not match this account and host.")
         if write and not self.execution_enabled:
             raise Fault("execution_disabled", "Explicitly enable this target in controller configuration.")
+        return self
+
+
+    def workspace_machine(self, name: str):
+        self.machine(name)
+        if not self.workspace_write_enabled:
+            raise Fault("workspace_write_disabled", "Typed target workspace writes are disabled.")
         return self
 
 
@@ -69,20 +77,29 @@ def _scope_ready() -> str:
 
 
 def _dispatch(request: dict, archive: Path) -> dict:
-    if (not isinstance(request, dict) or set(request) != {"protocol", "version", "identity", "execution_enabled", "operation", "arguments", "workspaces"}
+    if (not isinstance(request, dict) or set(request) != {"protocol", "version", "identity", "execution_enabled", "workspace_write_enabled", "operation", "arguments", "workspaces"}
             or request["protocol"] != PROTOCOL or request["version"] != __version__):
         raise Fault("protocol_mismatch", "The controller and worker protocol/version must match.")
     identity, home = _identity()
     expected = request["identity"]
     if expected and expected != identity:
         raise Fault("identity_mismatch", "The pinned target identity changed; no operation was performed.")
-    config = _RemoteConfig(identity, request["workspaces"], request["execution_enabled"])
+    config = _RemoteConfig(identity, request["workspaces"], request["execution_enabled"], request["workspace_write_enabled"])
     operation, arguments = request["operation"], request["arguments"]
     if not isinstance(arguments, dict):
         raise Fault("invalid_request", "Operation arguments must be an object.")
     state = home / ".local/state/openmachine"
     if operation == "probe":
-        result = {"identity_verified": bool(expected), "python": platform.python_version(), "systemd": _scope_ready(),
+        execution.check_workspace_leases(config, state)
+        change_state = workspace.check_change_state(state)
+        legacy_compatible = True
+        try:
+            execution.check_workspace_leases(config, state, legacy_candidate=True)
+        except Fault as error:
+            if error.code != "legacy_workspace_busy":
+                raise
+            legacy_compatible = False
+        result = {**change_state, "legacy_workspace_compatible": legacy_compatible, "identity_verified": bool(expected), "python": platform.python_version(), "systemd": _scope_ready() if config.execution_enabled else None,
                   "state_directory": str(state), "version": __version__,
                   "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"],
                                 "controls": sorted(execution.CONTROL_ACTIONS), "control_protocol": execution.CONTROL_PROTOCOL},
@@ -112,7 +129,19 @@ def _dispatch(request: dict, archive: Path) -> dict:
     elif operation == "read_workspace_file":
         result = workspace.read_text_file(config, identity, **arguments)
     elif operation == "write_workspace_file":
-        result = workspace.write_text_file(config, state, identity, **arguments)
+        if set(arguments) - {"workspace", "path", "content", "expected_head_sha", "expected_sha256", "change_id", "expected_workspace_identity"}:
+            raise Fault("invalid_request", "Use only the documented whole-file fields.")
+        result = workspace.write_text_file(config, state, identity, **arguments,
+                                          validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
+    elif operation == "edit_workspace_file":
+        if set(arguments) - {"workspace", "path", "edits", "expected_workspace_identity", "expected_head_sha", "expected_sha256", "change_id", "dry_run", "expected_plan_sha256"}:
+            raise Fault("invalid_request", "Use only the documented exact-edit fields.")
+        result = workspace.edit_text_file(config, state, identity, **arguments,
+                                         validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
+    elif operation == "read_workspace_change":
+        if set(arguments) - {"change_id", "observe_current"}:
+            raise Fault("invalid_request", "Use only the documented change-read fields.")
+        result = workspace.read_change(config, state, identity, **arguments)
     else:
         raise Fault("unsupported_operation", "Select a documented remote workspace or execution operation.")
     response = {"protocol": PROTOCOL, "version": __version__, "identity": identity,
@@ -122,6 +151,9 @@ def _dispatch(request: dict, archive: Path) -> dict:
             result, lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1,
             MAX_MESSAGE,
         )
+    if operation in {"read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change"}:
+        response["result"] = workspace.bound_result(result,
+            lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1)
     return response
 
 
@@ -144,7 +176,7 @@ def main() -> None:
         if len(encoded) + 1 > MAX_MESSAGE:
             raise Fault("outcome_unknown", "The response exceeded its bound; read the original execution or destination before retrying.")
     except Fault as error:
-        encoded = json.dumps({"error": {"code": error.code, "message": str(error)}}).encode()
+        encoded = json.dumps({**(error.evidence or {}), "error": {"code": error.code, "message": str(error)}}).encode()
     except (OSError, ValueError, KeyError, TypeError, IndexError):
         encoded = b'{"error":{"code":"source_unavailable","message":"Remote source or request unavailable; no success was verified."}}'
     sys.stdout.buffer.write(encoded + b"\n")

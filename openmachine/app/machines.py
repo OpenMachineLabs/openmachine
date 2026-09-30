@@ -42,12 +42,32 @@ class Machines:
         return workspace.read_text_file(self.config, machine, workspace_name, path, offset, expected_sha256)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
-                             expected_head_sha: str, expected_sha256: str) -> dict:
-        if self.config.machine(machine, write=True).transport == "ssh":
+                             expected_head_sha: str, expected_sha256: str, change_id: str = "",
+                             expected_workspace_identity: str = "") -> dict:
+        if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "write_workspace_file", workspace=workspace_name, path=path,
-                             content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256)
+                             content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256,
+                             change_id=change_id, expected_workspace_identity=expected_workspace_identity)
         return workspace.write_text_file(self.config, self.state, machine, workspace_name, path, content,
-                                         expected_head_sha, expected_sha256)
+                                         expected_head_sha, expected_sha256, change_id, expected_workspace_identity,
+                                         validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+
+    def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
+                            expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
+                            change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "") -> dict:
+        arguments = dict(workspace=workspace_name, path=path, edits=edits,
+                         expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
+                         expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run,
+                         expected_plan_sha256=expected_plan_sha256)
+        if self.config.machine(machine).transport == "ssh":
+            return self._ssh(machine, "edit_workspace_file", **arguments)
+        return workspace.edit_text_file(self.config, self.state, machine, **arguments,
+                                       validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+
+    def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
+        if self.config.machine(machine).transport == "ssh":
+            return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current)
+        return workspace.read_change(self.config, self.state, machine, change_id, observe_current)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",

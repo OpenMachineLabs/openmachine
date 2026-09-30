@@ -19,7 +19,7 @@ from . import MAX_MESSAGE, PROTOCOL
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MUTATIONS = {"start_execution", "write_workspace_file", "cancel_execution", "control_execution"}
+MUTATIONS = {"start_execution", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
 
 
 def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:
@@ -70,20 +70,23 @@ def call(config: "Settings", machine: str, operation: str, *,
         raise Fault("invalid_request", "Observer cancellation is only valid for execution reads.")
     if cancelled is not None and cancelled.is_set():
         raise Fault("observation_cancelled", "The observation was cancelled before contacting the target.")
-    target = config.machine(machine, write=(operation in {"start_execution", "write_workspace_file"}
+    target = config.machine(machine, write=(operation == "start_execution"
                                               or operation == "control_execution" and arguments.get("action") in {"write_stdin", "resize"}))
     if target.transport != "ssh":
         raise Fault("not_ssh", "Select a configured SSH target, or omit the explicit doctor target.")
     if not target.ssh_identity and operation != "probe":
         raise Fault("identity_required", "Probe this target and explicitly pin its ssh_identity before workspace access.")
     request = {"protocol": PROTOCOL, "version": __version__, "identity": target.ssh_identity,
-               "execution_enabled": target.execution_enabled, "operation": operation, "arguments": arguments,
+               "execution_enabled": target.execution_enabled,
+               "workspace_write_enabled": target.execution_enabled if target.workspace_write_enabled is None else target.workspace_write_enabled,
+               "operation": operation, "arguments": arguments,
                "workspaces": {name: item.root for name, item in config.workspaces.items() if item.machine == machine}}
     argv = ["ssh", "-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
             "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
             "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR", "--",
             target.ssh_alias, shlex.join(["python3", "-I", target.ssh_worker, "rpc"])]
-    mutating = operation in MUTATIONS
+    mutating = operation in MUTATIONS and not (operation == "edit_workspace_file" and arguments.get("dry_run") is True)
+    identity_evidence = {"machine": machine, "change_id": arguments["change_id"]} if arguments.get("change_id") else None
     try:
         code, raw = _exchange(argv, json.dumps(request, ensure_ascii=True).encode(), cancelled=cancelled)
     except FileNotFoundError as error:
@@ -92,7 +95,7 @@ def call(config: "Settings", machine: str, operation: str, *,
         if isinstance(error, Fault) and (error.code == "request_limit" or not mutating):
             raise
         raise Fault("outcome_unknown" if mutating else "ssh_unavailable",
-                    "No complete SSH response was verified. Read the original execution or destination before any mutation retry.") from error
+                    "No complete SSH response was verified. Read the original execution/change before any mutation retry.", identity_evidence) from error
     try:
         response = json.loads(raw)
         if not isinstance(response, dict):
@@ -100,19 +103,19 @@ def call(config: "Settings", machine: str, operation: str, *,
     except (ValueError, UnicodeError) as error:
         reason = "ssh_unavailable" if code == 255 else "remote_runtime_unavailable" if code == 2 else "ssh_protocol_error"
         raise Fault("outcome_unknown" if mutating else reason,
-                    "Check the existing SSH identity, Python 3.12+, and the configured worker archive. No result was verified.") from error
+                    "Check the existing SSH identity, Python 3.12+, and the configured worker archive. No result was verified.", identity_evidence) from error
     if "error" in response:
         error = response["error"]
         if isinstance(error, dict) and isinstance(error.get("code"), str) and isinstance(error.get("message"), str):
-            raise Fault(error["code"], error["message"])
-        raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote error response was invalid.")
+            raise Fault(error["code"], error["message"], {key: value for key, value in response.items() if key != "error"} | (identity_evidence or {}))
+        raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote error response was invalid.", identity_evidence)
     if (code or response.get("protocol") != PROTOCOL or response.get("version") != __version__
             or response.get("worker_sha256") != Path(target.ssh_worker).stem
             or not isinstance(response.get("identity"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", response["identity"])
             or (target.ssh_identity and response["identity"] != target.ssh_identity)
             or not isinstance(response.get("result"), dict)):
-        raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote response identity was not verified.")
+        raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote response identity was not verified.", identity_evidence)
     result = response["result"]
     if "machine" in result:
         result["machine"] = machine

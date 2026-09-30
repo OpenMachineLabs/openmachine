@@ -111,9 +111,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         expected = json.loads(Path(__file__).with_name("mcp_contract.json").read_text())["tools"]
         if not github:
             expected = {name: tool for name, tool in expected.items() if not name.startswith("github_")}
-        # Only these six annotations vary with configured SSH; never normalize actual results.
+        # Only these eight annotations vary with configured SSH; never normalize actual results.
         for name in ("inspect_workspace", "read_workspace_file", "write_workspace_file",
-                     "read_execution", "list_executions", "control_execution"):
+                     "read_execution", "list_executions", "control_execution", "edit_workspace_file", "read_workspace_change"):
             expected[name]["annotations"]["openWorldHint"] = ssh
         self.assertIsNone(result.nextCursor, "The baseline tool catalog is a single complete page")
         actual = {tool.name: tool for tool in result.tools}
@@ -183,7 +183,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "find_tasks", "read_task", "save_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "find_tasks", "read_task", "save_task"})
                 self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
                 self.assertTrue(tools["start_execution"].annotations.destructiveHint)
                 self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
@@ -527,6 +527,162 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.work / "test_runs.txt").read_text(), "1")
         self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve existing work\n")
         self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
+
+    async def test_exact_edit_preview_and_original_receipt_survive_server_restart(self):
+        file = self.work / "exact.py"
+        file.write_bytes(b"answer = 41\r\nuntouched = 7")
+        scope = {"machine": "desktop", "workspace_name": "example", "path": "exact.py"}
+        change_id = uuid.uuid4().hex
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                read = (await session.call_tool("read_workspace_file", scope)).structuredContent
+                args = {**scope, "edits": [{"old_text": "41", "new_text": "42"}],
+                        "expected_workspace_identity": read["context"]["workspace_identity"],
+                        "expected_head_sha": "", "expected_sha256": read["sha256"]}
+                preview = await session.call_tool("edit_workspace_file", args | {"dry_run": True})
+                self.assertFalse(preview.isError, preview)
+                self.assertEqual(preview.structuredContent["status"], "preview")
+                self.assertFalse((self.state / "workspace-changes").exists())
+                self.assertIn(b"41", file.read_bytes())
+                args.update(change_id=change_id, expected_plan_sha256=preview.structuredContent["plan_sha256"])
+                applied = await session.call_tool("edit_workspace_file", args)
+                self.assertFalse(applied.isError, applied)
+                first = applied.structuredContent
+                self.assertEqual(first["status"], "applied")
+                self.assertEqual(file.read_bytes(), b"answer = 42\r\nuntouched = 7")
+                repeated = await session.call_tool("edit_workspace_file", args)
+                self.assertFalse(repeated.isError, repeated)
+                self.assertEqual((repeated.structuredContent["created_at"], repeated.structuredContent["revision"]),
+                                 (first["created_at"], first["revision"]))
+                rejected = await session.call_tool("edit_workspace_file", args | {"expected_sha256": "0" * 64})
+                self.assertTrue(rejected.isError)
+                self.assertEqual(rejected.structuredContent["error"]["code"], "change_id_conflict")
+                self.assertEqual(rejected.structuredContent["change_id"], change_id)
+        self.stop(self.processes[-1])
+        file.write_bytes(b"later third-party edit")
+        self.launch()
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("read_workspace_change", {
+                    "machine": "desktop", "change_id": change_id, "observe_current": True})
+                self.assertFalse(result.isError, result)
+                readback = result.structuredContent
+                self.assertEqual((readback["status"], readback["created_at"], readback["revision"]),
+                                 ("applied", first["created_at"], first["revision"]))
+                self.assertEqual(readback["current"]["sha256"], hashlib.sha256(file.read_bytes()).hexdigest())
+                self.assertFalse(readback["historical_diff_available"])
+                repeated = await session.call_tool("edit_workspace_file", args)
+                self.assertEqual(repeated.structuredContent["revision"], first["revision"])
+                self.assertEqual(file.read_bytes(), b"later third-party edit")
+        self.assertEqual(len(list((self.state / "workspace-changes").iterdir())), 1)
+        self.assertFalse((self.state / "executions").exists())
+
+    async def test_exact_edit_grant_schema_and_worst_case_json(self):
+        self.stop(self.processes[-1])
+        self.config.write_text(self.config.read_text().replace("execution_enabled = true", "execution_enabled = false\nworkspace_write_enabled = true"))
+        self.launch()
+        file = self.work / "escaped.txt"
+        file.write_text("\x01" * 32760 + " 41")
+        scope = {"machine": "desktop", "workspace_name": "example", "path": "escaped.txt"}
+        async with self.client() as (reader, writer, _):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                read = (await session.call_tool("read_workspace_file", scope)).structuredContent
+                args = {**scope, "edits": [{"old_text": "41", "new_text": "42"}],
+                        "expected_workspace_identity": read["context"]["workspace_identity"],
+                        "expected_head_sha": "", "expected_sha256": read["sha256"]}
+                for delta in ({"dry_run": "false"}, {"edits": [{"old_text": "41", "new_text": "42", "replace_all": True}]},
+                              {"edits": [{"old_text": "", "new_text": "42"}]}, {"edits": []}):
+                    bad = await session.call_tool("edit_workspace_file", args | {"change_id": uuid.uuid4().hex} | delta)
+                    self.assertTrue(bad.isError)
+                    self.assertTrue(file.read_text().endswith("41"))
+                identity = uuid.uuid4().hex
+                result = await session.call_tool("edit_workspace_file", args | {"change_id": identity})
+                self.assertFalse(result.isError, result)
+                encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
+                self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
+                self.assertEqual(result.structuredContent["change_id"], identity)
+                self.assertTrue(result.structuredContent["truncated"])
+                self.assertEqual(result.structuredContent["effects"][0]["stage"], "applied")
+                self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+                denied = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": uuid.uuid4().hex,
+                    "cwd": str(self.work), "argv": [sys.executable, "-c", "pass"]})
+                self.assertEqual(denied.structuredContent["error"]["code"], "execution_disabled")
+
+    async def test_disconnected_edit_observer_does_not_stop_or_repeat_original_publication(self):
+        from openmachine.bootstrap import create_application
+        from openmachine.workspace import changes
+        with tempfile.TemporaryDirectory(prefix="om-edit-disconnect-", dir="/tmp") as directory:
+            root = Path(directory).resolve()
+            file = root / "source.py"
+            file.write_text("answer = 41")
+            config = Settings.model_validate({"schema_version": 1,
+                "machines": {"local": {"transport": "local", "workspace_write_enabled": True}},
+                "workspaces": {"p": {"machine": "local", "root": str(root)}}})
+            app = create_application(config, root / "state")
+            read = app.read_workspace_file("local", "p", "source.py")
+            with patch.object(server, "create_application", return_value=app):
+                mcp = server.create_server(config, root / "state")
+            identity = uuid.uuid4().hex
+            args = {"machine": "local", "workspace_name": "p", "path": "source.py",
+                    "edits": [{"old_text": "41", "new_text": "42"}], "expected_head_sha": "",
+                    "expected_workspace_identity": read["context"]["workspace_identity"],
+                    "expected_sha256": read["sha256"], "change_id": identity}
+            entered, release = threading.Event(), threading.Event()
+            actual = changes.publish_file
+            def paused(*values):
+                entered.set()
+                if not release.wait(5):
+                    raise AssertionError("The fixture failed to release its publisher")
+                return actual(*values)
+            with patch.object(changes, "publish_file", side_effect=paused) as publisher:
+                mutation = asyncio.create_task(mcp.call_tool("edit_workspace_file", args))
+                try:
+                    deadline = time.monotonic() + 3
+                    while not entered.is_set() and time.monotonic() < deadline:
+                        await asyncio.sleep(0.01)
+                    self.assertTrue(entered.is_set())
+                    observed = await asyncio.wait_for(mcp.call_tool("read_workspace_change", {
+                        "machine": "local", "change_id": identity}), 1)
+                    self.assertEqual(observed.structuredContent["status"], "applying")
+                    self.assertTrue(observed.structuredContent["writer_alive"])
+                    mutation.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await mutation
+                finally:
+                    release.set()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    observed = await mcp.call_tool("read_workspace_change", {"machine": "local", "change_id": identity})
+                    if observed.structuredContent["status"] == "applied":
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(observed.structuredContent["status"], "applied")
+                repeated = await mcp.call_tool("edit_workspace_file", args)
+                self.assertEqual(repeated.structuredContent["revision"], observed.structuredContent["revision"])
+                self.assertEqual(publisher.call_count, 1)
+                self.assertEqual(file.read_text(), "answer = 42")
+
+    async def test_workspace_error_envelope_is_distinct_from_history_inspection(self):
+        from openmachine.foundation.sanitize import Fault
+        payload = {"change_id": "a" * 32, "status": "outcome_unknown", "revision": 3,
+                   "effects": [{"stage": "applied", "result_sha256": "b" * 64}], "error": "record_unverified"}
+        applied = server._reply(lambda: payload, workspace_output=True, workspace_mutation=True)
+        inspected = server._reply(lambda: payload, workspace_output=True)
+        self.assertTrue(applied.isError)
+        self.assertFalse(inspected.isError)
+        self.assertEqual(applied.structuredContent["effects"], payload["effects"])
+        def failed():
+            raise Fault("change_outcome_unknown", "Original evidence only.", payload)
+        fault = server._reply(failed, workspace_output=True, workspace_mutation=True)
+        self.assertTrue(fault.isError)
+        self.assertEqual(fault.structuredContent["change_id"], payload["change_id"])
+        self.assertEqual(fault.structuredContent["effects"], payload["effects"])
+        abandoned = server._reply(lambda: {"status": "applying", "reconciliation": "outcome_unknown"},
+                                   workspace_output=True, workspace_mutation=True)
+        self.assertTrue(abandoned.isError)
 
     async def test_large_explicit_payload_and_changed_instruction_cancellation(self):
         scope = {"machine": "desktop", "workspace_name": "example"}

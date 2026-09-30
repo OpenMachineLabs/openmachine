@@ -20,14 +20,18 @@ description: Inspect projects and user Skills, make explicit changes, and contin
    references, workspace, material evidence, original execution IDs/log offsets,
    failed approaches and next safe step. Do not save secrets, transcripts, hidden
    reasoning or bulk source/logs. Private state is not an independent approval.
-4. Inspect status/search and read complete relevant files. Prefer the dedicated
-   read_workspace_file/write_workspace_file for ordinary text edits. Follow every
-   has_more page using next_offset and expected_sha256; never reconstruct a file
-   from partial or redacted text. Write with the observed HEAD and full raw-byte
-   hash. Empty SHA means absent, not empty. Preserve unrelated work. The writer
-   changes one file only; it does not run content or create missing directories.
-   Pause external editors writing that file: hash checking and atomic rename are
-   separate, and runtime locks cannot fence non-cooperating processes.
+4. Inspect status/search and relevant source, including applicable nested
+   AGENTS.md. Prefer read_workspace_file then edit_workspace_file for exact small
+   changes. Retain whole-source hash, HEAD and workspace identity. All old fragments
+   must match uniquely in the same original bytes. Use an empty ID for pure
+   dry_run; save a caller-generated change_id before applying, optionally binding
+   the preview plan SHA. After uncertainty, read_workspace_change on the original
+   target; never replay or replace an ID. Historical effects and current hashes
+   are separate. Whole replacements still use write_workspace_file; follow every
+   has_more page with next_offset/expected_sha256 and never reconstruct a whole
+   file from partial/redacted text. Empty SHA means absent, not empty. Preserve
+   unrelated work and the index. Pause competing editors: checks and rename are
+   not a kernel CAS. No implicit commands, formatting, parents or rollback.
 5. Before a command, save its new 32-hex execution ID, machine, absolute cwd,
    explicit argv, expected HEAD and intended effect in the task. Use the project's
    selected interpreter. Call start_execution once, optionally linking task_id.
@@ -118,7 +122,7 @@ Facts absent from formats 1-3 remain null; format-4 facts stay intact. New reade
 do not strengthen historical guarantees.
 
 Use the transition-capable CLI and the selected installation's actual contract.
-Prepare protocol-3 SSH endpoints explicitly alongside original archives. Pass an
+Prepare protocol-4 SSH endpoints explicitly alongside original archives. Pass an
 explicit `update --candidate-config` when changing endpoint routes; do not edit
 the active configuration in advance. Preserve service-owned configuration
 snapshots. Candidate local/remote readers must accept retained state before stop;
@@ -173,7 +177,7 @@ stdin approval. Never send passwords/tokens or automate prompts. Terminal echo
 can appear in raw logs, even though control receipts retain only a fingerprint.
 Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
 or restart a process merely to clear a busy control. New readers preserve v4
-lifecycle facts and all older bytes; state contract 3 and SSH protocol 3 are not
+lifecycle facts and all older bytes; state contract 4 and SSH protocol 4 are not
 release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.
 
 After a controller transition, read capabilities, then the original execution
@@ -181,3 +185,24 @@ and last control receipt before deciding on another input. Keep the original
 cursor; do not reset the sequence, relaunch the terminal or replace its runtime.
 A compatible rollback preserves live work, not permission to replay uncertain
 effects. An identical installation update is a no-op, not proof of a transition.
+
+W1 sources and combined edit strings remain limited to 128 KiB, with 1..64 exact
+replacements; large-source line views and multi-file patching are not delivered.
+Typed writes use workspace_write_enabled independently of commands. Omitted/null
+inherits the legacy execution grant; explicit false denies editing. Preview and
+scoped receipt reads need no write grant. New init/examples disable both grants.
+Same-ID identical requests observe original results before new write checks;
+changed intent conflicts. A valid applied receipt can coexist with later source
+drift. An abandoned attempting effect remains unknown; current hashes do not prove
+historical authorship. Never delete/correct history to make an operation retry.
+
+Keep change and execution references together in the existing task, without
+copying authoritative state. Explicitly run the selected check and verify touched
+post-hashes before and afterward; a successful old command is not a PASS for
+changed source. Change receipts are not source backups or automatic undo. The
+10,000-ID target store has no automatic eviction. A live idle PTY blocks conflicting
+edits, and legacy non-Git lease mapping can block an upgrade in either direction;
+let the original owner finish rather than replacing lock files or bypassing busy.
+Retained local/target change records require actual compatible readers before
+service stop. W1 source/SDK tests do not establish refreshed Chat, live SSH or
+managed-transition acceptance; record those separately under W4.

@@ -24,13 +24,15 @@ sandbox** once enabled. Returned files and logs travel to ChatGPT through OpenAI
 
 ## Development after v0.2.0
 
-The current development tree includes Spec #28 E1-E3: lifecycle facts, graceful
-draining termination, bounded observation, and worker-owned interactive PTY
-control. New executions use format 5, state contract 3 and SSH protocol 3. These changes are **not** part of the
-immutable v0.2.0 release linked above. Inspect the selected build's capabilities
-before using new fields; release installation commands remain pinned.
-Pipe remains the default; request PTY explicitly and inspect the original worker's
-control capabilities. These internal contract numbers are not release versions.
+The current development tree includes the accepted Spec #28 interactive execution
+and Spec #13 W1 guarded single-file editing: exact replacements, pure preview and
+original-ID change receipts. W1 retains 128 KiB source/payload limits; larger
+sources, line windows and multi-file patching remain separate increments.
+Execution records remain format 5; workspace changes use format 1, state contract
+4 and SSH protocol 4. These internal numbers are not release versions, and W1 is
+not part of the immutable releases above. Inspect installed capabilities before
+using new fields. Pipe remains the default; PTY is explicit. Source/SDK acceptance
+is separate from actual refreshed Chat, live SSH and managed-transition acceptance.
 
 ## Install
 
@@ -72,9 +74,12 @@ Start with an existing disposable workspace; replace the example path:
 Default configuration: `~/.config/openmachine/config.toml`. Private state:
 `~/.local/state/openmachine/`. Global `--config` and `--state-dir` options go
 before the subcommand. `init` creates mode-0600 configuration without overwriting
-files and leaves execution **disabled**. Explicitly set `execution_enabled = true`
-for a machine only when native account access is intended. Restart this
-service after changing configuration.
+files and leaves execution **disabled**. W1 `init` also explicitly sets
+`workspace_write_enabled = false`. Enable `execution_enabled = true` only for
+intended native commands, and `workspace_write_enabled = true` only for typed
+file edits. Existing configurations omitting the new field inherit their old
+execution grant; an explicit false overrides that inheritance. Restart this
+service after an authorized configuration change.
 
 Machine/workspace names are operator-owned; see [examples/config.toml](examples/config.toml).
 Local and explicitly configured SSH transports are supported. Optional `[github]`
@@ -125,7 +130,8 @@ each other. The stable launcher and immutable environments live below
 `<state-dir>/service/`; `service.json` owns the selected/previous installation,
 probe, unfinished activation and exact configuration-snapshot references used by
 E1 transitions. Configuration, user Skills,
-`tasks/`, `executions/` and their locks keep their original owners and locations.
+`tasks/`, `executions/`, `workspace-changes/` and their locks retain their owning
+capabilities and locations.
 The launcher uses the selected base Python at installation time; preserve that
 interpreter as well as the version environments. Do not move virtual environments.
 
@@ -177,15 +183,15 @@ archives and interpreters for original executions. Controller update and rollbac
 never provision or replace remote workers automatically; a rollback also requires
 a worker matching the selected controller for new calls.
 
-E3 keeps lifecycle protocol 1 and uses state contract 3. The transition-capable
-CLI explicitly recognizes contracts 1/2/3, but a number alone never proves
-compatibility: the candidate's real readers must validate all retained state.
-Readiness checks the selected installation's actual contract, not the caller's.
-Any unreadable format-5 record, including a completed execution, blocks an older
-candidate **before** the healthy service is stopped. Do not delete receipts to
-make rollback pass. `0.1.0a6` and earlier are not managed rollback targets.
+W1 keeps lifecycle protocol 1 and advances state contract to 4. The transition-capable
+CLI recognizes contracts 1/2/3/4, but numbers alone never prove compatibility:
+the candidate's actual readers must validate retained state. Readiness uses the
+selected installation's contract. Retained workspace change history blocks a
+candidate without its reader, even if an old check silently ignores that directory.
+Completed execution/change receipts still count. Never delete history to permit a
+downgrade; `0.1.0a6` and earlier are not managed rollback targets.
 
-E3 SSH uses strict protocol 3. Explicitly prepare the matching endpoint alongside
+W1 SSH uses strict protocol 4. Explicitly prepare the matching endpoint alongside
 old worker archives. For a managed upgrade that changes endpoint paths, leave the
 active configuration untouched and pass `update --candidate-config /absolute/new.toml`.
 The existing service owner snapshots the exact old/new bytes; it validates the
@@ -197,6 +203,14 @@ since the last activation. A conflicting edit observed during the transition is
 preserved with `recovery_required`; these checks do not fence uncooperative editors. Retain the
 private `service/configurations/` snapshots with both immutable installations.
 Use the transition-capable CLI for these transitions; an old CLI may reject them.
+
+Before selecting an older controller, the current installed reader also checks
+original pinned targets for retained workspace changes and incompatible live
+non-Git leases. An unavailable proof blocks the transition before service stop.
+Idle PTYs retain their leases; a legacy subdirectory lease must finish under its
+original owner before switching to the configured-root mapping. Independent
+workspaces remain independent. Edit-only target probing does not require the
+execution-specific systemd user manager.
 
 No state migration, remote provisioning or worker relaunch is performed. Rollback
 does not undo user work or GitHub effects. An identical update is a no-op, not a
@@ -257,8 +271,10 @@ change. A socket or a tool list does not prove that write tools work.
 | `get_capabilities` | Version, configuration hash, configured machines/workspaces and implemented limits; health remains `not_probed`. |
 | `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`. |
 | `inspect_skills` | `list/read/files`, exact discovered `skill`, relative resource `path`, query/range and `expected_snapshot`; bundled and explicit user sources only. |
-| `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256; UTF-8-safe pages, raw hash, Git context and explicit absence. |
-| `write_workspace_file` | Machine/workspace/path, complete text, required observed HEAD and SHA256; one verified replacement, not a command. |
+| `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256; UTF-8-safe pages, raw hash, versioned workspace identity, Git classification and explicit absence. |
+| `write_workspace_file` | Complete bounded text, observed HEAD/hash; optional `change_id` requires `expected_workspace_identity` and retains the original change result. No-ID behavior stays legacy. |
+| `edit_workspace_file` | Exact `old_text/new_text` replacements in one original file, observed workspace identity/HEAD/hash; empty ID for `dry_run`, original caller-generated ID for apply; optional approved plan SHA. |
+| `read_workspace_change` | Original machine/change ID; historical receipt and owner observation, with optional separate current hashes. Never applies, repairs or initializes history. |
 | `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
 | `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
@@ -565,39 +581,73 @@ Projects management, a general plugin SDK or a claim that Desktop has shipped.
 
 ## Explicit file editing
 
-For an ordinary source change, read the exact file with `read_workspace_file`,
-then write its complete desired text with `write_workspace_file`. Supply the
-observed `expected_head_sha` and whole-file `expected_sha256`. Empty HEAD explicitly
-means the workspace has no HEAD; empty SHA256 means the file is absent, not empty.
-An existing empty file has the normal SHA256 of zero bytes. Both preconditions
-are required arguments. Identical destination content returns `already_current`.
+W1 adds focused edits without resending the whole file. Read relevant source with
+`read_workspace_file`, and retain its complete raw-byte `sha256`, `context.head_sha`
+and versioned `context.workspace_identity`. The latter identifies the root and
+branch, not just its current commit: switching between two branches at the same
+commit invalidates old edit intent. Confirmed non-Git and unborn workspaces have
+no HEAD; unavailable Git identity is not permission to ignore it.
 
-Files are at most 128 KiB of UTF-8 text; read pages are at most 32 KiB and retain
-character boundaries. Follow `next_offset` until `has_more=false`, echoing the
-original SHA256. Do not overwrite a file from incomplete or redacted content.
-The fixed 1 MiB MCP request bound accommodates worst-case JSON escaping of a
-bounded file; it does not allow a larger file or unbounded commands.
+Call `edit_workspace_file` with `edits=[{"old_text":"return 41","new_text":"return 42"}]`
+and the three observed preconditions. Every old fragment must occur exactly once,
+including overlapping occurrences. All 1..64 replacements locate the same original
+bytes; generated text cannot become a later match. Ambiguity, overlaps, stale
+context/source and unsupported paths fail before publication. Untouched bytes,
+BOM, line endings and final-newline presence are preserved; new text is explicit.
 
-Writes require the selected machine's existing `execution_enabled` setting and
-remain inside its named configured workspace. They share the original execution
-worktree lock, reject credential/Git-control paths, traversal, descendant symlinks,
-hardlinks and special files, and require existing parents. Publication preserves
-ordinary file mode, atomically installs the destination, fsyncs it and reads back.
-The file writer does not expose a shell, content execution, deletion, directory
-creation, permission changes or Git mutations. Local edits make no network calls;
-configured SSH edits use the pinned target. Tests and authorized Git commands
-still use `start_execution`.
+For preview, use `dry_run=true` and an empty `change_id`. It creates no record,
+staging file, directory or command. It returns a bounded proposed diff and plan
+SHA, not write authority. For apply, retain a new 32-lowercase-hex `change_id` before
+calling, optionally echoing the approved `expected_plan_sha256`. The complete plan
+is revalidated; no lock is held while a person reviews the preview.
 
-These are single-file operations, not multi-file transactions or an OS sandbox.
-Cooperative locks cannot fence manual editors or hostile same-account processes.
-The final hash check and rename are separate operations, not a kernel-supported
-compare-and-swap. Pause external writers to the same file; an external write in
-that interval may be overwritten despite the earlier checked hash. No portable
-mandatory editor fencing is promised by this increment.
-`write_outcome_unknown` requires destination readback before any retry. Honest
-write/destructive/idempotence annotations describe actual effects; they do not
-replace platform approval or guarantee fewer OpenAI blocks. Never disguise or
-reroute a refused operation to evade its checks.
+After a lost reply, use `read_workspace_change(machine, change_id)`. An identical
+retained request returns original evidence; a changed request conflicts. Later
+third-party content is never restored by an old retry. `observe_current=true`
+adds current hashes separately without rewriting historical facts. An inactive
+writer with an attempted but unobserved effect is unknown, not success or a replay
+request. Missing/corrupt history is not evidence that nothing happened.
+
+`write_workspace_file` remains available for empty files, new files and intentional
+whole replacements. An empty source SHA means absence, not empty content. With a
+change ID it uses the same durable publisher and strict preconditions. Without an
+ID it retains the legacy `already_current` shortcut and explicitly has no durable
+recovery guarantee. Never reconstruct a whole file from partial/redacted pages.
+Byte cursors retain their units; follow `next_offset` with the original hash.
+
+The machine's `workspace_write_enabled` independently controls typed editing:
+true allows it without commands, false denies it even when commands are enabled,
+and omitted/null inherits `execution_enabled` for existing configurations.
+Preview and scoped historical reads require no write grant. New example/init
+configurations explicitly disable both grants. Editing scripts is not a sandbox
+for commands that may later execute them; platform approval remains independent.
+
+W1 bounds sources/results and complete text or combined edit strings to 128 KiB,
+read pages/diffs to 32 KiB, records to 64 KiB and encoded workspace responses to
+512 KiB, including duplicated MCP representations. Each target retains at most
+10,000 change identities without automatic eviction. The existing 1 MiB transport
+limit still applies. Receipts contain context, request/plan fingerprints and actual
+effects, not raw edit payloads or a source archive. Historical diffs are not
+reconstructed from live Git state. Retain original IDs; deleting history loses
+its deduplication protection.
+
+Local and SSH edits share one target-side publisher and the original worktree
+lease. Non-Git commands and edits use the unambiguous configured root. Descendant
+links, hardlinks, special files, credential/Git-control paths and nested repositories
+are refused; parent directories must already exist. Ordinary POSIX mode is retained;
+unsupported special metadata is rejected where detected, not copied or elevated.
+Publication stages an adjacent file, rechecks bytes/context/parent attachment,
+uses no-clobber creation or atomic replacement, then syncs and reads back. A saved
+terminal receipt is required for success. Failed or uncertain publication keeps
+its original ID and known effects; it never silently retries or rolls back.
+
+These checks are not a kernel CAS against external writers. Pause competing
+editors; hash checking and rename remain separate syscalls. There is no formatter,
+LSP, shell, implicit test, automatic commit, parent creation, deletion or multi-file
+transaction. Run validation explicitly through execution, bind touched post-hashes
+and the execution/change IDs in the existing task, and verify applicability after
+source drift. File application is not a test PASS or completed task. Actual client,
+live SSH and managed-transition evidence remain separate W4 acceptance.
 
 ## Configured SSH machines
 
@@ -630,6 +680,7 @@ transport = "ssh"
 ssh_alias = "my-build-host"
 ssh_worker = "/home/alex/.local/share/openmachine/workers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"
 execution_enabled = false
+workspace_write_enabled = false
 
 [workspaces.remote-project]
 machine = "build"

@@ -3,6 +3,7 @@ schema_version = 1
 [machines.local]
 transport = "local"
 execution_enabled = false
+workspace_write_enabled = false
 
 [workspaces.project]
 machine = "local"
@@ -30,6 +31,7 @@ roots = []
 # ssh_alias = "my-build-host"
 # ssh_worker = "/home/alex/.local/share/openmachine/workers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"
 # execution_enabled = false
+# workspace_write_enabled = false
 # [workspaces.remote-project]
 # machine = "build"
 # root = "/home/alex/project"

@@ -38,7 +38,7 @@ class SSHTests(unittest.TestCase):
             "workspaces": {"project": {"machine": "build-machine", "root": str(self.project)}},
         })
         self.request = {"protocol": PROTOCOL, "version": __version__, "identity": self.identity,
-                        "execution_enabled": True, "workspaces": {"project": str(self.project)},
+                        "execution_enabled": True, "workspace_write_enabled": True, "workspaces": {"project": str(self.project)},
                         "operation": "read_workspace_file", "arguments": {"workspace": "project", "path": "file.txt"}}
 
     def dispatch(self, operation, **arguments):
@@ -83,7 +83,7 @@ class SSHTests(unittest.TestCase):
                               "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
                               "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
-                              "openmachine/workspace/files.py", "openmachine/foundation/__init__.py",
+                              "openmachine/workspace/files.py", "openmachine/workspace/changes.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
                               "openmachine/foundation/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
@@ -218,10 +218,11 @@ class SSHTests(unittest.TestCase):
                     endpoint._dispatch(self.request | delta, self.archive)
                 self.assertEqual(caught.exception.code, expected)
         self.request["execution_enabled"] = False
+        self.request["workspace_write_enabled"] = False
         with self.assertRaises(Fault) as caught:
             self.dispatch("write_workspace_file", workspace="project", path="file.txt", content="new",
                           expected_head_sha="", expected_sha256="")
-        self.assertEqual(caught.exception.code, "execution_disabled")
+        self.assertEqual(caught.exception.code, "workspace_write_disabled")
         self.assertFalse((self.project / "file.txt").exists())
         self.assertFalse((self.root / ".local").exists())
 
@@ -264,7 +265,7 @@ class SSHTests(unittest.TestCase):
                       "request": {"machine": self.identity, "cwd": str(self.project), "expected_head_sha": "",
                                   "argv": ["true"], "timeout_seconds": 10}}
             save_json(directory / "record.json", record)
-        config = endpoint._RemoteConfig(self.identity, {}, False)
+        config = endpoint._RemoteConfig(self.identity, {}, False, False)
         with patch.object(execution_api, "_scope_state", return_value="active"):
             self.assertEqual(execution.read(config, state, self.identity, directory.name)["status"], "finishing")
         with patch.object(execution_api, "_scope_state", return_value="not-found"):
@@ -313,7 +314,7 @@ class SSHTests(unittest.TestCase):
         with lease(directory / "control.lock"):
             save_json(directory / "record.json", record)
         original = (directory / "record.json").read_bytes()
-        config = endpoint._RemoteConfig(self.identity, {}, False)
+        config = endpoint._RemoteConfig(self.identity, {}, False, False)
         for observed, status, cleanup in (("active", "finishing", "pending"), ("not-found", "succeeded", "verified")):
             def inspect_scope(*args, **kwargs):
                 with lease(directory / "control.lock", create=False):
@@ -404,7 +405,7 @@ class SSHTests(unittest.TestCase):
         with lease(directory / "control.lock"), lease(directory / "worker.lock"):
             save_json(directory / "record.json", record)
         before = (directory / "record.json").read_bytes()
-        config = endpoint._RemoteConfig(self.identity, {}, False)
+        config = endpoint._RemoteConfig(self.identity, {}, False, False)
         with patch.object(execution_api, "_scope_state", return_value="active"):
             observed = execution.read(config, state, self.identity, directory.name)
             self.assertEqual(observed["status"], "outcome_unknown")

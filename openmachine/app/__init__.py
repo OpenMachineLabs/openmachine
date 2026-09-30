@@ -2,7 +2,6 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-import hashlib
 import os
 from pathlib import Path
 import threading
@@ -17,6 +16,9 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
 from .machines import Machines
+
+MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
+bound_workspace_result = workspace.bound_result
 
 
 class Application:
@@ -45,8 +47,9 @@ class Application:
     def get_capabilities(self) -> dict:
         has_ssh = any(item.transport == "ssh" for item in self.config.machines.values())
         return {
-            "version": __version__, "configuration_sha256": hashlib.sha256(self.config.model_dump_json().encode()).hexdigest(),
-            "machines": {name: {**item.model_dump(), "probe_status": "not_probed"} for name, item in self.config.machines.items()},
+            "version": __version__, "configuration_sha256": self.config.configuration_sha256(),
+            "machines": {name: {**item.model_dump(), "workspace_write_effective": item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled,
+                                  "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
@@ -61,6 +64,10 @@ class Application:
                           "max_waiting_readers": execution.MAX_WAITERS,
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
                           "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
+            "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
+                          "patch": False, "max_edits": workspace.MAX_EDITS, "source_bytes": MAX_TEXT_FILE,
+                          "payload_bytes": MAX_TEXT_FILE, "change_record_bytes": workspace.MAX_RECORD,
+                          "retained_change_ids": workspace.MAX_CHANGES, "result_bytes": workspace.MAX_WORKSPACE_RESULT},
             "lifecycle": {"protocol": service.PROTOCOL, "state_contract": service.STATE_CONTRACT, "pid": os.getpid()},
             "limits": {"default_timeout_seconds": execution.DEFAULT_TIMEOUT, "max_timeout_seconds": execution.MAX_TIMEOUT, "max_read_bytes": execution.MAX_READ,
                        "max_execution_result_bytes": execution.MAX_RESULT_BYTES,
@@ -89,10 +96,24 @@ class Application:
         return self.machines.read_workspace_file(machine, workspace_name, path, offset, expected_sha256)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
-                             expected_head_sha: str, expected_sha256: str) -> dict:
+                             expected_head_sha: str, expected_sha256: str, change_id: str = "",
+                             expected_workspace_identity: str = "") -> dict:
         with self._admit():
             return self.machines.write_workspace_file(machine, workspace_name, path, content, expected_head_sha,
-                                                      expected_sha256)
+                                                      expected_sha256, change_id, expected_workspace_identity)
+
+    def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
+                            expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
+                            change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "") -> dict:
+        arguments = (machine, workspace_name, path, edits, expected_workspace_identity, expected_head_sha,
+                     expected_sha256, change_id, dry_run, expected_plan_sha256)
+        if dry_run is True:
+            return self.machines.edit_workspace_file(*arguments)
+        with self._admit():
+            return self.machines.edit_workspace_file(*arguments)
+
+    def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
+        return self.machines.read_workspace_change(machine, change_id, observe_current)
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
                    limit: int = 20, expected_generation: int = -1) -> dict:

@@ -56,14 +56,14 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.foundation.*": ("openmachine.foundation.*",),
             "openmachine.execution.*": ("openmachine", "openmachine.execution.*",
                                         "openmachine.foundation.*", "openmachine.workspace.git"),
-            "openmachine.workspace.*": ("openmachine.workspace.*", "openmachine.foundation.*"),
+            "openmachine.workspace.*": ("openmachine", "openmachine.workspace.*", "openmachine.foundation.*"),
             "openmachine.tasks": ("openmachine.tasks.store", "openmachine.tasks.index"),
             "openmachine.tasks.store": ("openmachine.tasks.index", "openmachine.foundation.*"),
             "openmachine.tasks.index": ("openmachine.foundation.*",),
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
             "openmachine.skills": ("openmachine.foundation.*",),
             "openmachine.service": ("openmachine", "openmachine.config", "openmachine.execution",
-                                    "openmachine.tasks", "openmachine.foundation.*", "httpx", "mcp.*"),
+                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx", "mcp.*"),
             "openmachine.app": ("openmachine", "openmachine.app.machines", "openmachine.config",
                                 "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
                                 "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
@@ -220,6 +220,7 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         first = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertFalse(load(path).machines["local"].execution_enabled)
+        self.assertIs(load(path).machines["local"].workspace_write_enabled, False)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         content = path.read_bytes()
         self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)

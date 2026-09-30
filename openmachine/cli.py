@@ -46,7 +46,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "init":
-            text = 'schema_version = 1\n\n[machines.local]\ntransport = "local"\nexecution_enabled = false\n'
+            text = 'schema_version = 1\n\n[machines.local]\ntransport = "local"\nexecution_enabled = false\nworkspace_write_enabled = false\n'
             if args.workspace is not None:
                 if not args.workspace.is_absolute() or not args.workspace.is_dir():
                     raise Fault("invalid_workspace", "--workspace must be an existing absolute directory.")
@@ -57,7 +57,7 @@ def main() -> int:
                 output.write(text)
                 output.flush()
                 os.fsync(output.fileno())
-            print(json.dumps({"created": str(args.config), "execution_enabled": False}))
+            print(json.dumps({"created": str(args.config), "execution_enabled": False, "workspace_write_enabled": False}))
             return 0
         if args.command == "worker-bundle":
             from integrations.ssh.bundle import build_bundle

@@ -1,5 +1,7 @@
 """Explicit machines and workspaces; no implicit execution authority."""
 
+import hashlib
+import json
 from pathlib import Path
 import re
 import tomllib
@@ -21,6 +23,7 @@ class Machine(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     transport: Literal["local", "ssh"]
     execution_enabled: bool = False
+    workspace_write_enabled: bool | None = None
     ssh_alias: Name | None = None
     ssh_worker: str | None = None
     ssh_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = ""
@@ -35,7 +38,7 @@ class Machine(BaseModel):
               or len(self.ssh_worker) > 4096
               or not re.fullmatch(r"[0-9a-f]{64}\.pyz", Path(self.ssh_worker).name)):
             raise ValueError("SSH requires an alias and an absolute content-addressed worker archive")
-        elif self.execution_enabled and not self.ssh_identity:
+        elif (self.execution_enabled or self.workspace_write_enabled is True) and not self.ssh_identity:
             raise ValueError("probe and explicitly pin the SSH identity before enabling execution")
         return self
 
@@ -107,6 +110,22 @@ class Settings(BaseModel):
         machine = self.machines[name]
         if write and not machine.execution_enabled:
             raise Fault("execution_disabled", "The operator must explicitly enable this machine in configuration.")
+        return machine
+
+    def configuration_sha256(self) -> str:
+        # Null is the inherited legacy grant, not a change to old config identity.
+        value = self.model_dump()
+        for machine in value["machines"].values():
+            if machine["workspace_write_enabled"] is None:
+                del machine["workspace_write_enabled"]
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+    def workspace_machine(self, name: str) -> Machine:
+        machine = self.machine(name)
+        if machine.workspace_write_enabled is None:
+            return self.machine(name, write=True)
+        if not machine.workspace_write_enabled:
+            raise Fault("workspace_write_disabled", "Typed workspace writes are disabled for this machine.")
         return machine
 
 

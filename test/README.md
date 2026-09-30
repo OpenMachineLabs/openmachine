@@ -257,3 +257,28 @@ or add a new test framework. Refreshed real Chat calls and a fresh conversation'
 original-evidence readback are separate gates. Record exact candidate/artifact,
 platform and original handles, with PASS/FAIL/NOT RUN; missing client evidence or
 later MCP/task integration never becomes a pass through SDK tests.
+
+## Spec #13 W1
+
+`unit/test_workspace_changes.py` covers the same original-byte editor and durable
+publisher through local and target entrypoints: preview purity, independent grants,
+context/plan drift, exact/overlapping matches, preservation, aliases, capacity,
+non-Git/PTY leases, concurrent same-ID calls and deterministic persistence/IO races.
+The reader race fixture releases a writer between record and owner observations;
+it must never classify stale prepared state as proof of no effect. Service cases
+verify actual change readers and local/remote compatibility evidence before stop,
+including old candidates that silently ignore a new directory.
+
+The existing MCP suite uses installed private-socket SDK sessions for exact edits,
+server restart/original-ID readback, four configured catalogs, strict replacement
+arguments and worst-case JSON bounds. A direct SDK cancellation fixture verifies
+that a disconnected observer does not terminate or duplicate its admitted edit.
+Neither that fixture nor mocked SSH/launchctl is live Chat or native-transition
+acceptance. W4 retains those real-client, live SSH and managed-upgrade checks.
+
+The manually reviewed frozen-contract delta adds only two workspace tools and two
+optional whole-writer inputs; unrelated schemas and prior provenance stay intact.
+Run wheel/sdist-derived installation and the curated target archive outside the
+checkout; target code must still import under `-I -S` without controller dependencies.
+W1 deliberately advertises 128 KiB sources, change format 1, state 4 and SSH 4;
+execution format 5 and the pinned MCP SDK remain unchanged.

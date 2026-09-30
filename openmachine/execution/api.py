@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from openmachine import __version__
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
-from openmachine.workspace.git import context
+from openmachine.workspace.git import context, lock_root
 
 from . import control as controls, logs
 from .logs import MAX_READ
@@ -115,7 +115,9 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
         observed = context(working)
         if observed["git_status"] == "unavailable":
             raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
-        key = hashlib.sha256(observed["worktree"].encode()).hexdigest()
+        check_workspace_leases(config, state, scope=working)
+        observed["workspace_lock_root"] = lock_root(config, machine, working, observed)
+        key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
         with ExitStack() as leases:
             owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
             for name in request["resource_keys"]:
@@ -163,6 +165,40 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                     save_json(directory / "record.json", record)
                     raise Fault("worker_launch_failed", "The worker could not start; inspect this execution ID.") from error
     return read(config, state, machine, execution_id)
+
+
+def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = False, scope: Path | None = None) -> None:
+    """Verify non-Git lease mapping in either direction without replacing a lock."""
+    root = state / "executions"
+    if not root.exists():
+        return
+    if root.is_symlink() or not root.is_dir():
+        raise Fault("corrupt_state", "The execution store is not an ordinary directory.")
+    for directory in root.iterdir():
+        record = read_record(directory)
+        observed = record["context"]
+        if observed.get("git_status") != "not_a_worktree":
+            continue
+        cwd = Path(record["request"]["cwd"])
+        related = [item for item in config.workspaces.values()
+                   if config.machine(item.machine).transport == "local" and cwd.is_relative_to(Path(item.root).resolve())]
+        if not related:
+            continue
+        if scope is not None and not any(
+            scope.is_relative_to(Path(item.root).resolve()) or Path(item.root).resolve().is_relative_to(scope)
+            for item in related
+        ):
+            continue
+        selected = observed["worktree"] if legacy_candidate else lock_root(config, related[0].machine, cwd, observed)
+        original = observed.get("workspace_lock_root", observed["worktree"])
+        if selected == original:
+            continue
+        old_key = hashlib.sha256(original.encode()).hexdigest()
+        try:
+            with lease(state / "locks" / f"workspace-{old_key}.lock", create=False):
+                pass
+        except (Fault, OSError) as error:
+            raise Fault("legacy_workspace_busy", "An original non-Git cwd lease is busy or unavailable; let its owner finish before changing the lock domain.") from error
 
 
 def _receipt(directory: Path, machine: str, *, wait: bool = True, deadline: float | None = None,

@@ -18,6 +18,12 @@
       "capture_wheel_sha256": "c0e45880461ee9d57ca88536abfea17d6fa8f1fd535e0a2382d6a953a4650975",
       "change": "E3 adds only tty/terminal_size to start_execution and one non-idempotent control_execution tool. The release baseline, E1/E2 deltas and every unrelated field/annotation are preserved; installed private-socket SDK discovery captures the approved additions and tests all four integration catalogs.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/28"
+    },
+    {
+      "approval": "Current maintainer request approves the planned W1 implementation, self-review, merge and Spec13 update.",
+      "base_commit": "687fb00c1b0414c981984a11d710546ffe53ef2b",
+      "change": "W1 adds edit_workspace_file and read_workspace_change, plus optional change_id/expected_workspace_identity on the existing writer. Every other baseline schema and annotation is unchanged. Expectations are authored from the approved contract and verified against installed SDK discovery in all four integration configurations.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
     }
   ],
   "baseline": {
@@ -143,6 +149,106 @@
           "action"
         ],
         "title": "control_executionArguments",
+        "type": "object"
+      }
+    },
+    "edit_workspace_file": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "ExactEdit": {
+            "additionalProperties": false,
+            "properties": {
+              "new_text": {
+                "maxLength": 131072,
+                "title": "New Text",
+                "type": "string"
+              },
+              "old_text": {
+                "maxLength": 131072,
+                "minLength": 1,
+                "title": "Old Text",
+                "type": "string"
+              }
+            },
+            "required": [
+              "old_text",
+              "new_text"
+            ],
+            "title": "ExactEdit",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "change_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/$defs/ExactEdit"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Edits",
+            "type": "array"
+          },
+          "expected_head_sha": {
+            "pattern": "^(?:[0-9a-f]{40})?$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "expected_plan_sha256": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Plan Sha256",
+            "type": "string"
+          },
+          "expected_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "expected_workspace_identity": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Workspace Identity",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "path",
+          "edits",
+          "expected_workspace_identity",
+          "expected_head_sha",
+          "expected_sha256"
+        ],
+        "title": "edit_workspace_fileArguments",
         "type": "object"
       }
     },
@@ -900,6 +1006,38 @@
         "type": "object"
       }
     },
+    "read_workspace_change": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "change_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Change Id",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "observe_current": {
+            "default": false,
+            "title": "Observe Current",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "machine",
+          "change_id"
+        ],
+        "title": "read_workspace_changeArguments",
+        "type": "object"
+      }
+    },
     "read_workspace_file": {
       "annotations": {
         "destructiveHint": false,
@@ -1134,6 +1272,12 @@
       },
       "inputSchema": {
         "properties": {
+          "change_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Change Id",
+            "type": "string"
+          },
           "content": {
             "maxLength": 131072,
             "title": "Content",
@@ -1147,6 +1291,12 @@
           "expected_sha256": {
             "pattern": "^(?:[0-9a-f]{64})?$",
             "title": "Expected Sha256",
+            "type": "string"
+          },
+          "expected_workspace_identity": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Workspace Identity",
             "type": "string"
           },
           "machine": {

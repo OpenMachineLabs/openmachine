@@ -21,6 +21,7 @@ import uvicorn
 
 from openmachine import __version__, service
 from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
+from openmachine.app import MAX_WORKSPACE_RESULT, bound_workspace_result
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -31,6 +32,12 @@ LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempote
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
 GITHUB_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
 GITHUB_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+
+
+class ExactEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    old_text: Annotated[str, Field(min_length=1, max_length=131072)]
+    new_text: Annotated[str, Field(max_length=131072)]
 
 
 class TerminalSize(BaseModel):
@@ -44,26 +51,34 @@ def _result(payload: dict, failed: bool = False) -> CallToolResult:
                           structuredContent=payload, isError=failed)
 
 
-def _reply(operation, *, execution_output: bool = False) -> CallToolResult:
+def _reply(operation, *, execution_output: bool = False, workspace_output: bool = False, workspace_mutation: bool = False,
+           change_id: str = "") -> CallToolResult:
     try:
         payload = operation()
-        if execution_output:
-            payload = bound_output(
-                payload, lambda value: len(json.dumps(_result(value).model_dump(
-                    mode="json", by_alias=True, exclude_none=True)).encode()),
-                MAX_RESULT_BYTES - 1024,
-            )
-        return _result(payload)
     except Fault as error:
-        payload = {"error": {"code": error.code, "message": str(error)}}
+        payload = {**(error.evidence or {}), "error": {"code": error.code, "message": str(error)}}
     except OSError as error:
         payload = {"error": {"code": "source_unavailable", "message": type(error).__name__}}
-    return _result(payload, True)
+    if change_id:
+        payload.setdefault("change_id", change_id)
+    failed = isinstance(payload.get("error"), dict) or workspace_mutation and payload.get("status") in {
+        "rejected", "partial", "outcome_unknown", "write_outcome_unknown"} or (workspace_mutation and payload.get("reconciliation") == "outcome_unknown")
+    if execution_output or workspace_output:
+        bound, limit = (bound_workspace_result, MAX_WORKSPACE_RESULT) if workspace_output else (bound_output, MAX_RESULT_BYTES)
+        try:
+            payload = bound(payload, lambda value: len(json.dumps(_result(value, bool(failed)).model_dump(
+                mode="json", by_alias=True, exclude_none=True)).encode()), limit - 1024)
+        except Fault as error:
+            payload = {**(error.evidence or {}), "error": {"code": error.code, "message": str(error)}}
+            if change_id:
+                payload["change_id"] = change_id
+            failed = True
+    return _result(payload, bool(failed))
 
 
 def _submit_owned(operation) -> Future:
     """Keep one request independent of observation saturation and SDK lifespans."""
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="om-execution")
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="om-operation")
     try:
         return pool.submit(operation)
     finally:
@@ -117,15 +132,42 @@ def create_server(config: Settings, state: Path) -> FastMCP:
                             offset: Annotated[int, Field(ge=0, le=131072)] = 0,
                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
         """Read one configured-workspace text file, including untracked source, with whole-file SHA256, Git context and explicit absence. Follow next_offset and echo expected_sha256 until has_more=false; never overwrite a file from partial/redacted text. Bounded UTF-8 pages; no writes or submitted-content execution. Configured SSH workspaces are read on their pinned remote target."""
-        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256))
+        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256), workspace_output=True)
 
     @mcp.tool(annotations=file_write, structured_output=False)
-    def write_workspace_file(machine: str, workspace_name: str, path: str,
+    async def write_workspace_file(machine: str, workspace_name: str, path: str,
                              content: Annotated[str, Field(max_length=131072)],
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
-                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")]) -> CallToolResult:
-        """Create or replace exactly one authorized UTF-8 file in a configured workspace with execution enabled. Requires observed Git HEAD and whole-file SHA256; empty HEAD explicitly means no HEAD, empty SHA256 means absent. Shares native execution locks and verifies atomic publication. Hash checking and rename are separate operations, not atomic CAS against external editors; pause other writers to this file. Rejects traversal, credential paths, links and special files. No shell, submitted-content execution, deletion, parent creation or permission-change interface. Configured SSH writes use the pinned target and its own preconditions and locks. Read back any unknown outcome; platform approval remains independent."""
-        return _reply(lambda: application.write_workspace_file(machine, workspace_name, path, content, expected_head_sha, expected_sha256))
+                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")],
+                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
+                             expected_workspace_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+        """Publish one bounded whole file. A change_id requires observed workspace identity and retains the original result; no-ID calls retain legacy behavior without durable recovery. Empty source hash means absence. Uses the independent effective edit grant and the original workspace lease; no commands, parents or implicit replay. Unknown effects require original-ID readback. Native checks are not a kernel CAS or sandbox."""
+        operation = partial(_reply, lambda: application.write_workspace_file(machine, workspace_name, path, content,
+            expected_head_sha, expected_sha256, change_id, expected_workspace_identity), workspace_output=True,
+            workspace_mutation=True, change_id=change_id)
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=file_write, structured_output=False)
+    async def edit_workspace_file(machine: str, workspace_name: str, path: str,
+                            edits: Annotated[list[ExactEdit], Field(min_length=1, max_length=64)],
+                            expected_workspace_identity: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+                            expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
+                            expected_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+                            change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
+                            dry_run: Annotated[bool, Field(strict=True)] = False,
+                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+        """Replace exact non-overlapping fragments located in the same original UTF-8 file. Preview requires empty ID and has no writes; apply requires a caller-generated ID. Echo observed whole-file hash, HEAD and workspace identity; optionally bind preview plan SHA. Same ID/request observes, never replays; ambiguous matches fail. W1 sources/payloads remain 128 KiB. File changes are not test results."""
+        operation = partial(_reply, lambda: application.edit_workspace_file(machine, workspace_name, path,
+            [edit.model_dump() for edit in edits], expected_workspace_identity, expected_head_sha, expected_sha256,
+            change_id, dry_run, expected_plan_sha256), workspace_output=True, workspace_mutation=True, change_id=change_id)
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=machine_read, structured_output=False)
+    def read_workspace_change(machine: str, change_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
+                              observe_current: Annotated[bool, Field(strict=True)] = False) -> CallToolResult:
+        """Read original target-owned change evidence without applying, repairing or initializing state. Optional current hashes are separate observations, not historical proof. Missing history is not non-admission; do not retry blindly. Original root must remain authorized. No write grant is required."""
+        return _reply(lambda: application.read_workspace_change(machine, change_id, observe_current),
+                      workspace_output=True, change_id=change_id)
 
     @mcp.tool(annotations=READ, structured_output=False)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],

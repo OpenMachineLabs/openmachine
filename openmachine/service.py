@@ -18,7 +18,7 @@ import tempfile
 import time
 import zipfile
 
-from openmachine import __version__, execution, tasks
+from openmachine import __version__, execution, tasks, workspace
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 3
+STATE_CONTRACT = 4
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -139,9 +139,11 @@ def check_state(config_path: Path, state: Path) -> dict:
         if page["next_offset"] is None:
             break
         page = tasks.find(state, offset=page["next_offset"], limit=50, expected_generation=page["generation"])
-    return {"version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    execution.check_workspace_leases(config, state)
+    changes = workspace.check_change_state(state)
+    return {**changes, "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count, "task_records": task_count,
-            "configuration_sha256": hashlib.sha256(config.model_dump_json().encode()).hexdigest()}
+            "configuration_sha256": config.configuration_sha256()}
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
@@ -157,9 +159,14 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2, 3)
+                or value["state_contract"] not in (1, 2, 3, 4)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
+        execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
+        workspace.check_change_state(state)
+        if os.path.lexists(state / "workspace-changes") and (type(value.get("workspace_change_format")) is not int
+                or value["workspace_change_format"] != workspace.CHANGE_FORMAT):
+            raise ValueError("candidate ignores retained workspace state")
         return value
     except (ValueError, KeyError, TypeError) as error:
         raise Fault("incompatible_state", "The candidate cannot validate current configuration and records; no state was migrated.") from error
@@ -246,7 +253,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         initialized = await session.initialize()
                         capabilities = await session.call_tool("get_capabilities", {})
                         caps = capabilities.structuredContent
-                        fingerprint = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
+                        fingerprint = config.configuration_sha256()
                         if (capabilities.isError or initialized.serverInfo.version != expected_version
                                 or caps["version"] != expected_version or caps["configuration_sha256"] != fingerprint
                                 or caps["lifecycle"]["protocol"] != PROTOCOL or caps["lifecycle"]["state_contract"] != expected_contract
@@ -302,12 +309,38 @@ def probe_service(state: Path, config_path: Path, probe: dict, version: str, pid
                               expected_contract=expected_contract, check_remote=check_remote))
 
 
+def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
+    """Ask that exact installed controller and pinned endpoint to validate target history."""
+    target = load(config_path).machines[name]
+    result = _run([str(python), "-I", "-m", "openmachine.cli", "--config", str(config_path),
+                   "doctor", "--machine", name], timeout=35)
+    try:
+        value = json.loads(result.stdout)
+        if (result.returncode not in (0, 1) or value.get("identity_verified") is not True or
+            result.returncode == 1 and not value.get("unavailable_workspaces") or
+            value.get("target_identity") != target.ssh_identity or
+            value.get("worker_sha256") != Path(target.ssh_worker).stem or
+            type(value.get("workspace_change_format")) is not int or value["workspace_change_format"] != workspace.CHANGE_FORMAT or
+            type(value.get("workspace_change_records")) is not int or not 0 <= value["workspace_change_records"] <= workspace.MAX_CHANGES or
+            type(value.get("workspace_change_store_present")) is not bool or
+            type(value.get("legacy_workspace_compatible")) is not bool or
+            not value["workspace_change_store_present"] and value["workspace_change_records"] != 0):
+            raise ValueError
+        return value
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
+        raise Fault("incompatible_remote_state", "The original target workspace history or lease compatibility was not verified.") from error
+
+
 def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote: bool = False) -> None:
     installed = _installed(state, identity)
     python = _runtime(state, identity) / "bin/python"
     observed = _candidate_state(python, Path(record["config"]), state, installed["state_contract"])
     if observed["version"] != installed["version"] or observed["prefix"] != str(python.parent.parent):
         raise Fault("installation_identity_mismatch", "The retained runtime changed identity; it will not be activated.")
+    if check_remote and installed["state_contract"] >= 4:
+        for name, target in load(Path(record["config"])).machines.items():
+            if target.transport == "ssh":
+                _remote_workspace_state(python, Path(record["config"]), name)
     with tempfile.TemporaryDirectory(prefix="om-ready-", dir="/tmp") as temporary:
         test_state = Path(temporary) / "state"
         process = subprocess.Popen([str(python), "-I", "-m", "openmachine.cli", "--config", record["config"],
@@ -513,6 +546,18 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
     with lease(state / "locks/lifecycle.lock"):
         installed = _installed(state, target)
         _candidate_state(_runtime(state, target) / "bin/python", candidate_path, state, installed["state_contract"])
+        pending_origin = record["pending"]
+        restoring = pending_origin is not None and target == pending_origin["from"]
+        if installed["state_contract"] < 4 and not restoring:
+            origin = pending_origin["from"] if pending_origin is not None else record["current"]
+            current = _installed(state, origin)
+            if current["state_contract"] >= 4:
+                original_config = _configuration_for(state, record, origin) if pending_origin else Path(record["config"])
+                for name, machine in load(original_config).machines.items():
+                    if machine.transport == "ssh":
+                        retained = _remote_workspace_state(_runtime(state, origin) / "bin/python", original_config, name)
+                        if retained["workspace_change_store_present"] or not retained["legacy_workspace_compatible"]:
+                            raise Fault("incompatible_remote_state", "Retained target changes or live root leases require a W1-compatible controller; no service was stopped.")
         # The actual candidate MCP/SSH readers must also accept all retained remote
         # records under the admission lock, including completed newer-format records.
         if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
