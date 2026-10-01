@@ -18,9 +18,11 @@ Within that scope, diagnose ordinary tool/test failures and continue. An AI
 engineering decision is not automatically a user decision. Use this recovery order:
 
 - For a confirmed terminal rejection with no effects, read the relevant current
-  source/context, correct the request, and preview it. For example, use unique
-  surrounding text for `match_ambiguous`. Keep the rejected receipt; a corrected
-  intent uses a new change ID, not replay or alteration of the old request.
+  source/context and correct the request. Preview edits/patches; for whole-file
+  writes, review the complete replacement (there is no write preview API).
+  For example, use unique surrounding text for `match_ambiguous`. Keep the
+  rejected receipt; a corrected intent uses a new change ID, not replay or
+  alteration of the old request.
 - A changed hash, branch or HEAD requires reconciliation, not blindly copying new
   preconditions. Continue only when the current target and intent remain within
   the authorized scope. Never overwrite unrelated edits or bypass a busy lease.

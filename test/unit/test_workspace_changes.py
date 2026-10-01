@@ -145,6 +145,27 @@ class WorkspaceChangeTests(unittest.TestCase):
         self.assertEqual(record.read_bytes(), retained)
         self.assertEqual(self.app.read_workspace_change("local", identity)["status"], "rejected")
 
+    def test_durable_write_recovery_does_not_require_an_unsupported_preview(self):
+        before = self.app.read_workspace_file("local", "project", "source.py")
+        identity = uuid.uuid4().hex
+        self.file.write_bytes(self.file.read_bytes() + b"\r\nother = 9")
+        rejected = self.app.write_workspace_file("local", "project", "source.py", "answer = 42\n", "",
+            before["sha256"], identity, before["context"]["workspace_identity"])
+        self.assertEqual((rejected["status"], rejected["error"]), ("rejected", "content_mismatch"))
+        self.assertEqual(rejected["effects"], [])
+        self.assertIn("review the complete replacement", rejected["recovery_hint"])
+        self.assertNotIn("preview", rejected["recovery_hint"])
+        record = self.directory(identity) / "record.json"
+        retained = record.read_bytes()
+        current = self.app.read_workspace_file("local", "project", "source.py")
+        replacement = current["text"].replace("41", "42")
+        completed = self.app.write_workspace_file("local", "project", "source.py", replacement, "",
+            current["sha256"], uuid.uuid4().hex, current["context"]["workspace_identity"])
+        self.assertEqual(completed["status"], "applied")
+        self.assertEqual(self.file.read_bytes(), b"answer = 42\r\nuntouched = 7\r\nother = 9")
+        self.assertEqual(record.read_bytes(), retained)
+        self.assertEqual(self.app.read_workspace_change("local", identity)["status"], "rejected")
+
     def test_content_mismatch_hint_requires_fresh_source_and_preserves_other_edits(self):
         stale = self.arguments()
         changed = self.file.read_bytes() + b"\r\nother = 9"

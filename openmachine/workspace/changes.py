@@ -794,8 +794,9 @@ def _observed(directory: Path, record: dict | None = None, *, owned: bool = Fals
                 "content_mismatch": "Read the current source and reconcile its changed content.",
             }.get(record["error"])
             if hint:
+                preparation = "review the complete replacement" if record["operation"] == "write" else "preview the corrected intent"
                 result["recovery_hint"] = ("No file effects were recorded. " + hint +
-                    " Continue only within current authorization; preview the corrected intent, then use a new change ID."
+                    f" Continue only within current authorization; {preparation}, then use a new change ID."
                     " Preserve this original receipt; do not replay its request.")
         return result
 
