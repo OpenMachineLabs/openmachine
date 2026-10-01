@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from functools import partial
 import json
 import os
@@ -102,6 +103,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     application = create_application(config, state)
     waiting = threading.BoundedSemaphore(MAX_WAITERS)
 
+    @asynccontextmanager
+    async def lifespan(_server):
+        # SDK 2.2 enters this once per HTTP manager, not per request/session.
+        with application.task_observer.running():
+            yield {}
+
     validators: dict[str, Draft202012Validator] = {}
 
     async def safe_tool_call(ctx: ServerRequestContext, call_next: CallNext) -> HandlerResult:
@@ -143,7 +150,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     mcp = MCPServer(
         "Open Machine", instructions="Read inspect_skills(action='read') before operating this runtime.",
-        version=__version__, middleware=[safe_tool_call],
+        version=__version__, middleware=[safe_tool_call], lifespan=lifespan,
     )
 
     private_directory(state)
@@ -255,7 +262,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                            expected_epoch: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
                            update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                            transition: tasks.Transition) -> CallToolResult:
-        """Explicitly claim/release, pause/resume/cancel, revise a plan, record a verified decision or finish the original task. Echo current task/plan/epoch and preserve update_id after a lost reply. Claims are native-account cooperative ownership, not ChatGPT identity or permission. Pause blocks new admission, not already admitted effects; cancellation retains unknown outcomes until original evidence resolves. Reads never claim. No observer, Events or automatic AI continuation."""
+        """Explicitly claim/release, pause/resume/cancel, revise a plan, record a verified decision or finish the original task. Echo current task/plan/epoch and preserve update_id after a lost reply. Claims are native-account cooperative ownership, not ChatGPT identity or permission. Pause blocks new admission, not already admitted effects; cancellation retains unknown outcomes until original evidence resolves. Reads never claim. Background local results can advance the revision; no Events or automatic AI continuation."""
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
             expected_plan_revision, expected_epoch, update_id, transition.model_dump()))
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))

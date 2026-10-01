@@ -330,8 +330,26 @@ with at most three 100-item lookup pages. Partial coverage, multiple matches and
 bodyless unknown effects are blockers when evidence cannot prove the result.
 Task receipt hashes cover bounded semantic observations, not copied logs/source.
 Legacy `save_task` remains the existing work journal; do not convert it or strip
-known supervised identities to bypass admission. S1.2 has no observer, Events,
-runtime recovery or AI wake. A command finishing while no caller is active does
-not automatically update its task yet. Keep full S1 and actual AI acceptance open.
+known supervised identities to bypass admission.
+
+S1.3's service-owned observer collects already-admitted local command/control/
+cancel/change results while callers are absent. Result and handoff publish
+together, not stage acceptance or a new effect. Re-read task/plan/epoch after
+material background progress; an older caller can legitimately see a conflict.
+Do not restart an original command or resend input to recover that conflict.
+The observer never calls SSH, GitHub or an AI, and leaves legacy history alone.
+
+Normal local observation is due every 2 seconds with four actual read slots and
+at most 32 active tasks. A timed-out thread keeps its slot/owner until actual
+exit. Read failure budgets are persisted before retries: three fast attempts,
+then bounded cooldown, at most one hour/120 attempts or earlier expiry. Pause,
+cancel and restart do not renew those budgets. Unknown/corrupt original evidence
+remains a blocker, not permission to repair, replay or delete it. A service
+activation can defer observation; it never authorizes bypassing lifecycle guards.
+Use passive `read_task` to distinguish current observation, stale original facts,
+pending recovery and a stopped observer. Heartbeats and quiet reads are not
+material progress; a stored next-attempt value is not a live timer after stop.
+Terminal history never reactivates. Complete runtime recovery, Events and actual
+AI wake remain separate; keep full S1 and A16 acceptance evidence distinct.
 State contract 6 requires actual compatible readers for every retained task,
 including terminal history, before a managed transition. Do not deploy implicitly.

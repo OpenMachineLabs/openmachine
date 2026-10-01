@@ -979,12 +979,48 @@ remain unresolved. There is no exactly-once promise for arbitrary shell/API effe
 Task `receipt_sha256` fingerprints bounded semantic domain observations, not a
 copy or hash claim about an entire source file, raw log or provider response.
 
-Result reconciliation occurs during the authorized operation/control workflow;
-it does not run while the caller is absent. A decisive result and pending handoff
-are published in the same canonical revision. S1.2 has no observer, automatic
-connection recovery, Events delivery or AI wake. Capabilities distinguish
-supervised admission from those unsupported features; caller state remains unknown.
-Full S1, unattended continuation and production activation are separate acceptance.
+S1.3 adds one service-owned local result observer through the existing MCP HTTP
+lifespan, independent of client sessions and Desktop. Constructing an Application
+or reading a task does not start it. Startup reconstructs a bounded active set
+from registered canonical records; normal discovery inspects changed metadata
+in pages of at most 50 records/2 MiB, not unchanged historical records forever.
+Terminal records and tasks without pending local operations leave observation.
+Unregistered/corrupt history or an incomplete index remains an explicit blocker;
+the observer never repairs the index or converts legacy checkpoints.
+
+Only original local execution, control/cancel and file-change receipts are read.
+The observer reuses Application's result mapping, then publishes decisive results
+and their pending handoff in one revision-checked canonical update. It never
+starts a command, repeats input/edits, claims continuation or accepts a stage.
+A lost reply or observer restart retrieves original work rather than relaunching
+it. Quiet repeated observations do not change the task revision or material
+progress time. A successful command alone does not complete its task.
+
+At most 32 tasks and four actual local readers participate, with observations
+normally due every 2 seconds and a 2-second read deadline. A timed-out reader
+keeps its slot until it really exits. The single private owner lease survives
+normal shutdown and coordinator faults until readers drain; no task/workspace
+lock spans a read or backoff. Service bootstrap owns that coordination lease,
+not task authority: a pending activation suppresses receipt reads, and every
+retry reservation/result publication retains current lifecycle admission.
+The observer does not restart, update or repair any service or worker.
+
+Local read failures retain one finite `recovery` episode: three fast attempts
+including the original failure, 1/2-second delays, then a 30-second cooldown,
+with 0.8-1.2 jitter and a limit of one hour/120 attempts or earlier authority
+expiry. Retry accounting is durable before dispatch and survives restart and
+pause/cancel. Permanent permission/identity/evidence faults stop affected reads;
+exhaustion is a visible blocker, never a new operation or discarded history.
+Pause/cancel still permits collection of already-owned outcomes without a wake;
+cancellation retires only when original evidence permits it.
+
+`read_task` adds passive runtime/execution observations with their evidence ages,
+last material progress, blockers and applicable next attempt. A live observer
+heartbeat is not command progress; a stopped observer has no live retry timer.
+Capability `local_result_observation` is distinct from complete runtime recovery
+and Events delivery, which remain unsupported here. Caller state stays unknown.
+Full S1, actual unattended AI continuation and production activation retain
+their separate acceptance; this increment does not claim to restart ChatGPT.
 Controller state contract 6 requires actual candidate-reader coverage before a
 managed transition, including terminal-only history. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.

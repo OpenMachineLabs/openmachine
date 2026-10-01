@@ -472,37 +472,50 @@ class TaskAdmission:
             changes.append((operation["id"], result, locator))
         return self._publish(record["task_id"], changes) if changes else view
 
+    def apply_observations(self, record: dict, now_ms: int, observations: list[tuple[str, dict, dict]]) -> None:
+        """Pure result/handoff transition shared with the revision-checked observer."""
+        if record["terminal"] is not None:
+            return
+        changed = []
+        for operation_id, result, locator in observations:
+            operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
+            if operation is None or tasks.operation_key(operation["locator"]) != tasks.operation_key(locator):
+                raise Fault("task_operation_conflict", "Original observation binding changed; preserve its domain receipt.")
+            if operation["result"] == result and operation["locator"] == locator:
+                continue
+            # A transient unavailable read never erases a verified historical outcome.
+            if operation["result"] is not None and not records.pending(operation) and result["status"] in {"unknown", "running"}:
+                continue
+            operation.update(result=result, locator=locator, state="unknown" if result["status"] == "unknown" else "observed",
+                             observed_at_ms=now_ms)
+            changed.append(operation)
+        if not changed:
+            return
+        recovery = record["recovery"]
+        if recovery is not None and recovery["category"] == "local_observation" and not any(
+                records.pending(item) and item["locator"]["kind"] in {"execution", "change"}
+                and item["locator"]["target_identity"] is None for item in record["operations"]):
+            record["recovery"] = None
+        control = record["control"]
+        if control["stop_intent"] == "cancel" and not any(records.pending(item) for item in record["operations"]):
+            records.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
+        elif control["stop_intent"] == "none":
+            stage = records.stage_for(record)
+            decisive = next((item for item in reversed(changed) if item["result"]["status"] != "running"
+                and item["stage_id"] == stage["id"] and item["plan_revision"] == record["plan"]["revision"]
+                and item["source_sha256"] == stage["source_sha256"]), None)
+            if decisive is not None:
+                control["state"] = "waiting_for_ai"
+                control["pending_decision"] = None if decisive["result"]["status"] == "succeeded" else "Review the original operation outcome before new work."
+                records.handoff(record, decisive["id"], now_ms,
+                                "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
+
     def _publish(self, identity: str, observations: list[tuple[str, dict, dict]]) -> dict:
-        def apply(record, now_ms):
-            if record["terminal"] is not None:
-                return
-            changed = []
-            for operation_id, result, locator in observations:
-                operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
-                if operation is None or tasks.operation_key(operation["locator"]) != tasks.operation_key(locator):
-                    raise Fault("task_operation_conflict", "Original observation binding changed; preserve its domain receipt.")
-                if operation["result"] == result and operation["locator"] == locator:
-                    continue
-                # A transient unavailable read never erases a verified historical outcome.
-                if operation["result"] is not None and not records.pending(operation) and result["status"] in {"unknown", "running"}:
-                    continue
-                operation.update(result=result, locator=locator, state="unknown" if result["status"] == "unknown" else "observed",
-                                 observed_at_ms=now_ms)
-                changed.append(operation)
-            if not changed:
-                return
-            control = record["control"]
-            if control["stop_intent"] == "cancel" and not any(records.pending(item) for item in record["operations"]):
-                records.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
-            elif control["stop_intent"] == "none":
-                decisive = next((item for item in reversed(changed) if item["result"]["status"] != "running"), None)
-                if decisive is not None:
-                    control["state"] = "waiting_for_ai"
-                    control["pending_decision"] = None if decisive["result"]["status"] == "succeeded" else "Review the original operation outcome before new work."
-                    records.handoff(record, decisive["id"], now_ms,
-                                    "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
         try:
-            return tasks.update(self.app.state, identity, apply)
+            view = tasks.update(self.app.state, identity, lambda value, now: self.apply_observations(value, now, observations))
         except (Fault, OSError) as error:
             raise Fault("task_result_unverified", "Original domain work may have finished, but task evidence publication was not verified. Read the same task and original operation; do not repeat its effect.",
                         {"task_id": identity, "operation_ids": [item[0] for item in observations]}) from error
+        if view["status"] == "saved":
+            self.app.task_observer.notify()
+        return view

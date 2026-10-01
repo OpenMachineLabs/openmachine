@@ -485,3 +485,31 @@ resources must match; the sdist-derived wheel must reproduce the direct wheel.
 Keep exact candidate, original receipts and diagnostics in the PR evidence.
 This increment does not deliver the absent-caller observer (A4), runtime recovery,
 Events, live SSH activation, production deployment or A16. Full S1 remains open.
+
+## Spec #29 S1.3 local absent-caller observation
+
+Use the existing continuity/runtime/MCP groups and installed-wheel commands.
+Actual local commands and file receipts prove automatic canonical result/handoff
+publication without a caller saving progress or repeating the operation. Real
+subprocess death immediately before/after result publication proves original
+counter/receipt and handoff preservation, including a stale derived index.
+The private-socket test closes both clients on both supported protocols, then
+checks canonical bytes with no further tool calls while the service stays up,
+restarts during the command, or restarts after the command finishes while down.
+All cases retain the same execution identity and one counter increment.
+
+Focused fault cases cover late results racing pause/terminal decisions, actual
+lifecycle-lock contention at startup/publication, finite durable read episodes,
+restart without budget reset, four real blocked threads retaining their slots
+and owner through timeout/shutdown/fatal coordinator failure, 32-task overflow,
+corrupt-record aggregate bounds and unchanged-history discovery. Synthetic
+receipts only test scheduling/budgets; they are not execution or provider proof.
+Ordinary task reads remain passive while background writes may independently
+advance the record. A stopped observer must not advertise an active retry timer.
+
+Verify exact source/wheel/installed resources and sdist roundtrip, actual old
+readers with retained recovery/terminal records, and the unchanged MCP input
+catalog/format contracts. Qualify managed-service tests separately from fixtures.
+These tests do not prove SSH recovery, Events delivery, actual ChatGPT wake,
+production activation or all of S1/A16. No production fault, new test framework,
+per-task daemon or second task database is part of this acceptance.

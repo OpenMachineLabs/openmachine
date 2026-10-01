@@ -17,6 +17,7 @@ from openmachine.foundation.state import lease, private_directory
 
 from .machines import Machines
 from .task_admission import TaskAdmission
+from .task_observer import TaskObserver
 
 MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
 MAX_SOURCE = workspace.MAX_SOURCE
@@ -30,6 +31,7 @@ class Application:
         self.machines = machines
         self.github = github
         self.task_admission = TaskAdmission(self)
+        self.task_observer = TaskObserver(self)
 
     @contextmanager
     def _admit(self) -> Iterator[None]:
@@ -57,7 +59,7 @@ class Application:
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
             "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
                       "index_format": 2, "supervised_admission": True, "runtime_recovery": False,
-                      "events_delivery": False},
+                      "events_delivery": False, "local_result_observation": True},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
@@ -152,7 +154,7 @@ class Application:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
     def read_task(self, task_id: str) -> dict:
-        return tasks.read(self.state, task_id)
+        return self.task_observer.project(tasks.read(self.state, task_id))
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
                   anchors: list[str] | None = None) -> dict:
@@ -165,7 +167,9 @@ class Application:
             expected_plan_revision=expected_plan_revision, expected_epoch=expected_epoch,
             update_id=update_id, transition=transition))
         with self._admit():
-            return self.task_admission.control(request)
+            view = self.task_admission.control(request)
+        self.task_observer.notify()
+        return view
 
     def _validate_task_scope(self, request: dict) -> None:
         contract = request["contract"]
@@ -210,8 +214,10 @@ class Application:
         tasks.normalize_create({"task_id": task_id, "update_id": update_id, "title": title,
             "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
         with self._admit():
-            return tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
+            view = tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
                                 validate_new=self._validate_task_scope)
+        self.task_observer.notify()
+        return view
 
     def rebuild_task_index(self, expected_generation: int = -1) -> dict:
         with self._admit():
