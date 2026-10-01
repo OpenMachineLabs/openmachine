@@ -875,6 +875,30 @@ class TaskAdmissionTests(unittest.TestCase):
         self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[args["execution_id"]], reason="Read the original terminal receipt and counter.")
         self.control("finish", outcome="completed", acceptance=[{"stage_id": "verify", "operation_id": args["execution_id"]}], limitations="No observer was involved.")
 
+    def test_expired_claim_reclaims_final_handoff_without_repeating_accepted_work(self):
+        self.accept_plan()
+        args = self.write_arguments()
+        self.app.write_workspace_file(**args)
+        accepted = self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[args["change_id"]],
+                                reason="Verified original file and receipt.")["record"]
+        expired = accepted["control"]["owner"]["expires_at_ms"] + 1
+        finish = dict(outcome="completed", acceptance=[{"stage_id": "verify", "operation_id": args["change_id"]}],
+                      limitations="Local evidence; clock advanced only to the original claim deadline.")
+        self.app = create_application(self.config, self.state)
+        with patch.object(task_store.time, "time_ns", return_value=expired * 1000000):
+            self.assertEqual(self.view()["record"], accepted)
+            self.fault("task_owner_conflict", self.control, "finish", **finish)
+            reclaimed = self.control("claim", handoff_id=accepted["handoff"]["id"])["record"]
+            self.assertEqual(reclaimed["plan"], accepted["plan"])
+            self.assertEqual(reclaimed["operations"], accepted["operations"])
+            self.assertEqual(reclaimed["handoff"], accepted["handoff"])
+            self.assertEqual(reclaimed["control"]["epoch"], accepted["control"]["epoch"] + 1)
+            done = self.control("finish", **finish)["record"]
+        self.assertEqual(done["terminal"]["outcome"], "completed")
+        self.assertIsNone(done["handoff"])
+        self.assertEqual(done["operations"], accepted["operations"])
+        self.assertEqual((self.work / "result.txt").read_text(), "original\n")
+
     def test_stale_revision_plan_epoch_and_pause_reject_before_effect(self):
         self.accept_plan()
         args = self.write_arguments()

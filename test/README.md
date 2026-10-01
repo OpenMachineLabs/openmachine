@@ -513,3 +513,24 @@ catalog/format contracts. Qualify managed-service tests separately from fixtures
 These tests do not prove SSH recovery, Events delivery, actual ChatGPT wake,
 production activation or all of S1/A16. No production fault, new test framework,
 per-task daemon or second task database is part of this acceptance.
+
+## Spec #29 S1.4 caller workflow and multi-stage continuation
+
+The existing private-socket task workflow now edits a file, accepts that stage,
+hands over across a server restart, and runs the original verification exactly
+once on both supported protocols. It retains pause/resume and stale-caller
+checks, then interrupts again after all stages are accepted. A new client claims
+the retained final handoff and finishes with both original receipt references.
+History remains discoverable and read-only with retired observation and no timer.
+A focused continuity test advances the clock past the original claim deadline,
+reconstructs Application, rejects an unclaimed finish, and completes through the
+same handoff without changing accepted work. Existing source-change, ownership,
+absent-caller, legacy and compatibility cases retain their own coverage.
+
+Run the documented installed-wheel unit/MCP suites and repository checks. Verify
+the shipped Skill matches the source; tool descriptions change, input contracts
+and retained formats do not. These tests supply a scripted contract and therefore
+do not prove A19 natural-language planning. Record actual AI-authored creation and
+one-step-read selection only on an exposed, separately authorized candidate
+connection; absent client tools leave that acceptance NOT RUN. Full S1, A16,
+Events, production activation and release remain separate.
