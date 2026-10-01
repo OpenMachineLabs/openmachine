@@ -2,12 +2,12 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.3
+## v0.2.4
 
-Open Machine v0.2.3 delivers the MCP SDK 2.2.0 migration from
-[Spec #32](https://github.com/OpenMachineLabs/openmachine/issues/32): MCP
-`2026-07-28` support with retained `2025-11-25` compatibility, public `MCPServer`
-integration, preserved tool contracts, and verified safe stop -> upgrade -> resume continuity.
+Open Machine v0.2.4 packages the post-v0.2.3 workflow and GitHub collaboration
+fixes from PRs #45 and #46: recoverable tool rejections now carry scoped
+continuation guidance, GitHub attribution defaults on with a local opt-out, and
+Spec Development linking accepts the repository's current `Issue: Refs #N` metadata.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
@@ -16,10 +16,10 @@ contracts, not release versions. Execution retains format 5 and opt-in PTY contr
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
 
-Version `0.2.3` is an initial-development release, not a stable 1.x API promise.
-Spec #32 records completed installed/native/client acceptance, including the
-refreshed ChatGPT path. Live SSH migration, Events and Connection Layer work
-remain outside this release.
+Version `0.2.4` is an initial-development release, not a stable 1.x API promise.
+Spec #32 remains the MCP SDK 2.2.0 migration baseline. This release adds the
+post-v0.2.3 maintenance fixes from PRs #45 and #46 without changing the SDK,
+state, SSH, execution or workspace receipt compatibility contracts.
 
 Managed services support logged-in macOS controllers. Linux supports manual
 `serve` and configured SSH workers; managed Linux services and Windows are not
@@ -32,12 +32,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.3 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.4 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.3-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.4-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -50,8 +50,8 @@ state or arbitrary checkout files. Workers use the installed package, never a
 source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
 JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
 building. See [requirements.lock](requirements.lock) for the complete locked set.
-v0.2.3 is the first tagged release on MCP SDK 2.2.0. The v0.2.2 tag remains
-on SDK 1.30.0 and retains its own matching lock.
+v0.2.4 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
+v0.2.2 tag remains on SDK 1.30.0 and retains its own matching lock.
 
 ## Configure and run
 
@@ -98,7 +98,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.2.3-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.2.4-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
