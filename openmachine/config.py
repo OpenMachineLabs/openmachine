@@ -65,7 +65,7 @@ class GitHubConfig(BaseModel):
     read_owners: list[Owner] = Field(default_factory=list, max_length=256)
     write_owners: list[Owner] = Field(default_factory=list, max_length=256)
     account: Owner | None = None
-    attribution: bool | None = None
+    attribution: bool = True
 
     @model_validator(mode="after")
     def explicit_scopes(self):

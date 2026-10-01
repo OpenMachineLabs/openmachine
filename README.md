@@ -537,7 +537,7 @@ read_repositories = ["owner/reference"]
 write_repositories = ["owner/project"]
 read_owners = []
 write_owners = []
-# attribution = true
+attribution = true # Default; set false to disable provenance footers.
 ```
 
 Write grants include reads. Owners can be personal accounts or organizations;
@@ -577,8 +577,8 @@ to 2 MiB and returned observations to 256 KiB after JSON escaping. An oversized
 result requires a narrower read, not an invented success. GitHub's PR file API
 has a 3,000-file cap; larger candidates expose an explicit coverage gap.
 
-Create/update operations preserve the existing provenance policy: default on
-for public repositories and off for private ones; `attribution` overrides it.
+Create/update operations add provenance footers by default for both public and
+private repositories. Set local `github.attribution = false` to disable them.
 Updates preserve an existing footer without branding older artifacts. Readback
 checks all submitted fields, object identity, review commit/event and the acting
 account. Optional `expected_updated_at` detects stale Issue/PR/comment edits;

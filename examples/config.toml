@@ -18,7 +18,7 @@ root = "/absolute/path/to/your/project"
 # write_repositories = ["owner/project"]
 # read_owners = []
 # write_owners = []
-# attribution = true # Default when omitted: public on, private off.
+# attribution = true # Default when omitted; set false to disable provenance footers.
 
 # Optional explicit Skill sources; the empty default does not scan user accounts.
 [skills]

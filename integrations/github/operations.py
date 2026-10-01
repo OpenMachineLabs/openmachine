@@ -85,13 +85,7 @@ def _project(kind: str, value: dict) -> dict:
 
 
 def _enabled(settings: Settings, repository: str, metadata: dict | None = None) -> bool:
-    config = connection.authorize(settings, repository)
-    if config.attribution is not None:
-        return config.attribution
-    metadata = object_response(connection.request("GET", f"repos/{repository}")) if metadata is None else metadata
-    if not isinstance(metadata.get("private"), bool):
-        raise Fault("github_invalid_response", "GitHub did not return repository visibility.")
-    return not metadata["private"]
+    return connection.authorize(settings, repository).attribution
 
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
