@@ -29,7 +29,7 @@ jobs:
           event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
           pull = event["pull_request"]
           matches = re.findall(
-              r"(?m)^\s*-\s+Issue:\s*#([1-9]\d*)\s*$",
+              r"(?mi)^\s*-\s+Issue:.*?#([1-9]\d*)\b.*$",
               pull.get("body") or "",
           )
           if len(matches) != 1:
