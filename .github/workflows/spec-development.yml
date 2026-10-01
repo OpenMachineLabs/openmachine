@@ -28,15 +28,16 @@ jobs:
 
           event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
           pull = event["pull_request"]
-          matches = re.findall(
-              r"(?mi)^\s*-\s+Issue:.*?#([1-9]\d*)\b.*$",
+          fields = re.findall(
+              r"(?mi)^\s*-\s+Issue:\s*(.*?)\s*$",
               pull.get("body") or "",
           )
-          if len(matches) != 1:
+          references = re.findall(r"#([1-9]\d*)\b", fields[0]) if len(fields) == 1 else []
+          if len(references) != 1:
               print("No unique numeric Issue field; skipping.")
               raise SystemExit(0)
 
-          number = matches[0]
+          number = references[0]
           result = subprocess.run(
               ["gh", "api", f"repos/{os.environ['GH_REPO']}/issues/{number}"],
               check=True,
