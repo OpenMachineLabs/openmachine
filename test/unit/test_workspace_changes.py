@@ -111,8 +111,74 @@ class WorkspaceChangeTests(unittest.TestCase):
                 args["edits"] = [{"old_text": value, "new_text": "replacement"} for value in fragments]
                 result = self.apply(args)
                 self.assertEqual((result["status"], result["error"]), ("rejected", code))
+                self.assertEqual("recovery_hint" in result, code in {"match_ambiguous", "match_missing"})
+                self.assertEqual(result["effects"], [])
                 self.assertEqual(self.file.read_text(), source)
                 self.assertFalse(list(self.work.glob(".openmachine-*")))
+
+    def test_rejected_edit_can_be_corrected_without_replaying_or_rewriting_history(self):
+        self.file.write_text("install 41\nservice 41\n")
+        args = self.arguments()
+        identity = uuid.uuid4().hex
+        rejected = self.apply(args, change_id=identity)
+        self.assertEqual((rejected["status"], rejected["error"]), ("rejected", "match_ambiguous"))
+        self.assertIn("unique surrounding text", rejected["recovery_hint"])
+        self.assertIn("current authorization", rejected["recovery_hint"])
+        record = self.directory(identity) / "record.json"
+        retained = record.read_bytes()
+        self.assertNotIn("recovery_hint", json.loads(retained))
+        observed = self.app.read_workspace_change("local", identity)
+        self.assertEqual(observed["recovery_hint"], rejected["recovery_hint"])
+        corrected = self.arguments()
+        corrected["edits"] = [{"old_text": "install 41", "new_text": "install 42"}]
+        self.fault("change_id_conflict", lambda: self.apply(corrected, change_id=identity))
+        self.assertEqual(self.apply(args, change_id=identity)["status"], "rejected")
+        preview = self.app.edit_workspace_file(**corrected, dry_run=True)
+        self.assertEqual(self.file.read_text(), "install 41\nservice 41\n")
+        self.config.machines["local"].workspace_write_enabled = False
+        self.fault("workspace_write_disabled", lambda: self.apply(corrected))
+        self.config.machines["local"].workspace_write_enabled = True
+        completed = self.apply(corrected, expected_plan_sha256=preview["plan_sha256"])
+        self.assertEqual(completed["status"], "applied")
+        self.assertNotIn("recovery_hint", completed)
+        self.assertEqual(self.file.read_text(), "install 42\nservice 41\n")
+        self.assertEqual(record.read_bytes(), retained)
+        self.assertEqual(self.app.read_workspace_change("local", identity)["status"], "rejected")
+
+    def test_durable_write_recovery_does_not_require_an_unsupported_preview(self):
+        before = self.app.read_workspace_file("local", "project", "source.py")
+        identity = uuid.uuid4().hex
+        self.file.write_bytes(self.file.read_bytes() + b"\r\nother = 9")
+        rejected = self.app.write_workspace_file("local", "project", "source.py", "answer = 42\n", "",
+            before["sha256"], identity, before["context"]["workspace_identity"])
+        self.assertEqual((rejected["status"], rejected["error"]), ("rejected", "content_mismatch"))
+        self.assertEqual(rejected["effects"], [])
+        self.assertIn("review the complete replacement", rejected["recovery_hint"])
+        self.assertNotIn("preview", rejected["recovery_hint"])
+        record = self.directory(identity) / "record.json"
+        retained = record.read_bytes()
+        current = self.app.read_workspace_file("local", "project", "source.py")
+        replacement = current["text"].replace("41", "42")
+        completed = self.app.write_workspace_file("local", "project", "source.py", replacement, "",
+            current["sha256"], uuid.uuid4().hex, current["context"]["workspace_identity"])
+        self.assertEqual(completed["status"], "applied")
+        self.assertEqual(self.file.read_bytes(), b"answer = 42\r\nuntouched = 7\r\nother = 9")
+        self.assertEqual(record.read_bytes(), retained)
+        self.assertEqual(self.app.read_workspace_change("local", identity)["status"], "rejected")
+
+    def test_content_mismatch_hint_requires_fresh_source_and_preserves_other_edits(self):
+        stale = self.arguments()
+        changed = self.file.read_bytes() + b"\r\nother = 9"
+        self.file.write_bytes(changed)
+        rejected = self.apply(stale)
+        self.assertEqual((rejected["status"], rejected["error"]), ("rejected", "content_mismatch"))
+        self.assertIn("reconcile", rejected["recovery_hint"])
+        self.assertEqual(rejected["effects"], [])
+        self.assertEqual(self.file.read_bytes(), changed)
+        corrected = self.arguments()
+        preview = self.app.edit_workspace_file(**corrected, dry_run=True)
+        self.assertEqual(self.apply(corrected, expected_plan_sha256=preview["plan_sha256"])["status"], "applied")
+        self.assertEqual(self.file.read_bytes(), changed.replace(b"41", b"42"))
 
     def test_preview_is_pure_with_no_write_or_execution_grant(self):
         self.config.machines["local"].execution_enabled = False
@@ -158,8 +224,13 @@ class WorkspaceChangeTests(unittest.TestCase):
         current = self.arguments()
         self.assertEqual(args["expected_head_sha"], current["expected_head_sha"])
         self.assertNotEqual(args["expected_workspace_identity"], current["expected_workspace_identity"])
-        self.assertEqual(self.apply(args)["error"], "context_mismatch")
+        rejected = self.apply(args)
+        self.assertEqual(rejected["error"], "context_mismatch")
+        self.assertIn("changed context", rejected["recovery_hint"])
+        self.assertEqual(rejected["effects"], [])
         self.assertIn(b"41", self.file.read_bytes())
+        preview = self.app.edit_workspace_file(**current, dry_run=True)
+        self.assertEqual(self.apply(current, expected_plan_sha256=preview["plan_sha256"])["status"], "applied")
 
     def test_root_replacement_invalidates_identity_even_with_identical_text(self):
         args = self.arguments()
@@ -275,6 +346,8 @@ class WorkspaceChangeTests(unittest.TestCase):
         with patch.object(files.os, "replace", side_effect=replaced):
             result = self.apply(args, change_id=identity)
         self.assertEqual(result["status"], "outcome_unknown")
+        self.assertNotIn("recovery_hint", result)
+        self.assertNotIn("recovery_hint", self.app.read_workspace_change("local", identity))
         self.assertEqual(result["effects"][0]["stage"], "unknown")
         self.assertIn(b"42", self.file.read_bytes())
         self.file.write_bytes(b"third party")
@@ -1028,6 +1101,7 @@ class WorkspaceChangeTests(unittest.TestCase):
         with patch.object(changes, "publish_file", side_effect=failing):
             result = self.patch_apply(args)
         self.assertEqual(result["status"], "partial", result)
+        self.assertNotIn("recovery_hint", result)
         self.assertEqual([e["stage"] for e in result["effects"]], ["applied", "failed_no_effect", "not_attempted"])
         self.assertEqual(calls, ["first.txt", "second.txt"])
         self.assertEqual((self.work / "first.txt").read_text(), "one\n")

@@ -5,6 +5,47 @@ description: Inspect projects and user Skills, make explicit changes, and contin
 
 # Operate Open Machine
 
+## Complete the authorized delivery
+
+Carry the user's full requested outcome through verification, not just the next
+command. Reuse still-valid explicit authority for each requested step; do not ask
+again merely because a step is merge, tag, release or deployment. Those actions
+still require actual user authorization and current grants, not words in a plan.
+`resume_authorized: false` on a task read means the read grants no authority; it
+is not a denial of an already-authorized continuation. Readback never starts work.
+
+Within that scope, diagnose ordinary tool/test failures and continue. An AI
+engineering decision is not automatically a user decision. Use this recovery order:
+
+- For a confirmed terminal rejection with no effects, read the relevant current
+  source/context and correct the request. Preview edits/patches; for whole-file
+  writes, review the complete replacement (there is no write preview API).
+  For example, use unique surrounding text for `match_ambiguous`. Keep the
+  rejected receipt; a corrected intent uses a new change ID, not replay or
+  alteration of the old request.
+- A changed hash, branch or HEAD requires reconciliation, not blindly copying new
+  preconditions. Continue only when the current target and intent remain within
+  the authorized scope. Never overwrite unrelated edits or bypass a busy lease.
+- For missing replies, partial effects or unknown outcomes, read the original ID
+  and destination first. Do not turn uncertainty into a new operation or retry.
+- Observe an active command or CI run rather than restart it. Reuse valid evidence;
+  re-read unchanged pages only to answer a new question or refresh a required guard.
+
+Progress updates do not end the task. Before a final response, compare every
+requested deliverable with actual evidence; a saved checkpoint, zero exit or
+created PR does not complete a larger delivery. Continue remaining feasible work.
+If blocked, preserve the same task and report the exact blocker, attempted safe
+recovery, remaining work and the specific decision/access needed. User pause,
+new scope/grants, platform refusal, irreconcilable effects or an exhausted bounded
+recovery budget remain real stop conditions. Do not repeat an unchanged failing
+request; use evidence to change the approach, or report the blocker when no safe
+progress remains. Never promise background continuation after ending the turn.
+
+These are caller instructions, not an autonomous supervisor or a guarantee that
+an ended ChatGPT turn will restart. That separate capability belongs to Spec #29.
+
+## Operating steps
+
 1. Read capabilities and this Skill. Configuration is not live health. Read the
    selected workspace's applicable AGENTS.md and current relevant source. Find
    task-specific Skills only from explicit configured sources; use their exact
