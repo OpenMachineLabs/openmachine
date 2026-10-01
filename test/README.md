@@ -364,3 +364,21 @@ standard-library target archives outside the checkout. SDK/native evidence is
 separate from real refreshed Chat tools and a fresh conversation's readback.
 Live SSH is NOT RUN, maintainer-waived for this W4 scope; offline tests and runtime
 compatibility checks remain intact. Missing actual-client evidence stays pending.
+
+## Spec #32 MCP migration
+
+Use the exact SDK 2.2.0 pin and independently installed artifacts. The existing
+contract suite exercises modern 2026-07-28, retained 2025-11-25 and automatic
+negotiation, all four configured catalogs, success/error envelopes, invalid
+arguments, private-socket ingress limits and concurrent/disconnected observers.
+The frozen tool fixture remains unchanged; do not regenerate it to hide drift.
+
+Upgrade acceptance is quiescent: finish or safely stop work, retain a recoverable
+checkpoint and execution receipts, stop the service, activate the candidate, read
+original history, then continue the same task with a new authorized execution.
+Do not require zero downtime or a running worker to survive an upgrade. Retain
+existing safety checks and reuse valid tests unaffected by the change.
+
+Native/SDK results are not actual ChatGPT/tunnel acceptance. Record A6 separately
+on the candidate connection; no Events delivery or automatic continuation is
+implied by the SDK extension seam. Keep disposable evidence outside the repo.

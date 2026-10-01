@@ -13,10 +13,12 @@ import sys
 import threading
 from typing import Annotated, Literal
 
-from mcp.server.fastmcp import FastMCP
+from jsonschema import Draft202012Validator
+from mcp.server import MCPServer
+from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolRequest, CallToolResult, TextContent, ToolAnnotations
-from pydantic import BaseModel, ConfigDict, Field
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import uvicorn
 
 from openmachine import __version__, service
@@ -27,11 +29,11 @@ from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
-READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
-GITHUB_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
-GITHUB_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+LOCAL_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
+GITHUB_READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+GITHUB_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True)
 
 
 class ExactEdit(BaseModel):
@@ -54,7 +56,7 @@ class TerminalSize(BaseModel):
 
 def _result(payload: dict, failed: bool = False) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))],
-                          structuredContent=payload, isError=failed)
+                          structured_content=payload, is_error=failed)
 
 
 def _reply(operation, *, execution_output: bool = False, workspace_output: bool = False, workspace_mutation: bool = False,
@@ -92,27 +94,54 @@ def _submit_owned(operation) -> Future:
         pool.shutdown(wait=False)
 
 
-def create_server(config: Settings, state: Path) -> FastMCP:
+def create_server(config: Settings, state: Path) -> MCPServer:
     application = create_application(config, state)
     waiting = threading.BoundedSemaphore(MAX_WAITERS)
 
-    mcp = FastMCP(
+    validators: dict[str, Draft202012Validator] = {}
+
+    async def safe_tool_call(ctx: ServerRequestContext, call_next: CallNext) -> HandlerResult:
+        if ctx.method != "tools/call":
+            return await call_next(ctx)
+        invalid = _result({"error": {"code": "invalid_tool_call",
+            "message": "Check the tool name and arguments against tools/list; no success was verified."}}, True).model_dump(
+                mode="json", by_alias=True, exclude_none=True, exclude={"result_type"})
+        # Middleware short-circuits bypass the SDK's per-version envelope serializer.
+        if ctx.protocol_version == "2026-07-28":
+            invalid.update(resultType="complete", _meta={
+                "io.modelcontextprotocol/serverInfo": {"name": mcp.name, "version": mcp.version}})
+        # v1 validated JSON schema before Pydantic coercion. Preserve this boundary
+        # using the public catalog, without modifying the SDK handler registry.
+        if not validators:
+            validators.update({tool.name: Draft202012Validator(tool.input_schema)
+                               for tool in await mcp.list_tools()})
+        params = ctx.params
+        if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+            return invalid
+        validator = validators.get(params["name"])
+        arguments = params.get("arguments")
+        if validator is None or not validator.is_valid({} if arguments is None else arguments):
+            return invalid
+        try:
+            response = await call_next(ctx)
+        except ValidationError:
+            return invalid
+        if (isinstance(response, dict) and response.get("isError") is True
+                and response.get("structuredContent") is None):
+            return invalid
+        return response
+
+    mcp = MCPServer(
         "Open Machine", instructions="Read inspect_skills(action='read') before operating this runtime.",
-        stateless_http=True, json_response=True, max_request_body_size=1048576,
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=["localhost", "localhost:*"], allowed_origins=["http://localhost", "http://localhost:*"],
-        ),
+        version=__version__, middleware=[safe_tool_call],
     )
-    # The pinned FastMCP constructor does not expose the low-level version field.
-    mcp._mcp_server.version = __version__
 
     private_directory(state)
     private_directory(state / "locks")
 
     has_ssh = any(item.transport == "ssh" for item in config.machines.values())
-    machine_read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=has_ssh)
-    file_write = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=has_ssh)
+    machine_read = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=has_ssh)
+    file_write = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=has_ssh)
 
     @mcp.tool(annotations=READ, structured_output=False)
     def get_capabilities() -> CallToolResult:
@@ -266,7 +295,7 @@ def create_server(config: Settings, state: Path) -> FastMCP:
         operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
         return await asyncio.wrap_future(_submit_owned(operation))
 
-    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=has_ssh), structured_output=False)
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=has_ssh), structured_output=False)
     async def control_execution(machine: str, execution_id: str,
                                 expected_control_seq: Annotated[int, Field(strict=True, ge=0, le=MAX_CONTROL_SEQ - 1)],
                                 action: Literal["write_stdin", "interrupt", "resize"],
@@ -334,20 +363,6 @@ def create_server(config: Settings, state: Path) -> FastMCP:
             """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
             return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message))
 
-    sdk_handler = mcp._mcp_server.request_handlers[CallToolRequest]
-
-    async def safe_tool_call(request):
-        # Keep SDK schema validation, but never echo rejected argument values.
-        result = await sdk_handler(request)
-        response = result.root
-        if isinstance(response, CallToolResult) and response.isError and response.structuredContent is None:
-            payload = {"error": {"code": "invalid_tool_call",
-                                 "message": "Check the tool name and arguments against tools/list; no success was verified."}}
-            response.content = [TextContent(type="text", text=json.dumps(payload))]
-            response.structuredContent = payload
-        return result
-
-    mcp._mcp_server.request_handlers[CallToolRequest] = safe_tool_call
     return mcp
 
 
@@ -373,7 +388,14 @@ def serve(config: Settings, state: Path, *, managed: bool = False) -> None:
         # Uvicorn re-raises SIGTERM after shutdown. Unwind Python cleanup first.
         previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         try:
-            app = create_server(config, state).streamable_http_app()
+            app = create_server(config, state).streamable_http_app(
+                stateless_http=True, json_response=True, max_request_body_size=1048576,
+                transport_security=TransportSecuritySettings(
+                    enable_dns_rebinding_protection=True,
+                    allowed_hosts=["localhost", "localhost:*"],
+                    allowed_origins=["http://localhost", "http://localhost:*"],
+                ),
+            )
             uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning")).run(sockets=[listener])
         finally:
             signal.signal(signal.SIGTERM, previous)

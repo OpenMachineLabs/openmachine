@@ -17,10 +17,10 @@ import unittest
 from unittest.mock import Mock, patch
 import uuid
 
-import httpx
-from mcp import ClientSession
+import httpx2 as httpx
+from mcp import Client, ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ListToolsResult
 
 import openmachine
@@ -91,7 +91,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 yield streams
 
     async def test_grace_schema_rejects_invalid_values_before_admission(self):
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 for value in (True, False, "5", -1, 31):
@@ -100,9 +100,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                         "machine": "desktop", "execution_id": identity, "cwd": str(self.work),
                         "argv": [sys.executable, "-c", "raise SystemExit(0)"],
                         "termination_grace_seconds": value})
-                    self.assertTrue(result.isError, value)
+                    self.assertTrue(result.is_error, value)
                     self.assertFalse((self.state / "executions" / identity).exists())
-                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                caps = (await session.call_tool("get_capabilities", {})).structured_content
                 self.assertEqual(caps["execution"]["receipt_format"], 5)
                 self.assertEqual(caps["execution"]["io_modes"], ["pipe", "pty"])
                 self.assertEqual(caps["execution"]["controls"], ["interrupt", "resize", "write_stdin"])
@@ -115,13 +115,13 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         for name in ("inspect_workspace", "read_workspace_file", "write_workspace_file",
                      "read_execution", "list_executions", "control_execution", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch"):
             expected[name]["annotations"]["openWorldHint"] = ssh
-        self.assertIsNone(result.nextCursor, "The baseline tool catalog is a single complete page")
+        self.assertIsNone(result.next_cursor, "The baseline tool catalog is a single complete page")
         actual = {tool.name: tool for tool in result.tools}
         self.assertEqual(len(result.tools), len(actual), "Duplicate tool names in discovery")
         self.assertEqual(set(actual), set(expected), "Configured MCP tool names changed")
         for name, contract in expected.items():
             observed = actual[name].model_dump(mode="json", by_alias=True, exclude_none=True,
-                                              include={"inputSchema", "outputSchema", "annotations"})
+                                              include={"input_schema", "output_schema", "annotations"})
             # JSON comparison preserves scalar types: a false default must not equal zero.
             self.assertEqual(json.dumps(observed, indent=2, sort_keys=True),
                              json.dumps(contract, indent=2, sort_keys=True),
@@ -140,11 +140,11 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.config.write_text(config)
                 process = self.launch()
                 try:
-                    async with self.client() as (reader, writer, _):
+                    async with self.client() as (reader, writer):
                         async with ClientSession(reader, writer) as session:
                             await session.initialize()
                             self.assert_tool_contract(await session.list_tools(), github=False, ssh=ssh)
-                            caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                            caps = (await session.call_tool("get_capabilities", {})).structured_content
                             self.assertEqual(caps["integrations"], ["ssh"] if ssh else [])
                 finally:
                     self.stop(process)
@@ -156,57 +156,57 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                          'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n'
                          '[workspaces.remote]\nmachine="build"\nroot="/remote/not-on-controller"\n')
         self.launch()
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=True)
                 tools = {item.name: item for item in discovered.tools}
-                self.assertTrue(tools["read_workspace_file"].annotations.openWorldHint)
-                self.assertTrue(tools["write_workspace_file"].annotations.openWorldHint)
-                self.assertFalse(tools["save_task"].annotations.openWorldHint)
-                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                self.assertTrue(tools["read_workspace_file"].annotations.open_world_hint)
+                self.assertTrue(tools["write_workspace_file"].annotations.open_world_hint)
+                self.assertFalse(tools["save_task"].annotations.open_world_hint)
+                caps = (await session.call_tool("get_capabilities", {})).structured_content
                 self.assertIn("ssh", caps["integrations"])
                 denied = await session.call_tool("read_workspace_file", {"machine": "build", "workspace_name": "remote", "path": "x"})
-                self.assertEqual(denied.structuredContent["error"]["code"], "identity_required")
+                self.assertEqual(denied.structured_content["error"]["code"], "identity_required")
                 local = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example", "action": "read", "path": "AGENTS.md"})
-                self.assertFalse(local.isError)
+                self.assertFalse(local.is_error)
 
     async def test_installed_package_discovery_and_socket_permissions(self):
         self.assertTrue(Path(openmachine.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()))
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)
         self.assertEqual(self.socket.stat().st_mode & 0o777, 0o600)
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 init = await session.initialize()
-                self.assertEqual(init.serverInfo.version, openmachine.__version__)
+                self.assertEqual(init.server_info.version, openmachine.__version__)
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
                 self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task"})
-                self.assertFalse(tools["start_execution"].annotations.readOnlyHint)
-                self.assertTrue(tools["start_execution"].annotations.destructiveHint)
-                self.assertTrue(tools["inspect_workspace"].annotations.readOnlyHint)
-                self.assertFalse(tools["cancel_execution"].annotations.readOnlyHint)
-                self.assertFalse(tools["control_execution"].annotations.readOnlyHint)
-                self.assertFalse(tools["control_execution"].annotations.idempotentHint)
-                self.assertFalse(tools["github_issue"].annotations.readOnlyHint)
-                self.assertTrue(tools["github_read"].annotations.readOnlyHint)
-                self.assertTrue(tools["github_read"].annotations.openWorldHint)
+                self.assertFalse(tools["start_execution"].annotations.read_only_hint)
+                self.assertTrue(tools["start_execution"].annotations.destructive_hint)
+                self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)
+                self.assertFalse(tools["cancel_execution"].annotations.read_only_hint)
+                self.assertFalse(tools["control_execution"].annotations.read_only_hint)
+                self.assertFalse(tools["control_execution"].annotations.idempotent_hint)
+                self.assertFalse(tools["github_issue"].annotations.read_only_hint)
+                self.assertTrue(tools["github_read"].annotations.read_only_hint)
+                self.assertTrue(tools["github_read"].annotations.open_world_hint)
                 for name in ("github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"):
-                    self.assertFalse(tools[name].annotations.idempotentHint)
-                self.assertNotIn("endpoint", tools["github_read"].inputSchema["properties"])
-                timeout = tools["start_execution"].inputSchema["properties"]["timeout_seconds"]
+                    self.assertFalse(tools[name].annotations.idempotent_hint)
+                self.assertNotIn("endpoint", tools["github_read"].input_schema["properties"])
+                timeout = tools["start_execution"].input_schema["properties"]["timeout_seconds"]
                 self.assertEqual((timeout["default"], timeout["maximum"]), (600, 86400))
-                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                caps = (await session.call_tool("get_capabilities", {})).structured_content
                 self.assertEqual(caps["machines"]["desktop"]["probe_status"], "not_probed")
                 self.assertEqual(caps["integrations"], ["github"])
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
-                self.assertFalse(skill.isError)
-                self.assertIn("Operate Open Machine", skill.structuredContent["text"])
+                self.assertFalse(skill.is_error)
+                self.assertIn("Operate Open Machine", skill.structured_content["text"])
 
     async def test_github_scope_rejects_before_connection(self):
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 for name, arguments in (
@@ -215,8 +215,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     ("github_merge", {"repository": "Other/repo", "number": 1, "expected_head_sha": "a" * 40}),
                 ):
                     result = await session.call_tool(name, arguments)
-                    self.assertTrue(result.isError)
-                    self.assertEqual(result.structuredContent["error"]["code"], "github_not_allowed")
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(result.structured_content["error"]["code"], "github_not_allowed")
 
     async def test_missing_gh_and_auth_do_not_break_local_execution(self):
         self.stop(self.processes[-1])
@@ -233,26 +233,26 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 command.write_text("#!/bin/sh\nprintf 'gh: Bad credentials (HTTP 401)\\n' >&2\nexit 1\n")
                 command.chmod(0o700)
             process = self.launch(environment)
-            async with self.client() as (reader, writer, _):
+            async with self.client() as (reader, writer):
                 async with ClientSession(reader, writer) as session:
                     await session.initialize()
                     unavailable = await session.call_tool("github_read", {"action": "status"})
-                    self.assertTrue(unavailable.isError)
-                    self.assertEqual(unavailable.structuredContent["error"]["code"], code)
+                    self.assertTrue(unavailable.is_error)
+                    self.assertEqual(unavailable.structured_content["error"]["code"], code)
                     identity = uuid.uuid4().hex
                     started = await session.call_tool("start_execution", {
                         "machine": "desktop", "execution_id": identity, "cwd": str(self.work),
                         "argv": [sys.executable, "-c", "print('local-still-usable')"],
                     })
-                    self.assertFalse(started.isError, started)
+                    self.assertFalse(started.is_error, started)
                     for _ in range(100):
                         observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
-                        self.assertFalse(observed.isError, observed)
-                        if observed.structuredContent["status"] == "succeeded":
+                        self.assertFalse(observed.is_error, observed)
+                        if observed.structured_content["status"] == "succeeded":
                             break
                         await asyncio.sleep(0.03)
-                    self.assertEqual(observed.structuredContent["exit_code"], 0)
-                    self.assertIn("local-still-usable", observed.structuredContent["output"])
+                    self.assertEqual(observed.structured_content["exit_code"], 0)
+                    self.assertIn("local-still-usable", observed.structured_content["output"])
             self.stop(process)
 
     async def test_github_typed_boundaries_before_dispatch(self):
@@ -272,18 +272,18 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                            f"print(json.dumps({responses!r}[sys.argv[-1]]))\n")
         command.chmod(0o700)
         self.launch(dict(os.environ, PATH=str(binaries)))
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("github_issue", {
                     "action": "update", "repository": "Example/repo", "number": 2, "state": "closed"})
-                self.assertTrue(result.isError)
-                self.assertEqual(result.structuredContent["error"]["code"], "github_wrong_object_type")
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "github_wrong_object_type")
                 for path in (".ENV", "Secrets.toml", "ID_RSA", "config/.EnV.local"):
                     result = await session.call_tool("github_read", {
                         "action": "file", "repository": "Example/repo", "ref": "a" * 40, "path": path})
-                    self.assertTrue(result.isError)
-                    self.assertEqual(result.structuredContent["error"]["code"], "invalid_github_request")
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(result.structured_content["error"]["code"], "invalid_github_request")
         observed = [json.loads(line) for line in calls.read_text().splitlines()]
         self.assertTrue(observed)
         self.assertTrue(all(method == "GET" and endpoint in responses for method, endpoint in observed))
@@ -292,80 +292,80 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         execution_id = uuid.uuid4().hex
         request = {"machine": "desktop", "execution_id": execution_id, "cwd": str(self.work),
                    "argv": [sys.executable, "-c", 'import time; from pathlib import Path; time.sleep(0.7); p=Path("result.txt"); p.write_text(p.read_text()+"done" if p.exists() else "done"); print("complete")']}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 rules = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example",
                                                                          "action": "read", "path": "AGENTS.md"})
-                self.assertIn("disposable", rules.structuredContent["text"])
+                self.assertIn("disposable", rules.structured_content["text"])
                 started = await session.call_tool("start_execution", request)
-                self.assertFalse(started.isError, started)
+                self.assertFalse(started.is_error, started)
         self.stop(self.processes[0])
         self.assertFalse(self.socket.exists(), "Graceful shutdown must remove its own socket")
         self.launch()
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 for _ in range(100):
                     result = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})
-                    self.assertFalse(result.isError, result)
-                    if result.structuredContent["status"] == "succeeded":
+                    self.assertFalse(result.is_error, result)
+                    if result.structured_content["status"] == "succeeded":
                         break
                     await asyncio.sleep(0.03)
-                self.assertEqual(result.structuredContent["exit_code"], 0)
-                self.assertIn("complete", result.structuredContent["output"])
+                self.assertEqual(result.structured_content["exit_code"], 0)
+                self.assertIn("complete", result.structured_content["output"])
                 again = await session.call_tool("start_execution", request)
-                self.assertEqual(again.structuredContent["status"], "succeeded")
+                self.assertEqual(again.structured_content["status"], "succeeded")
                 changed = await session.call_tool("start_execution", {**request, "argv": ["false"]})
-                self.assertTrue(changed.isError)
-                self.assertEqual(changed.structuredContent["error"]["code"], "execution_conflict")
+                self.assertTrue(changed.is_error)
+                self.assertEqual(changed.structured_content["error"]["code"], "execution_conflict")
                 observed = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example",
                                                                             "action": "read", "path": "result.txt"})
-                self.assertEqual(observed.structuredContent["text"], "done")
+                self.assertEqual(observed.structured_content["text"], "done")
 
     async def test_large_file_offsets_remain_usable_through_mcp(self):
         (self.work / "large.txt").write_text("x" * 180000)
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example",
                                                                          "action": "read", "path": "large.txt", "offset": 131072})
-                self.assertFalse(result.isError, result)
-                page = result.structuredContent
+                self.assertFalse(result.is_error, result)
+                page = result.structured_content
                 self.assertEqual(page["next_offset"], 163840)
                 self.assertTrue(page["has_more"])
                 self.assertEqual(len(page["text"].encode()), 32768)
                 tail = await session.call_tool("inspect_workspace", {
                     "machine": "desktop", "workspace_name": "example", "action": "read",
                     "path": "large.txt", "offset": page["next_offset"]})
-                self.assertFalse(tail.isError, tail)
-                self.assertEqual(tail.structuredContent["next_offset"], 180000)
-                self.assertFalse(tail.structuredContent["has_more"])
-                self.assertEqual(page["text"] + tail.structuredContent["text"], "x" * (180000 - 131072))
+                self.assertFalse(tail.is_error, tail)
+                self.assertEqual(tail.structured_content["next_offset"], 180000)
+                self.assertFalse(tail.structured_content["has_more"])
+                self.assertEqual(page["text"] + tail.structured_content["text"], "x" * (180000 - 131072))
 
     async def test_disabled_write_and_invalid_origin_fail_closed(self):
         self.stop(self.processes[0])
         self.config.write_text(self.config.read_text().replace("execution_enabled = true", "execution_enabled = false"))
         self.launch()
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": uuid.uuid4().hex,
                                                                       "cwd": str(self.work), "argv": ["false"]})
-                self.assertTrue(result.isError)
-                self.assertEqual(result.structuredContent["error"]["code"], "execution_disabled")
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "execution_disabled")
         async with httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(uds=str(self.socket)), trust_env=False) as client:
             result = await client.get("http://localhost/mcp", headers={"host": "untrusted.invalid"})
             self.assertEqual(result.status_code, 421)
 
     async def test_invalid_tool_arguments_are_rejected_without_echoing_values(self):
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("inspect_workspace", {"machine": "desktop", "workspace_name": "example",
                                                                          "action": "password=synthetic-secret"})
-                self.assertTrue(result.isError)
-                self.assertEqual(result.structuredContent["error"]["code"], "invalid_tool_call")
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "invalid_tool_call")
                 self.assertNotIn("synthetic-secret", result.model_dump_json())
 
     async def test_second_server_does_not_replace_existing_socket(self):
@@ -374,10 +374,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                                  "--state-dir", str(self.state), "serve"], capture_output=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.socket.stat().st_ino, inode)
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                self.assertFalse((await session.call_tool("get_capabilities", {})).isError)
+                self.assertFalse((await session.call_tool("get_capabilities", {})).is_error)
 
 
     async def test_complete_coding_workflow_uses_real_mcp_tools(self):
@@ -393,16 +393,16 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
         head = git("rev-parse", "HEAD")
         (self.work / "unrelated.txt").write_text("preserve this existing work\n")
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 scope = {"machine": "desktop", "workspace_name": "example"}
                 rules = await session.call_tool("inspect_workspace", {**scope, "action": "read", "path": "AGENTS.md"})
-                self.assertIn("disposable", rules.structuredContent["text"])
+                self.assertIn("disposable", rules.structured_content["text"])
                 before = await session.call_tool("inspect_workspace", {**scope, "action": "status"})
-                self.assertEqual(before.structuredContent["context"]["head_sha"], head)
+                self.assertEqual(before.structured_content["context"]["head_sha"], head)
                 found = await session.call_tool("inspect_workspace", {**scope, "action": "search", "query": "return a - b"})
-                self.assertEqual(found.structuredContent["matches"][0]["path"], "calculator.py")
+                self.assertEqual(found.structured_content["matches"][0]["path"], "calculator.py")
                 commands = [
                     [sys.executable, "-c", 'from pathlib import Path; p=Path("calculator.py"); s=p.read_text(); assert s.count("return a - b")==1; p.write_text(s.replace("return a - b", "return a + b"))'],
                     [sys.executable, "-m", "unittest", "discover", "-p", "test_calculator.py"],
@@ -412,51 +412,51 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     request = {"machine": "desktop", "execution_id": execution_id, "cwd": str(self.work),
                                "argv": argv, "expected_head_sha": head}
                     started = await session.call_tool("start_execution", request)
-                    self.assertFalse(started.isError, started)
+                    self.assertFalse(started.is_error, started)
                     for _ in range(100):
                         result = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})
-                        self.assertFalse(result.isError, result)
-                        if result.structuredContent["status"] in ("succeeded", "failed", "outcome_unknown"):
+                        self.assertFalse(result.is_error, result)
+                        if result.structured_content["status"] in ("succeeded", "failed", "outcome_unknown"):
                             break
                         await asyncio.sleep(0.03)
-                    self.assertEqual((result.structuredContent["status"], result.structuredContent["exit_code"]), ("succeeded", 0))
-                self.assertIn("OK", result.structuredContent["output"])
+                    self.assertEqual((result.structured_content["status"], result.structured_content["exit_code"]), ("succeeded", 0))
+                self.assertIn("OK", result.structured_content["output"])
                 diff = await session.call_tool("inspect_workspace", {**scope, "action": "diff", "path": "calculator.py"})
-                self.assertFalse(diff.isError, diff)
-                self.assertIn("+    return a + b", diff.structuredContent["text"])
-                self.assertFalse(diff.structuredContent["truncated"])
+                self.assertFalse(diff.is_error, diff)
+                self.assertIn("+    return a + b", diff.structured_content["text"])
+                self.assertFalse(diff.structured_content["truncated"])
                 readback = await session.call_tool("inspect_workspace", {**scope, "action": "read", "path": "calculator.py"})
-                self.assertEqual(readback.structuredContent["text"], "def add(a, b):\n    return a + b\n")
+                self.assertEqual(readback.structured_content["text"], "def add(a, b):\n    return a + b\n")
                 self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve this existing work\n")
                 self.assertEqual(git("rev-parse", "HEAD"), head)
 
     async def test_reconnected_client_finds_and_cancels_original_execution(self):
         execution_id = uuid.uuid4().hex
         identity = {"machine": "desktop", "execution_id": execution_id}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("start_execution", {**identity, "cwd": str(self.work),
                         "argv": [sys.executable, "-c", 'import time; print("started", flush=True); time.sleep(20)'],
                         "timeout_seconds": 86400})
-                self.assertFalse(result.isError, result)
-        async with self.client() as (reader, writer, _):
+                self.assertFalse(result.is_error, result)
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 listing = await session.call_tool("list_executions", {"machine": "desktop"})
-                self.assertEqual(listing.structuredContent["executions"][0]["execution_id"], execution_id)
+                self.assertEqual(listing.structured_content["executions"][0]["execution_id"], execution_id)
                 requested = await session.call_tool("cancel_execution", identity)
-                self.assertFalse(requested.isError, requested)
-                self.assertTrue(requested.structuredContent["cancel_requested"])
+                self.assertFalse(requested.is_error, requested)
+                self.assertTrue(requested.structured_content["cancel_requested"])
                 for _ in range(100):
                     result = await session.call_tool("read_execution", identity)
-                    self.assertFalse(result.isError, result)
-                    if result.structuredContent["status"] == "cancelled":
+                    self.assertFalse(result.is_error, result)
+                    if result.structured_content["status"] == "cancelled":
                         break
                     await asyncio.sleep(0.03)
-                self.assertEqual(result.structuredContent["status"], "cancelled")
+                self.assertEqual(result.structured_content["status"], "cancelled")
                 repeated = await session.call_tool("cancel_execution", identity)
-                self.assertEqual(repeated.structuredContent["status"], "cancelled")
+                self.assertEqual(repeated.structured_content["status"], "cancelled")
 
 
     async def test_explicit_edits_and_checkpoints_continue_across_client_sessions(self):
@@ -485,55 +485,55 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         identity = uuid.uuid4().hex
         anchor = "issue=example/project#17"
         checkpoint = {"task_id": "resume-fixture", "title": "Repair calculator", "anchors": [anchor]}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                listing = (await session.call_tool("inspect_skills", {})).structuredContent
+                listing = (await session.call_tool("inspect_skills", {})).structured_content
                 selected = next(item["skill"] for item in listing["skills"] if item["name"] == "repair")
-                self.assertIn("Inspect the diff", (await session.call_tool("inspect_skills", {"action": "read", "skill": selected})).structuredContent["text"])
-                original = (await session.call_tool("read_workspace_file", {**scope, "path": "calculator.py"})).structuredContent
+                self.assertIn("Inspect the diff", (await session.call_tool("inspect_skills", {"action": "read", "skill": selected})).structured_content["text"])
+                original = (await session.call_tool("read_workspace_file", {**scope, "path": "calculator.py"})).structured_content
                 initial = await session.call_tool("save_task", {**checkpoint, "expected_revision": 0,
                     "body": "Goal: repair calculator in the disposable project.\nNext: make the authorized change.\n"})
-                self.assertFalse(initial.isError, initial)
+                self.assertFalse(initial.is_error, initial)
                 changed = await session.call_tool("write_workspace_file", {**scope, "path": "calculator.py",
                     "content": "def add(a, b):\n    return a + b\n", "expected_head_sha": head,
                     "expected_sha256": original["sha256"]})
-                self.assertEqual(changed.structuredContent["status"], "written")
+                self.assertEqual(changed.structured_content["status"], "written")
                 intent = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1,
                     "body": "Completed: code repair.\nExecution: " + identity + "\nNext: run the project test once.\n"})
-                self.assertFalse(intent.isError, intent)
+                self.assertFalse(intent.is_error, intent)
                 start = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": identity,
                     "cwd": str(self.work), "argv": [sys.executable, "-m", "unittest", "discover", "-p", "test_calculator.py"],
                     "expected_head_sha": head, "task_id": "resume-fixture"})
-                self.assertFalse(start.isError, start)
+                self.assertFalse(start.is_error, start)
                 for _ in range(100):
                     receipt = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
-                    if receipt.structuredContent["status"] in ("succeeded", "failed", "outcome_unknown"):
+                    if receipt.structured_content["status"] in ("succeeded", "failed", "outcome_unknown"):
                         break
                     await asyncio.sleep(0.03)
-                self.assertEqual((receipt.structuredContent["status"], receipt.structuredContent["exit_code"]), ("succeeded", 0))
-                self.assertEqual(receipt.structuredContent["task_id"], "resume-fixture")
+                self.assertEqual((receipt.structured_content["status"], receipt.structured_content["exit_code"]), ("succeeded", 0))
+                self.assertEqual(receipt.structured_content["task_id"], "resume-fixture")
                 result = await session.call_tool("save_task", {**checkpoint, "expected_revision": 2,
                     "body": "Completed: repair and passing tests.\nOriginal execution: " + identity + "\nNext: inspect diff only.\n"})
-                self.assertFalse(result.isError, result)
-        async with self.client() as (reader, writer, _):
+                self.assertFalse(result.is_error, result)
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 found = await session.call_tool("find_tasks", {"anchors": [anchor]})
-                self.assertEqual(found.structuredContent["status"], "matched")
+                self.assertEqual(found.structured_content["status"], "matched")
                 checkpoint_read = await session.call_tool("read_task", {"task_id": "resume-fixture"})
-                self.assertIn(identity, checkpoint_read.structuredContent["body"])
+                self.assertIn(identity, checkpoint_read.structured_content["body"])
                 observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
-                self.assertEqual(observed.structuredContent["status"], "succeeded")
+                self.assertEqual(observed.structured_content["status"], "succeeded")
                 status = await session.call_tool("inspect_workspace", {**scope, "action": "status"})
-                self.assertEqual(status.structuredContent["context"]["head_sha"], head)
+                self.assertEqual(status.structured_content["context"]["head_sha"], head)
                 diff = await session.call_tool("inspect_workspace", {**scope, "action": "diff", "path": "calculator.py"})
-                self.assertIn("+    return a + b", diff.structuredContent["text"])
+                self.assertIn("+    return a + b", diff.structured_content["text"])
                 latest = await session.call_tool("read_workspace_file", {**scope, "path": "calculator.py"})
-                self.assertEqual(latest.structuredContent["sha256"], changed.structuredContent["sha256"])
+                self.assertEqual(latest.structured_content["sha256"], changed.structured_content["sha256"])
                 final = await session.call_tool("save_task", {**checkpoint, "expected_revision": 3,
                     "body": "Completed: repair, original passing tests, unchanged source, and final diff review.\nNo further action.\n"})
-                self.assertEqual(final.structuredContent["revision"], 4)
+                self.assertEqual(final.structured_content["revision"], 4)
         self.assertEqual((self.work / "test_runs.txt").read_text(), "1")
         self.assertEqual((self.work / "unrelated.txt").read_text(), "preserve existing work\n")
         self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
@@ -543,48 +543,48 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         file.write_bytes(b"answer = 41\r\nuntouched = 7")
         scope = {"machine": "desktop", "workspace_name": "example", "path": "exact.py"}
         change_id = uuid.uuid4().hex
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                read = (await session.call_tool("read_workspace_file", scope)).structuredContent
+                read = (await session.call_tool("read_workspace_file", scope)).structured_content
                 args = {**scope, "edits": [{"old_text": "41", "new_text": "42"}],
                         "expected_workspace_identity": read["context"]["workspace_identity"],
                         "expected_head_sha": "", "expected_sha256": read["sha256"]}
                 preview = await session.call_tool("edit_workspace_file", args | {"dry_run": True})
-                self.assertFalse(preview.isError, preview)
-                self.assertEqual(preview.structuredContent["status"], "preview")
+                self.assertFalse(preview.is_error, preview)
+                self.assertEqual(preview.structured_content["status"], "preview")
                 self.assertFalse((self.state / "workspace-changes").exists())
                 self.assertIn(b"41", file.read_bytes())
-                args.update(change_id=change_id, expected_plan_sha256=preview.structuredContent["plan_sha256"])
+                args.update(change_id=change_id, expected_plan_sha256=preview.structured_content["plan_sha256"])
                 applied = await session.call_tool("edit_workspace_file", args)
-                self.assertFalse(applied.isError, applied)
-                first = applied.structuredContent
+                self.assertFalse(applied.is_error, applied)
+                first = applied.structured_content
                 self.assertEqual(first["status"], "applied")
                 self.assertEqual(file.read_bytes(), b"answer = 42\r\nuntouched = 7")
                 repeated = await session.call_tool("edit_workspace_file", args)
-                self.assertFalse(repeated.isError, repeated)
-                self.assertEqual((repeated.structuredContent["created_at"], repeated.structuredContent["revision"]),
+                self.assertFalse(repeated.is_error, repeated)
+                self.assertEqual((repeated.structured_content["created_at"], repeated.structured_content["revision"]),
                                  (first["created_at"], first["revision"]))
                 rejected = await session.call_tool("edit_workspace_file", args | {"expected_sha256": "0" * 64})
-                self.assertTrue(rejected.isError)
-                self.assertEqual(rejected.structuredContent["error"]["code"], "change_id_conflict")
-                self.assertEqual(rejected.structuredContent["change_id"], change_id)
+                self.assertTrue(rejected.is_error)
+                self.assertEqual(rejected.structured_content["error"]["code"], "change_id_conflict")
+                self.assertEqual(rejected.structured_content["change_id"], change_id)
         self.stop(self.processes[-1])
         file.write_bytes(b"later third-party edit")
         self.launch()
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 result = await session.call_tool("read_workspace_change", {
                     "machine": "desktop", "change_id": change_id, "observe_current": True})
-                self.assertFalse(result.isError, result)
-                readback = result.structuredContent
+                self.assertFalse(result.is_error, result)
+                readback = result.structured_content
                 self.assertEqual((readback["status"], readback["created_at"], readback["revision"]),
                                  ("applied", first["created_at"], first["revision"]))
                 self.assertEqual(readback["current"]["sha256"], hashlib.sha256(file.read_bytes()).hexdigest())
                 self.assertFalse(readback["historical_diff_available"])
                 repeated = await session.call_tool("edit_workspace_file", args)
-                self.assertEqual(repeated.structuredContent["revision"], first["revision"])
+                self.assertEqual(repeated.structured_content["revision"], first["revision"])
                 self.assertEqual(file.read_bytes(), b"later third-party edit")
         self.assertEqual(len(list((self.state / "workspace-changes").iterdir())), 1)
         self.assertFalse((self.state / "executions").exists())
@@ -596,30 +596,30 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         file = self.work / "escaped.txt"
         file.write_text("\x01" * 32760 + " 41")
         scope = {"machine": "desktop", "workspace_name": "example", "path": "escaped.txt"}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                read = (await session.call_tool("read_workspace_file", scope)).structuredContent
+                read = (await session.call_tool("read_workspace_file", scope)).structured_content
                 args = {**scope, "edits": [{"old_text": "41", "new_text": "42"}],
                         "expected_workspace_identity": read["context"]["workspace_identity"],
                         "expected_head_sha": "", "expected_sha256": read["sha256"]}
                 for delta in ({"dry_run": "false"}, {"edits": [{"old_text": "41", "new_text": "42", "replace_all": True}]},
                               {"edits": [{"old_text": "", "new_text": "42"}]}, {"edits": []}):
                     bad = await session.call_tool("edit_workspace_file", args | {"change_id": uuid.uuid4().hex} | delta)
-                    self.assertTrue(bad.isError)
+                    self.assertTrue(bad.is_error)
                     self.assertTrue(file.read_text().endswith("41"))
                 identity = uuid.uuid4().hex
                 result = await session.call_tool("edit_workspace_file", args | {"change_id": identity})
-                self.assertFalse(result.isError, result)
+                self.assertFalse(result.is_error, result)
                 encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
                 self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
-                self.assertEqual(result.structuredContent["change_id"], identity)
-                self.assertTrue(result.structuredContent["truncated"])
-                self.assertEqual(result.structuredContent["effects"][0]["stage"], "applied")
-                self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+                self.assertEqual(result.structured_content["change_id"], identity)
+                self.assertTrue(result.structured_content["truncated"])
+                self.assertEqual(result.structured_content["effects"][0]["stage"], "applied")
+                self.assertEqual(json.loads(result.content[0].text), result.structured_content)
                 denied = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": uuid.uuid4().hex,
                     "cwd": str(self.work), "argv": [sys.executable, "-c", "pass"]})
-                self.assertEqual(denied.structuredContent["error"]["code"], "execution_disabled")
+                self.assertEqual(denied.structured_content["error"]["code"], "execution_disabled")
 
     async def test_disconnected_edit_observer_does_not_stop_or_repeat_original_publication(self):
         from openmachine.bootstrap import create_application
@@ -663,8 +663,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(entered.is_set())
                     observed = await asyncio.wait_for(mcp.call_tool("read_workspace_change", {
                         "machine": "local", "change_id": identity}), 1)
-                    self.assertEqual(observed.structuredContent["status"], "applying")
-                    self.assertTrue(observed.structuredContent["writer_alive"])
+                    self.assertEqual(observed.structured_content["status"], "applying")
+                    self.assertTrue(observed.structured_content["writer_alive"])
                     mutation.cancel()
                     with self.assertRaises(asyncio.CancelledError):
                         await mutation
@@ -673,12 +673,12 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline:
                     observed = await mcp.call_tool("read_workspace_change", {"machine": "local", "change_id": identity})
-                    if observed.structuredContent["status"] == "applied":
+                    if observed.structured_content["status"] == "applied":
                         break
                     await asyncio.sleep(0.01)
-                self.assertEqual(observed.structuredContent["status"], "applied")
+                self.assertEqual(observed.structured_content["status"], "applied")
                 repeated = await mcp.call_tool("edit_workspace_file", args)
-                self.assertEqual(repeated.structuredContent["revision"], observed.structuredContent["revision"])
+                self.assertEqual(repeated.structured_content["revision"], observed.structured_content["revision"])
                 self.assertEqual(publisher.call_count, 1)
                 self.assertEqual(file.read_text(), "answer = 42")
 
@@ -688,41 +688,41 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                    "effects": [{"stage": "applied", "result_sha256": "b" * 64}], "error": "record_unverified"}
         applied = server._reply(lambda: payload, workspace_output=True, workspace_mutation=True)
         inspected = server._reply(lambda: payload, workspace_output=True)
-        self.assertTrue(applied.isError)
-        self.assertFalse(inspected.isError)
-        self.assertEqual(applied.structuredContent["effects"], payload["effects"])
+        self.assertTrue(applied.is_error)
+        self.assertFalse(inspected.is_error)
+        self.assertEqual(applied.structured_content["effects"], payload["effects"])
         def failed():
             raise Fault("change_outcome_unknown", "Original evidence only.", payload)
         fault = server._reply(failed, workspace_output=True, workspace_mutation=True)
-        self.assertTrue(fault.isError)
-        self.assertEqual(fault.structuredContent["change_id"], payload["change_id"])
-        self.assertEqual(fault.structuredContent["effects"], payload["effects"])
+        self.assertTrue(fault.is_error)
+        self.assertEqual(fault.structured_content["change_id"], payload["change_id"])
+        self.assertEqual(fault.structured_content["effects"], payload["effects"])
         abandoned = server._reply(lambda: {"status": "applying", "reconciliation": "outcome_unknown"},
                                    workspace_output=True, workspace_mutation=True)
-        self.assertTrue(abandoned.isError)
+        self.assertTrue(abandoned.is_error)
 
     async def test_large_explicit_payload_and_changed_instruction_cancellation(self):
         scope = {"machine": "desktop", "workspace_name": "example"}
         identity = uuid.uuid4().hex
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 tools = {tool.name: tool for tool in (await session.list_tools()).tools}
                 for name in ("save_task", "write_workspace_file"):
-                    self.assertFalse(tools[name].annotations.readOnlyHint)
-                    self.assertTrue(tools[name].annotations.destructiveHint)
-                    self.assertTrue(tools[name].annotations.idempotentHint)
-                    self.assertFalse(tools[name].annotations.openWorldHint)
+                    self.assertFalse(tools[name].annotations.read_only_hint)
+                    self.assertTrue(tools[name].annotations.destructive_hint)
+                    self.assertTrue(tools[name].annotations.idempotent_hint)
+                    self.assertFalse(tools[name].annotations.open_world_hint)
                 content = "\x01" * 131072
                 write = await session.call_tool("write_workspace_file", {**scope, "path": "large.txt", "content": content,
                     "expected_head_sha": "", "expected_sha256": ""})
-                self.assertFalse(write.isError, write)
-                self.assertEqual(write.structuredContent["status"], "written")
+                self.assertFalse(write.is_error, write)
+                self.assertEqual(write.structured_content["status"], "written")
                 digest = hashlib.sha256(content.encode()).hexdigest()
                 offset, pieces = 0, []
                 while True:
                     page = (await session.call_tool("read_workspace_file", {**scope, "path": "large.txt",
-                        "offset": offset, "expected_sha256": digest})).structuredContent
+                        "offset": offset, "expected_sha256": digest})).structured_content
                     self.assertLessEqual(len(page["text"].encode()), 32768)
                     pieces.append(page["text"])
                     offset = page["next_offset"]
@@ -732,27 +732,27 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 checkpoint = {"task_id": "changed-goal", "title": "Short cancellation fixture", "anchors": []}
                 initial = await session.call_tool("save_task", {**checkpoint, "expected_revision": 0,
                     "body": "Goal: observe one short owned command.\nPlanned execution: " + identity + "\n"})
-                self.assertFalse(initial.isError, initial)
+                self.assertFalse(initial.is_error, initial)
                 start = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": identity,
                     "cwd": str(self.work), "argv": [sys.executable, "-c", "import time; time.sleep(20)"], "task_id": "changed-goal"})
-                self.assertFalse(start.isError, start)
+                self.assertFalse(start.is_error, start)
                 revised = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1,
                     "body": "Changed fixture instruction: stop the original command.\nOriginal execution: " + identity + "\nNext: cancel and read termination.\n"})
-                self.assertFalse(revised.isError, revised)
+                self.assertFalse(revised.is_error, revised)
                 cancel = await session.call_tool("cancel_execution", {"machine": "desktop", "execution_id": identity})
-                self.assertFalse(cancel.isError, cancel)
+                self.assertFalse(cancel.is_error, cancel)
                 for _ in range(100):
                     receipt = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
-                    if receipt.structuredContent["status"] == "cancelled":
+                    if receipt.structured_content["status"] == "cancelled":
                         break
                     await asyncio.sleep(0.03)
-                self.assertEqual(receipt.structuredContent["status"], "cancelled")
+                self.assertEqual(receipt.structured_content["status"], "cancelled")
                 conflict = await session.call_tool("save_task", {**checkpoint, "expected_revision": 1, "body": "Stale progress."})
-                self.assertTrue(conflict.isError)
-                self.assertEqual(conflict.structuredContent["error"]["code"], "task_conflict")
+                self.assertTrue(conflict.is_error)
+                self.assertEqual(conflict.structured_content["error"]["code"], "task_conflict")
                 final = await session.call_tool("save_task", {**checkpoint, "expected_revision": 2,
                     "body": "Changed instruction retained. Original execution " + identity + " is cancelled. No replacement was started.\n"})
-                self.assertEqual(final.structuredContent["revision"], 3)
+                self.assertEqual(final.structured_content["revision"], 3)
         self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
 
 
@@ -775,20 +775,20 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(service.probe_service, self.state, self.config,
                                     {**probe, "path": "absent.txt"}, openmachine.__version__)
         self.assertEqual(failed.exception.code, "service_read_unavailable")
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 request = {"task_id": "transition-guard", "title": "Transition guard",
                            "expected_revision": 0, "body": "One authorized fixture checkpoint.", "anchors": []}
                 with lease(self.state / "locks/lifecycle.lock"):
                     denied = await session.call_tool("save_task", request)
-                    self.assertTrue(denied.isError)
-                    self.assertEqual(denied.structuredContent["error"]["code"], "resource_busy")
-                    self.assertFalse((await session.call_tool("get_capabilities", {})).isError)
+                    self.assertTrue(denied.is_error)
+                    self.assertEqual(denied.structured_content["error"]["code"], "resource_busy")
+                    self.assertFalse((await session.call_tool("get_capabilities", {})).is_error)
                     self.assertFalse((self.state / "tasks").exists())
                 saved = await session.call_tool("save_task", request)
-                self.assertFalse(saved.isError, saved)
-                self.assertEqual(saved.structuredContent["revision"], 1)
+                self.assertFalse(saved.is_error, saved)
+                self.assertEqual(saved.structured_content["revision"], 1)
 
     async def test_managed_stale_socket_recovery_preserves_live_owner(self):
         # Leave this owned listener's socket behind without depending on graceful
@@ -803,49 +803,49 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                                    capture_output=True, timeout=10)
         self.assertNotEqual(duplicate.returncode, 0)
         self.assertEqual(self.socket.stat().st_ino, inode)
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 caps = await session.call_tool("get_capabilities", {})
-                self.assertEqual(caps.structuredContent["lifecycle"]["pid"], self.processes[-1].pid)
+                self.assertEqual(caps.structured_content["lifecycle"]["pid"], self.processes[-1].pid)
 
 
 
     async def test_wait_schema_and_quiet_expiry_keep_original_execution(self):
         identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 for value in (True, False, "1", -0.1, 5.1):
                     result = await session.call_tool("read_execution", identity | {"wait_seconds": value})
-                    self.assertTrue(result.isError)
-                    self.assertEqual(result.structuredContent["error"]["code"], "invalid_tool_call")
-                caps = (await session.call_tool("get_capabilities", {})).structuredContent
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(result.structured_content["error"]["code"], "invalid_tool_call")
+                caps = (await session.call_tool("get_capabilities", {})).structured_content
                 self.assertEqual(caps["execution"]["wait_seconds"], {"default": 0, "min": 0, "max": 5})
                 self.assertEqual(caps["execution"]["max_waiting_readers"], 16)
                 started = await session.call_tool("start_execution", identity | {
                     "cwd": str(self.work), "argv": [sys.executable, "-c", 'import time; print("ready",flush=True); time.sleep(10)'],
                     "timeout_seconds": 15})
-                self.assertFalse(started.isError)
+                self.assertFalse(started.is_error)
                 try:
                     deadline = time.monotonic() + 5
                     while time.monotonic() < deadline:
-                        ready = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        ready = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structured_content
                         if "ready" in ready.get("output", ""):
                             break
                     self.assertIn("ready", ready["output"])
                     path = self.state / "executions" / identity["execution_id"] / "record.json"
                     original = path.read_bytes()
                     observed = await session.call_tool("read_execution", identity | {"offset": ready["next_offset"], "wait_seconds": 0.1})
-                    self.assertFalse(observed.isError)
-                    self.assertTrue(observed.structuredContent["wait_expired"])
-                    self.assertEqual(observed.structuredContent["status"], "running")
+                    self.assertFalse(observed.is_error)
+                    self.assertTrue(observed.structured_content["wait_expired"])
+                    self.assertEqual(observed.structured_content["status"], "running")
                     self.assertEqual(path.read_bytes(), original)
                 finally:
                     await session.call_tool("cancel_execution", identity)
                     deadline = time.monotonic() + 5
                     while time.monotonic() < deadline:
-                        result = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        result = (await session.call_tool("read_execution", identity | {"wait_seconds": 1})).structured_content
                         if result.get("status") == "cancelled":
                             break
                     self.assertEqual(result["status"], "cancelled")
@@ -856,20 +856,20 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         code = ('import time; from pathlib import Path; p=Path("counter"); p.write_text("once"); print("ready",flush=True)\n'
                 'while not Path("emit").exists(): time.sleep(.01)\n'
                 'print("continued",flush=True)')
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as control:
                 await control.initialize()
                 started = await control.call_tool("start_execution", identity | {
                     "cwd": str(self.work), "argv": [sys.executable, "-c", code], "timeout_seconds": 15})
-                self.assertFalse(started.isError)
+                self.assertFalse(started.is_error)
                 try:
                     deadline = time.monotonic() + 5
                     while time.monotonic() < deadline:
-                        ready = (await control.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                        ready = (await control.call_tool("read_execution", identity | {"wait_seconds": 1})).structured_content
                         if "ready" in ready.get("output", ""):
                             break
                     self.assertIn("ready", ready["output"])
-                    async with self.client() as (other_reader, other_writer, _):
+                    async with self.client() as (other_reader, other_writer):
                         async with ClientSession(other_reader, other_writer) as other:
                             await other.initialize()
                             waiting = asyncio.create_task(other.call_tool("read_execution", identity | {
@@ -877,24 +877,24 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                             await asyncio.sleep(0.1)
                             self.assertFalse(waiting.done())
                             caps = await asyncio.wait_for(control.call_tool("get_capabilities", {}), 2)
-                            self.assertFalse(caps.isError)
+                            self.assertFalse(caps.is_error)
                             now = await asyncio.wait_for(control.call_tool("read_execution", identity), 2)
-                            self.assertEqual(now.structuredContent["status"], "running")
+                            self.assertEqual(now.structured_content["status"], "running")
                             waiting.cancel()
                             with self.assertRaises(asyncio.CancelledError):
                                 await waiting
                     # A new connection observes the original worker rather than a replacement.
-                    async with self.client() as (fresh_reader, fresh_writer, _):
+                    async with self.client() as (fresh_reader, fresh_writer):
                         async with ClientSession(fresh_reader, fresh_writer) as fresh:
                             await fresh.initialize()
                             observed = await fresh.call_tool("read_execution", identity)
-                            self.assertEqual(observed.structuredContent["created_at"], started.structuredContent["created_at"])
-                            self.assertFalse(observed.structuredContent["cancel_requested"])
+                            self.assertEqual(observed.structured_content["created_at"], started.structured_content["created_at"])
+                            self.assertFalse(observed.structured_content["cancel_requested"])
                             self.assertEqual((self.work / "counter").read_text(), "once")
                             gate.touch()
                             deadline = time.monotonic() + 5
                             while time.monotonic() < deadline:
-                                result = (await fresh.call_tool("read_execution", identity | {"wait_seconds": 1})).structuredContent
+                                result = (await fresh.call_tool("read_execution", identity | {"wait_seconds": 1})).structured_content
                                 if result.get("status") == "succeeded":
                                     break
                             self.assertEqual((result["status"], result["exit_code"]), ("succeeded", 0))
@@ -908,8 +908,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
             response = await session.call_tool("read_execution", identity | {"wait_seconds": 0.25})
-            self.assertFalse(response.isError)
-            observed = response.structuredContent
+            self.assertFalse(response.is_error)
+            observed = response.structured_content
             if predicate(observed):
                 return observed
             await asyncio.sleep(0.02)
@@ -923,19 +923,19 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 'print("ready",flush=True); x=input(); print("first-read",flush=True); '
                 'y=input(); print("same-process",x,y,flush=True); time.sleep(8)')
         try:
-            async with self.client() as (reader, writer, _):
+            async with self.client() as (reader, writer):
                 async with ClientSession(reader, writer) as session:
                     await session.initialize()
                     started = await session.call_tool("start_execution", identity | {
                         "cwd": str(self.work), "argv": [sys.executable, "-c", code], "timeout_seconds": 15, "tty": True})
-                    self.assertFalse(started.isError)
+                    self.assertFalse(started.is_error)
                     ready = await self.execution_until(session, identity, lambda r: r["control_ready"] and "ready" in r["output"])
                     sent = await session.call_tool("control_execution", identity | {
                         "expected_control_seq": 0, "action": "write_stdin", "text": "41\n"})
-                    self.assertFalse(sent.isError)
-                    receipt = sent.structuredContent["control_result"]
+                    self.assertFalse(sent.is_error)
+                    receipt = sent.structured_content["control_result"]
                     self.assertEqual(receipt["status"], "applied")
-                    self.assertNotIn("output", sent.structuredContent)
+                    self.assertNotIn("output", sent.structured_content)
                     before = await self.execution_until(session, identity, lambda r: "first-read" in r["output"])
             original = execution.read_record(self.state / "executions" / identity["execution_id"])
             original_processes = (self.work / "process-identity").read_text()
@@ -943,7 +943,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(self.socket.exists())
             restarted = self.launch()
             self.assertNotEqual(restarted.pid, self.processes[0].pid)
-            async with self.client() as (reader, writer, _):
+            async with self.client() as (reader, writer):
                 async with ClientSession(reader, writer) as fresh:
                     await fresh.initialize()
                     observed = await self.execution_until(fresh, identity, lambda r: r["control"]["seq"] == 1)
@@ -957,31 +957,31 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(retained["request"], original["request"])
                     self.assertEqual(observed["control"]["last"], receipt)
                     cursor = (await fresh.call_tool("read_execution", identity | {
-                        "offset": before["next_offset"]})).structuredContent
+                        "offset": before["next_offset"]})).structured_content
                     self.assertEqual(cursor["next_offset"], before["next_offset"])
                     self.assertFalse(cursor["output_gap"])
                     self.assertEqual(cursor["output"], "")
                     duplicate = await fresh.call_tool("control_execution", identity | {
                         "expected_control_seq": 0, "action": "write_stdin", "text": "41\n"})
-                    self.assertFalse(duplicate.isError)
-                    self.assertEqual(duplicate.structuredContent["control_result"], receipt)
+                    self.assertFalse(duplicate.is_error)
+                    self.assertEqual(duplicate.structured_content["control_result"], receipt)
                     second = await fresh.call_tool("control_execution", identity | {
                         "expected_control_seq": 1, "action": "write_stdin", "text": "1\n"})
-                    self.assertFalse(second.isError)
+                    self.assertFalse(second.is_error)
                     await self.execution_until(fresh, identity, lambda r: "same-process 41 1" in r["output"])
                     self.assertEqual((self.work / "start-count").read_text(), "1")
-                    self.assertFalse((await fresh.call_tool("cancel_execution", identity)).isError)
+                    self.assertFalse((await fresh.call_tool("cancel_execution", identity)).is_error)
                     final = await self.execution_until(fresh, identity, lambda r: r["status"] == "cancelled")
                     self.assertEqual(final["cleanup"]["status"], "verified")
                     self.assertEqual(final["control"]["seq"], 2)
         finally:
-            async with self.client() as (reader, writer, _):
+            async with self.client() as (reader, writer):
                 async with ClientSession(reader, writer) as cleanup:
                     await cleanup.initialize()
                     await cleanup.call_tool("cancel_execution", identity)
 
     async def test_interactive_sdk_schema_rejects_invalid_effects_before_admission(self):
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 for delta in ({"tty": 1}, {"tty": "true"}, {"tty": True, "terminal_size": {"rows": True, "cols": 80}},
@@ -990,7 +990,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
                     result = await session.call_tool("start_execution", identity | {
                         "cwd": str(self.work), "argv": [sys.executable, "-c", "pass"]} | delta)
-                    self.assertTrue(result.isError)
+                    self.assertTrue(result.is_error)
                     self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
                 identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
                 for delta in ({"expected_control_seq": True}, {"expected_control_seq": 2**53 - 1},
@@ -999,8 +999,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                               {"action": "resize", "terminal_size": {"rows": 1, "cols": 1001}}):
                     result = await session.call_tool("control_execution", identity | {
                         "expected_control_seq": 0, "action": "interrupt"} | delta)
-                    self.assertTrue(result.isError)
-                    self.assertNotEqual(result.structuredContent["error"]["code"], "execution_not_found")
+                    self.assertTrue(result.is_error)
+                    self.assertNotEqual(result.structured_content["error"]["code"], "execution_not_found")
                 self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
 
 
@@ -1009,33 +1009,33 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         original = b"padding\n" * 20000 + b"answer = 41\n"
         file.write_bytes(original)
         scope = {"machine": "desktop", "workspace_name": "example", "path": "large.py"}
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 read = await session.call_tool("read_workspace_file", scope | {"start_line": 20001, "line_count": 1})
-                self.assertFalse(read.isError, read)
-                page = read.structuredContent
+                self.assertFalse(read.is_error, read)
+                page = read.structured_content
                 self.assertEqual(page["text"], "answer = 41\n")
                 self.assertGreater(page["offset"], 131072)
                 byte_page = await session.call_tool("read_workspace_file", scope | {"offset": page["offset"], "expected_sha256": page["sha256"]})
-                self.assertFalse(byte_page.isError, byte_page)
+                self.assertFalse(byte_page.is_error, byte_page)
                 identity = uuid.uuid4().hex
                 args = scope | {"edits": [{"old_text": "41", "new_text": "42"}],
                     "expected_workspace_identity": page["context"]["workspace_identity"],
                     "expected_head_sha": "", "expected_sha256": page["sha256"]}
                 preview = await session.call_tool("edit_workspace_file", args | {"dry_run": True})
-                self.assertFalse(preview.isError, preview)
+                self.assertFalse(preview.is_error, preview)
                 self.assertEqual(file.read_bytes(), original)
                 changed = await session.call_tool("edit_workspace_file", args | {"change_id": identity,
-                    "expected_plan_sha256": preview.structuredContent["plan_sha256"]})
-                self.assertFalse(changed.isError, changed)
+                    "expected_plan_sha256": preview.structured_content["plan_sha256"]})
+                self.assertFalse(changed.is_error, changed)
                 self.assertEqual(file.read_bytes(), original.replace(b"41", b"42"))
                 receipt = await session.call_tool("read_workspace_change", {"machine": "desktop", "change_id": identity, "observe_current": True})
-                self.assertFalse(receipt.isError, receipt)
-                self.assertEqual(receipt.structuredContent["current"]["sha256"], changed.structuredContent["plan"]["after_sha256"])
+                self.assertFalse(receipt.is_error, receipt)
+                self.assertEqual(receipt.structured_content["current"]["sha256"], changed.structured_content["plan"]["after_sha256"])
                 for invalid in ({"start_line": True}, {"line_count": "2"}, {"line_count": 501}, {"start_line": 1, "offset": 1}):
                     result = await session.call_tool("read_workspace_file", scope | invalid)
-                    self.assertTrue(result.isError, invalid)
+                    self.assertTrue(result.is_error, invalid)
 
     async def test_bounded_search_pages_do_not_skip_captured_matches(self):
         file = self.work / "escaped.txt"
@@ -1043,15 +1043,15 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         scope = {"machine": "desktop", "workspace_name": "example", "action": "search",
                  "query": "needle", "path_glob": "*.txt", "limit": 200}
         offset, lines, snapshot = 0, [], ""
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 while True:
                     result = await session.call_tool("inspect_workspace", scope | {"offset": offset, "expected_snapshot": snapshot})
-                    self.assertFalse(result.isError, result)
+                    self.assertFalse(result.is_error, result)
                     encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
                     self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
-                    page = result.structuredContent
+                    page = result.structured_content
                     self.assertEqual(json.loads(result.content[0].text), page)
                     lines.extend(item["line"] for item in page["matches"])
                     snapshot = page["snapshot"]
@@ -1068,15 +1068,15 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         file.write_text(original)
         scope = {"machine": "desktop", "workspace_name": "example", "path": "escaped.txt"}
         offset, parts = 0, []
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 while True:
                     result = await session.call_tool("read_workspace_file", scope | {"offset": offset})
-                    self.assertFalse(result.isError, result)
+                    self.assertFalse(result.is_error, result)
                     self.assertLessEqual(len(json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()),
                                          server.MAX_WORKSPACE_RESULT - 1024)
-                    page = result.structuredContent
+                    page = result.structured_content
                     parts.append(page["text"])
                     if not page["has_more"]:
                         break
@@ -1096,29 +1096,29 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         text = ("*** Begin Patch\n*** Update File: source.py\n*** Move to: new/source.py\n"
                 "@@\n-answer = 41\n+answer = 42\n*** Add File: new/expected\n+42\n"
                 "*** Delete File: obsolete\n*** End Patch\n")
-        async with self.client() as (reader, writer, _):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                read = (await session.call_tool("read_workspace_file", scope | {"path":"source.py"})).structuredContent
+                read = (await session.call_tool("read_workspace_file", scope | {"path":"source.py"})).structured_content
                 request = scope | {"patch":text,"expected_workspace_identity":read["context"]["workspace_identity"],
                     "expected_head_sha":"","create_parents":True,
                     "preconditions":[{"path":"source.py","expected_sha256":read["sha256"]},
                         {"path":"new/source.py","expected_sha256":""},{"path":"new/expected","expected_sha256":""},
                         {"path":"obsolete","expected_sha256":hashlib.sha256(obsolete.read_bytes()).hexdigest()}]}
                 preview = await session.call_tool("apply_workspace_patch", request | {"dry_run":True})
-                self.assertFalse(preview.isError,preview)
+                self.assertFalse(preview.is_error,preview)
                 self.assertFalse((self.work / "new").exists())
                 self.assertFalse((self.state / "workspace-changes").exists())
-                request.update(change_id=identity,expected_plan_sha256=preview.structuredContent["plan_sha256"])
+                request.update(change_id=identity,expected_plan_sha256=preview.structured_content["plan_sha256"])
                 result = await session.call_tool("apply_workspace_patch",request)
-                self.assertFalse(result.isError,result)
-                first = result.structuredContent
+                self.assertFalse(result.is_error,result)
+                first = result.structured_content
                 self.assertEqual(first["status"],"applied")
                 self.assertEqual([item["kind"] for item in first["effects"]], ["mkdir","publish","remove","publish","remove"])
                 self.assertEqual((self.work / "new/source.py").read_bytes(), b"answer = 42\r\n")
                 self.assertFalse(source.exists())
                 self.assertFalse(obsolete.exists())
-                caps = (await session.call_tool("get_capabilities",{})).structuredContent
+                caps = (await session.call_tool("get_capabilities",{})).structured_content
                 self.assertEqual(caps["workspace"]["patch_language"],"om_patch_v1")
                 self.assertEqual(caps["workspace"]["change_read_formats"],[1,2])
                 self.assertFalse((self.state / "executions").exists(), "Patch must not run hidden commands")
@@ -1134,19 +1134,19 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 saved = await session.call_tool("save_task", {"task_id": task_id, "expected_revision": 0,
                     "title": "Validate original patch", "body": json.dumps(evidence),
                     "anchors": [f"change=desktop/{identity}", f"execution=desktop/{validation_id}"]})
-                self.assertFalse(saved.isError, saved)
+                self.assertFalse(saved.is_error, saved)
                 for path, sha in post_hashes.items():
-                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structuredContent
+                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structured_content
                     self.assertEqual(current["sha256"], sha)
                 started = await session.call_tool("start_execution", {"machine": "desktop", "execution_id": validation_id,
                     "cwd": str(self.work), "argv": command, "expected_head_sha": "", "task_id": task_id})
-                self.assertFalse(started.isError, started)
+                self.assertFalse(started.is_error, started)
                 deadline = time.monotonic() + 10
                 while True:
                     observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": validation_id,
                         "wait_seconds": 0.2})
-                    self.assertFalse(observed.isError, observed)
-                    validation = observed.structuredContent
+                    self.assertFalse(observed.is_error, observed)
+                    validation = observed.structured_content
                     if validation["status"] in {"succeeded", "failed", "cancelled", "timed_out", "outcome_unknown"}:
                         break
                     self.assertLess(time.monotonic(), deadline)
@@ -1154,41 +1154,41 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                                  ("succeeded", 0, "verified"))
                 self.assertIn("PATCH_VALIDATION_OK", validation["output"])
                 for path, sha in post_hashes.items():
-                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structuredContent
+                    current = (await session.call_tool("read_workspace_file", scope | {"path": path})).structured_content
                     self.assertEqual(current["sha256"], sha)
                 evidence.update(status="succeeded", execution_created_at=validation["created_at"])
                 saved = await session.call_tool("save_task", {"task_id": task_id, "expected_revision": 1,
                     "title": "Validate original patch", "body": json.dumps(evidence)})
-                self.assertFalse(saved.isError, saved)
-                self.assertEqual(saved.structuredContent["revision"], 2)
+                self.assertFalse(saved.is_error, saved)
+                self.assertEqual(saved.structured_content["revision"], 2)
         self.stop(self.processes[-1])
         record = self.state / "workspace-changes" / identity / "record.json"
         retained = record.read_bytes()
         (self.work / "new/source.py").write_text("later work\n")
         self.launch()
-        async with self.client() as (reader,writer,_):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader,writer) as session:
                 await session.initialize()
                 read = await session.call_tool("read_workspace_change",{"machine":"desktop","change_id":identity,"observe_current":True})
-                self.assertFalse(read.isError,read)
-                self.assertEqual((read.structuredContent["created_at"],read.structuredContent["revision"]),(first["created_at"],first["revision"]))
-                task = (await session.call_tool("read_task", {"task_id": task_id})).structuredContent
+                self.assertFalse(read.is_error,read)
+                self.assertEqual((read.structured_content["created_at"],read.structured_content["revision"]),(first["created_at"],first["revision"]))
+                task = (await session.call_tool("read_task", {"task_id": task_id})).structured_content
                 self.assertEqual(task["revision"], 2)
                 self.assertEqual(json.loads(task["body"]), evidence)
                 original_execution = (await session.call_tool("read_execution", {
-                    "machine": "desktop", "execution_id": validation_id})).structuredContent
+                    "machine": "desktop", "execution_id": validation_id})).structured_content
                 self.assertEqual((original_execution["created_at"], original_execution["status"], original_execution["exit_code"]),
                                  (evidence["execution_created_at"], "succeeded", 0))
-                current_hashes = {item["path"]: item["sha256"] for item in read.structuredContent["current"]["files"]}
+                current_hashes = {item["path"]: item["sha256"] for item in read.structured_content["current"]["files"]}
                 self.assertNotEqual(current_hashes["new/source.py"], evidence["post_hashes"]["new/source.py"],
                                     "Historical test success must not validate subsequent source drift")
                 again = await session.call_tool("apply_workspace_patch",request)
-                self.assertFalse(again.isError,again)
-                self.assertEqual(again.structuredContent["revision"],first["revision"])
+                self.assertFalse(again.is_error,again)
+                self.assertEqual(again.structured_content["revision"],first["revision"])
                 self.assertEqual((self.work / "new/source.py").read_text(),"later work\n")
                 conflict = await session.call_tool("apply_workspace_patch",request | {"create_parents":False})
-                self.assertTrue(conflict.isError)
-                self.assertEqual(conflict.structuredContent["error"]["code"],"change_id_conflict")
+                self.assertTrue(conflict.is_error)
+                self.assertEqual(conflict.structured_content["error"]["code"],"change_id_conflict")
         self.assertEqual(record.read_bytes(),retained)
         self.assertEqual((self.work / "validation-count").read_text(), "1")
         self.assertEqual([p.name for p in (self.state / "executions").iterdir()], [validation_id])
@@ -1199,28 +1199,28 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.launch()
         scope = {"machine":"desktop","workspace_name":"example"}
         text = "*** Begin Patch\n*** Add File: escaped\n+" + "\x01" * 32760 + "\n*** End Patch\n"
-        async with self.client() as (reader,writer,_):
+        async with self.client() as (reader, writer):
             async with ClientSession(reader,writer) as session:
                 await session.initialize()
-                read = (await session.call_tool("read_workspace_file",scope | {"path":"AGENTS.md"})).structuredContent
+                read = (await session.call_tool("read_workspace_file",scope | {"path":"AGENTS.md"})).structured_content
                 request = scope | {"patch":text,"expected_workspace_identity":read["context"]["workspace_identity"],
                                   "expected_head_sha":"","preconditions":[{"path":"escaped","expected_sha256":""}]}
                 for delta in ({"create_parents":1},{"dry_run":"false"},{"preconditions":[]},
                               {"preconditions":[{"path":"escaped","expected_sha256":"","extra":True}]}):
                     result = await session.call_tool("apply_workspace_patch",request | {"change_id":uuid.uuid4().hex} | delta)
-                    self.assertTrue(result.isError)
+                    self.assertTrue(result.is_error)
                     self.assertFalse((self.work / "escaped").exists())
                 identity = uuid.uuid4().hex
                 result = await session.call_tool("apply_workspace_patch",request | {"change_id":identity})
-                self.assertFalse(result.isError,result)
-                self.assertEqual(result.structuredContent["status"],"applied")
-                self.assertEqual(result.structuredContent["change_id"],identity)
-                self.assertEqual(len(result.structuredContent["effects"]),1)
-                self.assertEqual(json.loads(result.content[0].text),result.structuredContent)
+                self.assertFalse(result.is_error,result)
+                self.assertEqual(result.structured_content["status"],"applied")
+                self.assertEqual(result.structured_content["change_id"],identity)
+                self.assertEqual(len(result.structured_content["effects"]),1)
+                self.assertEqual(json.loads(result.content[0].text),result.structured_content)
                 self.assertLessEqual(len(json.dumps(result.model_dump(mode="json",by_alias=True,exclude_none=True)).encode()),server.MAX_WORKSPACE_RESULT-1024)
                 denied = await session.call_tool("start_execution",{"machine":"desktop","execution_id":uuid.uuid4().hex,
                     "cwd":str(self.work),"argv":[sys.executable,"-c","pass"]})
-                self.assertEqual(denied.structuredContent["error"]["code"],"execution_disabled")
+                self.assertEqual(denied.structured_content["error"]["code"],"execution_disabled")
 
     async def test_patch_disconnect_and_partial_receipt_keep_original_effects(self):
         from openmachine.bootstrap import create_application
@@ -1265,17 +1265,183 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             deadline = time.monotonic()+3
             while time.monotonic()<deadline:
                 read = await mcp.call_tool("read_workspace_change",{"machine":"local","change_id":identity})
-                if read.structuredContent["status"] == "partial":
+                if read.structured_content["status"] == "partial":
                     break
                 await asyncio.sleep(.01)
-            self.assertEqual(read.structuredContent["status"],"partial")
-            self.assertFalse(read.isError,"Inspecting a failed change is a successful read, not a successful patch")
+            self.assertEqual(read.structured_content["status"],"partial")
+            self.assertFalse(read.is_error,"Inspecting a failed change is a successful read, not a successful patch")
             again = await mcp.call_tool("apply_workspace_patch",request)
-            self.assertTrue(again.isError)
-            self.assertEqual(again.structuredContent["effects"],read.structuredContent["effects"])
+            self.assertTrue(again.is_error)
+            self.assertEqual(again.structured_content["effects"],read.structured_content["effects"])
             self.assertEqual(publisher.call_count,2)
             self.assertEqual((self.work / "first").read_text(),"yes\n")
             self.assertFalse((self.work / "second").exists())
+
+    def wire_client(self, version):
+        return httpx.AsyncClient(trust_env=False, timeout=10,
+            transport=httpx.AsyncHTTPTransport(uds=str(self.socket)),
+            headers={"accept": "application/json, text/event-stream",
+                     "content-type": "application/json", "MCP-Protocol-Version": version})
+
+    async def wire_call(self, client, method, params=None):
+        version = client.headers["MCP-Protocol-Version"]
+        headers = {}
+        if version == "2026-07-28":
+            params = dict(params or {})
+            meta = dict(params.get("_meta") or {})
+            meta["io.modelcontextprotocol/protocolVersion"] = version
+            meta["io.modelcontextprotocol/clientCapabilities"] = {}
+            params["_meta"] = meta
+            headers["MCP-Method"] = method
+            if method == "tools/call" and isinstance(params.get("name"), str):
+                headers["MCP-Name"] = params["name"]
+        request = {"jsonrpc": "2.0", "id": 1, "method": method}
+        if params is not None:
+            request["params"] = params
+        return await client.post("http://localhost/mcp", json=request, headers=headers)
+
+    def assert_wire_tool_result(self, result, version):
+        modern = version == "2026-07-28"
+        self.assertEqual("resultType" in result, modern, result)
+        if modern:
+            self.assertEqual(result["resultType"], "complete")
+        self.assertEqual(result.get("_meta", {}).get("io.modelcontextprotocol/serverInfo"),
+                         {"name": "Open Machine", "version": openmachine.__version__} if modern else None)
+        self.assertEqual(json.loads(result["content"][0]["text"]), result["structuredContent"])
+
+    async def test_migration_protocols_preserve_all_four_catalogs(self):
+        from importlib.metadata import version
+        self.assertEqual(version("mcp"), "2.2.0")
+        original = self.config.read_text()
+        self.stop(self.processes[0])
+        for github in (False, True):
+            for ssh in (False, True):
+                config = original if github else original.split("[github]")[0]
+                if ssh:
+                    config += '\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\nssh_worker="/remote/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"\n'
+                self.config.write_text(config)
+                process = self.launch()
+                try:
+                    for mode in ("legacy", "2026-07-28", "auto"):
+                        with self.subTest(github=github, ssh=ssh, mode=mode):
+                            async with Client(self.client(), mode=mode, cache=None) as client:
+                                expected = "2025-11-25" if mode == "legacy" else "2026-07-28"
+                                self.assertEqual(client.protocol_version, expected)
+                                self.assert_tool_contract(await client.list_tools(), github=github, ssh=ssh)
+                                result = await client.call_tool("read_workspace_file", {
+                                    "machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"})
+                                self.assertFalse(result.is_error, result)
+                                self.assertEqual(json.loads(result.content[0].text), result.structured_content)
+                                self.assertIn("disposable", result.structured_content["text"])
+                finally:
+                    self.stop(process)
+
+
+    async def test_migration_wire_envelopes_and_invalid_arguments_are_safe(self):
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                response = await self.wire_call(client, "tools/call", {"name": "get_capabilities"})
+                self.assertEqual(response.status_code, 200)
+                result = response.json()["result"]
+                self.assert_wire_tool_result(result, version)
+                scope = {"machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"}
+                for params in ({"name": "untrusted-sentinel"},
+                               {"name": "read_workspace_file", "arguments": scope | {"line_count": "untrusted-sentinel"}},
+                               {"name": "read_workspace_file", "arguments": scope | {"line_count": 1.0}},
+                               {"name": "get_capabilities", "_meta": {"progressToken": ["untrusted-sentinel"]}}):
+                    response = await self.wire_call(client, "tools/call", params)
+                    self.assertEqual(response.status_code, 200)
+                    result = response.json()["result"]
+                    self.assertTrue(result["isError"])
+                    self.assertIn("structuredContent", result, (version, params, result))
+                    self.assert_wire_tool_result(result, version)
+                    self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
+                    self.assertNotIn("untrusted-sentinel", response.text)
+                for method in ("events/list", "events/subscribe", "events/unsubscribe"):
+                    response = await self.wire_call(client, method, {})
+                    self.assertEqual(response.json()["error"]["code"], -32601)
+        self.assertFalse((self.state / "executions").exists())
+        self.assertFalse((self.state / "tasks").exists())
+
+
+    async def test_migration_ingress_host_origin_and_version_reject_before_effects(self):
+        bound = 1048576
+        harmless = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                              "params": {"name": "get_capabilities"}}).encode()
+        mutation = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "save_task", "arguments": {"task_id": "never-admitted", "expected_revision": 0,
+            "title": "Rejected request", "body": "No effects"}}}
+        oversized = json.dumps(mutation).encode()
+        oversized += b" " * (bound + 1 - len(oversized))
+        async def chunks():
+            for offset in range(0, len(oversized), 32768):
+                yield oversized[offset:offset + 32768]
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                exact_body = harmless
+                exact_headers = {}
+                if version == "2026-07-28":
+                    request = json.loads(harmless)
+                    request["params"]["_meta"] = {
+                        "io.modelcontextprotocol/protocolVersion": version,
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    }
+                    exact_body = json.dumps(request).encode()
+                    exact_headers = {"MCP-Method": "tools/call", "MCP-Name": "get_capabilities"}
+                exact = await client.post("http://localhost/mcp",
+                                          content=exact_body + b" " * (bound - len(exact_body)),
+                                          headers=exact_headers)
+                self.assertEqual(exact.status_code, 200)
+                self.assertFalse(exact.json()["result"]["isError"])
+                for content in (oversized, chunks()):
+                    response = await client.post("http://localhost/mcp", content=content)
+                    self.assertEqual(response.status_code, 413)
+                for headers, status in (({"host": "untrusted.invalid"}, 421),
+                                        ({"origin": "https://untrusted.invalid"}, 403),
+                                        ({"MCP-Protocol-Version": "2099-01-01"}, 400)):
+                    response = await client.post("http://localhost/mcp", json=mutation, headers=headers)
+                    self.assertEqual(response.status_code, status, response.text)
+        self.assertFalse((self.state / "tasks").exists())
+
+    async def test_modern_overlapping_clients_and_abandoned_wait_preserve_original_execution(self):
+        identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+        gate = self.work / "modern-emit"
+        code = ('import time; from pathlib import Path; p=Path("modern-counter"); p.write_text("once"); '
+                'print("ready",flush=True)\n'
+                'while not Path("modern-emit").exists(): time.sleep(.01)\n'
+                'print("continued",flush=True)')
+        async with Client(self.client(), mode="2026-07-28", cache=None) as control:
+            self.assertEqual(control.protocol_version, "2026-07-28")
+            started = await control.call_tool("start_execution", identity | {
+                "cwd": str(self.work), "argv": [sys.executable, "-c", code], "timeout_seconds": 15})
+            self.assertFalse(started.is_error, started)
+            try:
+                ready = await self.execution_until(control, identity, lambda r: "ready" in r.get("output", ""))
+                async with Client(self.client(), mode="2026-07-28", cache=None) as other:
+                    waiting = asyncio.create_task(other.call_tool("read_execution", identity | {
+                        "offset": ready["next_offset"], "wait_seconds": 5}))
+                    await asyncio.sleep(0.1)
+                    self.assertFalse(waiting.done())
+                    caps = await asyncio.wait_for(control.call_tool("get_capabilities", {}), 2)
+                    self.assertFalse(caps.is_error)
+                    now = await asyncio.wait_for(control.call_tool("read_execution", identity), 2)
+                    self.assertEqual(now.structured_content["status"], "running")
+                    waiting.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await waiting
+                async with Client(self.client(), mode="2026-07-28", cache=None) as fresh:
+                    self.assertEqual(fresh.protocol_version, "2026-07-28")
+                    observed = await fresh.call_tool("read_execution", identity)
+                    self.assertEqual(observed.structured_content["created_at"], started.structured_content["created_at"])
+                    self.assertFalse(observed.structured_content["cancel_requested"])
+                    self.assertEqual((self.work / "modern-counter").read_text(), "once")
+                    gate.touch()
+                    result = await self.execution_until(fresh, identity, lambda r: r.get("status") == "succeeded")
+                    self.assertEqual((result["status"], result["exit_code"]), ("succeeded", 0))
+                    self.assertIn("continued", result["output"])
+            finally:
+                gate.touch()
+                await control.call_tool("cancel_execution", identity)
 
 
 class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
@@ -1314,10 +1480,10 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             try:
                 self.assertTrue(await asyncio.to_thread(admitted.wait, 3))
                 overflow = await mcp.call_tool("read_execution", args)
-                self.assertEqual(overflow.structuredContent["error"]["code"], "reader_busy")
-                self.assertFalse((await mcp.call_tool("get_capabilities", {})).isError)
-                self.assertFalse((await mcp.call_tool("read_execution", args | {"wait_seconds": 0})).isError)
-                self.assertFalse((await mcp.call_tool("cancel_execution", {"machine": "local", "execution_id": "a" * 32})).isError)
+                self.assertEqual(overflow.structured_content["error"]["code"], "reader_busy")
+                self.assertFalse((await mcp.call_tool("get_capabilities", {})).is_error)
+                self.assertFalse((await mcp.call_tool("read_execution", args | {"wait_seconds": 0})).is_error)
+                self.assertFalse((await mcp.call_tool("cancel_execution", {"machine": "local", "execution_id": "a" * 32})).is_error)
                 readers[0].cancel()
                 with self.assertRaises(asyncio.CancelledError):
                     await readers[0]
@@ -1325,12 +1491,12 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 # The fake observer intentionally has not exited yet. Its slot
                 # cannot be reused just because the asyncio await was cancelled.
                 overflow = await mcp.call_tool("read_execution", args)
-                self.assertEqual(overflow.structuredContent["error"]["code"], "reader_busy")
+                self.assertEqual(overflow.structured_content["error"]["code"], "reader_busy")
             finally:
                 release.set()
                 await asyncio.gather(*readers, return_exceptions=True)
             result = await mcp.call_tool("read_execution", args)
-            self.assertFalse(result.isError)
+            self.assertFalse(result.is_error)
 
     async def test_cancellation_has_capacity_when_immediate_reads_fill_default_executor(self):
         with tempfile.TemporaryDirectory(prefix="om-cancel-capacity-", dir="/tmp") as directory:
@@ -1367,11 +1533,11 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.01)
                 self.assertTrue(filled.is_set())
                 result = await asyncio.wait_for(mcp.call_tool("cancel_execution", args), 1)
-                self.assertFalse(result.isError)
-                self.assertTrue(result.structuredContent["cancel_requested"])
+                self.assertFalse(result.is_error)
+                self.assertTrue(result.structured_content["cancel_requested"])
                 application.cancel_execution.assert_called_once_with("local", "b" * 32)
                 controlled = await asyncio.wait_for(mcp.call_tool("control_execution", args | {"expected_control_seq": 0, "action": "interrupt"}), 1)
-                self.assertEqual(controlled.structuredContent["control_result"]["status"], "applied")
+                self.assertEqual(controlled.structured_content["control_result"]["status"], "applied")
                 application.control_execution.assert_called_once_with("local", "b" * 32, 0, "interrupt", None, None)
                 self.assertFalse(any(task.done() for task in readers))
             finally:
@@ -1383,11 +1549,11 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
                    "output_presentation_truncated": False}
         result = server._reply(lambda: payload, execution_output=True)
         encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
-        self.assertFalse(result.isError)
+        self.assertFalse(result.is_error)
         self.assertLessEqual(len(encoded), server.MAX_RESULT_BYTES - 1024)
-        self.assertTrue(result.structuredContent["output_presentation_truncated"])
-        self.assertEqual(result.structuredContent["next_offset"], 200000)
-        self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+        self.assertTrue(result.structured_content["output_presentation_truncated"])
+        self.assertEqual(result.structured_content["next_offset"], 200000)
+        self.assertEqual(json.loads(result.content[0].text), result.structured_content)
         self.assertFalse(payload["output_presentation_truncated"])
 
 
