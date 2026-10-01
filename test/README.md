@@ -382,3 +382,42 @@ existing safety checks and reuse valid tests unaffected by the change.
 Native/SDK results are not actual ChatGPT/tunnel acceptance. Record A6 separately
 on the candidate connection; no Events delivery or automatic continuation is
 implied by the SDK extension seam. Keep disposable evidence outside the repo.
+
+## Spec #29 S0 continuity boundary
+
+S0 freezes the next task contract in [Spec #29](https://github.com/OpenMachineLabs/openmachine/issues/29#s0-contract-freeze-and-probe-2026-10-01),
+not in a second runtime or copied design document. No production task writer,
+observer, callback sender, subscription or inference backend is added here.
+
+The existing MCP suite tests the exact SDK 2.2.0 public extension/middleware seam:
+additive Events methods, explicit top-level capability advertisement, unchanged
+core tool behavior and legacy method rejection. The in-process SDK/ASGI fixture
+rejects subscribe/unsubscribe deliberately; it has no subscription backend and
+cannot demonstrate delivery, authorization, signatures, persistence or AI wake-up.
+The private-socket fixture separately observes the installed OM baseline.
+
+For an explicitly authorized socket, the opt-in probe makes only `server/discover`
+and `events/list` requests. It never auto-discovers installations or sends a callback:
+
+```sh
+"$PYTHON" "$REPO/test/contract/probe_task_handoff.py" --socket /absolute/private/state/mcp.sock
+```
+
+Run outside the checkout with the locked installed environment. Exit 0 means only
+Events discovery is ready; 2 means blocked/inconclusive discovery; 1 means the
+bounded probe failed. Output omits raw responses, paths and callback credentials.
+Each response is at most 64 KiB, each request at most five seconds, the whole probe
+at most 15 seconds, with no retries/redirects. An incomplete catalog is not absence.
+`ai_continuation=not_run` is unconditional: discovery is never end-to-end acceptance.
+
+Actual S0 caller acceptance requires an enrolled disposable plugin/endpoint, a
+verified principal and callback supplied by ChatGPT after initial opt-in. Preserve
+one task and original operation IDs. Independently test running-command loss,
+committed-result/caller absence, and a task with no active execution. The returning
+AI must read original evidence and perform/verify the next harmless step without a
+post-fault user message, Retry click or a probe script doing the AI's step. Record
+event receipt, task read, claim and next effect separately. Pause, late delivery
+and duplicate events must not reactivate work. Record missing eligibility, binding
+or callback evidence as BLOCKED/NOT RUN, not as an SDK limitation or a waived goal.
+No account/usage-cost promise follows from these tests. Stop owned disposable
+services and retire test subscriptions explicitly; leave production untouched.
