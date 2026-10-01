@@ -348,7 +348,12 @@ Resume does not claim ownership, extend expired authority or reopen terminal wor
 Use `revise_plan` for accepted changes, explicitly invalidating changed stages
 and their dependents; preserve unrelated acceptance, stage IDs and all operations.
 Use `record_decision` with verified applicable original evidence, then `finish`
-only after every required stage is accepted. Empty evidence is an explicit
+only after every required stage is accepted. Its transition is
+`{"action":"finish","outcome":"completed","acceptance":[{"stage_id":"stage-id","operation_id":"original-operation-id"}],"limitations":""}`.
+Cover every stage with its accepted original operation IDs. Use `operation_id: null`
+only for an accepted non-command decision with no operation evidence. `finish`
+does not take `reason`, `summary` or the `record_decision` field `evidence`.
+Empty evidence is an explicit
 non-command decision, never a substitute for an operation-backed stage. File
 and provider drift invalidates current acceptance, not historical authorship.
 Known partial outcomes need a new authorized judgment, never batch/input replay.
