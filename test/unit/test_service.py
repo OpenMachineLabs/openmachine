@@ -144,6 +144,7 @@ class ServiceTests(unittest.TestCase):
             service.guard_writes(self.state)
 
     def test_application_mutations_share_admission_and_preserve_dispatch_arguments(self):
+        import inspect
         config = Settings.model_validate({"schema_version": 1,
             "machines": {"local": {"transport": "local", "execution_enabled": True}},
             "github": {"repositories": ["example/project"]}})
@@ -170,6 +171,7 @@ class ServiceTests(unittest.TestCase):
         ]
         for name, arguments, owner, method in cases:
             operation = getattr(app, name)
+            signature = inspect.signature(getattr(owner, method))
             with self.subTest(operation=name), patch.object(owner, method) as dispatch:
                 self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}
                 self.save(self.record)
@@ -183,7 +185,7 @@ class ServiceTests(unittest.TestCase):
                     self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 6)
                 dispatch.assert_not_called()
 
-                def admitted(*args):
+                def admitted(*args, **kwargs):
                     with self.assertRaises(Fault) as caught:
                         with lease(self.state / "locks/lifecycle.lock"):
                             self.fail("Admission lease was released before dispatch")
@@ -196,7 +198,9 @@ class ServiceTests(unittest.TestCase):
                     self.assertEqual(operation(*arguments), {"dispatched": True})
                     admission.assert_called_once_with(self.state / "locks/lifecycle.lock", shared=True)
                 prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
-                dispatch.assert_called_once_with(*prefix, *arguments)
+                self.assertEqual(dispatch.call_count, 1)
+                self.assertEqual(signature.bind(*dispatch.call_args.args, **dispatch.call_args.kwargs).arguments,
+                                 signature.bind(*prefix, *arguments).arguments)
                 with lease(self.state / "locks/lifecycle.lock"):
                     pass
 

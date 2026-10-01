@@ -91,6 +91,100 @@ class GitHubTests(unittest.TestCase):
             operation(*args, **kwargs)
         self.assertEqual(caught.exception.code, code)
 
+    def task_locator(self, kind, number=None, parent=None):
+        return dict(kind="github", repository=REPO, object_type=kind, number=number,
+                    parent_number=parent, anchor="om-task:fixture:" + "e" * 32)
+
+    def test_task_publication_reconciliation_reads_original_destination_only(self):
+        locator = self.task_locator("issue")
+        body = "Retained fixture request.\n\n<!-- " + locator["anchor"] + " -->"
+        self.issue_value.update(title="Fixture", body=body + "\n\n" + operations.CREATED_FOOTER, user=ACTOR)
+        request = dict(action="create", title="Fixture", body=body, state=None)
+        result = github.reconcile(settings(), locator, request)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["receipt"]["number"], 1)
+        self.assertTrue(result["fields_verified"])
+        self.assertTrue(all(call.args[0] == "GET" for call in self.transport.call_args_list))
+        self.assertEqual(github.reconcile(settings(), locator, dict(request, title="Changed"))["status"], "observed")
+        self.assertEqual(github.reconcile(settings(), dict(locator, number=1))["status"], "observed")
+
+    def test_task_publication_search_is_bounded_and_duplicate_or_partial_coverage_is_unknown(self):
+        locator = self.task_locator("issue")
+        found = dict(self.issue_value, body="<!-- " + locator["anchor"] + " -->", user=ACTOR)
+        with patch.object(client, "list_page", return_value=([found, dict(found, number=3)], None)):
+            result = github.reconcile(settings(), locator)
+            self.assertEqual(result["status"], "write_outcome_unknown")
+            self.assertEqual(result["matching_destinations"], 2)
+        with patch.object(client, "list_page", side_effect=[([found], 2), ([], 3), ([], 4)]) as pages:
+            result = github.reconcile(settings(), locator)
+            self.assertEqual(pages.call_count, 3)
+            self.assertEqual(result["coverage"], "incomplete")
+            self.assertEqual(result["status"], "write_outcome_unknown")
+        self.assertTrue(all(call.args[0] == "GET" for call in self.transport.call_args_list))
+
+    def test_task_comment_review_and_pr_reconciliation_keep_type_parent_and_head(self):
+        for kind, number, parent in (("comment", 9, 1), ("review", 9, 2), ("pull_request", 2, None)):
+            locator = self.task_locator(kind, number, parent)
+            body = "Fixture.\n\n<!-- " + locator["anchor"] + " -->"
+            request = dict(action="create", body=body)
+            if kind == "pull_request":
+                self.pr.update(body=body, title="Fixture")
+                request.update(title="Fixture", head="topic", base="main", draft=False, expected_head_sha=HEAD)
+                result = github.reconcile(settings(), locator, request)
+            else:
+                value = dict(self.reviews[0], body=body, issue_url=f"https://api.github.com/{ROOT}/issues/1")
+                endpoint = f"{ROOT}/issues/comments/9" if kind == "comment" else f"{ROOT}/pulls/2/reviews/9"
+                if kind == "review":
+                    request.update(expected_head_sha=HEAD, event="COMMENT")
+                def response(method, target, payload=None):
+                    if method == "GET" and target == endpoint:
+                        return copy.deepcopy(value)
+                    return self.response(method, target, payload)
+                with patch.object(connection, "request", side_effect=response) as transport:
+                    result = github.reconcile(settings(), locator, request)
+                    self.assertTrue(all(call.args[0] == "GET" for call in transport.call_args_list))
+                    if kind == "comment":
+                        value["issue_url"] = f"https://api.github.com/{ROOT}/issues/99"
+                        self.assert_fault("github_wrong_object_type", github.reconcile, settings(), locator, request)
+            self.assertEqual(result["status"], "verified", kind)
+        unknown = github.reconcile(settings(), self.task_locator("review", 9))
+        self.assertEqual(unknown["status"], "write_outcome_unknown")
+        self.assertFalse(any("/None/" in call.args[1] for call in self.transport.call_args_list))
+        self.assertEqual(github.reconcile(settings(), self.task_locator("pull_request", 2),
+            dict(request, expected_head_sha=BASE))["status"], "observed")
+
+    def test_task_merge_reconciliation_proves_original_head_and_destination_without_put(self):
+        self.pr.update(merged=True, merge_commit_sha=MERGE)
+        locator = self.task_locator("merge", 2)
+        request = dict(expected_head_sha=HEAD, commit_title="Fixture merge", commit_message="Fixture body")
+        comparison = {"status": "ahead", "merge_base_commit": {"sha": MERGE}}
+        def response(method, target, payload=None):
+            if method == "GET":
+                values = {f"{ROOT}/commits/{MERGE}": {"sha": MERGE, "commit": {"message": "Fixture merge\n\nFixture body\n"}},
+                    f"{ROOT}/branches/main": {"commit": {"sha": TREE}},
+                    f"{ROOT}/compare/{MERGE}...{TREE}": comparison}
+                if target in values:
+                    return copy.deepcopy(values[target])
+            return self.response(method, target, payload)
+        with patch.object(connection, "request", side_effect=response) as transport:
+            result = github.reconcile(settings(), locator, request)
+            self.assertEqual(result["status"], "merged_verified")
+            self.assertEqual(result["receipt"], {"number": 2, "head_sha": HEAD, "merge_commit_sha": MERGE})
+            self.assertEqual(github.reconcile(settings(), locator)["status"], "observed")
+            comparison["merge_base_commit"]["sha"] = BASE
+            self.assertEqual(github.reconcile(settings(), locator, request)["status"], "write_outcome_unknown")
+            self.assertTrue(all(call.args[0] == "GET" for call in transport.call_args_list))
+        self.assert_fault("github_candidate_changed", github.reconcile, settings(), locator, dict(request, expected_head_sha=BASE))
+
+    def test_task_reconciliation_rejects_forged_locator_and_changed_account(self):
+        for invalid in (self.task_locator("issue", True), dict(self.task_locator("issue", 1), anchor="../../unsafe")):
+            self.assert_fault("invalid_github_request", github.reconcile, settings(), invalid)
+        self.assertEqual(self.transport.call_count, 0)
+        locator = self.task_locator("issue", 1)
+        actor = dict(ACTOR, id=999)
+        with patch.object(connection, "read_actor", side_effect=[ACTOR, actor]):
+            self.assert_fault("github_identity_changed", github.reconcile, settings(), locator)
+
     def test_public_default_uses_exact_created_and_posted_footers(self):
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
             github.issue(settings(), "create", REPO, "title", "body")

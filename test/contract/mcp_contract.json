@@ -42,6 +42,12 @@
       "base_commit": "4e270e2b4f2ece1417f7c325c2bc108e8d9862d3",
       "change": "S1.1 adds only create_task with bounded S0 contract/stage inputs. All existing schemas and annotations remain unchanged. Expectations are manually authored, not generated from candidate SDK/model output; installed discovery verifies the delta.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/29"
+    },
+    {
+      "approval": "Current maintainer request approves S1.2 task control, unified effect admission, self-review/merge and Spec29 body update.",
+      "base_commit": "8fca25d7649863093fe7f7511f707eac1c7eb8a3",
+      "change": "S1.2 adds control_task and optional strict task_context on all eleven existing mutation tools. Existing tool arguments, annotations, release evidence and unrelated schemas remain unchanged. New expectations are authored from the frozen S0.4 contract, not copied from candidate discovery. Native-account claims do not advertise Events, automatic recovery or ChatGPT identity.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/29"
     }
   ],
   "baseline": {
@@ -81,6 +87,52 @@
               "expected_sha256"
             ],
             "title": "PatchPrecondition",
+            "type": "object"
+          },
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
             "type": "object"
           }
         },
@@ -135,6 +187,17 @@
             "title": "Preconditions",
             "type": "array"
           },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "workspace_name": {
             "title": "Workspace Name",
             "type": "string"
@@ -160,6 +223,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "execution_id": {
             "title": "Execution Id",
@@ -168,6 +279,17 @@
           "machine": {
             "title": "Machine",
             "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -187,6 +309,52 @@
       },
       "inputSchema": {
         "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          },
           "TerminalSize": {
             "additionalProperties": false,
             "properties": {
@@ -235,6 +403,17 @@
             "title": "Machine",
             "type": "string"
           },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "terminal_size": {
             "anyOf": [
               {
@@ -267,6 +446,547 @@
           "action"
         ],
         "title": "control_executionArguments",
+        "type": "object"
+      }
+    },
+    "control_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "Acceptance": {
+            "additionalProperties": false,
+            "properties": {
+              "operation_id": {
+                "anyOf": [
+                  {
+                    "maxLength": 32,
+                    "minLength": 32,
+                    "pattern": "^[0-9a-f]{32}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Operation Id"
+              },
+              "stage_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Stage Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "stage_id",
+              "operation_id"
+            ],
+            "title": "Acceptance",
+            "type": "object"
+          },
+          "Claim": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "claim",
+                "title": "Action",
+                "type": "string"
+              },
+              "handoff_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Handoff Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "handoff_id"
+            ],
+            "title": "Claim",
+            "type": "object"
+          },
+          "Contract": {
+            "additionalProperties": false,
+            "properties": {
+              "acceptance": {
+                "maxLength": 1024,
+                "title": "Acceptance",
+                "type": "string"
+              },
+              "authority_refs": {
+                "items": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "title": "Authority Refs",
+                "type": "array"
+              },
+              "exclusions": {
+                "maxLength": 1024,
+                "title": "Exclusions",
+                "type": "string"
+              },
+              "expires_at_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Expires At Ms",
+                "type": "integer"
+              },
+              "objective": {
+                "maxLength": 1024,
+                "title": "Objective",
+                "type": "string"
+              },
+              "repositories": {
+                "items": {
+                  "maxLength": 140,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$",
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "title": "Repositories",
+                "type": "array"
+              },
+              "scope": {
+                "maxLength": 1024,
+                "title": "Scope",
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/$defs/Source"
+                },
+                "maxItems": 16,
+                "title": "Sources",
+                "type": "array"
+              },
+              "stop_condition": {
+                "maxLength": 1024,
+                "title": "Stop Condition",
+                "type": "string"
+              },
+              "targets": {
+                "items": {
+                  "$ref": "#/$defs/Target"
+                },
+                "maxItems": 4,
+                "title": "Targets",
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Tools",
+                "type": "array"
+              }
+            },
+            "required": [
+              "objective",
+              "scope",
+              "exclusions",
+              "acceptance",
+              "stop_condition",
+              "authority_refs",
+              "targets",
+              "repositories",
+              "tools",
+              "sources",
+              "expires_at_ms"
+            ],
+            "title": "Contract",
+            "type": "object"
+          },
+          "Finish": {
+            "additionalProperties": false,
+            "properties": {
+              "acceptance": {
+                "items": {
+                  "$ref": "#/$defs/Acceptance"
+                },
+                "maxItems": 64,
+                "title": "Acceptance",
+                "type": "array"
+              },
+              "action": {
+                "const": "finish",
+                "title": "Action",
+                "type": "string"
+              },
+              "limitations": {
+                "maxLength": 2048,
+                "title": "Limitations",
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "completed",
+                  "failed"
+                ],
+                "title": "Outcome",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "outcome",
+              "acceptance",
+              "limitations"
+            ],
+            "title": "Finish",
+            "type": "object"
+          },
+          "ReasonedControl": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "release",
+                  "pause",
+                  "resume",
+                  "cancel"
+                ],
+                "title": "Action",
+                "type": "string"
+              },
+              "reason": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Reason",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "reason"
+            ],
+            "title": "ReasonedControl",
+            "type": "object"
+          },
+          "RecordDecision": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "record_decision",
+                "title": "Action",
+                "type": "string"
+              },
+              "evidence": {
+                "items": {
+                  "maxLength": 32,
+                  "minLength": 32,
+                  "pattern": "^[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "title": "Evidence",
+                "type": "array"
+              },
+              "outcome": {
+                "enum": [
+                  "accepted",
+                  "blocked"
+                ],
+                "title": "Outcome",
+                "type": "string"
+              },
+              "reason": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Reason",
+                "type": "string"
+              },
+              "stage_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Stage Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "stage_id",
+              "outcome",
+              "evidence",
+              "reason"
+            ],
+            "title": "RecordDecision",
+            "type": "object"
+          },
+          "RevisePlan": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "revise_plan",
+                "title": "Action",
+                "type": "string"
+              },
+              "contract": {
+                "$ref": "#/$defs/Contract"
+              },
+              "invalidated_stage_ids": {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Invalidated Stage Ids",
+                "type": "array"
+              },
+              "reason": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Reason",
+                "type": "string"
+              },
+              "stages": {
+                "items": {
+                  "$ref": "#/$defs/StageDefinition"
+                },
+                "maxItems": 16,
+                "minItems": 1,
+                "title": "Stages",
+                "type": "array"
+              }
+            },
+            "required": [
+              "action",
+              "contract",
+              "stages",
+              "invalidated_stage_ids",
+              "reason"
+            ],
+            "title": "RevisePlan",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "locator": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Locator",
+                "type": "string"
+              },
+              "sha256": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "locator",
+              "sha256"
+            ],
+            "title": "Source",
+            "type": "object"
+          },
+          "StageDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "depends_on": {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Depends On",
+                "type": "array"
+              },
+              "id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Id",
+                "type": "string"
+              },
+              "result": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Result",
+                "type": "string"
+              },
+              "source_refs": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Source Refs",
+                "type": "array"
+              },
+              "source_sha256": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Source Sha256",
+                "type": "string"
+              },
+              "verification": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Verification",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "depends_on",
+              "result",
+              "verification",
+              "source_refs",
+              "source_sha256"
+            ],
+            "title": "StageDefinition",
+            "type": "object"
+          },
+          "Target": {
+            "additionalProperties": false,
+            "properties": {
+              "head_sha": {
+                "anyOf": [
+                  {
+                    "maxLength": 40,
+                    "minLength": 40,
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Head Sha"
+              },
+              "machine": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "title": "Machine",
+                "type": "string"
+              },
+              "workspace": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "title": "Workspace",
+                "type": "string"
+              },
+              "workspace_identity": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Workspace Identity",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace",
+              "workspace_identity",
+              "head_sha"
+            ],
+            "title": "Target",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "expected_epoch": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Expected Epoch",
+            "type": "integer"
+          },
+          "expected_plan_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Plan Revision",
+            "type": "integer"
+          },
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "transition": {
+            "discriminator": {
+              "mapping": {
+                "cancel": "#/$defs/ReasonedControl",
+                "claim": "#/$defs/Claim",
+                "finish": "#/$defs/Finish",
+                "pause": "#/$defs/ReasonedControl",
+                "record_decision": "#/$defs/RecordDecision",
+                "release": "#/$defs/ReasonedControl",
+                "resume": "#/$defs/ReasonedControl",
+                "revise_plan": "#/$defs/RevisePlan"
+              },
+              "propertyName": "action"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Claim"
+              },
+              {
+                "$ref": "#/$defs/ReasonedControl"
+              },
+              {
+                "$ref": "#/$defs/RevisePlan"
+              },
+              {
+                "$ref": "#/$defs/RecordDecision"
+              },
+              {
+                "$ref": "#/$defs/Finish"
+              }
+            ],
+            "title": "Transition"
+          },
+          "update_id": {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Update Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_revision",
+          "expected_plan_revision",
+          "expected_epoch",
+          "update_id",
+          "transition"
+        ],
+        "title": "control_taskArguments",
         "type": "object"
       }
     },
@@ -629,6 +1349,52 @@
             ],
             "title": "ExactEdit",
             "type": "object"
+          },
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
           }
         },
         "properties": {
@@ -680,6 +1446,17 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "workspace_name": {
             "title": "Workspace Name",
@@ -773,6 +1550,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "action": {
             "enum": [
@@ -807,6 +1632,17 @@
           "repository": {
             "title": "Repository",
             "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -826,6 +1662,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "action": {
             "enum": [
@@ -879,6 +1763,17 @@
             "default": null,
             "title": "State"
           },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "title": {
             "anyOf": [
               {
@@ -909,6 +1804,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "commit_message": {
             "default": "",
@@ -950,6 +1893,17 @@
           "repository": {
             "title": "Repository",
             "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -969,6 +1923,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "action": {
             "enum": [
@@ -1041,6 +2043,17 @@
             ],
             "default": null,
             "title": "State"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "title": {
             "anyOf": [
@@ -1169,6 +2182,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "action": {
             "enum": [
@@ -1213,6 +2274,17 @@
             "minimum": 0,
             "title": "Review Id",
             "type": "integer"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1614,6 +2686,52 @@
       },
       "inputSchema": {
         "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          },
           "TerminalSize": {
             "additionalProperties": false,
             "properties": {
@@ -1673,6 +2791,17 @@
             "maxItems": 16,
             "title": "Resource Keys",
             "type": "array"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "task_id": {
             "default": "",
@@ -1744,6 +2873,54 @@
         "readOnlyHint": false
       },
       "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
         "properties": {
           "change_id": {
             "default": "",
@@ -1779,6 +2956,17 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "workspace_name": {
             "title": "Workspace Name",

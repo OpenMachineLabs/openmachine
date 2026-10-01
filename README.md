@@ -899,7 +899,7 @@ A logical task may refer to multiple executions. One private store owns it:
 <state-dir>/tasks/<task-id>/task.md   # legacy checkpoint (never both for one ID)
 ```
 
-Spec #29 S1.1 adds `create_task`: the caller derives the smallest contract and
+Spec #29 adds `create_task`: the caller derives the smallest contract and
 ordered stages from the authorized request; a hand-written Spec is optional.
 The initial record retains the original objective, explicit scope/expiry and
 authority references, inspected source hashes, current configured targets and
@@ -925,18 +925,66 @@ openmachine --config /absolute/config.toml --state-dir /absolute/private/state r
 ```
 
 Each call validates at most 50 records/2 MiB; continue an incomplete result with
-its observed `--expected-generation`. New writes remain blocked until complete.
+its observed `--expected-generation`. New work remains blocked until complete;
+original result publication and explicit stopping do not require a healthy index.
 At most 10,000 entries are considered, with no history deletion or bulk migration.
 Missing legacy revisions/hashes, unknown orphans, unsafe paths, missing locks and
 corrupt canonical records block recovery rather than authorize guessed metadata.
 The index contains lookup metadata, never a second progress ledger.
 
-S1.1 is storage, not supervision: new structured tasks cannot start commands
-through a bare `task_id`. There is no `control_task`, claim, automatic result
-collection, recovery loop, event delivery or AI wake. Status reports those
-features as unsupported and caller state as unknown. Terminal shapes are readable
-history, not a delivered terminal transition. Continue existing authorized work
-using its original legacy checkpoint; do not convert it into an unrunnable task.
+S1.2 adds explicit task control and one Application admission gate. A caller
+reads the current task, claims its eligible handoff through `control_task`, then
+supplies `task_context` on each supervised effect. The exact context contains
+`task_id`, `task_revision`, `plan_revision`, `continuation_epoch` and `operation_id`.
+Command start, all three file mutations, all five GitHub mutations, terminal
+control and cancellation use this same gate. Legacy tools remain available;
+a bare `task_id` cannot make a structured task runnable or confer supervision.
+
+`control_task` also supports release, pause, resume, cancellation, plan revision,
+stage decisions and explicit completion/failure. Changes compare all three
+observed revisions/epoch and retain the normalized `update_id`. Identical last
+updates observe the original result without extending ownership. A claim lasts
+at most 300 seconds or the earlier handoff/authority expiry. Native-account
+cooperative ownership is not a ChatGPT conversation identity, credential, or
+proof that an AI is present. Expiry never proves an original command stopped.
+
+Application durably admits an original normalized operation before dispatch,
+then releases the task lock before domain IO. Domains retain their original
+source, permission, sequence and workspace-lease checks. One unresolved mutation
+blocks overlapping work; a live original command still permits its authorized
+control/cancellation. Per-effect locks coordinate only the bounded dispatch,
+not the worker lifetime. New intent/plan growth reserves both encoded capacity
+and collection slots for original results and final evidence. Original-ID
+cancellation remains available if task capacity, metadata or identity admission
+is blocked. It never means the task has already reached its cancelled outcome.
+
+Pause or ownership replacement prevents new admission, not effects of work that
+was already admitted. Cancellation records the stop before requesting bounded
+termination of owned original executions; unknown outcomes remain visible.
+Late results are retained without clearing a pause or reactivating terminal
+history. Reading does not claim, resume, repair or record fresh runtime facts.
+Plan changes invalidate affected stages and dependents while retaining unrelated
+acceptance and old operations. A stage decision references verified applicable
+evidence; an exit code, claim or notification alone cannot finish the task.
+
+An original operation retry compares its normalized fingerprint and only reads
+its receipt/destination. Unknown admission or result publication is not permission
+to resend; missing original receipts remain a blocker. A known supervised identity
+cannot strip context to acquire a new effect. Readable immutable native-ID retries
+and original-worker cancellation retain their existing observation/stop routes.
+For GitHub, task markers and original object locators support read-only recovery;
+unknown-number lookup is bounded to three 100-item pages. Duplicate or incomplete
+coverage is unknown. A bodyless write without sufficient original evidence may
+remain unresolved. There is no exactly-once promise for arbitrary shell/API effects.
+Task `receipt_sha256` fingerprints bounded semantic domain observations, not a
+copy or hash claim about an entire source file, raw log or provider response.
+
+Result reconciliation occurs during the authorized operation/control workflow;
+it does not run while the caller is absent. A decisive result and pending handoff
+are published in the same canonical revision. S1.2 has no observer, automatic
+connection recovery, Events delivery or AI wake. Capabilities distinguish
+supervised admission from those unsupported features; caller state remains unknown.
+Full S1, unattended continuation and production activation are separate acceptance.
 Controller state contract 6 requires actual candidate-reader coverage before a
 managed transition, including terminal-only history. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
@@ -961,7 +1009,7 @@ initializing over history. The persistent store lock also distinguishes a lost
 task directory from a never-initialized store. No automatic repair or replay is
 provided. State permissions are private; same-account records are not tamper-proof.
 
-Continuation is deliberate: find/read the original task, recheck current user
+Legacy continuation is deliberate: find/read the original task, recheck current user
 instructions, Git and original execution receipts, reuse still-valid results,
 then perform only the missing step and save material progress. A keyword result
 is a candidate even when unique; exact anchors may be ambiguous. An execution's
@@ -995,13 +1043,13 @@ The runtime has one application boundary, local capabilities and explicit integr
 
 | Package | Ownership |
 | --- | --- |
-| `openmachine/app/` | Typed operations, shared lifecycle admission, configured local/SSH routing and controller task-reference checks. |
+| `openmachine/app/` | Typed operations, shared lifecycle/task admission, cooperative control, original-result reconciliation and configured local/SSH routing. |
 | `openmachine/bootstrap.py` | Assemble only configured components without probing, executing work or creating state. |
 | `integrations/ssh/` | Bounded controller transport, identity-checked target endpoint and immutable worker archives. |
 | `integrations/github/` | One gh connection backend, bounded API pagination, pinned review/merge evidence and scoped collaboration with destination reconciliation. |
 | `openmachine/execution/` | Local execution admission and observations; pipe/PTY lifecycle and bounded control IPC; persisted record validation and logs. |
 | `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
-| `openmachine/tasks/` | Strict canonical records and durable creation; bounded derived lookup; preserved legacy checkpoint integrity. |
+| `openmachine/tasks/` | Strict records and pure transitions; guarded canonical publication, bounded derived lookup and preserved legacy checkpoint integrity. |
 | `openmachine/foundation/` | Shared filesystem primitives, durable writes, cooperative locks and safe errors; no domain schemas or policy. |
 
 Execution uses `workspace.git` for canonical identity. Task store and index readers
