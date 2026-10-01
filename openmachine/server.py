@@ -230,12 +230,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                    task_id: str = "", offset: Annotated[int, Field(ge=0)] = 0,
                    limit: Annotated[int, Field(ge=1, le=50)] = 20,
                    expected_generation: Annotated[int, Field(ge=-1)] = -1) -> CallToolResult:
-        """Find private checkpoints by exact task/anchors or title/ID keywords. Anchor filters intersect; descriptive results are candidates, never continuation authority. Follow pagination/generation. Reads do not initialize state or start work; missing/corrupt history is explicit."""
+        """Find private checkpoints by exact task/anchors or title/ID keywords. Anchor filters intersect; descriptive results are candidates, never continuation authority. Follow pagination/generation. Reads do not initialize state or start work; missing/corrupt history is explicit. resume_authorized=false means this lookup grants no authority, not that current user authorization is denied."""
         return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_task(task_id: str) -> CallToolResult:
-        """Read the original bounded checkpoint and revision, verify its index hash, then recheck current authority, Git and execution receipts before continuation. This does not resume an agent or execute work."""
+        """Read the original bounded checkpoint and revision, verify its index hash, then recheck current authority, Git and execution receipts before continuation. This does not resume an agent or execute work. resume_authorized=false means this read grants no authority; reuse still-valid current user authorization rather than requesting it again."""
         return _reply(lambda: application.read_task(task_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)

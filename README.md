@@ -302,6 +302,13 @@ and read back the changed files. Preserve unrelated dirty work. Local SDK tests
 prove the protocol workflow, not this account-bound ChatGPT acceptance. Record
 the exact tested source and refresh changed tool metadata in a new conversation.
 
+The [operating Skill](skills/openmachine/SKILL.md#complete-the-authorized-delivery)
+explains how callers finish already-authorized work without routine handback.
+Task-read `resume_authorized: false` means the read grants no authority, not a
+revocation of current user consent. Recognized preflight rejections with no file
+effects include a derived `recovery_hint`; existing receipts and guards are
+unchanged. This guidance does not implement Spec #29 or restart ended AI turns.
+
 ### Workspace inspection bounds
 
 Workspace file/diff pages return at most 32 KiB of text. Listing/status/search

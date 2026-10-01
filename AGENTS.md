@@ -115,3 +115,11 @@ force-push, amend, or rewrite history without explicit authorization.
 Opening a PR is not permission to merge, close an implementation Spec, or release.
 On resumption, verify the original Git state and execution receipts before
 repeating work. Stop after the requested delivery and scoped acceptance.
+
+Complete every explicitly authorized deliverable before the final response;
+progress reports and ordinary tool/test failures are not handoff gates. Reuse
+valid authorization instead of asking again. Follow the recovery guidance in
+[the operating Skill](skills/openmachine/SKILL.md#complete-the-authorized-delivery):
+correct proven no-effect requests, reconcile uncertain effects, and preserve all
+current guards. A real blocker requires its evidence and the exact remaining
+work; do not end with only a promise to continue. Do not expand scope to avoid it.

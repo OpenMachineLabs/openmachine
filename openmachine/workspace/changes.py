@@ -782,9 +782,22 @@ def _observed(directory: Path, record: dict | None = None, *, owned: bool = Fals
                 raise
         classification = "terminal" if record["status"] in TERMINAL else "owner_active" if alive else (
             "no_effects" if record["status"] in {"accepted", "prepared"} else "outcome_unknown")
-        return record | {"writer_alive": alive, "owner_observed_at": observed_at, "reconciliation": classification,
-                         "historical_diff_available": False,
-                         "next_observation": {"operation": "read_workspace_change", "change_id": record["change_id"]}}
+        result = record | {"writer_alive": alive, "owner_observed_at": observed_at, "reconciliation": classification,
+                           "historical_diff_available": False,
+                           "next_observation": {"operation": "read_workspace_change", "change_id": record["change_id"]}}
+        # Derived guidance only; never persist it or infer safety from an error code alone.
+        if record["status"] == "rejected" and not record["effects"]:
+            hint = {
+                "match_ambiguous": "Use unique surrounding text to select the intended occurrence.",
+                "match_missing": "Read the current source and correct the absent old fragment.",
+                "context_mismatch": "Re-read workspace, branch and HEAD; reconcile the changed context.",
+                "content_mismatch": "Read the current source and reconcile its changed content.",
+            }.get(record["error"])
+            if hint:
+                result["recovery_hint"] = ("No file effects were recorded. " + hint +
+                    " Continue only within current authorization; preview the corrected intent, then use a new change ID."
+                    " Preserve this original receipt; do not replay its request.")
+        return result
 
 
 def read_change(config, state: Path, machine: str, change_id: str, observe_current: bool = False) -> dict:
