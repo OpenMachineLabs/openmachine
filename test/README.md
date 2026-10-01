@@ -534,3 +534,33 @@ do not prove A19 natural-language planning. Record actual AI-authored creation a
 one-step-read selection only on an exposed, separately authorized candidate
 connection; absent client tools leave that acceptance NOT RUN. Full S1, A16,
 Events, production activation and release remain separate.
+
+## Spec #29 S1.5 actual-client task acceptance
+
+Use an isolated installed candidate, private state and disposable workspace with
+its own authorized client connection. Record the source commit, wheel hash,
+source/installed Skill parity and actual client/tool discovery; a matching version
+string alone cannot distinguish a stale endpoint. Keep production routes intact.
+
+From the actual AI client, ask an ordinary multi-stage request without supplying
+Task Contract JSON or a hand-written Spec. Verify that the AI creates the bounded
+contract and plan before the first consequential effect. Deliberately hand over
+after an accepted stage, then continue from a fresh conversation using the
+original task identity and receipts. Complete the remaining stage and explicitly
+finish; verify accepted work was not repeated, the original verification counter
+is one, and terminal history remains readable without restarting work. A separate
+one-step read must leave task storage unchanged without prompting the AI to avoid
+task creation.
+
+Keep exact prompts, original identities and PASS/FAIL/NOT RUN evidence in Issue
+#29 and its PR. A client-authored contract, real file receipt and original command
+result are distinct from scripted SDK fixtures. Manual reattachment does not
+prove A16 unattended continuation. Reuse existing pause, source-drift, ownership,
+legacy and retirement regressions. The retained source-binding vector verifies
+the documented canonical encoding, including its final newline. A rejected
+contract followed by an ordinary file receipt fails this acceptance; correct the
+input before supervised effects, without dropping source bindings. Preserve the
+failed attempt and repeat only the affected client workflow on fresh disposable
+state after a guidance repair. Stop and retire the owned test connection after
+acceptance. No new runner, model backend, production activation or Events route
+is required.
