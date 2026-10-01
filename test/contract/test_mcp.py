@@ -103,6 +103,20 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             "stages": [{"id": "verify", "depends_on": [], "result": "Retained task", "verification": "Exact readback",
                         "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}
 
+    async def observer_task_view(self, client, identity):
+        # The canonical reader is deliberately nonblocking. A concurrent result
+        # publication may return resource_busy; retry only that passive read,
+        # bounded by one deadline, and expose every other structured failure.
+        deadline = time.monotonic() + 2
+        while True:
+            result = await client.call_tool("read_task", {"task_id": identity})
+            payload = result.structured_content or {}
+            if not result.is_error:
+                return payload
+            self.assertEqual(payload.get("error", {}).get("code"), "resource_busy", payload)
+            self.assertLess(time.monotonic(), deadline, payload)
+            await asyncio.sleep(0.02)
+
     async def test_observer_publishes_original_results_with_all_clients_absent(self):
         for mode in ("legacy", "2026-07-28"):
             for boundary in ("live", "restart-running", "restart-completed", "activation"):
@@ -132,7 +146,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                             task_context=dict(task_id=identity, task_revision=record["revision"], plan_revision=1,
                                 continuation_epoch=record["control"]["epoch"], operation_id=execution_id)))
                         async with Client(self.client(), mode=mode, cache=None) as second:
-                            self.assertFalse((await second.call_tool("read_task", {"task_id": identity})).is_error)
+                            self.assertEqual((await self.observer_task_view(second, identity))["task_id"], identity)
                     # No SDK sessions or tool calls remain. Only fixture control
                     # and passive canonical bytes may be used to await publication.
                     if boundary != "live":
@@ -157,8 +171,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                                     await asyncio.sleep(0.03)
                                 self.assertTrue(done.exists())
                                 async with Client(self.client(), mode=mode, cache=None) as probe:
-                                    result = await probe.call_tool("read_task", {"task_id": identity})
-                                    self.assertFalse(result.is_error, result.structured_content)
+                                    self.assertEqual((await self.observer_task_view(probe, identity))["task_id"], identity)
                                 self.assertEqual(path.read_bytes(), before)
                         else:
                             self.launch()
@@ -178,7 +191,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(counter.read_text(), "1")
                     before = path.read_bytes()
                     async with Client(self.client(), mode=mode, cache=None) as client:
-                        view = (await client.call_tool("read_task", {"task_id": identity})).structured_content
+                        view = await self.observer_task_view(client, identity)
                         self.assertTrue(view["support"]["local_result_observation"])
                         self.assertFalse(view["support"]["events_delivery"])
                         self.assertEqual(view["observations"][0]["state"], "unknown")
