@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from integrations.ssh import MAX_MESSAGE, PROTOCOL, bundle, client, endpoint
+from integrations.ssh import MAX_MESSAGE, PROTOCOL, bundle, client, endpoint, recovery
 from openmachine import __version__, execution, tasks
 from openmachine.execution import api as execution_api, logs
 from openmachine.config import Settings
@@ -150,6 +150,64 @@ class SSHTests(unittest.TestCase):
                     client.call(self.settings, "build-machine", operation)
                 self.assertEqual(caught.exception.code, expected)
                 self.assertEqual(exchange.call_count, 1)
+
+    def test_transport_classifies_bounded_failures_without_returning_diagnostics(self):
+        cases = [("Connection refused", "ssh_unavailable", True),
+                 ("Permission denied (publickey). Connection timed out", "ssh_authentication_required", False),
+                 ("REMOTE HOST IDENTIFICATION HAS CHANGED! Connection refused", "ssh_host_key_mismatch", False)]
+        for diagnostic, code, retryable in cases:
+            with self.subTest(diagnostic=diagnostic), self.assertRaises(Fault) as caught:
+                client._exchange([sys.executable, "-c", 'import os,sys;os.close(0);sys.stderr.write(sys.argv[1]);sys.exit(255)', diagnostic], b" " * MAX_MESSAGE)
+            self.assertEqual(caught.exception.code, code)
+            self.assertEqual((caught.exception.evidence or {}).get("ssh_retryable", False), retryable)
+            self.assertNotIn(diagnostic, str(caught.exception))
+        with patch.object(client, "_exchange", side_effect=TimeoutError), self.assertRaises(Fault) as caught:
+            client.call(self.settings, "build-machine", "read_execution", execution_id="c" * 32)
+        self.assertTrue(caught.exception.evidence["ssh_retryable"])
+        with patch.object(client, "_exchange", return_value=(255, b"")), self.assertRaises(Fault) as caught:
+            client.call(self.settings, "build-machine", "read_execution", execution_id="c" * 32)
+        self.assertFalse((caught.exception.evidence or {}).get("ssh_retryable", False))
+
+    def test_shared_recovery_is_passive_bounded_and_fail_closed(self):
+        state = self.root / "controller"
+        self.assertEqual(recovery.read(state)["targets"], {})
+        self.assertFalse(state.exists())
+        episode = {"episode_id": "c" * 32, "started_at_ms": 1, "deadline_ms": 3600001,
+                   "attempts": 1, "next_attempt_ms": 2001, "reason_code": "ssh_transport_unavailable"}
+        recovery.replace(state, self.identity, None, episode)
+        before = (state / "ssh-recovery.json").read_bytes()
+        self.assertEqual(recovery.read(state)["targets"][self.identity], episode)
+        recovery.replace(state, self.identity, episode, episode)
+        self.assertEqual((state / "ssh-recovery.json").read_bytes(), before)
+        with self.assertRaises(Fault) as caught:
+            recovery.replace(state, self.identity, None, None)
+        self.assertEqual(caught.exception.code, "ssh_recovery_conflict")
+        self.assertEqual((state / "ssh-recovery.json").read_bytes(), before)
+        for data in (before.replace(b'"attempts": 1', b'"attempts": true'),
+                     before.replace(b'"deadline_ms": 3600001', b'"deadline_ms": 3600002'),
+                     before.replace(b'"format": 1', b'"format": 1, "format": 1'), b"x" * (recovery.MAX_BYTES + 1)):
+            (state / "ssh-recovery.json").write_bytes(data)
+            with self.assertRaises(Fault):
+                recovery.read(state)
+            self.assertEqual((state / "ssh-recovery.json").read_bytes(), data)
+        (state / "ssh-recovery.json").unlink()
+        with self.assertRaises(Fault) as caught:
+            recovery.read(state)
+        self.assertEqual(caught.exception.code, "ssh_recovery_corrupt")
+        with self.assertRaises(Fault):
+            recovery.replace(state, self.identity, None, None)
+        self.assertFalse((state / "ssh-recovery.json").exists())
+
+    def test_shared_recovery_lost_durability_ack_never_reinitializes(self):
+        state = self.root / "controller"
+        original = recovery.save_json
+        def lost(path, value):
+            original(path, value)
+            raise OSError("Lost acknowledgement")
+        with patch.object(recovery, "save_json", side_effect=lost), self.assertRaises(Fault) as caught:
+            recovery.replace(state, self.identity, None, None)
+        self.assertEqual(caught.exception.code, "ssh_recovery_unverified")
+        self.assertEqual(recovery.read(state)["targets"], {self.identity: None})
 
     def test_controller_checkpoint_is_required_only_for_a_new_execution(self):
         app = create_application(self.settings, self.root / "controller")

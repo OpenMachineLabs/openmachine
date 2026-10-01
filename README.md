@@ -1000,11 +1000,11 @@ lifespan, independent of client sessions and Desktop. Constructing an Applicatio
 or reading a task does not start it. Startup reconstructs a bounded active set
 from registered canonical records; normal discovery inspects changed metadata
 in pages of at most 50 records/2 MiB, not unchanged historical records forever.
-Terminal records and tasks without pending local operations leave observation.
+Terminal records and tasks without pending execution/change operations leave observation.
 Unregistered/corrupt history or an incomplete index remains an explicit blocker;
 the observer never repairs the index or converts legacy checkpoints.
 
-Only original local execution, control/cancel and file-change receipts are read.
+Only original execution, control/cancel and file-change receipts are read.
 The observer reuses Application's result mapping, then publishes decisive results
 and their pending handoff in one revision-checked canonical update. It never
 starts a command, repeats input/edits, claims continuation or accepts a stage.
@@ -1035,10 +1035,28 @@ last material progress, blockers and applicable next attempt. A live observer
 heartbeat is not command progress; a stopped observer has no live retry timer.
 Capability `local_result_observation` is distinct from complete runtime recovery
 and Events delivery, which remain unsupported here. Caller state stays unknown.
-Full S1, actual unattended AI continuation and production activation retain
-their separate acceptance; this increment does not claim to restart ChatGPT.
-Controller state contract 6 requires actual candidate-reader coverage before a
-managed transition, including terminal-only history. An incompatible old runtime
+Actual unattended AI continuation and production activation retain their separate
+acceptance; result observation does not restart ChatGPT.
+
+S2.1 extends that same observer to configured SSH targets, exposing
+`ssh_result_observation`. Two additional readers observe original remote receipts
+every 5 seconds, with at most one exchange per pinned target across aliases/tasks.
+The existing transport retains its 30-second exchange deadline, 10-second connect
+timeout and one connection attempt. A failed SSH read never occupies a local slot.
+Only recognized transient transport failures retry: three fast attempts including
+the first failure, 2/4-second delays, then 60-second cooldown with 0.8-1.2 jitter,
+bounded by one hour/60 attempts and each task's earlier authority expiry.
+Authentication, host identity, protocol and corrupt-history failures stop retries.
+The SSH owner retains shared budgets in a private bounded `ssh-recovery.json`;
+tasks reference that episode instead of owning independent connection retries.
+Receipt-specific failures retain their own task budget. Pause, cancellation,
+restart or another task cannot reset either budget. A successful verified read
+clears connection recovery without replaying effects or accepting a task stage.
+
+Controller state contract 7 requires actual candidate-reader coverage before a
+managed transition, including terminal-only tasks and retained SSH budgets, even
+after SSH is disabled. Task format 1/index 2, execution format 5 and SSH protocol 6
+remain unchanged. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
 
 Legacy `save_task` creates at revision zero and updates only the observed revision. It

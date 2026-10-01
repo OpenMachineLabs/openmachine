@@ -64,7 +64,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
             "openmachine.skills": ("openmachine.foundation.*",),
             "openmachine.service": ("openmachine", "openmachine.config", "openmachine.execution",
-                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx2", "mcp.*"),
+                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx2", "mcp.*", "integrations.ssh.recovery"),
             "openmachine.app": ("openmachine", "openmachine.app.machines", "openmachine.app.task_admission", "openmachine.app.task_observer", "openmachine.config",
                                 "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
                                 "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
@@ -74,7 +74,7 @@ class RuntimeTests(unittest.TestCase):
                                                "openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.app.task_observer": ("openmachine.tasks", "openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
-                                      "integrations.github", "integrations.ssh.client"),
+                                      "integrations.github", "integrations.ssh.client", "integrations.ssh.recovery"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
                                    "openmachine.service", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
@@ -90,6 +90,7 @@ class RuntimeTests(unittest.TestCase):
                                                "integrations.github.evidence", "openmachine.config", "openmachine.foundation.*"),
             "integrations.ssh": (),
             "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
+            "integrations.ssh.recovery": ("openmachine.foundation.*",),
             "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
             # The archive's worker process entry is the sole cross-domain worker caller.
             "integrations.ssh.endpoint": ("openmachine", "openmachine.execution", "openmachine.execution.worker",
