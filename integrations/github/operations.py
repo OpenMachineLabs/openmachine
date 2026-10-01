@@ -85,12 +85,7 @@ def _project(kind: str, value: dict) -> dict:
 
 
 def _enabled(settings: Settings, repository: str, metadata: dict | None = None) -> bool:
-    config = connection.authorize(settings, repository)
-    if config.attribution is not None:
-        return config.attribution
-    # Attribution is enabled by default. A future UI can expose this as a user choice;
-    # do not silently omit provenance based on repository visibility.
-    return True
+    return connection.authorize(settings, repository).attribution
 
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
