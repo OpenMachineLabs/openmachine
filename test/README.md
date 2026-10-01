@@ -556,6 +556,11 @@ Keep exact prompts, original identities and PASS/FAIL/NOT RUN evidence in Issue
 #29 and its PR. A client-authored contract, real file receipt and original command
 result are distinct from scripted SDK fixtures. Manual reattachment does not
 prove A16 unattended continuation. Reuse existing pause, source-drift, ownership,
-legacy and retirement regressions; add a focused case only for a demonstrated
-defect. Stop and retire the owned test connection after acceptance. No new runner,
-model backend, production activation or Events route is required.
+legacy and retirement regressions. The retained source-binding vector verifies
+the documented canonical encoding, including its final newline. A rejected
+contract followed by an ordinary file receipt fails this acceptance; correct the
+input before supervised effects, without dropping source bindings. Preserve the
+failed attempt and repeat only the affected client workflow on fresh disposable
+state after a guidance repair. Stop and retire the owned test connection after
+acceptance. No new runner, model backend, production activation or Events route
+is required.

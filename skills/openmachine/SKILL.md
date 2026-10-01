@@ -66,6 +66,9 @@ an ended ChatGPT turn will restart. That separate capability belongs to Spec #29
    boundaries that materially affect the work. A one-step read needs no task.
    Check the exposed tools: absent `create_task`/`control_task` means structured
    supervision is unavailable, not permission to install or claim legacy coverage.
+   If contract creation fails, correct the rejected input or report the blocker
+   before effects. Do not substitute a file/execution receipt or legacy checkpoint
+   for the required structured task, or omit task_context to continue the work.
 4. Inspect status/search and relevant source, including applicable nested
    AGENTS.md. Optional path_glob filters workspace-relative paths for files/search;
    * never crosses / and ** is unsupported. Omission preserves traversal coverage.
@@ -299,8 +302,14 @@ requires a compatible actual reader before a software transition.
 
 Use `create_task` only to accept a new structured contract,
 not to convert existing legacy work. Supply original request/source identities,
-explicit scope/expiry and backward-dependent stages. Source hashes use canonical
-selected source objects in locator order. Creation rejects runtime fields and
+explicit scope/expiry and backward-dependent stages. For each stage, select its
+`source_refs` from `contract.sources`, sort those complete `{locator, sha256}`
+objects by locator, and hash the UTF-8 bytes of
+`json.dumps(selected, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"`
+with SHA-256. The final newline is required; an empty selection hashes `[]\n`.
+Hash the source objects, not only their digests or referenced file bytes. Compute
+hashes exactly; do not guess them or drop source bindings to bypass validation.
+Creation rejects runtime fields and
 unknown arguments. Keep the same task/update IDs after lost acknowledgement.
 Canonical reads remain available when derived lookup is stale; they never repair
 the index, claim work or authorize continuation. Explicit index maintenance is

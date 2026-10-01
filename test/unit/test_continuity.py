@@ -439,7 +439,7 @@ class StructuredTaskTests(unittest.TestCase):
         import copy
         changes = [lambda r: r["stages"][0].update(state="accepted"),
                    lambda r: r["stages"][0].update(depends_on=["verify"]),
-                   lambda r: r["stages"][0].update(source_sha256="0" * 64),
+                   lambda r: r["stages"][0].update(source_sha256=hashlib.sha256(b"[]").hexdigest()),
                    lambda r: r["contract"].update(expires_at_ms=True),
                    lambda r: r["contract"].update(expires_at_ms=2**53),
                    lambda r: r["contract"].update(scope="\u00e9" * 513),
@@ -703,14 +703,14 @@ store.create(Path(sys.argv[1]),request.pop("task_id"),**request)
         self.assertEqual(self.app.read_task("structured-one")["record"]["revision"], 1)
 
     def test_source_hashes_follow_locator_order_and_preserve_legacy_anchor_rules(self):
-        from openmachine.tasks import records
         sources = [{"locator": "fixture:z", "sha256": "a" * 64}, {"locator": "fixture:a", "sha256": "b" * 64}]
-        selected = sorted(sources, key=lambda item: item["locator"])
         self.request["contract"]["sources"] = sources
         self.request["anchors"] = [" ", "fixture=structured", " "]
-        self.request["stages"][0].update(source_refs=["fixture:z", "fixture:a"], source_sha256=records.digest(selected))
+        # Independent client vector: compact sorted JSON source objects plus a final newline.
+        self.request["stages"][0].update(source_refs=["fixture:z", "fixture:a"],
+            source_sha256="1323491417f9158ef1586fd4829f003c485343775f56103760e21ca83c38c904")
         self.request["stages"].append({"id": "finish", "depends_on": ["verify"], "result": "Retained plan",
-            "verification": "Read both stages", "source_refs": [], "source_sha256": records.digest([])})
+            "verification": "Read both stages", "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()})
         created = self.create()["record"]
         self.assertEqual(created["anchors"], [" ", "fixture=structured"])
         self.assertEqual(created["plan"]["stages"][1]["depends_on"], ["verify"])
