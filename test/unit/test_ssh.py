@@ -153,7 +153,10 @@ class SSHTests(unittest.TestCase):
 
     def test_transport_classifies_bounded_failures_without_returning_diagnostics(self):
         cases = [("Connection refused", "ssh_unavailable", True),
+                 ("Connection to fixture-host closed by remote host.\n", "ssh_unavailable", True),
+                 ("Connection closed by 192.0.2.10 port 22\n", "ssh_unavailable", True),
                  ("Permission denied (publickey). Connection timed out", "ssh_authentication_required", False),
+                 ("Host key verification failed.\nConnection closed by 192.0.2.10 port 22\n", "ssh_host_key_mismatch", False),
                  ("REMOTE HOST IDENTIFICATION HAS CHANGED! Connection refused", "ssh_host_key_mismatch", False)]
         for diagnostic, code, retryable in cases:
             with self.subTest(diagnostic=diagnostic), self.assertRaises(Fault) as caught:

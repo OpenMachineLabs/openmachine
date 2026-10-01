@@ -75,7 +75,9 @@ def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | N
                         raise Fault("ssh_authentication_required", "SSH authentication was refused; automatic recovery is stopped.")
                     if any(item in detail for item in (b"connection timed out", b"connection refused", b"no route to host",
                             b"network is unreachable", b"connection reset by peer", b"connection closed by remote host",
-                            b"temporary failure in name resolution", b"operation timed out")):
+                            b"temporary failure in name resolution", b"operation timed out")) or re.search(
+                            rb"(?:connection to [^\r\n]+ closed by remote host\.?|connection closed by [^\r\n]+ port [0-9]+)\s*$",
+                            detail, re.MULTILINE):
                         raise Fault("ssh_unavailable", "The original SSH connection is temporarily unavailable.", {"ssh_retryable": True})
                 return code, bytes(output)
         finally:
