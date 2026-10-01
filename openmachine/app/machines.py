@@ -88,12 +88,12 @@ class Machines:
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
                         task_id: str = "", termination_grace_seconds: float | None = None,
-                        tty: bool = False, terminal_size: dict | None = None) -> dict:
+                        tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False) -> dict:
         target = self.config.machine(machine, write=True)
         if target.transport == "ssh":
             keys = execution.validate_start(cwd, argv, timeout_seconds, expected_head_sha,
                                             workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size)
-            if task_id:
+            if task_id and not task_admitted:
                 # A pre-read only decides whether a new controller reference is needed.
                 # The target start must still compare the original normalized request.
                 try:
@@ -108,7 +108,7 @@ class Machines:
                              termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
                                expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
-                               validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id else None)
+                               validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
                        max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,

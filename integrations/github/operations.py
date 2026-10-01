@@ -182,6 +182,104 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     return _public(result)
 
 
+def reconcile(settings: Settings, locator: dict, request: dict | None = None) -> dict:
+    """Bounded original-destination observation. Never resubmit a publication."""
+    kind, repository = locator.get("object_type"), locator.get("repository", "")
+    number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
+    if (kind not in {"issue", "pull_request", "comment", "review", "merge"}
+            or not isinstance(anchor, str) or not re.fullmatch(r"om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}", anchor)
+            or any(value is not None and (type(value) is not int or value < 1) for value in (number, parent))):
+        raise Fault("invalid_github_request", "Reconciliation requires the original bounded publication locator.")
+    actor, _ = connection.access(settings, repository)
+    root, marker = f"repos/{repository}", f"<!-- {anchor} -->"
+    unknown = {"status": "write_outcome_unknown", "repository": repository,
+               "detail": "Original destination is unresolved; no publication was repeated."}
+    if kind == "merge":
+        if number is None:
+            return unknown
+        value = evidence.pull_request(repository, number, (request or {}).get("expected_head_sha", ""))
+        sha = value.get("merge_commit_sha", "")
+        if value.get("merged") is not True or not isinstance(sha, str) or not re.fullmatch(evidence.SHA, sha):
+            return unknown
+        head = object_response(value.get("head")).get("sha")
+        base_ref = object_response(value.get("base")).get("ref")
+        if not isinstance(base_ref, str) or not isinstance(head, str) or not re.fullmatch(evidence.SHA, head):
+            return unknown
+        commit = object_response(connection.request("GET", f"{root}/commits/{sha}"))
+        branch = object_response(connection.request("GET", f"{root}/branches/{quote(base_ref, safe='')}"))
+        tip = object_response(branch.get("commit")).get("sha", "")
+        if not re.fullmatch(evidence.SHA, tip):
+            return unknown
+        comparison = object_response(connection.request("GET", f"{root}/compare/{sha}...{tip}"))
+        if (commit.get("sha") != sha or comparison.get("status") not in {"ahead", "identical"}
+                or (comparison.get("merge_base_commit") or {}).get("sha") != sha):
+            return unknown
+        message = object_response(commit.get("commit")).get("message", "")
+        if request is not None and (
+                request.get("commit_title") and message.split("\n", 1)[0] != request["commit_title"]
+                or request.get("commit_message") and message.partition("\n\n")[2].rstrip("\n") != request["commit_message"].rstrip("\n")):
+            return unknown
+        if connection.read_actor(settings) != actor:
+            raise Fault("github_identity_changed", "The acting account changed during original-result observation.")
+        return {"status": "merged_verified" if request is not None else "observed", "repository": repository,
+                "receipt": {"number": number, "head_sha": head, "merge_commit_sha": sha}, "destination_verified": True}
+    if parent is None and (kind == "review" or kind == "comment" and number is None):
+        return unknown
+    collection = {"issue": f"{root}/issues?state=all&sort=created&direction=desc",
+                  "pull_request": f"{root}/pulls?state=all&sort=created&direction=desc",
+                  "comment": f"{root}/issues/{parent}/comments", "review": f"{root}/pulls/{parent}/reviews"}[kind]
+    coverage = "exact"
+    if number is None:
+        found = []
+        following = 1
+        for page in range(1, 4):
+            items, following = client.list_page(collection, page, 100)
+            found.extend(item for item in items if marker in (item.get("body") or "")
+                         and not (kind == "issue" and "pull_request" in item))
+            if following is None:
+                break
+        coverage = "incomplete" if following is not None else "complete"
+        if len(found) != 1 or following is not None:
+            return {**unknown, "coverage": coverage, "matching_destinations": len(found)}
+        number = found[0].get("number" if kind in {"issue", "pull_request"} else "id")
+        if type(number) is not int or number < 1:
+            return unknown
+    endpoint = {"issue": f"{root}/issues/{number}", "pull_request": f"{root}/pulls/{number}",
+                "comment": f"{root}/issues/comments/{number}", "review": f"{root}/pulls/{parent}/reviews/{number}"}[kind]
+    value = object_response(connection.request("GET", endpoint))
+    identity = "number" if kind in {"issue", "pull_request"} else "id"
+    if value.get(identity) != number or kind == "issue" and "pull_request" in value:
+        raise Fault("github_wrong_object_type", "The original locator did not resolve to the expected publication.")
+    if kind == "comment" and parent is not None and not str(value.get("issue_url", "")).endswith(f"/issues/{parent}"):
+        raise Fault("github_wrong_object_type", "The original comment belongs to another parent.")
+    matches = request is not None and marker in (value.get("body") or "")
+    if request is not None:
+        if request.get("action") == "create":
+            matches &= (value.get("user") or {}).get("id") == actor["id"]
+        for key in ("title", "state"):
+            if request.get(key) is not None:
+                matches &= value.get(key) == request[key]
+        if request.get("body") is not None:
+            body = request["body"]
+            matches &= value.get("body") in {body, *(_append(body, footer) for footer in FOOTERS)}
+        if kind == "pull_request":
+            if request.get("action") == "create":
+                matches &= value.get("draft") == request.get("draft", False)
+                for key in ("head", "base"):
+                    branch = object_response(value.get(key))
+                    matches &= request[key] in {branch.get("ref"), branch.get("label")}
+            if request.get("expected_head_sha"):
+                matches &= object_response(value.get("head")).get("sha") == request["expected_head_sha"]
+        if kind == "review" and request.get("action") == "create":
+            matches &= value.get("commit_id") == request.get("expected_head_sha")
+            matches &= value.get("state") == {"COMMENT": "COMMENTED", "APPROVE": "APPROVED",
+                                              "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(request.get("event"))
+    if connection.read_actor(settings) != actor:
+        raise Fault("github_identity_changed", "The acting account changed during original-result observation.")
+    return _public({"status": "verified" if matches else "observed", "repository": repository, "actor": actor,
+                    "receipt": _receipt(value), "fields_verified": bool(matches), "coverage": coverage})
+
+
 def _receipt(result: dict) -> dict:
     return {key: result[key] for key in ("id", "number", "html_url", "state", "submitted_at", "updated_at", "commit_id", "merged", "merge_commit_sha") if key in result}
 

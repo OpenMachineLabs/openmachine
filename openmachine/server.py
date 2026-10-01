@@ -54,6 +54,10 @@ class TerminalSize(BaseModel):
     cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
 
 
+def _task_context(value: tasks.TaskContext | None) -> dict | None:
+    return value.model_dump() if value is not None else None
+
+
 def _result(payload: dict, failed: bool = False) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))],
                           structured_content=payload, is_error=failed)
@@ -123,7 +127,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        if params["name"] == "create_task" and set(arguments) - validator.schema["properties"].keys():
+        guarded = {"create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+                   "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
+                   "github_pull_request", "github_comment", "github_review", "github_merge"}
+        if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
             return invalid
         try:
             response = await call_next(ctx)
@@ -182,10 +189,11 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                              expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")],
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")],
                              change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
-                             expected_workspace_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+                             expected_workspace_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
+                             task_context: tasks.TaskContext | None = None) -> CallToolResult:
         """Publish one bounded whole file. A change_id requires observed workspace identity and retains the original result; no-ID calls retain legacy behavior without durable recovery. Empty source hash means absence. Uses the independent effective edit grant and the original workspace lease; no commands, parents or implicit replay. Unknown effects require original-ID readback. Native checks are not a kernel CAS or sandbox."""
         operation = partial(_reply, lambda: application.write_workspace_file(machine, workspace_name, path, content,
-            expected_head_sha, expected_sha256, change_id, expected_workspace_identity), workspace_output=True,
+            expected_head_sha, expected_sha256, change_id, expected_workspace_identity, _task_context(task_context)), workspace_output=True,
             workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
@@ -197,11 +205,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                             expected_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                             dry_run: Annotated[bool, Field(strict=True)] = False,
-                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
+                            task_context: tasks.TaskContext | None = None) -> CallToolResult:
         """Replace exact non-overlapping fragments located in the same original UTF-8 file. Preview requires empty ID and has no writes; apply requires a caller-generated ID. Echo observed whole-file hash, HEAD and workspace identity; optionally bind preview plan SHA. Same ID/request observes, never replays; ambiguous matches fail. Sources/results support 2 MiB; combined replacement strings remain 128 KiB. File changes are not test results."""
         operation = partial(_reply, lambda: application.edit_workspace_file(machine, workspace_name, path,
             [edit.model_dump() for edit in edits], expected_workspace_identity, expected_head_sha, expected_sha256,
-            change_id, dry_run, expected_plan_sha256), workspace_output=True, workspace_mutation=True, change_id=change_id)
+            change_id, dry_run, expected_plan_sha256, _task_context(task_context)), workspace_output=True, workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=file_write, structured_output=False)
@@ -213,11 +222,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                             create_parents: Annotated[bool, Field(strict=True)] = False,
                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                             dry_run: Annotated[bool, Field(strict=True)] = False,
-                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+                            expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
+                            task_context: tasks.TaskContext | None = None) -> CallToolResult:
         """Apply one strict om_patch_v1 add/update/delete/move plan on one workspace. Exact preconditions cover both move endpoints; empty hash means absence. All files are prepared before effects, then published in declared order, not as an atomic batch. Preview has no state or filesystem writes and requires an empty ID. Apply requires a caller-generated ID; retained identical requests never replay. Explicit parent creation is bounded. Partial and unknown outcomes retain the original effect evidence; do not retry or roll back automatically. File changes are not test results."""
         operation = partial(_reply, lambda: application.apply_workspace_patch(machine, workspace_name, patch,
             expected_workspace_identity, expected_head_sha, [item.model_dump() for item in preconditions],
-            create_parents, change_id, dry_run, expected_plan_sha256), workspace_output=True,
+            create_parents, change_id, dry_run, expected_plan_sha256, _task_context(task_context)), workspace_output=True,
             workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
@@ -234,9 +244,21 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                     title: Annotated[str, Field(min_length=1, max_length=200)],
                     anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
                     stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
-        """Create one bounded canonical task contract and pending plan handoff. Stage source_sha256 hashes canonical selected source objects in locator order. Current targets/grants are checked only for a new creation; original update-ID retries return retained state. A stale index does not erase a committed record. Structured tasks are non-runnable in S1.1: no claim, execution, automatic recovery or AI wake follows. Authority references are traceability, not new grants. Never convert legacy history or supply runtime facts."""
+        """Create one bounded canonical task contract and pending plan handoff. Stage source_sha256 hashes canonical selected source objects in locator order. Current targets/grants are checked only for a new creation; original update-ID retries return retained state. A stale index does not erase a committed record. A later explicit control_task claim and current task_context are required before supervised effects; creation does not execute, recover or wake an AI. Authority references are traceability, not new grants. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
                       contract.model_dump(), [stage.model_dump() for stage in stages]))
+
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    async def control_task(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
+                           expected_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
+                           expected_plan_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
+                           expected_epoch: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
+                           update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
+                           transition: tasks.Transition) -> CallToolResult:
+        """Explicitly claim/release, pause/resume/cancel, revise a plan, record a verified decision or finish the original task. Echo current task/plan/epoch and preserve update_id after a lost reply. Claims are native-account cooperative ownership, not ChatGPT identity or permission. Pause blocks new admission, not already admitted effects; cancellation retains unknown outcomes until original evidence resolves. Reads never claim. No observer, Events or automatic AI continuation."""
+        operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
+            expected_plan_revision, expected_epoch, update_id, transition.model_dump()))
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],
@@ -248,7 +270,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_task(task_id: str) -> CallToolResult:
-        """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. Unknown caller state and unsupported supervision are explicit. Reading grants no authority and never reactivates terminal history."""
+        """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. Caller state remains unknown; native task control, runtime recovery and Events support are reported separately. Reading grants no authority and never reactivates terminal history."""
         return _reply(lambda: application.read_task(task_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
@@ -267,9 +289,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                         resource_keys: Annotated[list[str], Field(max_length=16)] = [], task_id: str = "",
                         termination_grace_seconds: Annotated[float | None, Field(strict=True, ge=0, le=30, allow_inf_nan=False)] = None,
                         tty: Annotated[bool, Field(strict=True)] = False,
-                        terminal_size: TerminalSize | None = None) -> CallToolResult:
-        """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id references an existing checkpoint; it never writes task progress or supplies authorization."""
-        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size.model_dump() if terminal_size is not None else None), execution_output=True)
+                        terminal_size: TerminalSize | None = None,
+                        task_context: tasks.TaskContext | None = None) -> CallToolResult:
+        """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id is a legacy checkpoint association, not permission. Structured work requires current task_context; the original execution_id must equal operation_id. Admission precedes dispatch; unknown outcomes never permit a new ID."""
+        return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size.model_dump() if terminal_size is not None else None, _task_context(task_context)), execution_output=True)
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     async def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
@@ -303,9 +326,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         return _reply(lambda: application.list_executions(machine, cursor, limit))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
-    async def cancel_execution(machine: str, execution_id: str) -> CallToolResult:
+    async def cancel_execution(machine: str, execution_id: str, task_context: tasks.TaskContext | None = None) -> CallToolResult:
         """Request cancellation of this owned execution only; read its terminal receipt. Does not undo previous side effects."""
-        operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id), execution_output=True)
+        operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id, _task_context(task_context)), execution_output=True)
         return await asyncio.wrap_future(_submit_owned(operation))
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=has_ssh), structured_output=False)
@@ -313,11 +336,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 expected_control_seq: Annotated[int, Field(strict=True, ge=0, le=MAX_CONTROL_SEQ - 1)],
                                 action: Literal["write_stdin", "interrupt", "resize"],
                                 text: Annotated[str | None, Field(max_length=MAX_INPUT)] = None,
-                                terminal_size: TerminalSize | None = None) -> CallToolResult:
+                                terminal_size: TerminalSize | None = None,
+                                task_context: tasks.TaskContext | None = None) -> CallToolResult:
         """Control the original worker using its observed sequence. PTY input is exact UTF-8, with no added newline or automatic confirmation. Interrupt is not cancellation. Identical retained retries return receipts; stale/conflicting or uncertain effects never replay. Read output separately. Launch permission is not blanket authority for later input; never send credentials."""
         operation = partial(_reply, lambda: application.control_execution(
             machine, execution_id, expected_control_seq, action, text,
-            terminal_size.model_dump() if terminal_size is not None else None))
+            terminal_size.model_dump() if terminal_size is not None else None, _task_context(task_context)))
         return await asyncio.wrap_future(_submit_owned(operation))
 
     if config.github is not None:
@@ -336,9 +360,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                          title: Annotated[str | None, Field(max_length=256)] = None,
                          body: Annotated[str | None, Field(max_length=60000)] = None,
                          number: Annotated[int, Field(ge=0)] = 0,
-                         state: Literal["open", "closed"] | None = None, expected_updated_at: str = "") -> CallToolResult:
+                         state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
+                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
             """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
-            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at))
+            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, _task_context(task_context)))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_pull_request(action: Literal["create", "update"], repository: str,
@@ -347,34 +372,37 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 number: Annotated[int, Field(ge=0)] = 0,
                                 head: str = "", base: str = "", draft: bool = False,
                                 state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-                                expected_head_sha: str = "") -> CallToolResult:
+                                expected_head_sha: str = "", task_context: tasks.TaskContext | None = None) -> CallToolResult:
             """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
-            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha))
+            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, _task_context(task_context)))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_comment(action: Literal["create", "update"], repository: str,
                            body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
-                           comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "") -> CallToolResult:
+                           comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "",
+                           task_context: tasks.TaskContext | None = None) -> CallToolResult:
             """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. updated_at detects an observed edit conflict without promising atomic CAS."""
-            return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at))
+            return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at, _task_context(task_context)))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_review(action: Literal["create", "update"], repository: str,
                           body: Annotated[str, Field(max_length=60000)],
                           number: Annotated[int, Field(ge=0)] = 0, review_id: Annotated[int, Field(ge=0)] = 0,
                           expected_head_sha: str = "",
-                          event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT") -> CallToolResult:
+                          event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
+                          task_context: tasks.TaskContext | None = None) -> CallToolResult:
             """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. Uncertain writes require original-review readback, never blind retry."""
-            return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event))
+            return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event, _task_context(task_context)))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_merge(repository: str, number: Annotated[int, Field(ge=1)],
                          expected_head_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")],
                          expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
                          commit_title: Annotated[str, Field(max_length=256)] = "",
-                         commit_message: Annotated[str, Field(max_length=60000)] = "") -> CallToolResult:
+                         commit_message: Annotated[str, Field(max_length=60000)] = "",
+                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
             """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
-            return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message))
+            return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message, _task_context(task_context)))
 
     return mcp
 

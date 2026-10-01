@@ -447,7 +447,41 @@ manually authored `create_task` expectation and preserves all prior tool entries
 tests must not regenerate expected schemas from candidate SDK output.
 
 These are S1.1 storage/admission-boundary checks, not full S1 acceptance. Retained
-terminal fixtures do not prove a terminal writer; server restart does not prove
+terminal fixtures alone do not prove a terminal writer; server restart does not prove
 runtime recovery or automatic AI continuation. Production activation, actual
 ChatGPT refresh, live SSH and Events remain separately scoped and NOT RUN unless
 their own authorized evidence is recorded. Do not close Spec #29 for this slice.
+
+## Spec #29 S1.2 task control and unified admission
+
+Run the same installed suites; no separate runner or workflow simulator is added.
+Continuity cases exercise actual canonical control publication on both sides of
+process death, concurrent claims/intents, pause while domain dispatch is waiting,
+stale task/plan/epoch, lost result publication, source drift, targeted plan
+invalidation and reserved capacity. Verify original file/command counters remain
+one. A real PTY case loses task publication after input acceptance, reads the
+original control receipt without resending and verifies that task history does
+not contain the input. Original cancellation stays usable with a busy task identity.
+
+Provider tests distinguish simulated transport/destination facts from real hosted
+publication. Original marker/number reads cover issue, PR, comment, review and
+merge, with exact parent/HEAD, identity and destination checks. No retry emits
+another POST/PATCH/PUT. Duplicate or incomplete bounded search remains unknown;
+a bodyless pending effect cannot escape by dropping its task context. Stale task
+contexts must fail before provider access, not after a mocked successful write.
+
+The private-socket suite runs a complete create/claim/start/pause/server-restart/
+original-result/resume/decision/finish sequence on both supported MCP protocols.
+It proves manual SDK reattachment, not an unattended ChatGPT turn. Read-only task
+and execution inspection leaves canonical bytes unchanged. The manually authored
+fixture adds only `control_task` and optional strict `task_context` to all eleven
+existing mutation tools; prior arguments and annotations remain intact. Check
+unknown top-level and nested runtime/owner fields before SDK filtering and effects.
+
+Validate actual S1.1 and candidate readers against disposable records produced by
+real control/terminal transitions, including retained original executions, and
+preserve the pre-S1.1 incompatibility gate. Source, installed package and wheel
+resources must match; the sdist-derived wheel must reproduce the direct wheel.
+Keep exact candidate, original receipts and diagnostics in the PR evidence.
+This increment does not deliver the absent-caller observer (A4), runtime recovery,
+Events, live SSH activation, production deployment or A16. Full S1 remains open.

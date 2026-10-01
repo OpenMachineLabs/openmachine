@@ -284,7 +284,7 @@ applied result. Read the same original ID; current.files observations are not
 historical proof. Format-1 receipts remain unchanged and format-2 patch history
 requires a compatible actual reader before a software transition.
 
-For Spec #29 S1.1, use `create_task` only to accept a new structured contract,
+For Spec #29, use `create_task` only to accept a new structured contract,
 not to convert existing legacy work. Supply original request/source identities,
 explicit scope/expiry and backward-dependent stages. Source hashes use canonical
 selected source objects in locator order. Creation rejects runtime fields and
@@ -293,9 +293,45 @@ Canonical reads remain available when derived lookup is stale; they never repair
 the index, claim work or authorize continuation. Explicit index maintenance is
 one bounded CLI page under normal lifecycle admission; preserve its generation.
 Missing legacy metadata, locks, unknown or corrupt history are not repair approval.
-Structured tasks are non-runnable until full task-context admission is delivered;
-do not strip their association or fabricate a replacement to bypass this boundary.
-Legacy `save_task` remains the existing work journal. No claim, terminal writer,
-supervisor or Events delivery exists in this increment; caller state is unknown.
+S1.2 requires an explicit `control_task` claim of the current handoff before
+supervised effects. Echo task/plan revisions and epoch; retain the original
+update ID after uncertain control publication. Claims last at most 300 seconds
+or earlier expiry and do not resolve a handoff or prove caller presence. Identity
+comes from the native-account endpoint, not a model field or ChatGPT chat ID.
+
+Pass current `task_context` to command/file/GitHub/control/cancel mutations.
+It contains task ID, task/plan revisions, continuation epoch and operation ID.
+Start/file operation IDs equal their execution/change IDs; terminal control and
+cancellation have separate IDs while retaining the original execution/sequence.
+Before new work, read original evidence and reconcile any earlier uncertain
+intent. A conflict after a material result requires current task readback, not
+ignoring the revision or inventing a replacement execution. Original admitted
+IDs compare normalized intent and read their outcome; they never resend input
+or publication just because the reply was lost. Unprovable effects remain unknown.
+
+Pause suppresses new admission; already admitted effects may still finish.
+Cancel records the stop and requests termination only of owned original commands;
+verify their outcome rather than treating stop intent as terminal success. The
+existing original-ID cancellation stays usable when task metadata/capacity is
+blocked. Reads remain passive, including while paused and after completion.
+Resume does not claim ownership, extend expired authority or reopen terminal work.
+
+Use `revise_plan` for accepted changes, explicitly invalidating changed stages
+and their dependents; preserve unrelated acceptance, stage IDs and all operations.
+Use `record_decision` with verified applicable original evidence, then `finish`
+only after every required stage is accepted. Empty evidence is an explicit
+non-command decision, never a substitute for an operation-backed stage. File
+and provider drift invalidates current acceptance, not historical authorship.
+Known partial outcomes need a new authorized judgment, never batch/input replay.
+
+Task storage reserves bounded result/stop/terminal capacity; do not delete history
+to admit more work. GitHub recovery reads stable markers and original destinations,
+with at most three 100-item lookup pages. Partial coverage, multiple matches and
+bodyless unknown effects are blockers when evidence cannot prove the result.
+Task receipt hashes cover bounded semantic observations, not copied logs/source.
+Legacy `save_task` remains the existing work journal; do not convert it or strip
+known supervised identities to bypass admission. S1.2 has no observer, Events,
+runtime recovery or AI wake. A command finishing while no caller is active does
+not automatically update its task yet. Keep full S1 and actual AI acceptance open.
 State contract 6 requires actual compatible readers for every retained task,
 including terminal history, before a managed transition. Do not deploy implicitly.

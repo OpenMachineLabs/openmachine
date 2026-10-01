@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from contextlib import contextmanager
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -92,11 +93,11 @@ def _view(root: Path, record: dict, raw: bytes, *, index_status: str | None = No
             index_status = "stale"
     return {"task_id": record["task_id"], "record": record, "observed_at_ms": time.time_ns() // 1000000,
             "index_status": index_status,
-            "support": {"structured_records": True, "supervised_admission": False,
+            "support": {"structured_records": True, "supervised_admission": True,
                         "runtime_recovery": False, "events_delivery": False},
             "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
                 "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
-                "blocker": "Caller continuation is not observed; S1.1 does not dispatch or wake an AI."}]}
+                "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
 
 
 def read(state: Path, identity: str) -> dict:
@@ -116,10 +117,124 @@ def read(state: Path, identity: str) -> dict:
                 "generation": index["generation"], "resume_authorized": False}
 
 
+def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
+           expected_revision: int | None = None, last_update: dict | None = None,
+           require_current: bool = False) -> dict:
+    """Publish one guarded canonical revision. The callback must not perform IO."""
+    task_id(identity)
+    with _writing(state, initialize=False) as root:
+        original, before = read_structured(root, identity)
+        if last_update is not None and original["last_update"]["id"] == last_update["id"]:
+            if original["last_update"] != last_update:
+                raise Fault("task_conflict", "The retained update ID belongs to a different normalized request.")
+            return {**_view(root, original, before), "status": "unchanged"}
+        if expected_revision is not None and expected_revision != original["revision"]:
+            raise Fault("task_conflict", "The original task advanced; read its current revision before another transition.",
+                        {"task_id": identity, "task_revision": original["revision"],
+                         "plan_revision": original["plan"]["revision"], "continuation_epoch": original["control"]["epoch"]})
+        index = None
+        try:
+            index = read_index(root)
+            if index["tasks"].get(identity) != structured_metadata(original, before):
+                raise Fault("task_index_incomplete", "The canonical task and derived index differ; reconcile metadata before new work.")
+        except (OSError, Fault):
+            if require_current:
+                raise
+            index = None
+        value = deepcopy(original)
+        now_ms = max(time.time_ns() // 1000000, original["updated_at_ms"])
+        transform(value, now_ms)
+        if last_update is not None:
+            value["last_update"] = last_update
+        if value == original:
+            return {**_view(root, original, before), "status": "unchanged"}
+        for key in ("format", "task_id", "title", "anchors", "created_at_ms", "origin"):
+            if value[key] != original[key]:
+                raise Fault("task_identity_conflict", "A transition cannot replace the original task identity or initiating request.")
+        value.update(revision=original["revision"] + 1, updated_at_ms=now_ms)
+        try:
+            value = records.Record.model_validate(value).model_dump()
+            raw = records.canonical(value)
+            if len(raw) > records.MAX_RECORD:
+                raise ValueError("record capacity exceeded")
+        except (ValueError, TypeError, UnicodeError) as error:
+            raise Fault("invalid_task_transition", "The bounded canonical transition is invalid; original task bytes are unchanged.") from error
+        try:
+            _replace(root / identity / "task.json", raw)
+            observed, content = read_structured(root, identity)
+            if observed != value or content != raw:
+                raise Fault("task_write_unverified", "Canonical update readback differs; inspect the same original task.")
+        except OSError as error:
+            raise Fault("task_write_unverified", "Canonical durability was not acknowledged; retain the original update/operation ID and never dispatch on uncertainty.") from error
+        if index is not None:
+            index["tasks"][identity] = structured_metadata(value, raw)
+            index["generation"] += 1
+            try:
+                _write_index(root, index)
+            except (OSError, Fault):
+                index = None
+        return {**_view(root, value, raw, index_status="current" if index is not None else "stale"), "status": "saved"}
+
+
+def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict | None:
+    """Bounded original-identity lookup, not a second ledger or background poll."""
+    generation, offset, found = None, 0, None
+    while True:
+        with _reading(state) as root:
+            if root is None:
+                return None
+            index = read_index(root)
+            if generation is not None and generation != index["generation"]:
+                raise Fault("task_index_changed", "Task identity coverage changed; read original evidence before new work.")
+            generation = index["generation"]
+            identities = sorted(index["tasks"])
+            checked, consumed = 0, 0
+            for identity in identities[offset:offset + INDEX_PAGE]:
+                item = index["tasks"][identity]
+                path = root / identity / "task.json"
+                if not os.path.lexists(path):
+                    if item.get("owner") == "structured":
+                        raise Fault("corrupt_tasks", "The original structured owner is missing; preserve its binding.")
+                    checked += 1
+                    continue
+                size = private_path(path).st_size
+                if size > records.MAX_RECORD:
+                    raise Fault("corrupt_tasks", "A retained canonical task exceeds its record bound; preserve it without dispatch.")
+                if consumed + size > MAX_INDEX:
+                    break
+                record, raw = read_structured(root, identity)
+                consumed += len(raw)
+                checked += 1
+                if item != structured_metadata(record, raw):
+                    raise Fault("task_index_incomplete", "Canonical identity coverage is stale; rebuild before a new effect.")
+                matches = [operation for operation in record["operations"]
+                           if operation_id and operation["id"] == operation_id or operation_key(operation["locator"]) == key
+                           or key[0] == "github_destination" and records.pending(operation)
+                           and operation["locator"]["kind"] == "github"
+                           and operation_key(dict(operation["locator"], anchor="")) == key]
+                if matches:
+                    if found is not None and found["task_id"] != identity:
+                        raise Fault("task_operation_conflict", "An original operation is ambiguously bound; preserve both tasks without dispatch.")
+                    found = {"task_id": identity, "operations": matches}
+            offset += checked
+            if offset == len(identities):
+                return found
+
+
+def operation_key(locator: dict) -> tuple:
+    kind = locator["kind"]
+    if kind == "github":
+        if not locator["anchor"]:
+            object_type = "pull_request" if locator["object_type"] == "merge" else locator["object_type"]
+            return "github_destination", locator["repository"].casefold(), object_type, locator["number"]
+        return kind, locator["repository"].casefold(), locator["anchor"]
+    return kind, locator["target_identity"] or "local", locator["execution_id" if kind == "execution" else "change_id"]
+
+
 def require_legacy(state: Path, identity: str) -> None:
     """Only used after original execution-ID reconciliation, before a new launch."""
     if "record" in read(state, identity):
-        raise Fault("supervised_admission_unavailable", "Structured tasks are not runnable until full task-context admission is implemented; do not use a bare task_id.")
+        raise Fault("supervised_admission_unavailable", "A bare task_id is not supervised authority; supply the current task_context before a new structured-task effect.")
 
 
 def _metadata_page(root: Path, index: dict, identities: list[str], limit: int = INDEX_PAGE) -> list[tuple[str, dict]]:

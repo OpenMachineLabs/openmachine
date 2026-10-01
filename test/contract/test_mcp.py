@@ -25,6 +25,7 @@ from mcp.types import ListToolsResult
 
 import openmachine
 from openmachine import execution, server
+from openmachine.execution.records import TERMINAL
 from openmachine.config import Settings
 from openmachine.foundation.state import lease
 
@@ -102,6 +103,118 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             "stages": [{"id": "verify", "depends_on": [], "result": "Retained task", "verification": "Exact readback",
                         "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}
 
+    async def test_task_admission_pause_restart_and_original_execution_on_both_protocols(self):
+        for mode in ("legacy", "2026-07-28"):
+            identity, execution_id = "admission-" + mode, uuid.uuid4().hex
+            counter = self.work / ("count-" + mode)
+            async with Client(self.client(), mode=mode, cache=None) as client:
+                async def call(name, arguments):
+                    result = await client.call_tool(name, arguments)
+                    self.assertFalse(result.is_error, result.structured_content)
+                    return result.structured_content
+                context = (await call("read_workspace_file", {"machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"}))["context"]
+                request = self.task_request(context, identity)
+                request["contract"]["tools"] = ["read_task", "control_task", "start_execution", "read_execution"]
+                record = (await call("create_task", request))["record"]
+                def control(record, action, **values):
+                    return dict(task_id=identity, expected_revision=record["revision"], expected_plan_revision=record["plan"]["revision"],
+                        expected_epoch=record["control"]["epoch"], update_id=uuid.uuid4().hex, transition=dict(action=action, **values))
+                claim = control(record, "claim", handoff_id=record["handoff"]["id"])
+                claimed = (await call("control_task", claim))["record"]
+                repeated = await call("control_task", claim)
+                self.assertEqual(repeated["record"], claimed)
+                task_context = dict(task_id=identity, task_revision=claimed["revision"], plan_revision=claimed["plan"]["revision"],
+                    continuation_epoch=claimed["control"]["epoch"], operation_id=execution_id)
+                code = 'import time; from pathlib import Path; p=Path(' + repr(str(counter)) + '); p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); time.sleep(1.5)'
+                arguments = dict(machine="desktop", execution_id=execution_id, cwd=str(self.work), argv=[sys.executable, "-c", code],
+                                 task_context=task_context)
+                started = await call("start_execution", arguments)
+                self.assertNotIn(started["status"], TERMINAL)
+                record = (await call("read_task", {"task_id": identity}))["record"]
+                paused = (await call("control_task", control(record, "pause", reason="Keep original work while blocking new admission.")))["record"]
+                self.assertEqual(paused["control"]["stop_intent"], "pause")
+                self.assertIsNone(paused["handoff"])
+            before = (self.state / "tasks" / identity / "task.json").read_bytes()
+            self.stop(self.processes[-1])
+            self.launch()
+            async with Client(self.client(), mode=mode, cache=None) as client:
+                record = (await call("read_task", {"task_id": identity}))["record"]
+                self.assertEqual(record, paused)
+                self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), before)
+                deadline = time.monotonic() + 6
+                while time.monotonic() < deadline:
+                    original = await call("read_execution", {"machine": "desktop", "execution_id": execution_id})
+                    if original["status"] in TERMINAL:
+                        break
+                    await asyncio.sleep(0.05)
+                self.assertEqual(original["status"], "succeeded")
+                self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), before)
+                recovered = await call("start_execution", arguments)
+                self.assertEqual(recovered["status"], "succeeded")
+                self.assertFalse(recovered["task_operation_replayed"])
+                self.assertEqual(counter.read_text(), "1")
+                new_id = uuid.uuid4().hex
+                stale = await client.call_tool("start_execution", dict(arguments, execution_id=new_id,
+                    task_context=dict(task_context, operation_id=new_id)))
+                self.assertEqual(stale.structured_content["error"]["code"], "task_conflict")
+                self.assertFalse((self.state / "executions" / new_id).exists())
+                record = (await call("read_task", {"task_id": identity}))["record"]
+                resumed = (await call("control_task", control(record, "resume", reason="Explicit fixture continuation.")))["record"]
+                record = (await call("control_task", control(resumed, "claim", handoff_id=resumed["handoff"]["id"])))["record"]
+                accepted = (await call("control_task", control(record, "record_decision", stage_id="verify", outcome="accepted",
+                    evidence=[execution_id], reason="Verified the original zero exit and single counter increment.")))["record"]
+                final = (await call("control_task", control(accepted, "finish", outcome="completed",
+                    acceptance=[{"stage_id": "verify", "operation_id": execution_id}], limitations="Manual SDK reattachment, not automatic AI recovery.")))["record"]
+                self.assertEqual(final["terminal"]["outcome"], "completed")
+                self.assertIsNone(final["handoff"])
+                self.assertEqual(len(final["operations"]), 1)
+
+    async def test_all_mutation_contexts_reject_unknown_and_forged_fields_before_dispatch(self):
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                response = await self.wire_call(client, "tools/call", {"name": "read_workspace_file", "arguments": {
+                    "machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"}})
+                source = response.json()["result"]["structuredContent"]
+                native = dict(machine="desktop", execution_id="a" * 32)
+                file = dict(machine="desktop", workspace_name="example", expected_head_sha="", change_id="b" * 32,
+                            expected_workspace_identity=source["context"]["workspace_identity"])
+                cases = {
+                    "start_execution": dict(native, cwd=str(self.work), argv=[sys.executable, "-c", "raise SystemExit(0)"]),
+                    "cancel_execution": native,
+                    "control_execution": dict(native, expected_control_seq=0, action="write_stdin", text="not sent\n"),
+                    "write_workspace_file": dict(file, path="new.txt", expected_sha256="", content="not written"),
+                    "edit_workspace_file": dict(file, path="AGENTS.md", expected_sha256=source["sha256"],
+                        edits=[{"old_text": "Only", "new_text": "Never"}]),
+                    "apply_workspace_patch": dict(file, patch="*** Begin Patch\n*** Add File: new.txt\n+not written\n*** End Patch\n",
+                        preconditions=[{"path": "new.txt", "expected_sha256": ""}]),
+                    "github_issue": dict(action="create", repository="Example/repo", title="Not published", body="fixture"),
+                    "github_pull_request": dict(action="create", repository="Example/repo", title="Not published", body="fixture", head="topic", base="main"),
+                    "github_comment": dict(action="create", repository="Example/repo", body="fixture", number=1),
+                    "github_review": dict(action="create", repository="Example/repo", body="fixture", number=1, expected_head_sha="c" * 40),
+                    "github_merge": dict(repository="Example/repo", number=1, expected_head_sha="c" * 40)}
+                forged = dict(task_id="not-created", task_revision=1, plan_revision=1, continuation_epoch=0, operation_id="d" * 32)
+                for name, arguments in cases.items():
+                    for invalid in (dict(arguments, task_revison=1),
+                                    dict(arguments, task_context=dict(forged, principal_ref="forged")),
+                                    dict(arguments, task_context=dict(forged, task_revision=True))):
+                        response = await self.wire_call(client, "tools/call", {"name": name, "arguments": invalid})
+                        result = response.json()["result"]
+                        self.assertTrue(result["isError"], (name, result))
+                        self.assert_wire_tool_result(result, version)
+                        self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
+                control = dict(task_id="not-created", expected_revision=1, expected_plan_revision=1,
+                    expected_epoch=0, update_id="e" * 32, transition={"action": "pause", "reason": "fixture"})
+                for invalid in (dict(control, owner="forged"), dict(control, expected_revision=True),
+                                dict(control, transition={"action": "pause", "reason": "fixture", "state": "completed"})):
+                    response = await self.wire_call(client, "tools/call", {"name": "control_task", "arguments": invalid})
+                    result = response.json()["result"]
+                    self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
+                    self.assert_wire_tool_result(result, version)
+                self.assertEqual((self.work / "AGENTS.md").read_text(), "Only modify this disposable project.\n")
+                self.assertFalse((self.work / "new.txt").exists())
+                self.assertFalse((self.state / "tasks").exists())
+                self.assertFalse((self.state / "executions").exists())
+
     async def test_canonical_tasks_survive_real_server_restart_without_dispatch(self):
         retained = {}
         for mode in ("legacy", "2026-07-28"):
@@ -135,7 +248,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 caps = (await client.call_tool("get_capabilities")).structured_content
                 self.assertEqual(caps["lifecycle"]["state_contract"], 6)
                 self.assertTrue(caps["tasks"]["structured_records"])
-                self.assertFalse(caps["tasks"]["supervised_admission"])
+                self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])
         snapshots = {identity: (self.state / "tasks" / identity / "task.json").read_bytes() for identity in retained}
         self.stop(self.processes[-1])
@@ -269,7 +382,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task", "create_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task", "create_task", "control_task"})
                 self.assertFalse(tools["start_execution"].annotations.read_only_hint)
                 self.assertTrue(tools["start_execution"].annotations.destructive_hint)
                 self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)
@@ -1737,10 +1850,10 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 result = await asyncio.wait_for(mcp.call_tool("cancel_execution", args), 1)
                 self.assertFalse(result.is_error)
                 self.assertTrue(result.structured_content["cancel_requested"])
-                application.cancel_execution.assert_called_once_with("local", "b" * 32)
+                application.cancel_execution.assert_called_once_with("local", "b" * 32, None)
                 controlled = await asyncio.wait_for(mcp.call_tool("control_execution", args | {"expected_control_seq": 0, "action": "interrupt"}), 1)
                 self.assertEqual(controlled.structured_content["control_result"]["status"], "applied")
-                application.control_execution.assert_called_once_with("local", "b" * 32, 0, "interrupt", None, None)
+                application.control_execution.assert_called_once_with("local", "b" * 32, 0, "interrupt", None, None, None)
                 self.assertFalse(any(task.done() for task in readers))
             finally:
                 release.set()
