@@ -101,6 +101,8 @@ class GitHubTests(unittest.TestCase):
             self.assertEqual(mutate.call_args.args[3]["body"], "comment\n\n" + operations.POSTED_FOOTER)
 
     def test_private_default_uses_attribution_and_explicit_override_still_works(self):
+        self.assertTrue(settings().github.attribution)
+        self.assertFalse(settings(False).github.attribution)
         self.metadata["private"] = True
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
             github.issue(settings(), "create", REPO, "title", "body")
