@@ -249,7 +249,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
 async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_version: str,
                  expected_pid: int | None = None, *, expected_contract: int = STATE_CONTRACT,
                  check_remote: bool = False) -> dict:
-    import httpx
+    import httpx2 as httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
@@ -262,21 +262,21 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
         async with asyncio.timeout(8 + 30 * len(remote_targets)):
             async with httpx.AsyncClient(trust_env=False, timeout=30 if remote_targets else 5,
                     transport=httpx.AsyncHTTPTransport(uds=str(socket_path))) as client:
-                async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer, _):
+                async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer):
                     async with ClientSession(reader, writer) as session:
                         initialized = await session.initialize()
                         capabilities = await session.call_tool("get_capabilities", {})
-                        caps = capabilities.structuredContent
+                        caps = capabilities.structured_content
                         fingerprint = config.configuration_sha256()
-                        if (capabilities.isError or initialized.serverInfo.version != expected_version
+                        if (capabilities.is_error or initialized.server_info.version != expected_version
                                 or caps["version"] != expected_version or caps["configuration_sha256"] != fingerprint
                                 or caps["lifecycle"]["protocol"] != PROTOCOL or caps["lifecycle"]["state_contract"] != expected_contract
                                 or (expected_pid is not None and caps["lifecycle"]["pid"] != expected_pid)):
                             raise Fault("service_identity_mismatch", "The live service does not match the selected version, configuration or process.")
                         result = await session.call_tool("read_workspace_file", {
                             "machine": selected.machine, "workspace_name": probe["workspace"], "path": probe["path"]})
-                        read = result.structuredContent
-                        if result.isError or not read["exists"] or read.get("content_redacted"):
+                        read = result.structured_content
+                        if result.is_error or not read["exists"] or read.get("content_redacted"):
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
                         remote_records = {}
                         for name in remote_targets:
@@ -284,8 +284,8 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                             while True:
                                 response = await session.call_tool("list_executions", {
                                     "machine": name, "cursor": cursor, "limit": 100})
-                                page = response.structuredContent
-                                if response.isError or not isinstance(page, dict) or page.get("unreadable"):
+                                page = response.structured_content
+                                if response.is_error or not isinstance(page, dict) or page.get("unreadable"):
                                     raise Fault("incompatible_remote_state", "The candidate cannot validate retained target receipts.")
                                 if page.get("target_identity") != config.machines[name].ssh_identity:
                                     raise Fault("incompatible_remote_state", "The candidate did not verify the configured target identity.")

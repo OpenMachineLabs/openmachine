@@ -49,9 +49,12 @@ no PyPI, Homebrew or npm publication is implied.
 
 The wheel includes the core, direct adapters and bundled Skill, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a
-source-checkout import. The baseline is MCP SDK 1.30.0, Pydantic 2.13.5, Uvicorn
-0.38.0 and Hatchling 1.27.0 for building. See [requirements.lock](requirements.lock)
-for the complete pinned dependency set.
+source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
+JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
+building. See [requirements.lock](requirements.lock) for the complete locked set.
+The released v0.2.2 tag retains SDK 1.30.0; use its own matching lock when
+following the release instructions above. This source migration is not a new
+release or an automatic update of an existing installation.
 
 ## Configure and run
 

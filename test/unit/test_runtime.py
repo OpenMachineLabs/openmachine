@@ -63,7 +63,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
             "openmachine.skills": ("openmachine.foundation.*",),
             "openmachine.service": ("openmachine", "openmachine.config", "openmachine.execution",
-                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx", "mcp.*"),
+                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx2", "mcp.*"),
             "openmachine.app": ("openmachine", "openmachine.app.machines", "openmachine.config",
                                 "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
                                 "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
@@ -72,7 +72,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
                                       "integrations.github", "integrations.ssh.client"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
-                                   "openmachine.service", "openmachine.foundation.*", "mcp.*", "pydantic", "uvicorn"),
+                                   "openmachine.service", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
                                 "openmachine.bootstrap", "openmachine.server", "openmachine.service",
