@@ -211,6 +211,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             counter = self.work / ("count-" + mode)
             async with Client(self.client(), mode=mode, cache=None) as client:
                 async def call(name, arguments):
+                    if name == "read_task":
+                        return await self.observer_task_view(client, arguments["task_id"])
                     result = await client.call_tool(name, arguments)
                     self.assertFalse(result.is_error, result.structured_content)
                     return result.structured_content
