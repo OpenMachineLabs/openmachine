@@ -88,10 +88,9 @@ def _enabled(settings: Settings, repository: str, metadata: dict | None = None) 
     config = connection.authorize(settings, repository)
     if config.attribution is not None:
         return config.attribution
-    metadata = object_response(connection.request("GET", f"repos/{repository}")) if metadata is None else metadata
-    if not isinstance(metadata.get("private"), bool):
-        raise Fault("github_invalid_response", "GitHub did not return repository visibility.")
-    return not metadata["private"]
+    # Attribution is enabled by default. A future UI can expose this as a user choice;
+    # do not silently omit provenance based on repository visibility.
+    return True
 
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,

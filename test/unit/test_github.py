@@ -100,17 +100,15 @@ class GitHubTests(unittest.TestCase):
             github.comment(settings(), "create", REPO, "comment", number=1)
             self.assertEqual(mutate.call_args.args[3]["body"], "comment\n\n" + operations.POSTED_FOOTER)
 
-    def test_private_default_and_explicit_override(self):
+    def test_private_default_uses_attribution_and_explicit_override_still_works(self):
         self.metadata["private"] = True
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
             github.issue(settings(), "create", REPO, "title", "body")
-            self.assertEqual(mutate.call_args.args[3]["body"], "body")
-            github.issue(settings(True), "create", REPO, "title", "body")
             self.assertEqual(mutate.call_args.args[3]["body"], "body\n\n" + operations.CREATED_FOOTER)
-            github.comment(settings(False), "create", REPO, "body", number=1)
+            github.issue(settings(False), "create", REPO, "title", "body")
             self.assertEqual(mutate.call_args.args[3]["body"], "body")
         with patch.object(connection, "request") as api:
-            self.assertTrue(operations._enabled(settings(True), REPO))
+            self.assertTrue(operations._enabled(settings(), REPO))
             self.assertFalse(operations._enabled(settings(False), REPO))
             api.assert_not_called()
 
