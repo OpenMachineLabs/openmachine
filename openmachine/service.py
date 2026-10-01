@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 5
+STATE_CONTRACT = 6
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5, 6) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -130,19 +130,11 @@ def check_state(config_path: Path, state: Path) -> dict:
                 raise Fault("corrupt_state", "An execution-store entry is invalid; preserve it before changing versions.")
             execution.read_record(directory)
             count += 1
-    page = tasks.find(state, limit=50)
-    task_count = 0
-    while True:
-        for item in page["tasks"]:
-            tasks.read(state, item["task_id"])
-            task_count += 1
-        if page["next_offset"] is None:
-            break
-        page = tasks.find(state, offset=page["next_offset"], limit=50, expected_generation=page["generation"])
+    task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
-            "prefix": str(Path(sys.prefix).resolve()), "execution_records": count, "task_records": task_count,
+    return {**changes, **task_state, "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+            "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
 
 
@@ -170,10 +162,20 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2, 3, 4, 5)
+                or value["state_contract"] not in (1, 2, 3, 4, 5, 6)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
+        retained_tasks = tasks.check_state(state)
+        if retained_tasks["task_index_format"] == 2:
+            formats = value.get("structured_task_read_formats")
+            if (value["state_contract"] < 6 or not isinstance(formats, list) or not formats
+                    or any(type(item) is not int or item not in tasks.READ_FORMATS for item in formats)
+                    or len(formats) != len(set(formats)) or not set(tasks.READ_FORMATS) <= set(formats)
+                    or any(type(value.get(key)) is not type(retained_tasks[key]) or value[key] != retained_tasks[key] for key in (
+                        "task_store_present", "task_records", "structured_task_records", "task_index_format",
+                        "task_index_generation", "task_index_coverage"))):
+                raise ValueError("candidate ignores or incompletely reads retained task state")
         retained = workspace.check_change_state(state)
         if retained["workspace_change_store_present"]:
             supported = _change_support(value)

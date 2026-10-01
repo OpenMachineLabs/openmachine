@@ -421,3 +421,33 @@ and duplicate events must not reactivate work. Record missing eligibility, bindi
 or callback evidence as BLOCKED/NOT RUN, not as an SDK limitation or a waived goal.
 No account/usage-cost promise follows from these tests. Stop owned disposable
 services and retire test subscriptions explicitly; leave production untouched.
+
+## Spec #29 S1.1 canonical task records
+
+Run the existing installed unit and MCP suites. Continuity cases use real private
+files, concurrent creators, explicit fsync failures and subprocess exit on both
+sides of directory publication. They distinguish an uncommitted temporary, an
+uncertain acknowledgement and a committed canonical record with stale metadata.
+Bounded rebuild cases cover mixed legacy history, generation-checked restart,
+50-record/2-MiB limits, missing locks and unsafe/corrupt/unknown state. No test
+converts production checkpoints or uses their contents as executable instructions.
+
+Service cases verify actual reader coverage, including synthetic terminal-only
+history, and refusal before mocked service stop when a candidate omits that proof.
+For separate installation acceptance, run the retained pre-S1.1 interpreter and
+the candidate's `-I -m openmachine.service check-state CONFIG STATE` against only
+disposable legacy/mixed/terminal fixtures. Preserve every original record byte;
+an old reader must reject new directory/index ownership, not silently ignore it.
+Record actual-version checks separately from synthetic/mocked service fixtures.
+
+The private-socket MCP cases exercise both supported protocols: create/retry,
+strict top-level/nested argument rejection, non-runnable legacy association,
+stale-index readback and real server restart. The frozen contract adds one
+manually authored `create_task` expectation and preserves all prior tool entries;
+tests must not regenerate expected schemas from candidate SDK output.
+
+These are S1.1 storage/admission-boundary checks, not full S1 acceptance. Retained
+terminal fixtures do not prove a terminal writer; server restart does not prove
+runtime recovery or automatic AI continuation. Production activation, actual
+ChatGPT refresh, live SSH and Events remain separately scoped and NOT RUN unless
+their own authorized evidence is recorded. Do not close Spec #29 for this slice.

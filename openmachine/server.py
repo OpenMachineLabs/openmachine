@@ -21,7 +21,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import uvicorn
 
-from openmachine import __version__, service
+from openmachine import __version__, service, tasks
 from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
 from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, bound_workspace_result
 from openmachine.bootstrap import create_application
@@ -121,6 +121,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         validator = validators.get(params["name"])
         arguments = params.get("arguments")
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
+            return invalid
+        # The new contract forbids extra fields before SDK argument filtering.
+        if params["name"] == "create_task" and set(arguments) - validator.schema["properties"].keys():
             return invalid
         try:
             response = await call_next(ctx)
@@ -225,6 +228,16 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         return _reply(lambda: application.read_workspace_change(machine, change_id, observe_current),
                       workspace_output=True, change_id=change_id)
 
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    def create_task(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
+                    update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
+                    title: Annotated[str, Field(min_length=1, max_length=200)],
+                    anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
+                    stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
+        """Create one bounded canonical task contract and pending plan handoff. Stage source_sha256 hashes canonical selected source objects in locator order. Current targets/grants are checked only for a new creation; original update-ID retries return retained state. A stale index does not erase a committed record. Structured tasks are non-runnable in S1.1: no claim, execution, automatic recovery or AI wake follows. Authority references are traceability, not new grants. Never convert legacy history or supply runtime facts."""
+        return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
+                      contract.model_dump(), [stage.model_dump() for stage in stages]))
+
     @mcp.tool(annotations=READ, structured_output=False)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],
                    task_id: str = "", offset: Annotated[int, Field(ge=0)] = 0,
@@ -235,7 +248,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_task(task_id: str) -> CallToolResult:
-        """Read the original bounded checkpoint and revision, verify its index hash, then recheck current authority, Git and execution receipts before continuation. This does not resume an agent or execute work. resume_authorized=false means this read grants no authority; reuse still-valid current user authorization rather than requesting it again."""
+        """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. Unknown caller state and unsupported supervision are explicit. Reading grants no authority and never reactivates terminal history."""
         return _reply(lambda: application.read_task(task_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)

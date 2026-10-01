@@ -53,6 +53,9 @@ class Application:
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
+            "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
+                      "index_format": 2, "supervised_admission": False, "runtime_recovery": False,
+                      "events_delivery": False},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
@@ -84,7 +87,8 @@ class Application:
                        "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,
                        "text_file_bytes": workspace.MAX_SOURCE, "text_page_bytes": TEXT_PAGE,
                        "skill_text_file_bytes": MAX_TEXT_FILE,
-                       "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX},
+                       "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX,
+                       "task_record_bytes": tasks.MAX_RECORD, "task_acceptance_bytes": tasks.MAX_ACCEPTANCE},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         }
 
@@ -147,6 +151,56 @@ class Application:
                   anchors: list[str] | None = None) -> dict:
         with self._admit():
             return tasks.save(self.state, task_id, expected_revision, title, body, anchors or [])
+
+    def _validate_task_scope(self, request: dict) -> None:
+        contract = request["contract"]
+        tools = set(contract["tools"])
+        known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
+                 "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
+                 "find_tasks", "read_task", "save_task", "create_task", "start_execution", "read_execution",
+                 "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
+                 "github_pull_request", "github_comment", "github_review", "github_merge"}
+        if not tools <= known:
+            raise Fault("invalid_task_contract", "Task scope must name implemented tools, not future actions.")
+        if tools & {"start_execution", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
+            raise Fault("invalid_task_contract", "Native mutation scope requires an explicit configured target.")
+        for target in contract["targets"]:
+            machine, name = target["machine"], target["workspace"]
+            self.config.machine(machine)
+            configured = self.config.workspaces.get(name)
+            if configured is None or configured.machine != machine:
+                raise Fault("invalid_task_contract", "Task target must bind an existing workspace to its configured machine.")
+            if tools & {"start_execution", "control_execution"}:
+                self.config.machine(machine, write=True)
+            if tools & {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}:
+                self.config.workspace_machine(machine)
+            observed = self.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1)["context"]
+            if (observed.get("workspace_identity") != target["workspace_identity"]
+                    or (observed.get("head_sha") or None) != target["head_sha"]):
+                raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")
+        github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"})
+        if any(name.startswith("github_") for name in tools):
+            self._provider()
+        if github_write and not contract["repositories"]:
+            raise Fault("invalid_task_contract", "A GitHub mutation scope needs explicit repositories.")
+        for repository in contract["repositories"]:
+            observed = self._provider().read(self.config, "repository", repository)
+            if github_write and (observed.get("configured_write") is not True
+                    or observed["data"].get("permissions", {}).get("push") is not True):
+                raise Fault("github_not_allowed", "The task repository has no verified current write grant.")
+
+    def create_task(self, task_id: str, update_id: str, title: str, anchors: list[str], origin: dict,
+                    contract: dict, stages: list[dict]) -> dict:
+        # Pure input validation precedes lifecycle initialization; target reads hold no task lock.
+        tasks.normalize_create({"task_id": task_id, "update_id": update_id, "title": title,
+            "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
+        with self._admit():
+            return tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
+                                validate_new=self._validate_task_scope)
+
+    def rebuild_task_index(self, expected_generation: int = -1) -> dict:
+        with self._admit():
+            return tasks.rebuild_index(self.state, expected_generation)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",

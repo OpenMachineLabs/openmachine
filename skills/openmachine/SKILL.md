@@ -283,3 +283,19 @@ operations. Never auto-rollback, replay the batch or call the proposed diff an
 applied result. Read the same original ID; current.files observations are not
 historical proof. Format-1 receipts remain unchanged and format-2 patch history
 requires a compatible actual reader before a software transition.
+
+For Spec #29 S1.1, use `create_task` only to accept a new structured contract,
+not to convert existing legacy work. Supply original request/source identities,
+explicit scope/expiry and backward-dependent stages. Source hashes use canonical
+selected source objects in locator order. Creation rejects runtime fields and
+unknown arguments. Keep the same task/update IDs after lost acknowledgement.
+Canonical reads remain available when derived lookup is stale; they never repair
+the index, claim work or authorize continuation. Explicit index maintenance is
+one bounded CLI page under normal lifecycle admission; preserve its generation.
+Missing legacy metadata, locks, unknown or corrupt history are not repair approval.
+Structured tasks are non-runnable until full task-context admission is delivered;
+do not strip their association or fabricate a replacement to bypass this boundary.
+Legacy `save_task` remains the existing work journal. No claim, terminal writer,
+supervisor or Events delivery exists in this increment; caller state is unknown.
+State contract 6 requires actual compatible readers for every retained task,
+including terminal history, before a managed transition. Do not deploy implicitly.

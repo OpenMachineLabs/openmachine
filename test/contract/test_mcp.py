@@ -90,6 +90,92 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             async with streamable_http_client("http://localhost/mcp", http_client=client) as streams:
                 yield streams
 
+    def task_request(self, context, identity):
+        return {"task_id": identity, "update_id": "1" * 32, "title": "Retain SDK fixture", "anchors": ["fixture=s11"],
+            "origin": {"request_ref": "fixture:request", "request_sha256": "a" * 64, "objective": "Retain declared work."},
+            "contract": {"objective": "Retain declared work.", "scope": "Disposable SDK fixture.", "exclusions": "No production effects.",
+                "acceptance": "Read the same task after restart.", "stop_condition": "Stop after readback.",
+                "authority_refs": ["fixture:consent"], "targets": [{"machine": "desktop", "workspace": "example",
+                    "workspace_identity": context["workspace_identity"], "head_sha": context.get("head_sha") or None}],
+                "repositories": [], "tools": ["read_task"], "sources": [],
+                "expires_at_ms": time.time_ns() // 1000000 + 3600000},
+            "stages": [{"id": "verify", "depends_on": [], "result": "Retained task", "verification": "Exact readback",
+                        "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}
+
+    async def test_canonical_tasks_survive_real_server_restart_without_dispatch(self):
+        retained = {}
+        for mode in ("legacy", "2026-07-28"):
+            async with Client(self.client(), mode=mode, cache=None) as client:
+                scope = await client.call_tool("read_workspace_file", {"machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"})
+                identity = "canonical-" + mode
+                request = self.task_request(scope.structured_content["context"], identity)
+                created = await client.call_tool("create_task", request)
+                self.assertFalse(created.is_error, created)
+                record = created.structured_content["record"]
+                retained[identity] = record
+                repeated = await client.call_tool("create_task", request)
+                self.assertEqual(repeated.structured_content["record"], record)
+                self.assertEqual(repeated.structured_content["status"], "unchanged")
+                changed = await client.call_tool("create_task", request | {"title": "Conflicting declaration"})
+                self.assertEqual(changed.structured_content["error"]["code"], "task_conflict")
+                execution_id = uuid.uuid4().hex
+                denied = await client.call_tool("start_execution", {"machine": "desktop", "execution_id": execution_id,
+                    "cwd": str(self.work), "argv": [sys.executable, "-c", "raise SystemExit(0)"], "task_id": identity})
+                self.assertEqual(denied.structured_content["error"]["code"], "supervised_admission_unavailable")
+                self.assertFalse((self.state / "executions" / execution_id).exists())
+                index = self.state / "tasks/index.json"
+                original = index.read_bytes()
+                index.write_text("Interrupted derived index fixture")
+                read = await client.call_tool("read_task", {"task_id": identity})
+                self.assertFalse(read.is_error, read)
+                self.assertEqual(read.structured_content["record"], record)
+                self.assertEqual(read.structured_content["index_status"], "stale")
+                self.assertEqual(index.read_text(), "Interrupted derived index fixture")
+                index.write_bytes(original)
+                caps = (await client.call_tool("get_capabilities")).structured_content
+                self.assertEqual(caps["lifecycle"]["state_contract"], 6)
+                self.assertTrue(caps["tasks"]["structured_records"])
+                self.assertFalse(caps["tasks"]["supervised_admission"])
+                self.assertFalse(caps["tasks"]["events_delivery"])
+        snapshots = {identity: (self.state / "tasks" / identity / "task.json").read_bytes() for identity in retained}
+        self.stop(self.processes[-1])
+        self.launch()
+        async with Client(self.client(), mode="2026-07-28", cache=None) as client:
+            found = (await client.call_tool("find_tasks", {"anchors": ["fixture=s11"]})).structured_content
+            self.assertEqual(found["coverage"], "complete")
+            self.assertEqual({item["task_id"] for item in found["tasks"]}, set(retained))
+            for identity, record in retained.items():
+                read = (await client.call_tool("read_task", {"task_id": identity})).structured_content
+                self.assertEqual(read["record"], record)
+                self.assertEqual(read["observations"][0]["state"], "unknown")
+                self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), snapshots[identity])
+
+    async def test_canonical_contract_rejects_runtime_fields_and_invalid_bindings_on_both_protocols(self):
+        import copy
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                response = await self.wire_call(client, "tools/call", {"name": "read_workspace_file", "arguments": {
+                    "machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"}})
+                context = response.json()["result"]["structuredContent"]["context"]
+                request = self.task_request(context, "never-admitted")
+                changes = [lambda r: r.update(runtime_state="succeeded"),
+                    lambda r: r["stages"][0].update(state="accepted"),
+                    lambda r: r["contract"].update(expires_at_ms=True),
+                    lambda r: r["contract"].update(scope="\u00e9" * 513),
+                    lambda r: r["stages"][0].update(source_sha256="f" * 64),
+                    lambda r: r["contract"]["targets"][0].update(workspace_identity="f" * 64)]
+                for change in changes:
+                    invalid = copy.deepcopy(request)
+                    change(invalid)
+                    response = await self.wire_call(client, "tools/call", {"name": "create_task", "arguments": invalid})
+                    result = response.json()["result"]
+                    self.assertTrue(result["isError"], result)
+                    self.assert_wire_tool_result(result, version)
+                    self.assertIn(result["structuredContent"]["error"]["code"],
+                                  {"invalid_tool_call", "invalid_task_contract", "context_mismatch"})
+                    self.assertFalse((self.state / "tasks").exists())
+                    self.assertFalse((self.state / "executions").exists())
+
     async def test_grace_schema_rejects_invalid_values_before_admission(self):
         async with self.client() as (reader, writer):
             async with ClientSession(reader, writer) as session:
@@ -183,7 +269,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task", "create_task"})
                 self.assertFalse(tools["start_execution"].annotations.read_only_hint)
                 self.assertTrue(tools["start_execution"].annotations.destructive_hint)
                 self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)

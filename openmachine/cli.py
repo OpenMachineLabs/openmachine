@@ -25,6 +25,8 @@ def main() -> int:
     target.add_argument("--github", action="store_true", help="Probe the existing GitHub identity without changing login")
     target.add_argument("--service", action="store_true", help="Verify managed service identity and its configured file read")
     doctor.add_argument("--repository", default="", help="With --github, probe one configured repository")
+    rebuild = commands.add_parser("rebuild-task-index", help="Explicitly rebuild one bounded page of derived task metadata, never task history")
+    rebuild.add_argument("--expected-generation", type=int, default=-1, help="Required observed generation when continuing an incomplete rebuild")
     bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
     bundle.add_argument("--directory", type=Path, required=True)
     serve = commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
@@ -73,6 +75,10 @@ def main() -> int:
             print(json.dumps(result))
             return int(result["status"] in {"unready", "activation_pending"})
         config = load(args.config)
+        if args.command == "rebuild-task-index":
+            from openmachine.bootstrap import create_application
+            print(json.dumps(create_application(config, args.state_dir).rebuild_task_index(args.expected_generation)))
+            return 0
         if args.command == "doctor":
             if args.repository and not args.github:
                 raise Fault("invalid_github_request", "--repository requires doctor --github.")
