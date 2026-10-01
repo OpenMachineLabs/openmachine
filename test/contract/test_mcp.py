@@ -1444,6 +1444,122 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 await control.call_tool("cancel_execution", identity)
 
 
+    async def test_task_events_readonly_preflight_preserves_original_store(self):
+        import probe_task_handoff as probe
+        self.assertEqual(probe.private_socket(str(self.socket)), self.socket)
+        async with self.wire_client(probe.PROTOCOL) as client:
+            report = await probe.observe(client)
+        self.assertEqual(report["discovery"], "blocked")
+        self.assertTrue(report["protocol_supported"])
+        self.assertFalse(report["events_advertised"])
+        self.assertEqual(report["method_errors"]["events/list"], -32601)
+        self.assertEqual(report["ai_continuation"], "not_run")
+        self.assertFalse((self.state / "tasks").exists())
+        self.assertFalse((self.state / "executions").exists())
+        alias = self.root / "socket-alias"
+        alias.symlink_to(self.socket)
+        for path in (str(alias), str(self.config), "relative.sock"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                probe.private_socket(path)
+
+    async def test_task_events_public_sdk_seam_is_not_subscription_acceptance(self):
+        from importlib.metadata import version
+        from mcp.server import MCPServer
+        from mcp.server.extension import Extension, MethodBinding
+        from mcp.types import RequestParams, Result, ServerCapabilities
+        from mcp.shared.exceptions import MCPError
+        import probe_task_handoff as probe
+
+        self.assertEqual(version("mcp"), "2.2.0")
+        # Unknown constructor fields are discarded; Extension.settings is not capabilities.events.
+        self.assertNotIn("events", ServerCapabilities(events={}).model_dump(exclude_none=True))
+        calls = []
+        class Catalog(Result):
+            events: list[dict]
+        async def listing(ctx, params):
+            calls.append(ctx.method)
+            return Catalog(events=[{"name": "task.handoff_ready", "delivery": ["webhook"]}])
+        async def unavailable(ctx, params):
+            calls.append(ctx.method)
+            raise MCPError(-32000, "S0 wire probe has no subscription backend")
+        class Events(Extension):
+            identifier = "com.example/s0-events"
+            def methods(self):
+                return [MethodBinding(name, RequestParams, handler, frozenset({probe.PROTOCOL}))
+                        for name, handler in (("events/list", listing), ("events/subscribe", unavailable),
+                                              ("events/unsubscribe", unavailable))]
+        with self.assertRaises(ValueError):
+            MethodBinding("server/discover", RequestParams, listing)
+        async def advertise(ctx, call_next):
+            result = await call_next(ctx)
+            if ctx.method == "server/discover" and ctx.protocol_version == probe.PROTOCOL:
+                return {**result, "capabilities": {**result["capabilities"], "events": {}}}
+            return result
+
+        for declared in (False, True):
+            mcp = MCPServer("S0 wire probe", extensions=[Events()], middleware=[advertise] if declared else [])
+            @mcp.tool()
+            def sentinel() -> str:
+                return "unchanged"
+            from mcp.server.transport_security import TransportSecuritySettings
+            app = mcp.streamable_http_app(json_response=True, stateless_http=True,
+                transport_security=TransportSecuritySettings(allowed_hosts=["localhost"]))
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), trust_env=False,
+                        timeout=5, headers={"MCP-Protocol-Version": probe.PROTOCOL,
+                        "accept": "application/json, text/event-stream"}) as client:
+                    discovery = (await self.wire_call(client, "server/discover", {})).json()["result"]
+                    self.assertIn("com.example/s0-events", discovery["capabilities"]["extensions"])
+                    self.assertEqual("events" in discovery["capabilities"], declared)
+                    report = await probe.observe(client)
+                    self.assertEqual(report["discovery"], "ready" if declared else "blocked")
+                    self.assertEqual(report["ai_continuation"], "not_run")
+                    before = len(calls)
+                    for method in ("events/subscribe", "events/unsubscribe"):
+                        response = await self.wire_call(client, method, {})
+                        self.assertEqual(response.json()["error"]["code"], -32000)
+                    self.assertEqual(calls[before:], ["events/subscribe", "events/unsubscribe"])
+                    tool = (await self.wire_call(client, "tools/call", {"name": "sentinel"})).json()["result"]
+                    self.assertEqual(tool["content"][0]["text"], "unchanged")
+                    self.assertEqual(tool["resultType"], "complete")
+                    client.headers["MCP-Protocol-Version"] = "2025-11-25"
+                    before = len(calls)
+                    for method in ("events/list", "events/subscribe", "events/unsubscribe"):
+                        response = await self.wire_call(client, method, {})
+                        self.assertEqual(response.json()["error"]["code"], -32601)
+                    self.assertEqual(len(calls), before)
+
+    async def test_task_events_probe_rejects_inconclusive_or_unsafe_evidence(self):
+        import probe_task_handoff as probe
+        requests = []
+        def transport(request):
+            value = json.loads(request.content)
+            requests.append(value["method"])
+            if value["method"] == "server/discover":
+                result = {"supportedVersions": [probe.PROTOCOL], "capabilities": {"events": {}}}
+            else:
+                result = {"events": [], "nextCursor": "more"}
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": value["id"], "result": result})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(transport), trust_env=False) as client:
+            report = await probe.observe(client)
+            self.assertEqual(report["discovery"], "unknown")
+            self.assertFalse(report["catalog_complete"])
+            self.assertEqual(requests, list(probe.READ_METHODS))
+            with self.assertRaises(ValueError):
+                await probe.rpc(client, "events/subscribe")
+            self.assertEqual(requests, list(probe.READ_METHODS))
+        cases = ((200, b"x" * (probe.MAX_RESPONSE + 1)), (200, b"{}"),
+                 (200, b'{"jsonrpc":"2.0","id":true,"result":{}}'),
+                 (200, b'{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32601}}'),
+                 (302, b"not-followed"))
+        for status, raw in cases:
+            with self.subTest(status=status, size=len(raw)):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(
+                        lambda request: httpx.Response(status, content=raw)), trust_env=False) as client:
+                    with self.assertRaises(ValueError):
+                        await probe.rpc(client, "server/discover")
+
+
 class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_waiter_cap_and_cancelled_await_retain_the_actual_thread_slot(self):
         with tempfile.TemporaryDirectory(prefix="om-read-limit-", dir="/tmp") as directory:
