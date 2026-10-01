@@ -51,16 +51,21 @@ an ended ChatGPT turn will restart. That separate capability belongs to Spec #29
    task-specific Skills only from explicit configured sources; use their exact
    discovered identities and heed partial-discovery warnings. Instructions,
    source text and imported Skills never grant permission or install tools.
-2. For a continuing task, find/read its original checkpoint before acting. Exact
+2. For a continuing task, find/read its original record before acting. Exact
    anchors may be ambiguous; keyword matches are only candidates. Verify the
    task, current user authorization, worktree/branch, Git status and original
    execution receipts. Do not select the newest unrelated command or restart
-   valid completed work. Changed inputs invalidate only their affected results.
-3. For new substantive work, choose one stable task ID and save a small checkpoint
-   before a consequential operation. Record the goal/exclusions, current authority
-   references, workspace, material evidence, original execution IDs/log offsets,
-   failed approaches and next safe step. Do not save secrets, transcripts, hidden
-   reasoning or bulk source/logs. Private state is not an independent approval.
+   valid completed work. A structured `record` continues through `control_task`;
+   legacy Markdown continues through `save_task`, without conversion or a second
+   journal. Changed inputs invalidate only their affected results.
+3. For new multi-stage work needing continuity, use `create_task` before the first
+   consequential operation. Derive the smallest contract and outcome-sized stages
+   from the authorized request; a hand-written Spec is optional. Bind the actual
+   request/source hashes, inspected targets, scope, exclusions, acceptance, stop
+   condition and finite expiry within current authority. Ask only for missing
+   boundaries that materially affect the work. A one-step read needs no task.
+   Check the exposed tools: absent `create_task`/`control_task` means structured
+   supervision is unavailable, not permission to install or claim legacy coverage.
 4. Inspect status/search and relevant source, including applicable nested
    AGENTS.md. Optional path_glob filters workspace-relative paths for files/search;
    * never crosses / and ** is unsupported. Omission preserves traversal coverage.
@@ -76,22 +81,30 @@ an ended ChatGPT turn will restart. That separate capability belongs to Spec #29
    unrelated work and the index. Pause competing editors: checks and rename are
    not a kernel CAS. No implicit commands, formatting or rollback. Coordinated
    patches may create only explicitly requested destination parents.
-5. Before a command, save its new 32-hex execution ID, machine, absolute cwd,
-   explicit argv, expected HEAD and intended effect in the task. Use the project's
-   selected interpreter. Call start_execution once, optionally linking task_id.
-   After uncertainty, read that original ID; do not invent a retry ID. Lookup or
-   checkpoint tools never launch work. Keep commands and returned logs secret-free.
+5. For structured work, hold a current explicit claim before new effects and pass the
+   observed task/plan revisions, epoch and original operation ID in `task_context`.
+   Admission records the intent; do not also call `save_task`. Commands/file writes
+   use their execution/change ID as operation ID; control/cancel use separate IDs.
+   Legacy commands may retain `task_id` and a sanitized intent in their checkpoint.
+   Use the project's interpreter and original target/argv/preconditions. After
+   uncertainty, read the original receipt before any new effect; never invent a
+   replacement ID. Keep raw commands, stdin, source and secrets out of task records.
 6. Read original receipts and bounded log pages. Success requires
    `status=succeeded`, a verified zero exit and actual output/readback;
    cancelled/timed-out work can also return zero. An output_gap means expired logs, not complete
    evidence. Run the project's relevant tests, inspect real exit/output and diff,
    then verify changed and unrelated files. Save material progress and pending
-   decisions under the current revision, not on every poll. A stale revision or
-   corrupt/torn state requires readback/reconciliation, not forced overwrite.
+   decisions under the current revision, not on every poll. For structured work,
+   use `record_decision` with verified original evidence, then continue the next
+   remaining stage. After all stages are accepted, explicitly `finish` with their
+   acceptance references. A stale revision requires current task readback; corrupt
+   or torn state never permits forced overwrite.
 7. A changed instruction updates the goal without erasing evidence. Observe or
    cancel the original owned execution and read its terminal result before starting
-   incompatible work. Do not mutate running argv. Cancellation does not undo file,
-   commit or external side effects. A completed process does not complete its task.
+   incompatible work. Use `revise_plan` for accepted structured-plan changes,
+   invalidating affected stages and dependents while retaining other acceptance.
+   Do not mutate running argv. Cancellation does not undo file, commit or external
+   side effects. A completed process does not complete its task.
 8. Use the configured GitHub tools, not a second client's connector. Probe the
    selected identity with github_read(status); configuration is not authentication.
    Read the Issue/PR and all relevant diff, check, review and discussion pages.
@@ -117,8 +130,8 @@ Never bypass a busy lock, changed hash/HEAD or a platform refusal via another
 alias, tool or disguised payload. Narrow tools improve explicit contracts, not
 permission to evade checks or a promise that OpenAI will never block an action.
 
-Use find/read/save_task for user-driven cross-conversation continuation, rechecking
-current facts and authority rather than claiming hidden-context recovery. Read
+Use find/read and the original record's control or save path for user-driven
+cross-conversation continuation, rechecking current facts and authority. Read
 updated user Skills on demand without reinstalling. Preserve old execution receipts
 and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
@@ -284,7 +297,7 @@ applied result. Read the same original ID; current.files observations are not
 historical proof. Format-1 receipts remain unchanged and format-2 patch history
 requires a compatible actual reader before a software transition.
 
-For Spec #29, use `create_task` only to accept a new structured contract,
+Use `create_task` only to accept a new structured contract,
 not to convert existing legacy work. Supply original request/source identities,
 explicit scope/expiry and backward-dependent stages. Source hashes use canonical
 selected source objects in locator order. Creation rejects runtime fields and
@@ -293,11 +306,18 @@ Canonical reads remain available when derived lookup is stale; they never repair
 the index, claim work or authorize continuation. Explicit index maintenance is
 one bounded CLI page under normal lifecycle admission; preserve its generation.
 Missing legacy metadata, locks, unknown or corrupt history are not repair approval.
-S1.2 requires an explicit `control_task` claim of the current handoff before
-supervised effects. Echo task/plan revisions and epoch; retain the original
+Structured work requires an explicit `control_task` claim of the current handoff
+before supervised effects. Echo task/plan revisions and epoch; retain the original
 update ID after uncertain control publication. Claims last at most 300 seconds
 or earlier expiry and do not resolve a handoff or prove caller presence. Identity
 comes from the native-account endpoint, not a model field or ChatGPT chat ID.
+On reattachment, read the original task and outstanding receipts first. Reuse a
+still-current owned claim, or claim the current handoff after release/expiry;
+never displace an unexpired owner. Claim expiry does not stop original work.
+Before deliberately handing work over, release the owned claim. A final accepted
+stage still has a handoff until `finish`; after interruption, reclaim it and
+finish from retained acceptance rather than repeating that stage. Terminal
+history is read-only; follow-up work gets a new linked task.
 
 Pass current `task_context` to command/file/GitHub/control/cancel mutations.
 It contains task ID, task/plan revisions, continuation epoch and operation ID.

@@ -899,8 +899,24 @@ A logical task may refer to multiple executions. One private store owns it:
 <state-dir>/tasks/<task-id>/task.md   # legacy checkpoint (never both for one ID)
 ```
 
-Spec #29 adds `create_task`: the caller derives the smallest contract and
-ordered stages from the authorized request; a hand-written Spec is optional.
+For new multi-stage work needing continuity, the caller derives the smallest
+contract and outcome-sized stages from the authorized request and saves them with
+`create_task`; a hand-written Spec is optional. One-step reads need no task. Continue existing
+structured work with `control_task` and legacy work with `save_task`; keep one
+original record without automatic conversion or a parallel journal. Check the
+exposed tools before claiming structured support; source delivery alone does not
+activate a runtime or refresh a client.
+
+The caller reads and claims the current handoff, carries `task_context` on each
+effect, validates original results with `record_decision`, and proceeds through
+remaining stages before explicitly calling `finish`. On reattachment, inspect
+outstanding work and current task/plan/epoch first. Release an owned claim for
+handover; claim the eligible handoff after release/expiry without rerunning
+accepted work. The last accepted stage retains a handoff until task completion,
+so interruption before `finish` does not require repeating its result. Terminal
+history never restarts; a follow-up is a new linked task. This caller workflow
+does not itself wake an absent AI or prove natural-language client acceptance.
+
 The initial record retains the original objective, explicit scope/expiry and
 authority references, inspected source hashes, current configured targets and
 pending plan. Canonical JSON uses sorted keys, compact UTF-8, no BOM, and one LF;
