@@ -294,6 +294,43 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
                 "resume_authorized": False}
 
 
+def observation_page(state: Path, known: dict[str, str]) -> dict:
+    """Read changed canonical candidates, not a second active-task ledger.
+
+    The caller retains only advertised metadata hashes. Startup inspects each
+    registered structured record once; unchanged history is never reread on a
+    timer. A stale index is reported, not repaired or taken as complete absence.
+    """
+    if len(known) > MAX_TASKS:
+        raise Fault("task_capacity", "Observation discovery exceeds the bounded task catalog.")
+    with _reading(state) as root:
+        if root is None:
+            return {"entries": [], "identities": [], "generation": None, "complete": True, "has_more": False}
+        index = load_index(root)
+        complete = catalog_complete(root, index)
+        identities = sorted(key for key, item in index["tasks"].items() if item.get("owner") == "structured")
+        changed = [key for key in identities if known.get(key) != index["tasks"][key]["sha256"]]
+        entries, consumed = [], 0
+        for identity in changed[:INDEX_PAGE]:
+            item = index["tasks"][identity]
+            record, error = None, None
+            try:
+                size = private_path(root / identity / "task.json").st_size
+                if size > records.MAX_RECORD:
+                    raise Fault("corrupt_tasks", "Retained canonical evidence exceeds its bound.")
+                if consumed + size > MAX_INDEX:
+                    break
+                consumed += size
+                record, raw = read_structured(root, identity)
+                complete = complete and item == structured_metadata(record, raw)
+            except (Fault, OSError) as failure:
+                error = failure.code if isinstance(failure, Fault) else "source_unavailable"
+                complete = False
+            entries.append({"task_id": identity, "metadata_sha256": item["sha256"], "record": record, "error": error})
+        return {"entries": entries, "identities": identities, "generation": index["generation"],
+                "complete": complete, "has_more": len(entries) < len(changed)}
+
+
 def _sync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:

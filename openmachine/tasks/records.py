@@ -585,7 +585,11 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
         if control["stop_intent"] != desired:
             control.update(state="paused", stop_intent=desired, owner=None, epoch=control["epoch"] + 1,
                            pending_decision="Await original operation outcomes." if desired == "cancel" else None)
-            record["handoff"] = record["recovery"] = None
+            record["handoff"] = None
+            # Pause/cancel suppress continuation, not evidence collection for
+            # already-owned local work. Neither action resets its retry budget.
+            if record["recovery"] is not None and record["recovery"]["category"] != "local_observation":
+                record["recovery"] = None
             material(record, now_ms, "stopped", reason)
         if desired == "cancel" and not any(pending(item) for item in record["operations"]):
             finish_record(record, "cancelled", [], "Explicit cancellation does not undo prior effects.", now_ms)
