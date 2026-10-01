@@ -101,14 +101,14 @@ class Machines:
                 except Fault as error:
                     if error.code != "execution_not_found":
                         raise
-                    tasks.read(self.state, task_id)
+                    tasks.require_legacy(self.state, task_id)
             return self._ssh(machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
                              timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
                              workspace_access=workspace_access, resource_keys=keys, task_id=task_id,
                              termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
                                expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
-                               validate_new=(lambda: tasks.read(self.state, task_id)) if task_id else None)
+                               validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
                        max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,

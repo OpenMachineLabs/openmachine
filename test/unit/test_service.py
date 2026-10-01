@@ -68,6 +68,59 @@ class ServiceTests(unittest.TestCase):
         self.assert_fault("unsupported_task_format", lambda: service.check_state(self.config, self.state))
         self.assertEqual(json.loads(paths[0].read_text())["format_version"], 999)
 
+    def test_actual_task_reader_covers_terminal_history_and_rejects_partial_candidate_proof(self):
+        from test_continuity import task_contract, terminal_task_fixture
+        from openmachine.tasks import records
+        request = task_contract()
+        created = tasks.create(self.state, request.pop("task_id"), **request)
+        path = self.state / "tasks/structured-one/task.json"
+        path.write_bytes(records.canonical(terminal_task_fixture(created["record"])))
+        tasks.rebuild_index(self.state)
+        raw = path.read_bytes()
+        proof = service.check_state(self.config, self.state)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (6, 1, 1))
+        actual = service._candidate_state(Path(sys.executable), self.config, self.state, 6)
+        self.assertEqual(actual, proof)
+        for change in ({"structured_task_records": 0}, {"task_records": True},
+                       {"task_store_present": 1}, {"structured_task_read_formats": [True]},
+                       {"structured_task_read_formats": [1, 1]}, {"task_index_coverage": "incomplete"},
+                       {"task_index_generation": proof["task_index_generation"] - 1}):
+            with self.subTest(change=change), patch.object(service, "_run", return_value=subprocess.CompletedProcess(
+                    [], 0, json.dumps(proof | change), "")):
+                self.assert_fault("incompatible_state", lambda: service._candidate_state(Path(sys.executable), self.config, self.state, 6))
+        self.assertEqual(path.read_bytes(), raw)
+        path.unlink()
+        self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
+
+    def test_candidate_ignoring_canonical_tasks_is_rejected_before_healthy_service_stop(self):
+        from test_continuity import task_contract
+        request = task_contract()
+        tasks.create(self.state, request.pop("task_id"), **request)
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service._json(path) | {"state_contract": 6})
+        ignored = subprocess.CompletedProcess([], 0, json.dumps({"protocol": 1, "state_contract": 6}), "")
+        original = (self.state / "tasks/structured-one/task.json").read_bytes()
+        with patch.object(service, "_verify_candidate"), patch.object(service, "_run", return_value=ignored), \
+                patch.object(service, "_stop") as stop, patch.object(service, "_start") as start:
+            self.assert_fault("incompatible_state", lambda: service._activate(self.state, self.record, self.b))
+            stop.assert_not_called()
+            start.assert_not_called()
+        self.assertEqual(service._record(self.state), self.record)
+        self.assertEqual((self.state / "tasks/structured-one/task.json").read_bytes(), original)
+
+    def test_task_creation_and_index_maintenance_share_lifecycle_admission(self):
+        from test_continuity import task_contract
+        config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}}})
+        app = create_application(config, self.state)
+        self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}
+        self.save(self.record)
+        with patch.object(tasks, "create") as create, patch.object(tasks, "rebuild_index") as rebuild:
+            self.assert_fault("activation_pending", lambda: app.create_task(**task_contract()))
+            self.assert_fault("activation_pending", app.rebuild_task_index)
+            create.assert_not_called()
+            rebuild.assert_not_called()
+        self.assertFalse((self.state / "tasks").exists())
+
     def test_incompatible_receipt_never_becomes_empty_history(self):
         directory = private_directory(self.state / "executions" / ("c" * 32))
         save_json(directory / "record.json", {"status": "running", "format_version": 999})
@@ -127,7 +180,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 5)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 6)
                 dispatch.assert_not_called()
 
                 def admitted(*args):
@@ -258,7 +311,7 @@ class ServiceTests(unittest.TestCase):
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service._json(path)
-        for contract in (1, 2, 3, 4, 5):
+        for contract in (1, 2, 3, 4, 5, 6):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
@@ -266,7 +319,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service._candidate_state(
                     Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
-        for contract in (0, 6, True, "3"):
+        for contract in (0, 7, True, "3"):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service._installed(self.state, self.b))
 

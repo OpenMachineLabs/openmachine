@@ -36,6 +36,12 @@
       "base_commit": "16ff23b98abf701275a441d2d82d6370bf361062",
       "change": "W3 adds only apply_workspace_patch with strict bounded om_patch_v1 and explicit path preconditions. Existing tools and annotations remain unchanged. This expectation is manually authored from the approved contract, not regenerated from candidate SDK output.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/13"
+    },
+    {
+      "approval": "Current maintainer explicitly approved S1.1 implementation, PR, self-review, merge and Spec29 body update.",
+      "base_commit": "4e270e2b4f2ece1417f7c325c2bc108e8d9862d3",
+      "change": "S1.1 adds only create_task with bounded S0 contract/stage inputs. All existing schemas and annotations remain unchanged. Expectations are manually authored, not generated from candidate SDK/model output; installed discovery verifies the delta.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/29"
     }
   ],
   "baseline": {
@@ -261,6 +267,335 @@
           "action"
         ],
         "title": "control_executionArguments",
+        "type": "object"
+      }
+    },
+    "create_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "Contract": {
+            "additionalProperties": false,
+            "properties": {
+              "acceptance": {
+                "maxLength": 1024,
+                "title": "Acceptance",
+                "type": "string"
+              },
+              "authority_refs": {
+                "items": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "title": "Authority Refs",
+                "type": "array"
+              },
+              "exclusions": {
+                "maxLength": 1024,
+                "title": "Exclusions",
+                "type": "string"
+              },
+              "expires_at_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Expires At Ms",
+                "type": "integer"
+              },
+              "objective": {
+                "maxLength": 1024,
+                "title": "Objective",
+                "type": "string"
+              },
+              "repositories": {
+                "items": {
+                  "maxLength": 140,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$",
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "title": "Repositories",
+                "type": "array"
+              },
+              "scope": {
+                "maxLength": 1024,
+                "title": "Scope",
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/$defs/Source"
+                },
+                "maxItems": 16,
+                "title": "Sources",
+                "type": "array"
+              },
+              "stop_condition": {
+                "maxLength": 1024,
+                "title": "Stop Condition",
+                "type": "string"
+              },
+              "targets": {
+                "items": {
+                  "$ref": "#/$defs/Target"
+                },
+                "maxItems": 4,
+                "title": "Targets",
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Tools",
+                "type": "array"
+              }
+            },
+            "required": [
+              "objective",
+              "scope",
+              "exclusions",
+              "acceptance",
+              "stop_condition",
+              "authority_refs",
+              "targets",
+              "repositories",
+              "tools",
+              "sources",
+              "expires_at_ms"
+            ],
+            "title": "Contract",
+            "type": "object"
+          },
+          "Origin": {
+            "additionalProperties": false,
+            "properties": {
+              "objective": {
+                "maxLength": 1024,
+                "title": "Objective",
+                "type": "string"
+              },
+              "request_ref": {
+                "maxLength": 1024,
+                "title": "Request Ref",
+                "type": "string"
+              },
+              "request_sha256": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Request Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "request_ref",
+              "request_sha256",
+              "objective"
+            ],
+            "title": "Origin",
+            "type": "object"
+          },
+          "Source": {
+            "additionalProperties": false,
+            "properties": {
+              "locator": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Locator",
+                "type": "string"
+              },
+              "sha256": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "locator",
+              "sha256"
+            ],
+            "title": "Source",
+            "type": "object"
+          },
+          "StageDefinition": {
+            "additionalProperties": false,
+            "properties": {
+              "depends_on": {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Depends On",
+                "type": "array"
+              },
+              "id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Id",
+                "type": "string"
+              },
+              "result": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Result",
+                "type": "string"
+              },
+              "source_refs": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "title": "Source Refs",
+                "type": "array"
+              },
+              "source_sha256": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Source Sha256",
+                "type": "string"
+              },
+              "verification": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Verification",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "depends_on",
+              "result",
+              "verification",
+              "source_refs",
+              "source_sha256"
+            ],
+            "title": "StageDefinition",
+            "type": "object"
+          },
+          "Target": {
+            "additionalProperties": false,
+            "properties": {
+              "head_sha": {
+                "anyOf": [
+                  {
+                    "maxLength": 40,
+                    "minLength": 40,
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Head Sha"
+              },
+              "machine": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "title": "Machine",
+                "type": "string"
+              },
+              "workspace": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "title": "Workspace",
+                "type": "string"
+              },
+              "workspace_identity": {
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Workspace Identity",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace",
+              "workspace_identity",
+              "head_sha"
+            ],
+            "title": "Target",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "anchors": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Anchors",
+            "type": "array"
+          },
+          "contract": {
+            "$ref": "#/$defs/Contract"
+          },
+          "origin": {
+            "$ref": "#/$defs/Origin"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/$defs/StageDefinition"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Stages",
+            "type": "array"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "update_id": {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Update Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "update_id",
+          "title",
+          "anchors",
+          "origin",
+          "contract",
+          "stages"
+        ],
+        "title": "create_taskArguments",
         "type": "object"
       }
     },

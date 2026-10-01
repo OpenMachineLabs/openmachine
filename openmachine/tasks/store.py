@@ -1,16 +1,22 @@
-"""Lock-coordinated checkpoint/index reads and saves, not a two-file transaction."""
+"""Canonical task publication, bounded derived lookup, and unchanged legacy saves."""
 
+from collections.abc import Callable
 from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
+import time
+import uuid
 
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.foundation.sanitize import Fault, redact
 
-from .index import MAX_CHECKPOINT, MAX_INDEX, metadata as validate_metadata, private_path, read_checkpoint, read_index, task_id
+from . import records
+from .index import (MAX_CHECKPOINT, MAX_INDEX, MAX_TASKS, INDEX_PAGE, catalog_complete, directory_names,
+                    load_index, metadata as validate_metadata, private_path, read_checkpoint, read_index,
+                    read_structured, structured_metadata, task_id)
 
 
 @contextmanager
@@ -36,82 +42,17 @@ def _reading(state: Path):
         private_path(state / "locks", directory=True)
         private_path(state / "locks/tasks.lock")
         with lease(state / "locks/tasks.lock", shared=True, create=False):
-            yield root, read_index(root)
+            yield root
     except OSError as error:
         raise Fault("corrupt_tasks", "Existing task state or its lock is unavailable; preserve it.") from error
 
 
-def read(state: Path, identity: str) -> dict:
-    task_id(identity)
-    with _reading(state) as store:
-        if store is None:
-            raise Fault("tasks_uninitialized", "This private task store has not been initialized.")
-        root, index = store
-        item, raw = read_checkpoint(root, index, identity)
-        body = raw.decode("utf-8")
-        return {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
-                "generation": index["generation"], "resume_authorized": False}
-
-
-def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "",
-         offset: int = 0, limit: int = 20, expected_generation: int = -1) -> dict:
-    if identity:
-        task_id(identity)
-    wanted = validate_metadata("lookup", anchors or [])["anchors"]
-    if (not isinstance(query, str) or len(query) > 200 or type(offset) is not int or offset < 0
-            or type(limit) is not int or not 1 <= limit <= 50 or type(expected_generation) is not int or expected_generation < -1):
-        raise Fault("invalid_range", "Use a bounded lookup query, nonnegative offset and page size from 1 to 50.")
-    with _reading(state) as store:
-        if store is None:
-            if expected_generation != -1:
-                raise Fault("task_index_changed", "The original task index is no longer available.")
-            return {"status": "uninitialized", "tasks": [], "next_offset": None, "generation": None,
-                    "coverage": "this_store_only", "resume_authorized": False}
-        root, index = store
-        if expected_generation != -1 and expected_generation != index["generation"]:
-            raise Fault("task_index_changed", "Task lookup metadata changed between pages; read the current index.")
-        matches = [(key, value) for key, value in sorted(index["tasks"].items())
-                   if (not identity or key == identity) and set(wanted) <= set(value["anchors"])
-                   and query.casefold() in (key + " " + value["title"]).casefold()]
-        page = matches[offset:offset + limit]
-        for key, _ in page:
-            read_checkpoint(root, index, key)
-        total = len(matches)
-        exact = bool(identity or wanted) and not query
-        status = "matched" if exact and total == 1 else "ambiguous" if exact and total > 1 else "candidates"
-        return {"status": status, "tasks": [{"task_id": key, "title": item["title"], "revision": item["revision"]}
-                                            for key, item in page], "total": total,
-                "next_offset": offset + limit if offset + limit < total else None,
-                "generation": index["generation"], "coverage": "registered_tasks_only", "resume_authorized": False}
-
-
-def _replace(path: Path, raw: bytes) -> None:
-    fd, name = tempfile.mkstemp(prefix=".checkpoint-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(raw)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(name, path)
-        parent = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(parent)
-        finally:
-            os.close(parent)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-def save(state: Path, identity: str, expected_revision: int, title: str, body: str, anchors: list[str]) -> dict:
-    task_id(identity)
-    metadata = validate_metadata(title, anchors)
-    if type(expected_revision) is not int or expected_revision < 0:
-        raise Fault("invalid_revision", "Supply the observed nonnegative checkpoint revision; zero means new.")
-    raw = body.encode("utf-8")
-    if not raw.strip() or len(raw) > MAX_CHECKPOINT or b"\0" in raw or redact(body) != body:
-        raise Fault("invalid_checkpoint", "Supply a nonempty checkpoint up to 32 KiB, without credentials or NUL bytes.")
-    if expected_revision and not (state / "tasks").exists():
-        raise Fault("corrupt_tasks", "The original task store is missing; do not initialize new history.")
+@contextmanager
+def _writing(state: Path, *, initialize: bool):
+    if not initialize:
+        with _reading(state) as root:
+            if root is None:
+                raise Fault("tasks_uninitialized", "No task store exists to rebuild.")
     state = private_directory(state)
     root = state / "tasks"
     existing = os.path.lexists(root)
@@ -132,7 +73,293 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
                 raise Fault("corrupt_tasks", "A prior task store is missing; do not initialize new history.")
             private_directory(root)
             save_json(root / "index.json", {"format_version": 1, "generation": 0, "tasks": {}})
+            _sync_directory(locks)
+            _sync_directory(state)
         private_path(root, directory=True)
+        yield root
+
+
+def _view(root: Path, record: dict, raw: bytes, *, index_status: str | None = None) -> dict:
+    if index_status is None:
+        try:
+            index = load_index(root)
+            complete = catalog_complete(root, index)
+            expected = structured_metadata(record, raw)
+            index_status = "current" if complete and index["tasks"].get(record["task_id"]) == expected else "stale"
+            if index.get("coverage") == "incomplete":
+                index_status = "incomplete"
+        except Fault:
+            index_status = "stale"
+    return {"task_id": record["task_id"], "record": record, "observed_at_ms": time.time_ns() // 1000000,
+            "index_status": index_status,
+            "support": {"structured_records": True, "supervised_admission": False,
+                        "runtime_recovery": False, "events_delivery": False},
+            "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
+                "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
+                "blocker": "Caller continuation is not observed; S1.1 does not dispatch or wake an AI."}]}
+
+
+def read(state: Path, identity: str) -> dict:
+    task_id(identity)
+    with _reading(state) as root:
+        if root is None:
+            raise Fault("tasks_uninitialized", "This private task store has not been initialized.")
+        if os.path.lexists(root / identity / "task.json"):
+            record, raw = read_structured(root, identity)
+            return _view(root, record, raw)
+        index = read_index(root)
+        if index["tasks"].get(identity, {}).get("owner") == "structured":
+            raise Fault("corrupt_tasks", "The canonical record is missing; legacy fallback is forbidden.")
+        item, raw = read_checkpoint(root, index, identity)
+        body = raw.decode("utf-8")
+        return {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
+                "generation": index["generation"], "resume_authorized": False}
+
+
+def require_legacy(state: Path, identity: str) -> None:
+    """Only used after original execution-ID reconciliation, before a new launch."""
+    if "record" in read(state, identity):
+        raise Fault("supervised_admission_unavailable", "Structured tasks are not runnable until full task-context admission is implemented; do not use a bare task_id.")
+
+
+def _metadata_page(root: Path, index: dict, identities: list[str], limit: int = INDEX_PAGE) -> list[tuple[str, dict]]:
+    page, consumed = [], 0
+    for identity in identities[:limit]:
+        structured = os.path.lexists(root / identity / "task.json")
+        path = root / identity / ("task.json" if structured else "task.md")
+        size = private_path(path).st_size
+        if size > (records.MAX_RECORD if structured else MAX_CHECKPOINT):
+            raise Fault("corrupt_tasks", "A retained task exceeds its record bound.")
+        if consumed + size > MAX_INDEX:
+            break
+        if structured:
+            record, raw = read_structured(root, identity)
+            item = structured_metadata(record, raw)
+        else:
+            item, raw = read_checkpoint(root, index, identity)
+            item = {"owner": "legacy", **item}
+        consumed += len(raw)
+        page.append((identity, item))
+    return page
+
+
+def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "",
+         offset: int = 0, limit: int = 20, expected_generation: int = -1) -> dict:
+    if identity:
+        task_id(identity)
+    wanted = validate_metadata("lookup", anchors or [])["anchors"]
+    if (not isinstance(query, str) or len(query) > 200 or type(offset) is not int or offset < 0
+            or type(limit) is not int or not 1 <= limit <= 50 or type(expected_generation) is not int or expected_generation < -1):
+        raise Fault("invalid_range", "Use a bounded lookup query, nonnegative offset and page size from 1 to 50.")
+    with _reading(state) as root:
+        if root is None:
+            if expected_generation != -1:
+                raise Fault("task_index_changed", "The original task index is no longer available.")
+            return {"status": "uninitialized", "tasks": [], "next_offset": None, "generation": None,
+                    "coverage": "this_store_only", "resume_authorized": False}
+        index = load_index(root)
+        complete = catalog_complete(root, index)
+        if expected_generation != -1 and expected_generation != index["generation"]:
+            raise Fault("task_index_changed", "Task lookup metadata changed between pages; read the current index.")
+        matches = [key for key, value in sorted(index["tasks"].items())
+                   if (not identity or key == identity) and set(wanted) <= set(value["anchors"])
+                   and query.casefold() in (key + " " + value["title"]).casefold()]
+        page = _metadata_page(root, index, matches[offset:], limit)
+        for key, item in page:
+            stored = {"owner": "legacy", **index["tasks"][key]}
+            complete = complete and item == stored
+        total = len(matches)
+        end = offset + len(page)
+        exact = bool(identity or wanted) and not query
+        status = "matched" if exact and total == 1 else "ambiguous" if exact and total > 1 else "candidates"
+        return {"status": status, "tasks": [{"task_id": key, "title": item["title"], "revision": item["revision"]}
+                                            for key, item in page], "total": total,
+                "next_offset": end if end < total else None, "generation": index["generation"],
+                "coverage": "registered_tasks_only" if complete and index["format_version"] == 1 else "complete" if complete else "incomplete",
+                "resume_authorized": False}
+
+
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _replace(path: Path, raw: bytes) -> None:
+    fd, name = tempfile.mkstemp(prefix=".checkpoint-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(raw)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(name, path)
+        _sync_directory(path.parent)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def _index_budget(index: dict) -> None:
+    if (len(index["tasks"]) > MAX_TASKS or index["generation"] > records.MAX_INTEGER
+            or len((json.dumps(index, sort_keys=True) + "\n").encode()) > MAX_INDEX):
+        raise Fault("task_index_full", "The bounded task index is full; preserve existing records.")
+
+
+def _version_two(index: dict) -> dict:
+    return {"format_version": 2, "generation": index["generation"],
+            "coverage": index.get("coverage", "complete"), "next_cursor": index.get("next_cursor"),
+            "tasks": {key: {"owner": "legacy", **item} for key, item in index["tasks"].items()}}
+
+
+def _write_index(root: Path, index: dict) -> None:
+    _index_budget(index)
+    save_json(root / "index.json", index)
+    if load_index(root) != index:
+        raise Fault("task_index_write_unverified", "Derived index readback differs; preserve canonical tasks and inspect metadata.")
+
+
+def _original_create(root: Path | None, request: dict) -> dict | None:
+    if root is None or not os.path.lexists(root / request["task_id"]):
+        return None
+    identity = request["task_id"]
+    if not os.path.lexists(root / identity / "task.json"):
+        read_checkpoint(root, read_index(root), identity)
+        raise Fault("task_conflict", "This ID belongs to legacy history; conversion requires separate approval.")
+    record, raw = read_structured(root, identity)
+    update = {"id": request["update_id"], "request_sha256": records.digest({"method": "create_task", **request})}
+    if record["last_update"] != update or record["revision"] != 1:
+        raise Fault("task_conflict", "The original task/update ID has different intent or a later revision; read it without replay.")
+    return {**_view(root, record, raw), "status": "unchanged"}
+
+
+def create(state: Path, identity: str, update_id: str, title: str, anchors: list[str], origin: dict,
+           contract: dict, stages: list[dict], *, validate_new: Callable[[dict], None] | None = None) -> dict:
+    request = records.normalize_create({"task_id": identity, "update_id": update_id, "title": title,
+        "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
+    with _reading(state) as root:
+        original = _original_create(root, request)
+        if original is not None:
+            return original
+    # Preflight size/expiry before initialization; no task lock spans target reads.
+    records.new_record(request, time.time_ns() // 1000000)
+    if validate_new is not None:
+        validate_new(request)
+    record = records.new_record(request, time.time_ns() // 1000000)
+    raw = records.canonical(record)
+    with _writing(state, initialize=True) as root:
+        original = _original_create(root, request)
+        if original is not None:
+            return original
+        index = _version_two(read_index(root))
+        index["tasks"][identity] = structured_metadata(record, raw)
+        index["generation"] += 1
+        _index_budget(index)
+        temporary = root / (".record-task-" + uuid.uuid4().hex)
+        try:
+            temporary.mkdir(mode=0o700)
+            _replace(temporary / "task.json", raw)
+            if os.path.lexists(root / identity):
+                raise Fault("task_conflict", "The destination appeared during creation; preserve both records.")
+            os.rename(temporary, root / identity)
+            _sync_directory(root)
+            observed, content = read_structured(root, identity)
+            if observed != record or content != raw:
+                raise Fault("task_write_unverified", "Canonical publication readback differs; inspect the original task.")
+        except OSError as error:
+            raise Fault("task_write_unverified", "Canonical publication has no verified durable acknowledgement; read the original ID, never replace it.") from error
+        # Index failure cannot undo a verified canonical commit or cause another creation.
+        try:
+            _write_index(root, index)
+        except (OSError, Fault):
+            return {**_view(root, record, raw, index_status="stale"), "status": "created"}
+        return {**_view(root, record, raw, index_status="current"), "status": "created"}
+
+
+def rebuild_index(state: Path, expected_generation: int = -1) -> dict:
+    """Explicit maintenance: at most 50 records/2 MiB, no canonical writes or GC."""
+    if type(expected_generation) is not int or not -1 <= expected_generation <= records.MAX_INTEGER:
+        raise Fault("invalid_range", "Supply the observed index generation, or -1 to begin a rebuild.")
+    with _writing(state, initialize=False) as root:
+        try:
+            original = load_index(root)
+        except Fault as error:
+            if error.code != "corrupt_tasks" or expected_generation != -1:
+                raise
+            # A missing/corrupt derived file is recoverable only without legacy gaps.
+            if os.path.lexists(root / "index.json"):
+                private_path(root / "index.json")
+            original = None
+        index = _version_two(original) if original is not None else {
+            "format_version": 2, "generation": time.time_ns() // 1000,
+            "coverage": "complete", "next_cursor": None, "tasks": {}}
+        if expected_generation != -1 and expected_generation != index["generation"]:
+            raise Fault("task_index_changed", "Index generation changed; inspect the current rebuild cursor.")
+        if index["coverage"] == "incomplete" and expected_generation == -1:
+            raise Fault("task_index_changed", "An existing rebuild needs its observed generation; do not restart its episode.")
+        names = directory_names(root)
+        if original is None and not names:
+            raise Fault("corrupt_tasks", "Missing metadata and no canonical records cannot prove empty history; do not initialize over it.")
+        catalog_complete(root, index, names)
+        cursor = index["next_cursor"] if index["coverage"] == "incomplete" else None
+        if cursor is not None and (cursor not in names or any(key <= cursor and key not in index["tasks"] for key in names)):
+            raise Fault("corrupt_tasks", "The published rebuild prefix changed; preserve it for reconciliation.")
+        remaining = [key for key in names if cursor is None or key > cursor]
+        page = _metadata_page(root, index, remaining)
+        for key, item in page:
+            index["tasks"][key] = item
+        done = len(page) == len(remaining)
+        index.update(generation=index["generation"] + 1, coverage="complete" if done else "incomplete",
+                     next_cursor=None if done else page[-1][0])
+        _index_budget(index)
+        try:
+            _write_index(root, index)
+        except OSError as error:
+            raise Fault("task_index_write_unverified", "Index publication was not acknowledged; read its original generation before continuing.") from error
+        return {"status": "current" if done else "incomplete", "generation": index["generation"],
+                "coverage": index["coverage"], "next_cursor": index["next_cursor"], "records_checked": len(page)}
+
+
+def check_state(state: Path) -> dict:
+    """Actual reader proof, including terminal-only stores; never repairs an index."""
+    count, structured, generation, offset, version, present = 0, 0, None, 0, None, False
+    while True:
+        with _reading(state) as root:
+            if root is None:
+                if present:
+                    raise Fault("corrupt_tasks", "The original task store disappeared during compatibility validation.")
+                break
+            present = True
+            index = read_index(root)
+            if generation is not None and index["generation"] != generation:
+                raise Fault("task_index_changed", "Task history changed during candidate validation.")
+            generation, version = index["generation"], index["format_version"]
+            identities = sorted(index["tasks"])
+            page = _metadata_page(root, index, identities[offset:])
+            for key, item in page:
+                if item != {"owner": "legacy", **index["tasks"][key]}:
+                    raise Fault("task_index_incomplete", "Canonical records and lookup metadata differ; rebuild before a service transition.")
+                structured += item["owner"] == "structured"
+            count += len(page)
+            offset += len(page)
+            if offset == len(identities):
+                break
+    return {"task_store_present": present, "task_records": count, "structured_task_records": structured,
+            "structured_task_read_formats": list(records.READ_FORMATS), "task_index_format": version,
+            "task_index_generation": generation, "task_index_coverage": "complete"}
+
+
+def save(state: Path, identity: str, expected_revision: int, title: str, body: str, anchors: list[str]) -> dict:
+    task_id(identity)
+    metadata = validate_metadata(title, anchors)
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise Fault("invalid_revision", "Supply the observed nonnegative checkpoint revision; zero means new.")
+    raw = body.encode("utf-8")
+    if not raw.strip() or len(raw) > MAX_CHECKPOINT or b"\0" in raw or redact(body) != body:
+        raise Fault("invalid_checkpoint", "Supply a nonempty checkpoint up to 32 KiB, without credentials or NUL bytes.")
+    if expected_revision and not (state / "tasks").exists():
+        raise Fault("corrupt_tasks", "The original task store is missing; do not initialize new history.")
+    with _writing(state, initialize=True) as root:
         index = read_index(root)
         revision, previous = 0, None
         if identity in index["tasks"]:
@@ -146,10 +373,9 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
         if expected_revision != revision:
             raise Fault("task_conflict", "A newer checkpoint exists; read it before updating progress.")
         item = {**metadata, "revision": revision + 1, "sha256": hashlib.sha256(raw).hexdigest()}
-        index["tasks"][identity] = item
+        index["tasks"][identity] = ({"owner": "legacy", **item} if index["format_version"] == 2 else item)
         index["generation"] += 1
-        if len(json.dumps(index).encode()) > MAX_INDEX:
-            raise Fault("task_index_full", "The bounded task index is full; preserve existing records.")
+        _index_budget(index)
         directory = private_directory(root / identity)
         try:
             _replace(directory / "task.md", raw)

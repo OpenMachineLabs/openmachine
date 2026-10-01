@@ -279,7 +279,8 @@ change. A socket or a tool list does not prove that write tools work.
 | `apply_workspace_patch` | Strict `om_patch_v1` text, exact path/hash preconditions, observed workspace identity/HEAD; optional bounded parent creation and preview-plan binding. One original change ID records ordered add/update/delete/move effects, not an atomic batch. |
 | `read_workspace_change` | Original machine/change ID; historical receipt and owner observation, with optional separate current hashes. Never applies, repairs or initializes history. |
 | `find_tasks` | Exact task/anchor filters or title/ID keywords, range and expected index generation; candidates never authorize continuation. |
-| `read_task` | Original task ID; verified checkpoint, revision and lookup references. |
+| `create_task` | Stable task/update IDs, origin, explicit bounded contract and ordered stages; creates a non-runnable canonical record, not an execution grant. |
+| `read_task` | Original task ID; canonical record with truthful support/index status, or the verified legacy checkpoint. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
 | `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, `termination_grace_seconds`, explicit `tty=false/true` and optional `terminal_size={rows,cols}`. |
 | `read_execution` | Original machine/ID, absolute byte offset and optional `wait_seconds=0..5`; observed state, command/stop/cleanup facts, output/presentation flags and next offset. Waiting never changes command lifetime. |
@@ -894,10 +895,53 @@ A logical task may refer to multiple executions. One private store owns it:
 
 ```text
 <state-dir>/tasks/index.json          # lookup metadata and integrity references
-<state-dir>/tasks/<task-id>/task.md   # material progress, evidence and next action
+<state-dir>/tasks/<task-id>/task.json # structured canonical task (new IDs)
+<state-dir>/tasks/<task-id>/task.md   # legacy checkpoint (never both for one ID)
 ```
 
-`save_task` creates at revision zero and updates only the observed revision. It
+Spec #29 S1.1 adds `create_task`: the caller derives the smallest contract and
+ordered stages from the authorized request; a hand-written Spec is optional.
+The initial record retains the original objective, explicit scope/expiry and
+authority references, inspected source hashes, current configured targets and
+pending plan. Canonical JSON uses sorted keys, compact UTF-8, no BOM, and one LF;
+stage source hashes cover selected source objects sorted by locator. Unknown
+fields and runtime assertions are rejected, including before SDK argument filtering.
+References record declared authority; they neither create grants nor prove that
+uninspected source was read. Current target identity/HEAD and configured grants
+are checked only for new creation, without holding a task lock during target reads.
+
+Structured records are bounded to 64 KiB; creation must fit 48 KiB, reserving
+16 KiB for later evidence. Creation publishes a complete, fsynced task directory
+before refreshing derived index format 2. Exact canonical reads do not require
+a healthy index: a committed record remains readable with stale/incomplete
+lookup status. Failed durability acknowledgement remains uncertain. Retry only
+the original task/update intent to observe it, never replace history or invent
+another handoff. There is no arbitrary canonical-record overwrite API.
+
+Reads never repair state. Explicit maintenance through the selected runtime:
+
+```sh
+openmachine --config /absolute/config.toml --state-dir /absolute/private/state rebuild-task-index
+```
+
+Each call validates at most 50 records/2 MiB; continue an incomplete result with
+its observed `--expected-generation`. New writes remain blocked until complete.
+At most 10,000 entries are considered, with no history deletion or bulk migration.
+Missing legacy revisions/hashes, unknown orphans, unsafe paths, missing locks and
+corrupt canonical records block recovery rather than authorize guessed metadata.
+The index contains lookup metadata, never a second progress ledger.
+
+S1.1 is storage, not supervision: new structured tasks cannot start commands
+through a bare `task_id`. There is no `control_task`, claim, automatic result
+collection, recovery loop, event delivery or AI wake. Status reports those
+features as unsupported and caller state as unknown. Terminal shapes are readable
+history, not a delivered terminal transition. Continue existing authorized work
+using its original legacy checkpoint; do not convert it into an unrunnable task.
+Controller state contract 6 requires actual candidate-reader coverage before a
+managed transition, including terminal-only history. An incompatible old runtime
+must not be selected by deleting records or merely changing a version number.
+
+Legacy `save_task` creates at revision zero and updates only the observed revision. It
 serializes saves under one stable store lock; an identical retry of the latest
 write returns unchanged. Lookup anchors are additive: an omitted or empty list
 preserves prior references rather than silently removing task locators. Titles
@@ -957,14 +1001,14 @@ The runtime has one application boundary, local capabilities and explicit integr
 | `integrations/github/` | One gh connection backend, bounded API pagination, pinned review/merge evidence and scoped collaboration with destination reconciliation. |
 | `openmachine/execution/` | Local execution admission and observations; pipe/PTY lifecycle and bounded control IPC; persisted record validation and logs. |
 | `openmachine/workspace/` | Canonical Git identity/capture; inspection and search results; scoped file reads and guarded publication. |
-| `openmachine/tasks/` | Lock-coordinated checkpoint saves/reads; index metadata and checkpoint integrity. |
+| `openmachine/tasks/` | Strict canonical records and durable creation; bounded derived lookup; preserved legacy checkpoint integrity. |
 | `openmachine/foundation/` | Shared filesystem primitives, durable writes, cooperative locks and safe errors; no domain schemas or policy. |
 
-Execution uses `workspace.git` for canonical identity. Task storage depends on
-its index validation, never the reverse. Package facades expose the existing
-operations; workers retain `python -m openmachine.execution`. These internal
-paths do not change MCP/CLI contracts, persisted locations, lock identities or
-save ordering. The checkpoint/index pair is still not a two-file transaction.
+Execution uses `workspace.git` for canonical identity. Task store and index readers
+share the pure record validator; task storage never imports execution or providers.
+Package facades expose domain operations; workers retain
+`python -m openmachine.execution`. The legacy checkpoint/index pair remains
+non-transactional; structured canonical publication is independent of index refresh.
 
 MCP operations and explicit CLI integration probes use the application assembled
 by `bootstrap.py`. Every application mutation acquires the existing shared

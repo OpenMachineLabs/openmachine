@@ -187,6 +187,26 @@ class SSHTests(unittest.TestCase):
                 app.start_execution("build-machine", **(arguments | {"task_id": "invalid/task"}))
             self.assertEqual(caught.exception.code, "invalid_task_id")
 
+    def test_structured_task_is_not_a_new_remote_execution_grant(self):
+        from test_continuity import task_contract
+        state = self.root / "controller"
+        app = create_application(self.settings, state)
+        request = task_contract()
+        tasks.create(state, request.pop("task_id"), **request)
+        arguments = {"execution_id": "d" * 32, "cwd": str(self.project), "argv": ["true"], "task_id": "structured-one"}
+        missing = (0, b'{"error":{"code":"execution_not_found","message":"No original receipt."}}')
+        with patch.object(client, "_exchange", return_value=missing) as exchange:
+            with self.assertRaises(Fault) as caught:
+                app.start_execution("build-machine", **arguments)
+            self.assertEqual(caught.exception.code, "supervised_admission_unavailable")
+            self.assertEqual([json.loads(call.args[1])["operation"] for call in exchange.call_args_list], ["read_execution"])
+        (state / "tasks/structured-one/task.json").write_text("Uncertain original task")
+        with patch.object(client, "_exchange", side_effect=[self.response({"status": "succeeded"}),
+                self.response({"status": "succeeded"})]) as exchange:
+            self.assertEqual(app.start_execution("build-machine", **arguments)["status"], "succeeded")
+            self.assertEqual([json.loads(call.args[1])["operation"] for call in exchange.call_args_list],
+                             ["read_execution", "start_execution"])
+
     def test_application_routes_remote_files_without_resolving_controller_paths(self):
         app = create_application(self.settings, self.root / "controller")
         self.settings.workspaces["project"].root = "/remote/not-on-controller"
