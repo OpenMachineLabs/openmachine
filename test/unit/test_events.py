@@ -330,7 +330,7 @@ class EventsTests(ObserverFixture, unittest.TestCase):
         config = self.root / "events-config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = service.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 10)
+        self.assertEqual(proof["state_contract"], 11)
         self.assertEqual(proof["events_subscriptions"], 1)
         for change in ({"state_contract": 8}, {"events_present": False}, {"events_sha256": "0" * 64}):
             with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

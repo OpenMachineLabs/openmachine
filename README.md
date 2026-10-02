@@ -12,7 +12,7 @@ Events and tests without changing the public tool contract or persisted formats.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 10 and SSH protocol 6 are compatibility
+current readers accept both. State contract 11 and SSH protocol 6 are compatibility
 contracts, not release versions. Execution retains format 5 and opt-in PTY control.
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
@@ -78,7 +78,9 @@ service after an authorized configuration change.
 Machine/workspace names are operator-owned; see [examples/config.toml](examples/config.toml).
 Local and explicitly configured SSH transports are supported. Optional `[github]`
 configuration enables the scoped collaboration tools described in the operation reference. Omit it to
-keep GitHub disabled. Open Machine uses the existing `gh` login and stores no token.
+keep GitHub disabled. New accounts use the official Open Machine GitHub App Device
+Flow and automatically pinned local credential storage; historical gh task bindings
+remain readable without importing their credentials.
 Unknown fields are rejected, not ignored. Plain `doctor` checks configuration and
 directory existence, not effective file access or network readiness. Managed
 `doctor --service` verifies the selected runtime, MCP identity and an actual
@@ -134,12 +136,14 @@ partial/unknown results preserve the original ID and known applied prefix.
 
 ## GitHub collaboration
 
-Current source includes Spec #62 PR1's runtime-owned existing-`gh` connection
-management: explicit attach/list/disconnect, account-bound GitHub requests and
-new task bindings. [Connection operations](docs/operations.md#account-connections)
-work through the existing private MCP; no GUI or new server is required. Native
-GitHub OAuth and refresh remain PR2. This source increment is not a new release
-or evidence that an existing installation has been updated.
+Current source implements Spec #62's native GitHub account owner: headless Device
+Flow, pinned Keychain/private-file credentials, serialized renewal, cancellation,
+disconnect and stable task bindings. [Connection operations](docs/operations.md#account-connections)
+use the existing private MCP and Runtime; no GUI or new server is required.
+New gh onboarding is removed; only original historical task recovery retains the
+external gh adapter. Routine renewal is automatic, not an unrevokable-login promise.
+This source increment is not a release or proof that an installation was updated
+or that its operator completed the GitHub App prerequisites and consent.
 
 [GitHub operations](docs/operations.md#github) use exact scopes and the existing
 account, current-head review gates and destination readback. A self-review is not

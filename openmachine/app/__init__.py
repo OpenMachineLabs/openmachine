@@ -33,6 +33,8 @@ class Application:
         self.github = github
         self.events = events
         self.connections = connections
+        if connections is not None:
+            connections.admit = self._admit
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
 
@@ -52,13 +54,17 @@ class Application:
     def list_integrations(self, provider: str = "", connection_id: str = "") -> dict:
         return self.connections.list(provider, connection_id)
 
-    def connect_integration(self, request_id: str, provider: str = "github", method: str = "existing_gh",
+    def connect_integration(self, request_id: str, provider: str = "github", method: str = "device_code",
                             connection_id: str = "") -> dict:
         with self._admit():
             return self.connections.connect(request_id, provider, method, connection_id)
 
     def read_integration_login(self, login_id: str) -> dict:
         return self.connections.read_login(login_id)
+
+    def cancel_integration_login(self, login_id: str) -> dict:
+        with self._admit():
+            return self.connections.cancel_login(login_id)
 
     def disconnect_integration(self, connection_id: str, expected_revision: int) -> dict:
         with self._admit():
@@ -90,10 +96,13 @@ class Application:
                       "local_result_observation": True,
                       "ssh_result_observation": self.machines.ssh_recovery is not None},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
-            "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
+            "github": None if self.config.github is None else {**self.config.github.model_dump(),
+                                                           "backend": "native", "legacy_gh": "historical_only",
                                                            "probe_status": "not_probed", "read_and_merge": True},
-            "connections": {"protocol": 1, "methods": ["existing_gh"], "native_login": False,
-                            "login_cancellation": False},
+            "connections": {"protocol": 2,
+                            "methods": ["device_code"] if self.config.github and self.connections.native.CLIENT_ID else [],
+                            "native_login": bool(self.config.github and self.connections.native.CLIENT_ID),
+                            "login_cancellation": True},
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
                           "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
@@ -274,7 +283,8 @@ class Application:
                  "find_tasks", "read_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_merge",
-                 "list_integrations", "connect_integration", "read_integration_login", "disconnect_integration"}
+                 "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
+                 "disconnect_integration"}
         if not tools <= known:
             raise Fault("invalid_task_contract", "Task scope must name implemented tools, not future actions.")
         if tools & {"start_execution", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
@@ -301,8 +311,8 @@ class Application:
         bindings = dict(contract.get("github_connections", {}))
         for repository in contract["repositories"]:
             binding = bindings.get(repository)
-            if bind_new and binding is None:
-                binding = self.connections.select(repository, write=github_write, persist=True).binding()
+            if bind_new:
+                binding = self.connections.select(repository, binding=binding, write=github_write, persist=True).binding()
                 bindings[repository] = binding
             observed = self._github_call("read", dict(action="repository", repository=repository),
                                          binding=binding, legacy=not bind_new and binding is None)

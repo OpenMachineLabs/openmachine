@@ -108,7 +108,7 @@ class ServiceTests(unittest.TestCase):
                                  [int(base * jitter) for base in (1000, 2000, 60000, 60000)])
         before = (self.state / "service/service.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 10), proof)
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 11), proof)
         for delta in ({"state_contract": 7}, {"runtime_recovery_present": False},
                       {"runtime_recovery_format": True}, {"runtime_recovery_sha256": "e" * 64}):
             with self.subTest(delta=delta), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
@@ -397,8 +397,8 @@ class ServiceTests(unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (10, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 10)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (11, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 11)
         self.assertEqual(actual, proof)
         for change in ({"structured_task_records": 0}, {"task_records": True},
                        {"task_store_present": 1}, {"structured_task_read_formats": [True]},
@@ -406,7 +406,7 @@ class ServiceTests(unittest.TestCase):
                        {"task_index_generation": proof["task_index_generation"] - 1}):
             with self.subTest(change=change), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | change), "")):
-                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 10))
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 11))
         self.assertEqual(path.read_bytes(), raw)
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
@@ -434,8 +434,8 @@ class ServiceTests(unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (10, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 10), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (11, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 11), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -520,7 +520,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 10)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 11)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):
@@ -658,7 +658,7 @@ class ServiceTests(unittest.TestCase):
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
         path = self.state / "service/versions" / self.b / "installation.json"
         original = service_state._json(path)
-        for contract in range(1, 11):
+        for contract in range(1, 12):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service_state._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
@@ -666,7 +666,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
-        for contract in (0, 11, True, "3"):
+        for contract in (0, 12, True, "3"):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service_state._installed(self.state, self.b))
 

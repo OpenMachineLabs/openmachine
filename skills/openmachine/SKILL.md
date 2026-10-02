@@ -312,15 +312,26 @@ Four fast delivery attempts with 1/2/4-second delays precede 60-second jittered
 cooldown, bounded by one hour/60 attempts or expiry; permanent refusal/410/413 stops.
 Actual AI continuation is route/account-specific acceptance, not SDK discovery.
 
-## Existing GitHub connections
+## Native GitHub connections
 
-Use `list_integrations` for passive retained metadata, not live health. Explicit
-`connect_integration(method="existing_gh")` attaches the existing configured
-account without login or token extraction. Keep its request ID and read the same
-login result after uncertainty. `disconnect_integration` uses the observed
-`authorization_revision`, affects only OM and never logs out `gh`. These management
-requests use their own ID/revision and existing lifecycle gate, not task_context.
-New GitHub tasks and operations bind the saved connection/account; optional
-connection_id must match. Never repair a denied request by changing accounts.
-Legacy task bindings remain unchanged. Native OAuth/refresh/cancellation is not
-advertised by PR1. Installed capabilities, not this source text, decide support.
+Use `list_integrations` for passive metadata and renewal-owner state, not live
+health. Protocol 2 starts native GitHub Device Flow through `connect_integration`;
+show only its public URL/user code. Open Machine uses the official OpenMachineLabs
+GitHub App with its public client ID built into the runtime; ordinary users do not
+register or configure an App. Device Flow returns the official App installation URL;
+install that same App on each target account or organization and select the repositories
+OM may access. Expiring tokens remain provider-side requirements. No credential import
+is a substitute.
+
+Keep the original login ID after uncertainty. Read without restarting; cancel
+only pending attempts. Disconnect uses the observed authorization revision,
+invalidates future use and reports local cleanup separately from remote revocation.
+The existing Runtime owns polling and refresh; ending a Chat turn does not cancel
+an admitted login. These controls use their own IDs/revisions, not task_context.
+
+New GitHub work uses native connections only. Retain historical format-1/format-2
+gh task authority without creating new gh attachments, changing external accounts
+or moving original tasks to native defaults. Renewable tokens and pinned stores
+survive ordinary restarts; revocation, expired refresh grants or unavailable stores
+remain real reauthorization boundaries. Native OAuth, deployment, installed-client
+acceptance and code merge require their own observed evidence, not mock responses.

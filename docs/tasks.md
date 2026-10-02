@@ -48,7 +48,7 @@ observe them, rather than allocating replacement work. No arbitrary overwrite AP
 
 ## GitHub account binding
 
-New GitHub task contracts resolve `github_connections` per repository and retain
+New GitHub task contracts resolve native `github_connections` per repository and retain
 `connection_id`, numeric `account_id` and `authorization_revision`. Their format-2
 operation locators keep that exact binding for dispatch and destination recovery.
 Changing the default, disconnecting or reconnecting cannot silently change a task's
@@ -58,7 +58,10 @@ Format-1 records retain their original serialization, request hashes and externa
 `gh` policy; reads and continuation never migrate them to a new account. Empty
 optional fields are omitted from legacy canonical bytes. New creation retries
 compare the original caller request, not subsequently resolved connection state.
-Account recovery does not replay a GitHub mutation or renew task authority.
+Existing format-2 gh bindings are historical-only as well; neither user-supplied
+bindings nor default selection can use them to create new work. Routine credential
+rotation preserves authorization revisions. Account recovery does not replay a
+GitHub mutation or renew task authority.
 
 ## Claims, effects and completion
 
@@ -209,7 +212,7 @@ All three actual Work continuation cases are retained in
 command still running, a committed result, and an accepted plan before execution.
 Those are historical account/route-specific results, not acceptance of every new
 candidate. Installation tests, event delivery and actual AI continuation remain
-separate evidence. State contract 10 requires genuine readers of all retained task,
+separate evidence. State contract 11 requires genuine readers of all retained task,
 SSH, managed recovery and Events history before transition, even terminal-only or
 disabled integrations. Never delete evidence to enable an old runtime.
 
@@ -230,3 +233,9 @@ current user instructions, Git and original operation receipts; reuse valid resu
 and perform only remaining authorized work. A changed instruction retains earlier
 evidence and observes or explicitly stops incompatible original work. A checkpoint
 restores neither hidden model state nor new authority, and schedules no model loop.
+
+A retained local start rejection is not a lost worker. A recorded pre-dispatch
+`resource_busy`, its free original launch lock and an absent execution directory
+prove a failed-before-launch result. The original task operation remains with its
+ID and request hash; no execution receipt is invented. Remote, ambiguous, live or
+partial destinations remain unresolved. This correction never replays an effect.

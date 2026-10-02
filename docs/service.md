@@ -63,9 +63,12 @@ on failure, including valid edits since the previous update. An independent raci
 edit is preserved with uncertainty, not overwritten. Cooperative locks do not
 fence external editors or another runtime/state root.
 
-Protocol 1/state contract 10 are not proof of compatibility. Actual readers must
+Protocol 1/state contract 11 are not proof of compatibility. Actual readers must
 cover every retained execution, task, workspace format, SSH budget, managed
-recovery and Events record, even terminal-only history or disabled integrations.
+recovery, Events and connection record, even terminal-only history or disabled
+integrations. Native connection format 2 needs the contract-11 reader; old-only
+format-1 connection state retains its exact hash for supported prior readers.
+Metadata checks do not read or print credential values and do not prove live OAuth.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
