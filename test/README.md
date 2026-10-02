@@ -583,3 +583,22 @@ Restart during cooldown and verify its original episode/deadline/attempt count;
 the command counter must remain one. State isolation or transport fault fixtures
 must be disclosed. Offline mocks, CI and SDK fixtures do not establish live SSH,
 production activation, unattended AI continuation or complete S2 acceptance.
+
+## Spec #29 S2.2 managed MCP interruption recovery
+
+The existing absent-client fixture covers abrupt MCP loss while an original
+command runs or completes. CI explicitly starts the replacement managed server;
+it verifies stale-socket recovery and original result/handoff publication, not
+OS supervision. Existing pause, terminal, identity and live-socket checks remain.
+
+Native macOS acceptance uses an authorized disposable state, workspace and
+state-derived LaunchAgent with the exact candidate wheel. Kill only the verified
+test MCP PID, then observe launchd replace it without another start command or
+active MCP client. Verify original worker/command identity, counter=1 and original
+result/handoff; retain pause and terminal state across recovery. Explicit service
+stop must leave its job unloaded and preserve unrelated instances. Clean up only
+that test job and its owned plist after verifying worker completion.
+
+Record candidate/artifact identities and actual results in Issue #29 and its PR.
+This does not accept persisted runtime-readiness budgets, Tunnel recovery,
+unattended AI continuation, production activation or complete S2.

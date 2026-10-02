@@ -135,6 +135,16 @@ log is private at `<state-dir>/service/service.log`; inspect it locally without
 pasting credentials or raw user data. It is not the bounded execution-log store.
 No system daemon, privilege grant, tunnel service or remote MCP daemon is installed.
 
+After an abnormal managed MCP exit, `launchd` can restart the selected runtime;
+managed startup reclaims only its verified dead socket. Independent execution
+workers and their original receipts remain in place. The task observer resumes
+original-result collection without a connected client or another command launch.
+An explicit `service stop` unloads the job and prevents that automatic restart
+for the current login session. Task pause and terminal state still govern
+continuation after recovery. This OS supervision is separate from the pending
+bounded runtime-readiness policy in Spec #29; it does not establish Tunnel health
+or unattended AI continuation.
+
 ### Update and roll back
 
 Use a trusted local wheel and its matching fully pinned requirements, never an

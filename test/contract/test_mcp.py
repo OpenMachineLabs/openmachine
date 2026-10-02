@@ -121,7 +121,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_observer_publishes_original_results_with_all_clients_absent(self):
         for mode in ("legacy", "2026-07-28"):
-            for boundary in ("live", "restart-running", "restart-completed", "activation"):
+            for boundary in ("live", "restart-running", "restart-completed", "crash-running", "crash-completed", "activation"):
                 identity = "observe-" + mode + "-" + boundary
                 execution_id = uuid.uuid4().hex
                 counter, release, done = (self.work / (prefix + identity) for prefix in ("count-", "release-", "done-"))
@@ -152,9 +152,15 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     # No SDK sessions or tool calls remain. Only fixture control
                     # and passive canonical bytes may be used to await publication.
                     if boundary != "live":
-                        self.stop(self.processes[-1])
+                        crashed = boundary.startswith("crash-")
+                        if crashed:
+                            self.processes[-1].kill()
+                            self.processes[-1].wait(timeout=5)
+                            self.assertTrue(self.socket.exists())
+                        else:
+                            self.stop(self.processes[-1])
                         before = path.read_bytes()
-                        if boundary == "restart-completed":
+                        if boundary.endswith("-completed"):
                             release.touch()
                             deadline = time.monotonic() + 5
                             while not done.exists() and time.monotonic() < deadline:
@@ -176,7 +182,9 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                                     self.assertEqual((await self.observer_task_view(probe, identity))["task_id"], identity)
                                 self.assertEqual(path.read_bytes(), before)
                         else:
-                            self.launch()
+                            # CI explicitly supplies managed startup; native
+                            # launchd auto-restart is separate acceptance.
+                            self.launch(managed=crashed)
                     release.touch()
                     deadline = time.monotonic() + 10
                     while time.monotonic() < deadline:
