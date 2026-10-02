@@ -602,3 +602,28 @@ that test job and its owned plist after verifying worker completion.
 Record candidate/artifact identities and actual results in Issue #29 and its PR.
 This does not accept persisted runtime-readiness budgets, Tunnel recovery,
 unattended AI continuation, production activation or complete S2.
+
+## Spec #29 S2.3 bounded managed MCP readiness recovery
+
+The existing service unit group uses deterministic time and process/probe fault
+fixtures to verify pre-effect durable accounting, the 5-second attempt bound,
+fast delays/jitter/cooldown, 15-minute/15-attempt limits, single-probe admission,
+fatal failure, parent restart, stop and explicit budget renewal. Actual installed
+state readers cover retained recovery history and reject incompatible candidates
+before stop. First-upgrade failure must preserve the old reader's state and
+restore its owned service definition; status reads must never renew a budget.
+
+Native macOS acceptance uses one authorized disposable service and exact wheels.
+Upgrade an old managed installation, inject a disclosed activation failure and
+verify restoration, then activate the candidate. Interrupt the verified MCP child
+and its service parent separately without a connected client or another start;
+verify one replacement child, original worker/command identity, counter=1 and
+original result/handoff. Retain pause/terminal state. Verify stop during a retained
+cooldown and explicit renewal, compatible rollback, incompatible-reader rejection
+before stop, unrelated-instance preservation and exact owned-job cleanup. A
+seeded cooldown is a state fault fixture, not a live 15-minute outage.
+
+Run the installed-wheel suites and repository checks; preserve artifact identity
+and sdist roundtrip evidence. These results do not establish continuous hang
+detection, Tunnel health, actual ChatGPT continuation, production activation,
+full S2 or A16. Keep `runtime_recovery` false until its full contract is accepted.

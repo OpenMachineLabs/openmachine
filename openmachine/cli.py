@@ -30,7 +30,9 @@ def main() -> int:
     bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
     bundle.add_argument("--directory", type=Path, required=True)
     serve = commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
-    serve.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
+    serving = serve.add_mutually_exclusive_group()
+    serving.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
+    serving.add_argument("--managed-child", action="store_true", help=argparse.SUPPRESS)
     service = commands.add_parser("service", help="Manage this macOS user service without controlling the tunnel")
     service_commands = service.add_subparsers(dest="service_action", required=True)
     install = service_commands.add_parser("install", help="Install a verified wheel as a stopped user service")
@@ -39,7 +41,9 @@ def main() -> int:
     install.add_argument("--probe-workspace", required=True)
     install.add_argument("--probe-path", required=True)
     for action in ("start", "status", "stop", "restart"):
-        service_commands.add_parser(action)
+        operation = service_commands.add_parser(action)
+        if action == "restart":
+            operation.add_argument("--reset-recovery", action="store_true", help="Explicitly renew a verified readiness recovery budget after stop")
     update = commands.add_parser("update", help="Verify and activate an explicit wheel; retain the original installation")
     update.add_argument("--wheel", type=Path, required=True)
     update.add_argument("--requirements", type=Path, required=True)
@@ -71,9 +75,14 @@ def main() -> int:
                              args.service_action if args.command == "service" else args.command,
                              wheel=getattr(args, "wheel", None), requirements=getattr(args, "requirements", None),
                              workspace=getattr(args, "probe_workspace", ""), path=getattr(args, "probe_path", ""),
-                             candidate_config=getattr(args, "candidate_config", None))
+                             candidate_config=getattr(args, "candidate_config", None),
+                             reset_recovery=getattr(args, "reset_recovery", False))
             print(json.dumps(result))
-            return int(result["status"] in {"unready", "activation_pending"})
+            return int(result["status"] in {"unready", "recovering", "blocked", "activation_pending"})
+        if args.command == "serve" and args.managed:
+            from openmachine.service import supervise
+            supervise(args.config, args.state_dir)
+            return 0
         config = load(args.config)
         if args.command == "rebuild-task-index":
             from openmachine.bootstrap import create_application
@@ -105,7 +114,7 @@ def main() -> int:
                               "ssh_targets": {name: "not_probed" for name, item in config.machines.items() if item.transport == "ssh"}}))
             return int(bool(unavailable))
         from openmachine.server import serve
-        serve(config, args.state_dir, managed=args.managed)
+        serve(config, args.state_dir, managed=args.managed_child)
         return 0
     except (Fault, OSError) as error:
         print(json.dumps({"error": {"code": error.code if isinstance(error, Fault) else type(error).__name__,

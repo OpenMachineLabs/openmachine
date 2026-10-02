@@ -8,13 +8,16 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import random
 import re
 import shutil
+import signal
 import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 
@@ -26,7 +29,10 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 7
+STATE_CONTRACT = 8
+READINESS_SECONDS = 5
+RECOVERY_MS = 15 * 60 * 1000
+RECOVERY_ATTEMPTS = 15
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +105,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5, 6, 7) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in range(1, 9) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -133,7 +139,7 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), **_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
 
@@ -148,7 +154,69 @@ def _ssh_recovery_state(state: Path) -> dict:
             "ssh_recovery_targets": 0, "ssh_recovery_sha256": None}
 
 
-def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
+def _read_recovery(state: Path) -> dict | None:
+    path = state / "service/recovery.json"
+    if not os.path.lexists(path) and not os.path.lexists(state / "service/recovery.lock"):
+        return None
+    try:
+        value = _json(path)
+        if set(value) != {"format", "episode"} or type(value["format"]) is not int or value["format"] != 1:
+            raise ValueError("unsupported recovery record")
+        episode = value["episode"]
+        if episode is not None:
+            if (not isinstance(episode, dict) or set(episode) != {"id", "started_at_ms", "deadline_ms", "attempts", "next_attempt_ms", "reason"}
+                    or not isinstance(episode["id"], str) or not re.fullmatch(r"[0-9a-f]{32}", episode["id"])
+                    or not isinstance(episode["reason"], str) or not re.fullmatch(r"[a-z0-9_]{1,128}", episode["reason"])
+                    or any(type(episode[key]) is not int or not 0 <= episode[key] <= 2**53 - 1
+                           for key in ("started_at_ms", "deadline_ms", "attempts", "next_attempt_ms"))
+                    or not 1 <= episode["attempts"] <= RECOVERY_ATTEMPTS
+                    or episode["deadline_ms"] != episode["started_at_ms"] + RECOVERY_MS
+                    or not episode["started_at_ms"] <= episode["next_attempt_ms"] <= episode["deadline_ms"]):
+                raise ValueError("invalid recovery episode")
+        return value
+    except (Fault, ValueError, TypeError) as error:
+        raise Fault("runtime_recovery_invalid", "Managed recovery history is missing, unsafe or corrupt; preserve it.") from error
+
+
+def _recovery_state(state: Path) -> dict:
+    value = _read_recovery(state)
+    return {"runtime_recovery_present": value is not None, "runtime_recovery_format": 1,
+            "runtime_recovery_sha256": hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest() if value else None}
+
+
+def _save_recovery(state: Path, episode: dict | None) -> None:
+    # The managed owner or a stopped-service operation holds recovery.lock.
+    value = {"format": 1, "episode": episode}
+    save_json(state / "service/recovery.json", value)
+    if _read_recovery(state) != value:
+        raise Fault("runtime_recovery_unverified", "Recovery accounting was not verified; no further attempt is safe.")
+
+
+def _recovery_blocked(episode: dict, now: int) -> bool:
+    return episode["reason"].startswith("blocked_") or episode["attempts"] >= RECOVERY_ATTEMPTS or now >= episode["deadline_ms"]
+
+
+def _recovery_attempt(state: Path, episode: dict | None, now: int) -> dict:
+    if episode is None:
+        episode = {"id": os.urandom(16).hex(), "started_at_ms": now, "deadline_ms": now + RECOVERY_MS,
+                   "attempts": 0, "next_attempt_ms": now, "reason": "readiness_pending"}
+    if _recovery_blocked(episode, now):
+        raise Fault("runtime_recovery_blocked", "Readiness recovery is blocked; inspect status before explicitly renewing its budget.")
+    if now < episode["next_attempt_ms"]:
+        raise Fault("runtime_recovery_cooldown", "The original recovery episode is still in cooldown.")
+    episode = dict(episode, attempts=episode["attempts"] + 1, reason="readiness_pending")
+    # Reserve the attempt before any launch/probe. An interrupted attempt remains
+    # charged and waits out its deadline, rather than gaining a fresh fast burst.
+    episode["next_attempt_ms"] = min(now + READINESS_SECONDS * 1000 + _recovery_delay(episode["attempts"]), episode["deadline_ms"])
+    _save_recovery(state, episode)
+    return episode
+
+
+def _recovery_delay(attempts: int) -> int:
+    return int((1000 if attempts == 1 else 2000 if attempts == 2 else 60000) * random.uniform(0.8, 1.2))
+
+
+def _run(argv: list[str], timeout: float = 30) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                               timeout=timeout, cwd="/", check=False)
@@ -172,7 +240,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2, 3, 4, 5, 6, 7)
+                or value["state_contract"] not in range(1, 9)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
@@ -180,6 +248,10 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
         if recovery["ssh_recovery_present"] and (value["state_contract"] < 7 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in recovery.items())):
             raise ValueError("candidate ignores or changes retained SSH observation budgets")
+        runtime_recovery = _recovery_state(state)
+        if runtime_recovery["runtime_recovery_present"] and (value["state_contract"] < 8 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in runtime_recovery.items())):
+            raise ValueError("candidate ignores or changes retained runtime recovery budgets")
         retained_tasks = tasks.check_state(state)
         if retained_tasks["task_index_format"] == 2:
             formats = value.get("structured_task_read_formats")
@@ -264,7 +336,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
 
 async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_version: str,
                  expected_pid: int | None = None, *, expected_contract: int = STATE_CONTRACT,
-                 check_remote: bool = False) -> dict:
+                 check_remote: bool = False, timeout_seconds: float | None = None) -> dict:
     import httpx2 as httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
@@ -275,7 +347,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
         raise Fault("invalid_service_probe", "Select one configured local workspace and a permitted existing text file.")
     remote_targets = [name for name, item in config.machines.items() if item.transport == "ssh"] if check_remote else []
     try:
-        async with asyncio.timeout(8 + 30 * len(remote_targets)):
+        async with asyncio.timeout(timeout_seconds if timeout_seconds is not None else 8 + 30 * len(remote_targets)):
             async with httpx.AsyncClient(trust_env=False, timeout=30 if remote_targets else 5,
                     transport=httpx.AsyncHTTPTransport(uds=str(socket_path))) as client:
                 async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer):
@@ -334,9 +406,29 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
 
 
 def probe_service(state: Path, config_path: Path, probe: dict, version: str, pid: int | None = None,
-                  *, expected_contract: int = STATE_CONTRACT, check_remote: bool = False) -> dict:
+                  *, expected_contract: int = STATE_CONTRACT, check_remote: bool = False,
+                  timeout_seconds: float | None = None) -> dict:
     return asyncio.run(_probe(state / "mcp.sock", config_path, probe, version, pid,
-                              expected_contract=expected_contract, check_remote=check_remote))
+                              expected_contract=expected_contract, check_remote=check_remote, timeout_seconds=timeout_seconds))
+
+
+def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None = None,
+                   timeout_seconds: float = READINESS_SECONDS) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    installed = _installed(state, record["current"])
+    # Callers hold the single readiness slot. The OS job PID is the parent,
+    # not the MCP PID; a matching version/config alone cannot prove ownership.
+    ready = probe_service(state, Path(record["config"]), record["probe"], installed["version"], child,
+                          expected_contract=installed["state_contract"], timeout_seconds=timeout_seconds)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise Fault("service_unready", "The MCP readiness attempt exceeded its deadline.")
+    if type(ready["pid"]) is not int or ready["pid"] <= 0:
+        raise Fault("service_identity_mismatch", "The MCP process identity is invalid.")
+    relationship = _run(["/bin/ps", "-o", "ppid=", "-p", str(ready["pid"])], timeout=min(1, remaining))
+    if relationship.returncode or relationship.stdout.strip() != str(parent):
+        raise Fault("service_identity_mismatch", "The MCP process is not a child of the selected managed service.")
+    return {**ready, "supervisor_pid": parent}
 
 
 def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
@@ -405,7 +497,8 @@ def _plist_path(state: Path) -> Path:
 def _definition(state: Path, record: dict) -> dict:
     return {"Label": _label(state), "ProgramArguments": [record["launch_python"], "-I", str(state / "service/launch.py")],
             "WorkingDirectory": str(state), "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
-            "ThrottleInterval": 10, "ExitTimeOut": 10, "AbandonProcessGroup": True,
+            "ThrottleInterval": 10, "ExitTimeOut": 10,
+            "AbandonProcessGroup": _installed(state, record["current"])["state_contract"] < 8,
             "EnvironmentVariables": {"PATH": record["path_environment"]},
             "StandardOutPath": "/dev/null", "StandardErrorPath": str(state / "service/service.log")}
 
@@ -418,7 +511,10 @@ def _verify_files(state: Path, record: dict) -> None:
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                     or info.st_mode & 0o077 or info.st_nlink != 1):
                 raise ValueError("unsafe service file")
-        if (plistlib.loads(path.read_bytes()) != _definition(state, record)
+        selections = {record["current"]}
+        if record["pending"] is not None:
+            selections.update((record["pending"]["from"], record["pending"]["to"]))
+        if (plistlib.loads(path.read_bytes()) not in [_definition(state, dict(record, current=identity)) for identity in selections]
                 or (state / "service/launch.py").read_text() != LAUNCHER):
             raise ValueError("service definition changed")
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
@@ -469,24 +565,173 @@ def _stop(state: Path) -> None:
 
 
 def _start(state: Path, record: dict) -> dict:
+    if record["pending"] is None and _installed(state, record["current"])["state_contract"] >= 8:
+        if _read_recovery(state) is None:
+            _save_recovery(state, None)
     observed = _native(state)
     if not observed["loaded"]:
+        # Only verified transition definitions are accepted; write the selected
+        # profile after bootout. Interrupted transitions retain both identities.
+        _verify_files(state, record)
+        desired = plistlib.dumps(_definition(state, record))
+        if _plist_path(state).read_bytes() != desired:
+            fd, temporary = tempfile.mkstemp(prefix=".openmachine-", dir=_plist_path(state).parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(desired)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, _plist_path(state))
+                directory = os.open(_plist_path(state).parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
         _run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(_plist_path(state))])
     elif observed["pid"] is None:
         _run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         observed = _native(state)
+        if record["pending"] is None:
+            recovery = _read_recovery(state)
+            if recovery and recovery["episode"]:
+                if recovery["episode"]["reason"].startswith("blocked_"):
+                    raise Fault("runtime_recovery_blocked", "The persisted recovery budget is blocked; inspect service status.")
+                # Only the owner may advance an active recovery episode. An
+                # explicit start observes it, including its original cooldown.
+                time.sleep(0.1)
+                continue
         if observed["pid"] is not None:
             try:
+                if _installed(state, record["current"])["state_contract"] >= 8:
+                    with lease(state / "service/readiness.lock"):
+                        return _managed_probe(state, record, observed["pid"])
                 return probe_service(state, Path(record["config"]), record["probe"],
                                      _installed(state, record["current"])["version"], observed["pid"],
                                      expected_contract=_installed(state, record["current"])["state_contract"])
             except Fault as error:
-                if error.code != "service_unready":
+                if error.code not in {"service_unready", "resource_busy"}:
                     raise
         time.sleep(0.1)
     raise Fault("service_unready", "The managed service did not pass MCP/file readiness; inspect its last exit and OS permissions.")
+
+
+def _launch_mcp(state: Path, record: dict) -> subprocess.Popen:
+    return subprocess.Popen([str(_runtime(state, record["current"]) / "bin/python"), "-I", "-m", "openmachine.cli",
+                             "--config", record["config"], "--state-dir", str(state), "serve", "--managed-child"],
+                            cwd=state, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+
+
+def _publish_recovery(state: Path, record: dict, episode: dict | None, stop: threading.Event) -> bool:
+    while not stop.is_set():
+        try:
+            with lease(state / "locks/lifecycle.lock", shared=True):
+                current = _record(state)
+                if current["current"] != record["current"] or current["pending"] is not None:
+                    return False
+                _save_recovery(state, episode)
+                return True
+        except Fault as error:
+            if error.code != "resource_busy":
+                raise
+            stop.wait(0.05)
+    return False
+
+
+def supervise(config_path: Path, state: Path) -> None:
+    """Own only the selected MCP child; launchd retains the service lifetime."""
+    stop = threading.Event()
+    previous = signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    child = None
+    try:
+        record = _record(state)
+        _verify_files(state, record)
+        if (str(config_path.resolve()) != record["config"] or _native(state)["pid"] != os.getpid()
+                or Path(sys.prefix).resolve() != _runtime(state, record["current"])
+                or os.getpgrp() != os.getpid()):
+            raise Fault("service_identity_mismatch", "Only the selected launchd job may supervise this MCP runtime.")
+        # Activation owns one candidate start and its readiness proof. Defer
+        # recovery state until commit so a failed first upgrade can restore v7.
+        if record["pending"] is not None:
+            child = _launch_mcp(state, record)
+            while not stop.is_set() and _record(state)["pending"] is not None:
+                if child.poll() is not None:
+                    return
+                stop.wait(0.05)
+        if stop.is_set():
+            return
+        if _read_recovery(state) is None:
+            raise Fault("runtime_recovery_invalid", "The service operation has not initialized its recovery record.")
+        with lease(state / "service/recovery.lock"):
+            while not stop.is_set():
+                episode = _read_recovery(state)["episode"]
+                now = time.time_ns() // 1000000
+                if episode is not None and _recovery_blocked(episode, now):
+                    reason = episode["reason"] if episode["reason"].startswith("blocked_") else "blocked_budget_exhausted"
+                    _publish_recovery(state, record, dict(episode, reason=reason), stop)
+                    return
+                if episode is not None and now < episode["next_attempt_ms"]:
+                    stop.wait((episode["next_attempt_ms"] - now) / 1000)
+                    continue
+                try:
+                    with lease(state / "service/readiness.lock"):
+                        # Do not hold the application admission lock over a wait
+                        # or probe, but serialize accounting with activation.
+                        with lease(state / "locks/lifecycle.lock", shared=True):
+                            current = _record(state)
+                            if current["current"] != record["current"] or current["pending"] is not None:
+                                return
+                            episode = _recovery_attempt(state, episode, now)
+                        deadline = time.monotonic() + min(READINESS_SECONDS, (episode["deadline_ms"] - now) / 1000)
+                        if child is None or child.poll() is not None:
+                            load(Path(record["config"]))
+                            child = _launch_mcp(state, record)
+                        while not (state / "mcp.sock").exists() and child.poll() is None and not stop.is_set() and time.monotonic() < deadline:
+                            stop.wait(min(0.05, max(0, deadline - time.monotonic())))
+                        if stop.is_set():
+                            return
+                        if child.poll() is not None:
+                            raise Fault("service_child_exited", "The original MCP child exited before readiness.")
+                        if time.monotonic() >= deadline:
+                            raise Fault("service_unready", "The MCP child did not become ready within its attempt.")
+                        _managed_probe(state, record, os.getpid(), child=child.pid, timeout_seconds=deadline - time.monotonic())
+                except (Fault, OSError) as error:
+                    if isinstance(error, Fault) and error.code == "resource_busy":
+                        stop.wait(0.05)
+                        continue
+                    if episode is None:
+                        raise
+                    code = error.code if isinstance(error, Fault) else "service_state_unavailable"
+                    retryable = code in {"service_unready", "service_child_exited"}
+                    episode = dict(episode, reason=code if retryable else "blocked_" + code)
+                    episode["next_attempt_ms"] = min(time.time_ns() // 1000000 + _recovery_delay(episode["attempts"]), episode["deadline_ms"])
+                    if not _publish_recovery(state, record, episode, stop):
+                        return
+                    continue
+                if not _publish_recovery(state, record, None, stop):
+                    return
+                # Healthy MCP lifetime is process-driven. No new periodic
+                # health poller or inferred caller/Tunnel state is introduced.
+                while child.poll() is None and not stop.is_set():
+                    stop.wait(0.1)
+    except (Fault, OSError) as error:
+        # Exit successfully to suppress launchd's automatic restart on a known
+        # fatal boundary. CLI start/status still report the actual unready state.
+        print(json.dumps({"error": error.code if isinstance(error, Fault) else "service_state_unavailable"}), file=sys.stderr)
+    finally:
+        try:
+            if child is not None and child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
 
 
 def _saved_configuration(state: Path, digest: str) -> Path:
@@ -635,14 +880,23 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
                 restored["configurations"] = {key: value for key, value in {
                     **restored["configurations"], previous: prior_digest}.items()
                     if key in {previous, previous_previous}}
-            save_json(state / "service/service.json", restored)
+            _commit_ready(state, restored)
             cause = error.code if isinstance(error, Fault) else type(error).__name__
             raise Fault("activation_failed_restored", "The previous service and exact configuration were restored. No task was replayed. Cause: " + cause) from None
         record.update(previous=previous if previous != target else previous_previous, pending=None)
         retained = {record["current"], record["previous"]} - {None}
         record["configurations"] = {key: value for key, value in configurations.items() if key in retained}
-        save_json(state / "service/service.json", record)
+        _commit_ready(state, record)
         return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
+
+
+def _commit_ready(state: Path, record: dict) -> None:
+    if _installed(state, record["current"])["state_contract"] >= 8:
+        # The candidate passed its actual probe. Its parent still waits for
+        # pending=None; publish readiness before committing the selection.
+        with lease(state / "service/recovery.lock"):
+            _save_recovery(state, None)
+    save_json(state / "service/service.json", record)
 
 
 def status(config_path: Path, state: Path) -> dict:
@@ -655,15 +909,26 @@ def status(config_path: Path, state: Path) -> dict:
         raise Fault("service_configuration_mismatch", "Use the configuration registered with this state directory.")
     _verify_files(state, record)
     observed = _native(state)
-    result = {"status": "stopped", **observed, "current": record["current"], "previous": record["previous"],
+    result = {"status": "unready" if observed["loaded"] else "stopped", **observed, "current": record["current"], "previous": record["previous"],
               "pending": record["pending"], "version": _installed(state, record["current"])["version"],
               "tunnel": "not_probed", "chatgpt": "not_probed"}
-    if observed["pid"] is not None:
+    recovery = _read_recovery(state)
+    result["recovery"] = recovery["episode"] if recovery else None
+    managed = _installed(state, record["current"])["state_contract"] >= 8
+    if managed:
+        result.update(supervisor_pid=observed["pid"], pid=None)
+    if recovery and recovery["episode"] and observed["loaded"]:
+        result["status"] = "blocked" if recovery["episode"]["reason"].startswith("blocked_") else "recovering"
+    elif observed["pid"] is not None:
         try:
-            result.update(probe_service(state, config_path, record["probe"], result["version"], observed["pid"],
-                                        expected_contract=_installed(state, record["current"])["state_contract"]))
+            if managed:
+                with lease(state / "service/readiness.lock"):
+                    result.update(_managed_probe(state, record, observed["pid"]))
+            else:
+                result.update(probe_service(state, config_path, record["probe"], result["version"], observed["pid"],
+                                            expected_contract=_installed(state, record["current"])["state_contract"]))
         except Fault as error:
-            result.update(status="unready", error=error.code)
+            result.update(status="recovering" if error.code == "resource_busy" else "unready", error=error.code)
     if record["pending"] is not None:
         result["status"] = "activation_pending"
     return result
@@ -671,11 +936,13 @@ def status(config_path: Path, state: Path) -> dict:
 
 def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None = None,
             requirements: Path | None = None, workspace: str = "", path: str = "",
-            candidate_config: Path | None = None) -> dict:
+            candidate_config: Path | None = None, reset_recovery: bool = False) -> dict:
     if sys.platform != "darwin" or os.getuid() == 0:
         raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serve and SSH workers remain separate.")
     if not config_path.is_absolute() or not state.is_absolute():
         raise Fault("invalid_service_path", "Use absolute configuration and state paths for a managed service.")
+    if reset_recovery and action != "restart":
+        raise Fault("invalid_service_request", "Explicit recovery renewal requires service restart --reset-recovery.")
     config_path = config_path.resolve()
     if action == "status":
         return status(config_path, state.resolve())
@@ -715,6 +982,8 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
         if str(config_path) != record["config"]:
             raise Fault("service_configuration_mismatch", "Use the registered configuration with this state directory.")
         _verify_files(state, record)
+        if reset_recovery and _installed(state, record["current"])["state_contract"] < 8:
+            raise Fault("incompatible_runtime", "This installation does not own managed readiness recovery.")
         if action == "rollback":
             target = record["pending"]["from"] if record["pending"] is not None else record["previous"]
             if target is None:
@@ -737,10 +1006,16 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 _candidate_state(_runtime(state, record["current"]) / "bin/python", config_path, state)
             if action in ("stop", "restart"):
                 _stop(state)
-            if action in ("start", "restart"):
-                return _start(state, record)
+            if reset_recovery:
+                _read_recovery(state)  # Corruption is not a budget reset request.
+                with lease(root / "recovery.lock"):
+                    _save_recovery(state, None)
             if action == "stop":
                 return {"status": "stopped", "workers": "preserved", "tunnel": "not_managed"}
+        if action in ("start", "restart"):
+            # The parent publishes accounting under shared lifecycle admission.
+            # The operation lock still serializes explicit service transitions.
+            return _start(state, record)
         raise Fault("invalid_service_request", "Use install, start, status, stop, restart, update or rollback.")
 
 

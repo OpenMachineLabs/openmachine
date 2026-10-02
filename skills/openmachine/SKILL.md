@@ -168,6 +168,18 @@ readback and explicit compatible rollback, not another update or workload replay
 Distinguish candidate rejection, verified restoration and unknown recovery. Keep
 source merge, service activation and any ChatGPT metadata refresh separate.
 
+Managed MCP recovery retains one service-owned budget across restarts: 5 seconds
+per readiness attempt, three fast attempts (1/2-second delays), then 60-second
+cooldown with 0.8-1.2 jitter, bounded by 15 minutes/15 attempts. Read status/doctor
+for the original episode; reads do not advance it. Identity, permission and
+corrupt-history failures stop retries. After correcting the cause, renew a valid
+budget only through explicitly requested `service restart --reset-recovery`.
+Ordinary start/restart preserves it; never delete or replace corrupt history.
+State contract 8 requires an actual candidate reader of this retained state
+before stopping a healthy service. The single service parent owns its MCP child;
+independent worker sessions and original task receipts remain untouched. This
+does not detect post-readiness hangs or establish Tunnel/AI-loop recovery.
+
 E1-E3 keep pipes as the default; PTY is explicit. New format-5 receipts separate command launch/exit, first
 stop reason, force use and cleanup. `termination_grace_seconds` accepts null or
 finite 0..30: null means 5 seconds for a new execution and the original effective
