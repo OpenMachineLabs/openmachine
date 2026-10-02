@@ -94,8 +94,10 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     if action not in get_args(ReadAction) or not 1 <= page <= 1000 or not 1 <= limit <= 100 or len(cursor) > 1024:
         raise Fault("invalid_github_request", "Select a supported read action and bounded pagination.")
     if action == "status" and not repository:
-        return _public({"status": "authenticated", "actor": connection.read_actor(settings, transport=transport), "backend": "gh",
-                        "scopes": settings.github.model_dump(), "repository_access": "not_probed"})
+        return _public({"status": "authenticated", "actor": connection.read_actor(settings, transport=transport),
+                        "backend": getattr(transport, "backend", "gh"),
+                        "scopes": settings.github.model_dump(),
+                        "repository_access": "not_probed"})
     actor, metadata = connection.access(settings, repository, transport=transport)
     result = {"repository": metadata["full_name"], "actor": actor, "action": action,
               "observed_at": datetime.now(timezone.utc).isoformat()}

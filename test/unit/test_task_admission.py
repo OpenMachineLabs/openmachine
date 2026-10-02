@@ -19,6 +19,44 @@ from support_tasks import TaskFixture, task_contract, terminal_task_fixture
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_pre_dispatch_busy_is_failed_and_old_unknown_reconciles(self):
+        self.accept_plan()
+        args = self.start_arguments()
+        key = hashlib.sha256(str(self.work).encode()).hexdigest()
+        with lease(self.state / "locks" / f"workspace-{key}.lock"):
+            self.fault("resource_busy", self.app.start_execution, **args)
+        original = self.view()["record"]["operations"][0]
+        self.assertEqual(original["result"]["status"], "failed")
+        self.assertFalse((self.state / "executions" / args["execution_id"]).exists())
+        def old_bug(value, now):
+            operation = value["operations"][0]
+            operation["state"], operation["result"]["status"] = "unknown", "unknown"
+        tasks.update(self.state, "structured-one", old_bug)
+        raw = self.path.read_bytes()
+        with lease(self.state / "locks" / f"{args['execution_id']}.lock", create=False):
+            self.app.task_admission.reconcile(self.view())
+        self.assertEqual(self.path.read_bytes(), raw)
+        repaired = self.app.task_admission.reconcile(self.view())["record"]["operations"][0]
+        self.assertEqual(repaired["result"]["status"], "failed")
+        self.assertEqual(repaired["id"], original["id"])
+        self.assertEqual(repaired["request_sha256"], original["request_sha256"])
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+
+    def test_missing_receipt_without_pre_dispatch_proof_remains_unknown(self):
+        self.accept_plan()
+        args = self.start_arguments()
+        with patch.object(self.app.machines, "start_execution", side_effect=Fault("resource_busy", "Fixture.")):
+            self.fault("resource_busy", self.app.start_execution, **args)
+        self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "unknown")
+        original = self.path.read_bytes()
+        self.app.task_admission.reconcile(self.view())
+        self.assertEqual(self.path.read_bytes(), original)
+        # An existing partial directory is not absence, even after its lock is free.
+        with lease(self.state / "locks" / f"{args['execution_id']}.lock"):
+            (self.state / "executions" / args["execution_id"]).mkdir(parents=True)
+        self.app.task_admission.reconcile(self.view())
+        self.assertEqual(self.path.read_bytes(), original)
+
     def test_control_claim_retry_deadline_and_reads_are_passive(self):
         created = self.accept_plan(claim=False)
         raw = self.path.read_bytes()

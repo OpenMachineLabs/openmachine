@@ -116,7 +116,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     @asynccontextmanager
     async def lifespan(_server):
         # SDK 2.2 enters this once per HTTP manager, not per request/session.
-        with application.task_observer.running():
+        with application.connections.running(), application.task_observer.running():
             yield {}
 
     validators: dict[str, Draft202012Validator] = {}
@@ -190,7 +190,8 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         guarded = {"create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_merge",
-                   "list_integrations", "connect_integration", "read_integration_login", "disconnect_integration"}
+                   "list_integrations", "connect_integration", "read_integration_login",
+                   "cancel_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
             return invalid
         try:
@@ -228,21 +229,26 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     @mcp.tool(annotations=WRITE, structured_output=False)
     async def connect_integration(request_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
                                   provider: Annotated[str, Field(max_length=64)] = "github",
-                                  method: Annotated[str, Field(max_length=64)] = "existing_gh",
+                                  method: Annotated[str, Field(max_length=64)] = "device_code",
                                   connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-        """Explicitly attach the configured existing gh account; no login, token extraction or global account change. Preserve request_id after uncertainty and read its original receipt. Native OAuth is not implemented."""
+        """Start native GitHub Device Flow owned by this runtime. Return only the public verification URL/code; credentials never enter tool results. Preserve request_id after uncertainty."""
         operation = lambda: _reply(lambda: application.connect_integration(request_id, provider, method, connection_id))
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def read_integration_login(login_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]) -> CallToolResult:
-        """Read the original attach result without probing or restarting it. Interrupted pending probes are not resumed. No native OAuth cancellation is advertised in this increment."""
+        """Read the original login result without restarting it. A runtime restart interrupts unfinished Device Flow but preserves established connections."""
         return _reply(lambda: application.read_integration_login(login_id))
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
+    def cancel_integration_login(login_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]) -> CallToolResult:
+        """Cancel one unfinished native login. This does not disconnect an established account or undo provider-side consent."""
+        return _reply(lambda: application.cancel_integration_login(login_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
     async def disconnect_integration(connection_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
                                      expected_revision: Annotated[int, Field(strict=True, ge=1, le=2**53 - 1)]) -> CallToolResult:
-        """Disconnect only this saved OM connection using its observed authorization revision. Existing gh credentials and remote grants remain untouched; a completed disconnect survives runtime restarts."""
+        """Disconnect only this saved OM connection using its observed authorization revision. Native credentials are removed from their pinned local store; remote GitHub grants are not claimed revoked."""
         operation = lambda: _reply(lambda: application.disconnect_integration(connection_id, expected_revision))
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 

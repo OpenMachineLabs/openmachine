@@ -22,7 +22,7 @@ def main() -> int:
     doctor = commands.add_parser("doctor", help="Inspect configuration or explicitly probe one integration or managed service")
     target = doctor.add_mutually_exclusive_group()
     target.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
-    target.add_argument("--github", action="store_true", help="Probe the existing GitHub identity without changing login")
+    target.add_argument("--github", action="store_true", help="Probe the selected native GitHub identity without initiating login")
     target.add_argument("--service", action="store_true", help="Verify managed service identity and its configured file read")
     doctor.add_argument("--repository", default="", help="With --github, probe one configured repository")
     rebuild = commands.add_parser("rebuild-task-index", help="Explicitly rebuild one bounded page of derived task metadata, never task history")

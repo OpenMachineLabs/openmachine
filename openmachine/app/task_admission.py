@@ -290,7 +290,9 @@ class TaskAdmission:
                     observed = self._read(operation, arguments)
                     result, enriched = self._observation(operation, observed)
                 except (Fault, OSError):
-                    result, enriched = _receipt("failed" if code in NO_EFFECT else "unknown", summary=f"Domain failure: {code}."), locator
+                    unstarted = code == "resource_busy" and method == "start_execution" and self._unstarted_local(operation)
+                    result, enriched = _receipt("failed" if code in NO_EFFECT or unstarted else "unknown",
+                                                summary=f"Domain failure: {code}."), locator
                 self._publish(record["task_id"], [(operation["id"], result, enriched)])
                 raise
             result, enriched = self._observation(operation, observed)
@@ -467,6 +469,21 @@ class TaskAdmission:
         result["log_offset"] = (operation["result"] or {}).get("log_offset") or 0
         return result, locator
 
+    def _unstarted_local(self, operation: dict) -> bool:
+        # A missing receipt alone never proves non-execution. Only the recorded
+        # local start rejection and its original free launch lock can do so.
+        locator = operation["locator"]
+        if (locator["kind"] != "execution" or locator["control_seq"] is not None
+                or locator["target_identity"] is not None or operation["id"] != locator["execution_id"]
+                or self.app.config.machine(locator["machine"]).transport != "local"):
+            return False
+        identity = locator["execution_id"]
+        try:
+            with lease(self.app.state / "locks" / f"{identity}.lock", create=False):
+                return not os.path.lexists(self.app.state / "executions" / identity)
+        except (Fault, OSError):
+            return False
+
     def reconcile(self, view: dict) -> dict:
         record = view["record"]
         if record["terminal"] is not None:
@@ -477,7 +494,16 @@ class TaskAdmission:
                 continue
             try:
                 observed = self._read(operation)
-            except (Fault, OSError):
+            except Fault as error:
+                result = operation.get("result") or {}
+                if (error.code == "execution_not_found" and result.get("status") == "unknown"
+                        and result.get("summary") == "Domain failure: resource_busy."
+                        and self._unstarted_local(operation)):
+                    changes.append((operation["id"],
+                        _receipt("failed", summary="Original resource_busy confirmed before local launch; no execution created."),
+                        operation["locator"]))
+                continue
+            except OSError:
                 continue
             result, locator = self._observation(operation, observed)
             changes.append((operation["id"], result, locator))

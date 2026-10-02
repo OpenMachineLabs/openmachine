@@ -19,10 +19,12 @@ def create_application(config: Settings, state: Path) -> Application:
         ssh_recovery = recovery
     provider = None
     backend = None
+    native = None
     if config.github is not None:
         from integrations import github
-        from integrations.github import connection
+        from integrations.github import connection, auth
+        native = auth
         backend = connection
         provider = github
-    connections = Connections(config, state, backend)
+    connections = Connections(config, state, backend, native)
     return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider, Events(state), connections)

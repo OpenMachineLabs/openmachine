@@ -54,6 +54,12 @@
       "base_commit": "f1c6e71407babf467e41adfcfa335177de08baeb",
       "change": "PR1 adds four existing-gh connection operations, optional connection_id on six GitHub tools and optional account-bound task contracts. Native OAuth/cancellation is not advertised. Expectations are independently authored from the approved inputs; unrelated schemas and annotations remain exact.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/62"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/62#issuecomment-5957647218",
+      "base_commit": "898d2f95edd4f2e53a97ec7000808aa01de6e5ce",
+      "change": "Add native login cancellation and change the default connect method to device_code. Connection output protocol 2 retires new existing_gh attachment; original historical task bindings remain. Expectations are authored independently, not copied from discovery. No other tool inputs change.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/62"
     }
   ],
   "baseline": {
@@ -306,6 +312,28 @@
         "type": "object"
       }
     },
+    "cancel_integration_login": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "login_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Login Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login_id"
+        ],
+        "title": "cancel_integration_loginArguments",
+        "type": "object"
+      }
+    },
     "connect_integration": {
       "annotations": {
         "destructiveHint": true,
@@ -322,7 +350,7 @@
             "type": "string"
           },
           "method": {
-            "default": "existing_gh",
+            "default": "device_code",
             "maxLength": 64,
             "title": "Method",
             "type": "string"

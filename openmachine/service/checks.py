@@ -89,7 +89,8 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
         connections = _connections_state(state)
-        if connections["connections_present"] and (value["state_contract"] < 10 or any(
+        required_connection_contract = 11 if connections["connections_format"] >= 2 else 10
+        if connections["connections_present"] and (value["state_contract"] < required_connection_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")
         events = _events_state(state)

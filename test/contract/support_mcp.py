@@ -35,8 +35,9 @@ class MCPFixture(object):
         self.addCleanup(self.stop_all)
         self.launch()
 
-    def launch(self, environment=None, *, managed=False):
-        process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
+    def launch(self, environment=None, *, managed=False, bootstrap=""):
+        entry = ["-c", bootstrap + "\nfrom openmachine.cli import main; main()"] if bootstrap else ["-m", "openmachine.cli"]
+        process = subprocess.Popen([sys.executable, "-I", *entry, "--config", str(self.config),
                                     "--state-dir", str(self.state), "serve", *(["--managed-child"] if managed else [])],
                                    cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment)
         self.processes.append(process)

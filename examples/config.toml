@@ -9,7 +9,7 @@ workspace_write_enabled = false
 machine = "local"
 root = "/absolute/path/to/your/project"
 
-# Optional GitHub connection using the existing gh account; no credentials here.
+# Optional GitHub connection using the official Open Machine GitHub App.
 # Write scopes include reads. Empty scopes grant no repository access.
 # Legacy repositories retains exact read/write access; do not mix scope forms.
 # [github]

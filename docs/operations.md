@@ -251,45 +251,66 @@ terminal UI, control takeover or restoration of dead-process memory is promised.
 
 ## Account connections
 
-Spec #62 PR1 adds one runtime-owned connection boundary, using existing `gh`
-credentials only. No OAuth login, refresh, credential storage or cancellation
-placeholder is introduced; native authentication belongs to PR2.
+Connection protocol **2** provides one runtime-owned native account lifecycle on
+existing private MCP. New accounts use GitHub App Device Flow; `existing_gh`
+onboarding and implicit new-work fallback are retired. The minimal historical gh
+request adapter remains only for original task bindings, not another login system.
 
 | Operation | Contract |
 | --- | --- |
-| `list_integrations` | Optional provider/connection filters; passive retained metadata and supported methods, never an authentication probe. |
-| `connect_integration` | Original 32-hex `request_id`, `provider=github`, `method=existing_gh`, optional original `connection_id` for reconnect. Probe and attach the configured account; repeated original requests return their retained result. |
-| `read_integration_login` | Read the original `login_id`, equal to the attach request ID, without restarting the probe. |
-| `disconnect_integration` | Connection ID and observed `expected_revision` (the connection's `authorization_revision`); stop subsequent OM use without logging out `gh` or revoking remote grants. |
+| `list_integrations` | Passive supported methods, saved accounts, observation time and renewal-owner state; not a live provider health probe. |
+| `connect_integration` | Original 32-hex request ID, `provider=github`, `method=device_code`, optional original native connection ID for reauthorization. Returns the public GitHub URL/code; repeat requests read the same attempt. |
+| `read_integration_login` | Original login ID; no network access, refresh or restart. |
+| `cancel_integration_login` | Cancel only an unfinished attempt; do not disconnect an already established account or claim provider revocation. |
+| `disconnect_integration` | Connection ID and observed authorization revision. Persist the disabled binding before owned credential cleanup; report cleanup failure separately. |
 
-GitHub tools accept optional `connection_id`. A sole eligible saved connection
-is the default; multiple eligible accounts require explicit selection. Request
-plumbing captures an account binding instead of switching a module-global token.
-Numeric account identity is checked against the external `gh` owner before each
-request. Independently changing `gh` during a request is not an atomic credential
-snapshot; this increment does not own native multi-account credentials.
+OpenMachineLabs owns the official Open Machine GitHub App once for all ordinary
+users. Its public client ID is built into OM; users do not register an App or supply
+OAuth configuration. The official App keeps **Device Flow** and **Expire user
+authorization tokens** enabled. No client secret, App private key or PAT import is
+needed. App installation/resource approval and user consent are separate. OM returns
+the official installation URL alongside Device Flow so users install the same public
+App on each target account or organization instead of creating their own App. Users
+complete the returned URL/code on any device; this runtime needs no browser or GUI.
+Do not claim repository access merely because user identity was verified: existing
+GitHub operations still check configured and provider resource permissions.
 
-Before any saved connection exists, the configured legacy `gh` path still works.
-An explicitly accepted new GitHub task also saves its resolved account binding.
-A saved disconnect is a tombstone: neither restart nor the old configuration
-reattaches it. Reconnect checks the original account, and changed authorization
-revisions invalidate previously bound tasks/requests instead of transferring them.
-Effective scope is the intersection of current configuration and saved policy.
-Configuration still owns operator enablement; ordinary account changes do not
-restart the runtime or alter tool definitions.
+Credentials stay in their automatically selected pinned backend: macOS system
+Keychain, otherwise OM's private file store. File mode uses private 0700 directories
+and 0600 atomic files; permissions are not encryption. Unavailable or locked Keychain
+never silently falls back. Credential references,
+private device codes and tokens do not enter public results, logs or task records.
 
-`connections.json` contains bounded non-secret metadata (32 accounts, 128 retained
-attach attempts, 128 KiB), with a private stable lock and atomic writes. There is
-no automatic eviction or recovery by clearing history. Unsafe/missing/corrupt
-state is reported, not reset. Public projections contain no credential references.
-Saved account state survives restart; an interrupted pending probe is reported as
-`runtime_interrupted`, not silently resumed. Closing the caller does not own an
-already-dispatched attach request. Management writes use the existing lifecycle
-gate and their connection request/revision, not a second task executor.
+The existing Runtime owns at most four login workers. Caller disconnection does
+not cancel admitted work. Successful connections survive compatible restarts;
+interrupted unfinished attempts report failure without reconstructing temporary
+secrets. Snapshot reads suffice; there is no new event bus, UI, server or executor.
+Saved metadata is bounded to 32 accounts, 128 attempts and 128 KiB. Full/corrupt
+stores are explicit failures, not automatic deletion or replay of old request IDs.
+
+Account selection is stable per operation/task. No global active token is changed.
+Per-account coordination serializes refresh and disconnect; new logins use unique
+credential slots, so late results cannot overwrite another account or undo a
+cancel/disconnect. New work accepts native bindings only; old task identities and
+serialized evidence are not migrated to a different authentication backend.
+
+Normal requests refresh access tokens near expiry. The same owner checks refresh
+grant deadlines every six hours and renews within the final 30 days, including
+otherwise idle accounts. No high-frequency keepalive or always-open network
+connection is needed. GitHub currently returns eight-hour access tokens and
+six-month rotating refresh grants; routine successful rotation renews both.
+
+The original credential is marked before exchange, then the complete replacement
+is persisted and identity-verified before use. A lost rotating-token response or
+uncommitted replacement is not silently replayed. Definitive revocation, expired
+grants, prolonged shutdown/offline periods, host loss and inaccessible storage can
+still require reauthorization. This is renewable authentication, not a promise of
+permanent unrevokable credentials. A confirmed 401 permits one bounded auth retry;
+uncertain business writes still require the existing destination reconciliation.
 
 ## GitHub
 
-Use the existing `gh` login with explicit exact grants:
+Use native GitHub authentication with explicit exact grants:
 
 ```toml
 [github]
@@ -338,8 +359,9 @@ writes and merges require destination reads, never automatic retries or new IDs.
 Git working-tree operations stay native execution. HTTPS Git may use a command-scoped
 existing `gh auth git-credential` helper without changing global config or remotes.
 Never place tokens in URLs/logs or copy controller credentials to another target.
-The complete provider remains in `integrations/github/`; native onboarding,
-Projects management and a general plugin SDK are separate features.
+The complete provider remains in `integrations/github/`. The native account owner
+is shared by its existing API operations. A native Git credential helper, Projects
+management and a general plugin SDK are not included in this increment.
 
 ## SSH
 
