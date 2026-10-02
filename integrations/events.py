@@ -17,6 +17,8 @@ import secrets
 import socket
 import ssl
 import stat
+import subprocess
+import sys
 import threading
 import time
 from typing import Annotated, Literal
@@ -89,6 +91,24 @@ def _pairs(items):
     return value
 
 
+def _resolve(host: str, port: int, seconds: float):
+    # libc resolution cannot be cancelled in a thread. Reap an owned child
+    # before returning so DNS cannot retain a delivery or verification slot.
+    query = ("import json, socket, sys\n"
+             "addresses = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]), type=socket.SOCK_STREAM)\n"
+             "if len(addresses) > 64: sys.exit(1)\n"
+             "print(json.dumps(addresses))\n")
+    try:
+        result = subprocess.run([sys.executable, "-I", "-c", query, host, str(port)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=seconds, check=True)
+    except subprocess.TimeoutExpired as error:
+        raise TimeoutError("callback DNS deadline") from error
+    except subprocess.CalledProcessError as error:
+        raise OSError("callback DNS unavailable") from error
+    return [(family, kind, protocol, name, tuple(address))
+            for family, kind, protocol, name, address in json.loads(result.stdout)]
+
+
 def post(url: str, body: bytes, identifier: str, subscription: dict, seconds: float) -> tuple[int, bytes, str | None]:
     """Pin a public address; bound the whole exchange, including slow responses."""
     parsed = destination(url)
@@ -114,7 +134,7 @@ def post(url: str, body: bytes, identifier: str, subscription: dict, seconds: fl
     timer.daemon = True
     timer.start()
     try:
-        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        addresses = _resolve(parsed.hostname, parsed.port or 443, remaining())
         if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global
                                 or ipaddress.ip_address(item[4][0]).is_multicast for item in addresses):
             raise Fault("callback_address", "The callback must resolve only to public unicast addresses.")

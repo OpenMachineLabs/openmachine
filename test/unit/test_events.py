@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -135,8 +136,28 @@ class EventsTests(unittest.TestCase):
         params = self.params()
         params["delivery"]["secret"] = "whsec_invalid"
         self.fault("invalid_event_secret", self.app.subscribe_event, params)
-        with patch.object(events.socket, "getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]):
-            self.fault("callback_address", self.app.subscribe_event, self.params())
+        params = self.params()
+        params["delivery"]["url"] = "https://127.0.0.1/event"
+        self.fault("callback_address", self.app.subscribe_event, params)
+        self.assertFalse((self.state / "events.json").exists())
+
+    def test_stalled_dns_is_killed_and_reaped_before_releasing_verification_slots(self):
+        self.create()
+        popen, post, children = subprocess.Popen, events.post, []
+        def stalled(*args, **kwargs):
+            child = popen([sys.executable, "-I", "-c", "import time; time.sleep(60)"], **kwargs)
+            children.append(child)
+            return child
+        def short_deadline(url, body, identity, subscription, seconds):
+            return post(url, body, identity, subscription, 0.1)
+        started = time.monotonic()
+        with patch.object(events.subprocess, "Popen", side_effect=stalled), \
+             patch.object(events, "post", side_effect=short_deadline):
+            for _ in range(3):
+                self.fault("callback_timeout", self.app.subscribe_event, self.params())
+                self.assertIsNotNone(children[-1].poll())
+        self.assertEqual(len(children), 3)
+        self.assertLess(time.monotonic() - started, 3)
         self.assertFalse((self.state / "events.json").exists())
 
     def test_pause_during_verification_rechecks_scope_without_holding_task_lock(self):
@@ -436,7 +457,7 @@ class EventsTests(unittest.TestCase):
         connection.getresponse.return_value = Mock(status=302, read=Mock(return_value=b""), getheader=Mock(return_value=None))
         addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
         body = b'{"bounded":"fixture"}'
-        with patch.object(events.socket, "getaddrinfo", return_value=addresses), patch.object(events.socket, "socket", return_value=raw), \
+        with patch.object(events, "_resolve", return_value=addresses), patch.object(events.socket, "socket", return_value=raw), \
              patch.object(events.ssl, "create_default_context", return_value=Mock(wrap_socket=Mock(return_value=tls))) as context, \
              patch.object(events.http.client, "HTTPSConnection", return_value=connection):
             status, _, _ = events.post(params["url"], body, "event-fixture", job, 5)
