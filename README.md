@@ -139,7 +139,12 @@ The selected service parent owns one MCP child; `launchd` restarts the parent
 after abnormal exit and cleans up its MCP process group. Independent execution
 workers retain their own sessions and original receipts. The task observer resumes
 original-result collection without a connected client or another command launch.
-After MCP exit or failed startup readiness, the parent persists an attempt before
+After readiness, the same parent checks MCP identity and a permitted file read
+every 30 seconds, within the existing 5-second deadline and single probe slot.
+Healthy checks do not write recovery state; a busy slot is retried after one
+second without treating contention as a failure. An unresponsive child starts a
+durable recovery episode before bounded TERM/KILL cleanup of that child only.
+Independent workers are not signalled. After MCP exit or failed readiness, the parent persists an attempt before
 launching or probing. Each attempt has a 5-second deadline. Three fast attempts
 include the first, with 1/2-second delays, then 60-second cooldown, all with
 0.8-1.2 jitter. One episode is bounded by 15 minutes and 15 attempts. Only a
@@ -153,9 +158,9 @@ After inspecting and correcting the cause, explicitly renew a valid budget with
 renew it, and corruption cannot be repaired by resetting or deleting its history.
 An explicit `service stop` unloads the job and prevents that automatic restart
 for the current login session. Task pause and terminal state still govern
-continuation after recovery. This covers process exit and startup readiness;
-continuous detection of an already-ready server hang, Tunnel recovery and
-unattended AI continuation remain separate.
+continuation after recovery. This covers process exit, startup readiness and
+post-readiness responsiveness. The separately managed upstream Tunnel owns its
+reconnect behavior; runtime recovery does not prove unattended AI continuation.
 
 ### Update and roll back
 

@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 import zipfile
 
 from openmachine import app as application, service, tasks
@@ -168,6 +168,70 @@ class ServiceTests(unittest.TestCase):
             service.supervise(self.config, self.state)
             self.assertEqual(service._read_recovery(self.state)["episode"], episode)
             self.assertEqual(probe.call_count, 15)
+        launch.assert_called_once()
+        child.terminate.assert_called_once()
+
+    def test_post_ready_hang_replaces_only_owned_child_after_durable_accounting(self):
+        stop, clock, child, launch = self.supervisor_mocks()
+        service._save_recovery(self.state, None)
+        replacement = Mock(pid=2469)
+        replacement.poll.return_value = None
+        launch.side_effect = [child, replacement]
+        probes = []
+        def probe(*args, **kwargs):
+            probes.append((clock[0], kwargs["child"]))
+            if len(probes) == 2:
+                self.assertIsNone(service._read_recovery(self.state)["episode"])
+                raise Fault("service_unready", "post-ready hang")
+            if len(probes) == 3:
+                self.assertEqual(service._read_recovery(self.state)["episode"]["attempts"], 2)
+        def terminate():
+            episode = service._read_recovery(self.state)["episode"]
+            self.assertEqual((episode["attempts"], episode["reason"]), (1, "service_unready"))
+        child.terminate.side_effect = terminate
+        child.wait.side_effect = [subprocess.TimeoutExpired("owned child", 5), 0]
+        def advance(seconds):
+            clock[0] += seconds
+            if len(probes) == 3:
+                stop.set()
+        stop.wait.side_effect = advance
+        with patch.object(service, "_managed_probe", side_effect=probe):
+            service.supervise(self.config, self.state)
+        self.assertEqual(probes, [(1000, 2468), (1030, 2468), (1031, 2469)])
+        self.assertEqual(launch.call_count, 2)
+        child.terminate.assert_called_once()
+        child.kill.assert_called_once()
+        self.assertEqual(child.wait.call_args_list, [call(timeout=5), call(timeout=5)])
+        replacement.terminate.assert_called_once()
+        self.assertIsNone(service._read_recovery(self.state)["episode"])
+
+    def test_healthy_checks_and_busy_slot_never_restart_or_spend_recovery_budget(self):
+        stop, clock, child, launch = self.supervisor_mocks()
+        service._save_recovery(self.state, None)
+        times, healthy_record = [], []
+        def probe(*args, **kwargs):
+            times.append(clock[0])
+            if len(times) == 2:
+                healthy_record.append((self.state / "service/service.json").read_bytes())
+                raise Fault("resource_busy", "another readiness caller")
+            if len(times) > 2:
+                self.assertEqual((self.state / "service/service.json").read_bytes(), healthy_record[0])
+            if len(times) == 4:
+                stop.set()
+        with patch.object(service, "_managed_probe", side_effect=probe):
+            service.supervise(self.config, self.state)
+        self.assertEqual(times, [1000, 1030, 1031, 1061])
+        launch.assert_called_once()
+        child.terminate.assert_called_once()
+        self.assertIsNone(service._read_recovery(self.state)["episode"])
+
+    def test_post_ready_fatal_identity_failure_blocks_without_replacement(self):
+        _, _, child, launch = self.supervisor_mocks()
+        service._save_recovery(self.state, None)
+        with patch.object(service, "_managed_probe", side_effect=[{}, Fault("service_identity_mismatch", "fixture")]):
+            service.supervise(self.config, self.state)
+        episode = service._read_recovery(self.state)["episode"]
+        self.assertEqual((episode["attempts"], episode["reason"]), (1, "blocked_service_identity_mismatch"))
         launch.assert_called_once()
         child.terminate.assert_called_once()
 

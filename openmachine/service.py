@@ -31,6 +31,7 @@ PROTOCOL = 1
 # Managed transitions deliberately do not perform persistent-state migrations.
 STATE_CONTRACT = 8
 READINESS_SECONDS = 5
+HEALTH_INTERVAL_SECONDS = 30
 RECOVERY_MS = 15 * 60 * 1000
 RECOVERY_ATTEMPTS = 15
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
@@ -368,7 +369,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         result = await session.call_tool("read_workspace_file", {
                             "machine": selected.machine, "workspace_name": probe["workspace"], "path": probe["path"]})
                         read = result.structured_content
-                        if result.is_error or not read["exists"] or read.get("content_redacted"):
+                        if result.is_error or not read["exists"]:
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
                         remote_records = {}
                         for name in remote_targets:
@@ -645,6 +646,36 @@ def _publish_recovery(state: Path, record: dict, episode: dict | None, stop: thr
     return False
 
 
+def _stop_mcp(child: subprocess.Popen) -> None:
+    if child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def _monitor_mcp(state: Path, record: dict, child: subprocess.Popen, stop: threading.Event) -> None:
+    next_check = time.monotonic() + HEALTH_INTERVAL_SECONDS
+    while child.poll() is None and not stop.is_set():
+        remaining = next_check - time.monotonic()
+        if remaining > 0:
+            stop.wait(min(0.1, remaining))
+            continue
+        try:
+            with lease(state / "service/readiness.lock"):
+                _managed_probe(state, record, os.getpid(), child=child.pid)
+        except Fault as error:
+            if error.code != "resource_busy":
+                raise
+            # Another bounded readiness caller owns the slot; contention is
+            # not evidence that the MCP child needs to be replaced.
+            next_check = time.monotonic() + 1
+        else:
+            next_check = time.monotonic() + HEALTH_INTERVAL_SECONDS
+
+
 def supervise(config_path: Path, state: Path) -> None:
     """Own only the selected MCP child; launchd retains the service lifetime."""
     stop = threading.Event()
@@ -680,6 +711,7 @@ def supervise(config_path: Path, state: Path) -> None:
                 if episode is not None and now < episode["next_attempt_ms"]:
                     stop.wait((episode["next_attempt_ms"] - now) / 1000)
                     continue
+                monitoring = False
                 try:
                     with lease(state / "service/readiness.lock"):
                         # Do not hold the application admission lock over a wait
@@ -702,11 +734,33 @@ def supervise(config_path: Path, state: Path) -> None:
                         if time.monotonic() >= deadline:
                             raise Fault("service_unready", "The MCP child did not become ready within its attempt.")
                         _managed_probe(state, record, os.getpid(), child=child.pid, timeout_seconds=deadline - time.monotonic())
+                    if not _publish_recovery(state, record, None, stop):
+                        return
+                    monitoring = True
+                    _monitor_mcp(state, record, child, stop)
                 except (Fault, OSError) as error:
                     if isinstance(error, Fault) and error.code == "resource_busy":
                         stop.wait(0.05)
                         continue
-                    if episode is None:
+                    if monitoring:
+                        # Read-only health checks do not spend a recovery
+                        # budget. Persist the new episode before cleanup or
+                        # replacement, under the existing activation guard.
+                        while not stop.is_set():
+                            try:
+                                with lease(state / "locks/lifecycle.lock", shared=True):
+                                    current = _record(state)
+                                    if current["current"] != record["current"] or current["pending"] is not None:
+                                        return
+                                    episode = _recovery_attempt(state, None, time.time_ns() // 1000000)
+                                break
+                            except Fault as busy:
+                                if busy.code != "resource_busy":
+                                    raise
+                                stop.wait(0.05)
+                        if stop.is_set():
+                            return
+                    elif episode is None:
                         raise
                     code = error.code if isinstance(error, Fault) else "service_state_unavailable"
                     retryable = code in {"service_unready", "service_child_exited"}
@@ -714,26 +768,18 @@ def supervise(config_path: Path, state: Path) -> None:
                     episode["next_attempt_ms"] = min(time.time_ns() // 1000000 + _recovery_delay(episode["attempts"]), episode["deadline_ms"])
                     if not _publish_recovery(state, record, episode, stop):
                         return
+                    if monitoring and retryable:
+                        _stop_mcp(child)
+                        child = None
                     continue
-                if not _publish_recovery(state, record, None, stop):
-                    return
-                # Healthy MCP lifetime is process-driven. No new periodic
-                # health poller or inferred caller/Tunnel state is introduced.
-                while child.poll() is None and not stop.is_set():
-                    stop.wait(0.1)
     except (Fault, OSError) as error:
         # Exit successfully to suppress launchd's automatic restart on a known
         # fatal boundary. CLI start/status still report the actual unready state.
         print(json.dumps({"error": error.code if isinstance(error, Fault) else "service_state_unavailable"}), file=sys.stderr)
     finally:
         try:
-            if child is not None and child.poll() is None:
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=5)
+            if child is not None:
+                _stop_mcp(child)
         finally:
             signal.signal(signal.SIGTERM, previous)
 

@@ -179,7 +179,11 @@ State contract 8 requires an actual candidate reader of this retained state
 before stopping a healthy service. The single service parent owns its MCP child;
 selection and recovery share one atomic service record. Independent worker
 sessions and original task receipts remain untouched. This
-does not detect post-readiness hangs or establish Tunnel/AI-loop recovery.
+also checks post-readiness responsiveness every 30 seconds through the same
+5-second identity/file probe and single slot. A busy slot waits one second;
+healthy checks do not spend a recovery budget. An unresponsive owned MCP child
+is replaced only after durable episode accounting and bounded cleanup, while
+independent workers keep running. This does not establish Tunnel/AI-loop recovery.
 
 E1-E3 keep pipes as the default; PTY is explicit. New format-5 receipts separate command launch/exit, first
 stop reason, force use and cleanup. `termination_grace_seconds` accepts null or

@@ -1141,6 +1141,20 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ready["chatgpt"], "not_probed")
         self.assertNotIn("text", ready)
         self.assertEqual(ready["file_sha256"], hashlib.sha256((self.work / "AGENTS.md").read_bytes()).hexdigest())
+        # Content changes and safe redaction do not make a readable probe fail.
+        (self.work / "AGENTS.md").write_text("token = synthetic-test-value\n")
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                redacted = await session.call_tool("read_workspace_file", {"machine": "desktop",
+                    "workspace_name": "example", "path": "AGENTS.md"})
+                self.assertFalse(redacted.is_error)
+                self.assertTrue(redacted.structured_content["content_redacted"])
+        ready = await asyncio.to_thread(service.probe_service, self.state, self.config, probe,
+                                        openmachine.__version__, self.processes[-1].pid)
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(ready["file_sha256"], hashlib.sha256((self.work / "AGENTS.md").read_bytes()).hexdigest())
+        self.assertNotIn("synthetic-test-value", json.dumps(ready))
         with self.assertRaises(Fault) as failed:
             await asyncio.to_thread(service.probe_service, self.state, self.config, probe,
                                     openmachine.__version__, self.processes[-1].pid + 1)
