@@ -52,7 +52,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
 
     def launch(self, environment=None, *, managed=False):
         process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
-                                    "--state-dir", str(self.state), "serve", *(["--managed"] if managed else [])],
+                                    "--state-dir", str(self.state), "serve", *(["--managed-child"] if managed else [])],
                                    cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment)
         self.processes.append(process)
         deadline = time.monotonic() + 10
@@ -421,7 +421,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 7)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 8)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])
@@ -1173,7 +1173,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.launch(managed=True)
         inode = self.socket.stat().st_ino
         duplicate = subprocess.run([sys.executable, "-I", "-m", "openmachine.cli", "--config", str(self.config),
-                                    "--state-dir", str(self.state), "serve", "--managed"],
+                                    "--state-dir", str(self.state), "serve", "--managed-child"],
                                    capture_output=True, timeout=10)
         self.assertNotEqual(duplicate.returncode, 0)
         self.assertEqual(self.socket.stat().st_ino, inode)

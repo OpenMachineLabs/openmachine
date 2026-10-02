@@ -135,15 +135,27 @@ log is private at `<state-dir>/service/service.log`; inspect it locally without
 pasting credentials or raw user data. It is not the bounded execution-log store.
 No system daemon, privilege grant, tunnel service or remote MCP daemon is installed.
 
-After an abnormal managed MCP exit, `launchd` can restart the selected runtime;
-managed startup reclaims only its verified dead socket. Independent execution
-workers and their original receipts remain in place. The task observer resumes
+The selected service parent owns one MCP child; `launchd` restarts the parent
+after abnormal exit and cleans up its MCP process group. Independent execution
+workers retain their own sessions and original receipts. The task observer resumes
 original-result collection without a connected client or another command launch.
+After MCP exit or failed startup readiness, the parent persists an attempt before
+launching or probing. Each attempt has a 5-second deadline. Three fast attempts
+include the first, with 1/2-second delays, then 60-second cooldown, all with
+0.8-1.2 jitter. One episode is bounded by 15 minutes and 15 attempts. Only a
+verified MCP identity and permitted file read clear it. Fatal identity, permission
+or corrupt-history failures block recovery. The private `service/service.json`
+retains the original budget across process and service restarts; status/doctor
+show its reason, attempt count and timestamps without advancing it.
+
+After inspecting and correcting the cause, explicitly renew a valid budget with
+`openmachine service restart --reset-recovery`. Ordinary start/restart cannot
+renew it, and corruption cannot be repaired by resetting or deleting its history.
 An explicit `service stop` unloads the job and prevents that automatic restart
 for the current login session. Task pause and terminal state still govern
-continuation after recovery. This OS supervision is separate from the pending
-bounded runtime-readiness policy in Spec #29; it does not establish Tunnel health
-or unattended AI continuation.
+continuation after recovery. This covers process exit and startup readiness;
+continuous detection of an already-ready server hang, Tunnel recovery and
+unattended AI continuation remain separate.
 
 ### Update and roll back
 
@@ -1063,9 +1075,12 @@ Receipt-specific failures retain their own task budget. Pause, cancellation,
 restart or another task cannot reset either budget. A successful verified read
 clears connection recovery without replaying effects or accepting a task stage.
 
-Controller state contract 7 requires actual candidate-reader coverage before a
-managed transition, including terminal-only tasks and retained SSH budgets, even
-after SSH is disabled. Task format 1/index 2, execution format 5 and SSH protocol 6
+Controller state contract 8 requires actual candidate-reader coverage before a
+managed transition, including terminal-only tasks, retained SSH budgets (even
+after SSH is disabled) and managed MCP recovery history. A first upgrade creates
+recovery history atomically with the verified selection, preserving first-upgrade
+rollback after a crash before commit. Retained history rejects an older reader before service
+stop. Task format 1/index 2, execution format 5 and SSH protocol 6
 remain unchanged. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
 
