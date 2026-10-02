@@ -155,12 +155,16 @@ def _ssh_recovery_state(state: Path) -> dict:
 
 
 def _read_recovery(state: Path) -> dict | None:
-    path = state / "service/recovery.json"
+    path = state / "service/service.json"
     if not os.path.lexists(path) and not os.path.lexists(state / "service/recovery.lock"):
         return None
     try:
-        value = _json(path)
-        if set(value) != {"format", "episode"} or type(value["format"]) is not int or value["format"] != 1:
+        record = _record(state)
+        if "recovery" not in record and not os.path.lexists(state / "service/recovery.lock"):
+            return None
+        value = record.get("recovery")
+        if (not isinstance(value, dict) or set(value) != {"format", "episode"}
+                or type(value["format"]) is not int or value["format"] != 1):
             raise ValueError("unsupported recovery record")
         episode = value["episode"]
         if episode is not None:
@@ -185,9 +189,9 @@ def _recovery_state(state: Path) -> dict:
 
 
 def _save_recovery(state: Path, episode: dict | None) -> None:
-    # The managed owner or a stopped-service operation holds recovery.lock.
+    # Lifecycle admission serializes this record with selection changes.
     value = {"format": 1, "episode": episode}
-    save_json(state / "service/recovery.json", value)
+    save_json(state / "service/service.json", dict(_record(state), recovery=value))
     if _read_recovery(state) != value:
         raise Fault("runtime_recovery_unverified", "Recovery accounting was not verified; no further attempt is safe.")
 
@@ -819,6 +823,11 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
     candidate_record = record | {"config": str(candidate_path)}
     _verify_candidate(state, candidate_record, target)
     with lease(state / "locks/lifecycle.lock"):
+        # The parent may have advanced its budget during candidate preflight.
+        # Preserve that current value in any pending/restored selection.
+        recovery = _read_recovery(state)
+        if recovery is not None:
+            record = dict(record, recovery=recovery)
         installed = _installed(state, target)
         _candidate_state(_runtime(state, target) / "bin/python", candidate_path, state, installed["state_contract"])
         pending_origin = record["pending"]
@@ -857,7 +866,8 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         if pending is not None and pending["to"] in configurations:
             allowed.add(configurations[pending["to"]])
         record = {**record, "current": target, "configurations": configurations,
-                  "pending": {"from": previous, "to": target, "previous": previous_previous}}
+                  "pending": {"from": previous, "to": pending["to"] if restoring else target,
+                              "previous": previous_previous}}
         save_json(state / "service/service.json", record)
         try:
             _select_configuration(state, config_path, candidate_digest, allowed)
@@ -866,7 +876,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         except (Fault, OSError) as error:
             restored = {**original, "current": previous, "previous": previous_previous,
                         "configurations": configurations,
-                        "pending": {"from": previous, "to": target, "previous": previous_previous}}
+                        "pending": record["pending"]}
             save_json(state / "service/service.json", restored)
             try:
                 _select_configuration(state, config_path, prior_digest, allowed)
@@ -892,11 +902,12 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
 
 def _commit_ready(state: Path, record: dict) -> None:
     if _installed(state, record["current"])["state_contract"] >= 8:
-        # The candidate passed its actual probe. Its parent still waits for
-        # pending=None; publish readiness before committing the selection.
-        with lease(state / "service/recovery.lock"):
-            _save_recovery(state, None)
+        # One atomic record commits selection and readiness together. Before
+        # this write, a failed first upgrade still has readable state-7 history.
+        record = dict(record, recovery={"format": 1, "episode": None})
     save_json(state / "service/service.json", record)
+    if _record(state) != record:
+        raise Fault("service_state_unverified", "The readiness/selection commit is unverified; read the original transition.")
 
 
 def status(config_path: Path, state: Path) -> dict:

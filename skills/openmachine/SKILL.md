@@ -177,7 +177,8 @@ budget only through explicitly requested `service restart --reset-recovery`.
 Ordinary start/restart preserves it; never delete or replace corrupt history.
 State contract 8 requires an actual candidate reader of this retained state
 before stopping a healthy service. The single service parent owns its MCP child;
-independent worker sessions and original task receipts remain untouched. This
+selection and recovery share one atomic service record. Independent worker
+sessions and original task receipts remain untouched. This
 does not detect post-readiness hangs or establish Tunnel/AI-loop recovery.
 
 E1-E3 keep pipes as the default; PTY is explicit. New format-5 receipts separate command launch/exit, first

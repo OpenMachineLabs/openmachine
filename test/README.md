@@ -611,7 +611,9 @@ fast delays/jitter/cooldown, 15-minute/15-attempt limits, single-probe admission
 fatal failure, parent restart, stop and explicit budget renewal. Actual installed
 state readers cover retained recovery history and reject incompatible candidates
 before stop. First-upgrade failure must preserve the old reader's state and
-restore its owned service definition; status reads must never renew a budget.
+restore its owned service definition. Selection and recovery commit atomically;
+crashes on either side must leave a supported rollback or committed selection.
+Status reads must never renew a budget.
 
 Native macOS acceptance uses one authorized disposable service and exact wheels.
 Upgrade an old managed installation, inject a disclosed activation failure and

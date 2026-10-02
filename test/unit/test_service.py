@@ -101,7 +101,7 @@ class ServiceTests(unittest.TestCase):
             with patch.object(service.random, "uniform", return_value=jitter):
                 self.assertEqual([service._recovery_delay(n) for n in (1, 2, 3, 15)],
                                  [int(base * jitter) for base in (1000, 2000, 60000, 60000)])
-        before = (self.state / "service/recovery.json").read_bytes()
+        before = (self.state / "service/service.json").read_bytes()
         proof = service.check_state(self.config, self.state)
         self.assertEqual(service._candidate_state(Path(sys.executable), self.config, self.state, 8), proof)
         for delta in ({"state_contract": 7}, {"runtime_recovery_present": False},
@@ -109,14 +109,14 @@ class ServiceTests(unittest.TestCase):
             with self.subTest(delta=delta), patch.object(service, "_run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service._candidate_state(Path(sys.executable), self.config, self.state))
-        self.assertEqual((self.state / "service/recovery.json").read_bytes(), before)
+        self.assertEqual((self.state / "service/service.json").read_bytes(), before)
 
     def test_recovery_corruption_and_missing_history_never_reset(self):
         episode = service._recovery_attempt(self.state, None, 1000000)
-        path = self.state / "service/recovery.json"
+        path = self.state / "service/service.json"
         for delta in ({"attempts": True}, {"attempts": 16}, {"deadline_ms": 1900001},
                       {"next_attempt_ms": 0}, {"reason": "raw error payload!"}):
-            save_json(path, {"format": 1, "episode": episode | delta})
+            save_json(path, self.record | {"recovery": {"format": 1, "episode": episode | delta}})
             before = path.read_bytes()
             self.assert_fault("runtime_recovery_invalid", lambda: service.check_state(self.config, self.state))
             self.assertEqual(path.read_bytes(), before)
@@ -226,7 +226,7 @@ class ServiceTests(unittest.TestCase):
             stop.side_effect = None
             service.operate(self.config, self.state, "restart", reset_recovery=True)
             self.assertIsNone(service._read_recovery(self.state)["episode"])
-            save_json(self.state / "service/recovery.json", {"format": 999})
+            save_json(self.state / "service/service.json", self.record | {"recovery": {"format": 999}})
             self.assert_fault("runtime_recovery_invalid", lambda: service.operate(self.config, self.state, "restart", reset_recovery=True))
 
     def test_managed_probe_binds_child_parent_and_overall_deadline(self):
@@ -255,6 +255,55 @@ class ServiceTests(unittest.TestCase):
             service._activate(self.state, self.record, self.b)
         self.assertEqual(service._read_recovery(self.state), {"format": 1, "episode": None})
         self.assertFalse(service._definition(self.state, service._record(self.state))["AbandonProcessGroup"])
+
+    def test_first_upgrade_commit_crash_leaves_rollback_or_committed_selection(self):
+        self.activation_mocks()
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service._json(path) | {"state_contract": 8})
+        for committed in (False, True):
+            self.save(self.record)
+            def crash_at_commit(path, value):
+                if path == self.state / "service/service.json" and value["current"] == self.b and value["pending"] is None:
+                    self.assertEqual(value["recovery"], {"format": 1, "episode": None})
+                    if committed:
+                        save_json(path, value)
+                    raise OSError("Injected controller loss at atomic commit")
+                save_json(path, value)
+            with self.subTest(committed=committed), patch.object(service, "save_json", side_effect=crash_at_commit):
+                with self.assertRaises(OSError):
+                    service._activate(self.state, self.record, self.b)
+            observed = service._record(self.state)
+            if committed:
+                self.assertIsNone(observed["pending"])
+                self.assertEqual(observed["current"], self.b)
+                self.assertEqual(service._read_recovery(self.state), {"format": 1, "episode": None})
+            else:
+                self.assertEqual(observed["pending"]["from"], self.a)
+                self.assertIsNone(service._read_recovery(self.state))
+                import plistlib
+                owned_plist = self.root / "owned.plist"
+                for owned, content in ((owned_plist, plistlib.dumps(service._definition(self.state, observed))),
+                                       (self.state / "service/launch.py", service.LAUNCHER.encode()),
+                                       (self.state / "service/service.log", b"")):
+                    owned.write_bytes(content)
+                    owned.chmod(0o600)
+                def restore(state, selection):
+                    service._verify_files(state, selection)
+                    return {"status": "ready"}
+                with patch.object(service, "_plist_path", return_value=owned_plist), patch.object(service, "_start", side_effect=restore):
+                    service._activate(self.state, observed, self.a)
+                self.assertEqual(service._record(self.state)["current"], self.a)
+                self.assertIsNone(service._read_recovery(self.state))
+
+    def test_activation_preserves_recovery_advanced_during_candidate_preflight(self):
+        verify, _, start = self.activation_mocks()
+        self.managed_fixture()
+        episode = service._recovery_attempt(self.state, None, 1000000)
+        later = dict(episode, attempts=2)
+        verify.side_effect = lambda *_args, **_kwargs: service._save_recovery(self.state, later)
+        start.side_effect = Fault("service_unready", "fixture")
+        self.assert_fault("recovery_required", lambda: service._activate(self.state, self.record, self.b))
+        self.assertEqual(service._read_recovery(self.state)["episode"], later)
 
     def test_state_check_uses_actual_task_reader_and_preserves_bytes(self):
         tasks.save(self.state, "original", 0, "Original task", "Preserve original execution evidence.\n", [])

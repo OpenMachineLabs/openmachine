@@ -144,7 +144,7 @@ launching or probing. Each attempt has a 5-second deadline. Three fast attempts
 include the first, with 1/2-second delays, then 60-second cooldown, all with
 0.8-1.2 jitter. One episode is bounded by 15 minutes and 15 attempts. Only a
 verified MCP identity and permitted file read clear it. Fatal identity, permission
-or corrupt-history failures block recovery. The private `service/recovery.json`
+or corrupt-history failures block recovery. The private `service/service.json`
 retains the original budget across process and service restarts; status/doctor
 show its reason, attempt count and timestamps without advancing it.
 
@@ -1078,8 +1078,8 @@ clears connection recovery without replaying effects or accepting a task stage.
 Controller state contract 8 requires actual candidate-reader coverage before a
 managed transition, including terminal-only tasks, retained SSH budgets (even
 after SSH is disabled) and managed MCP recovery history. A first upgrade creates
-recovery history only after candidate readiness, preserving failed-activation
-restoration. Retained recovery history rejects an older reader before service
+recovery history atomically with the verified selection, preserving first-upgrade
+rollback after a crash before commit. Retained history rejects an older reader before service
 stop. Task format 1/index 2, execution format 5 and SSH protocol 6
 remain unchanged. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
