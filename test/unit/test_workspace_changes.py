@@ -24,6 +24,7 @@ from openmachine.workspace import changes, files, git
 from openmachine.execution import api as execution_api
 from integrations.ssh import PROTOCOL, client, endpoint
 from openmachine import __version__
+from openmachine.service import checks as service_checks
 
 
 class WorkspaceChangeTests(unittest.TestCase):
@@ -588,8 +589,8 @@ class WorkspaceChangeTests(unittest.TestCase):
         self.apply()
         ignored = {"protocol": 1, "state_contract": 3}
         process = subprocess.CompletedProcess([], 0, json.dumps(ignored), "")
-        with patch.object(service, "_run", return_value=process), patch.object(service, "load", return_value=self.config):
-            self.fault("incompatible_state", lambda: service._candidate_state(Path(sys.executable), self.root / "config", self.state, 3))
+        with patch.object(service_checks, "_run", return_value=process), patch.object(service_checks, "load", return_value=self.config):
+            self.fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.root / "config", self.state, 3))
         self.assertEqual(workspace.check_change_state(self.state)["workspace_change_records"], 1)
 
     def test_legacy_omitted_edit_grant_keeps_configuration_fingerprint(self):

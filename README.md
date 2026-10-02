@@ -1229,7 +1229,7 @@ non-transactional; structured canonical publication is independent of index refr
 MCP operations and explicit CLI integration probes use the application assembled
 by `bootstrap.py`. Every application mutation acquires the existing shared
 lifecycle lease and selected-runtime guard once around dispatch, not for the
-background command's lifetime. CLI service management still enters `service.py`
+background command's lifetime. CLI service management still enters `service/`
 directly. Reads and already-running workers retain their existing behavior.
 
 Machine routing is controller-owned. Local execution/workspace code never calls
