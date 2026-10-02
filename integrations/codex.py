@@ -323,8 +323,10 @@ def observe_event(event: dict, evidence: dict, packet: dict, surface_state: dict
     result = item.get("result") or {}
     meta = result.get("_meta") or {}
     if (item.get("status") != "completed" or item.get("error") or result.get("isError")
-            or result.get("is_error") or meta.get("codex/browserUse") is not True):
+            or result.get("is_error")):
         return
+    if meta.get("codex/browserUse") is not True:
+        raise ValueError("successful delegated JS call lacks native browser-use evidence")
     evidence["calls"] += 1
     surface = meta.get("codex/toolSurface") or {}
     url = meta.get("browser_use", {}).get("url")

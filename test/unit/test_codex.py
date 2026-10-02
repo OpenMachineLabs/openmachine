@@ -227,6 +227,11 @@ sys.exit(7 if packet["goal"]=="exit-failed" else 0)
         late["item"]["status"] = "failed"
         codex.observe_event(late, evidence, packet, surface)
         self.assertIsNone(evidence["snapshot"])
+        non_browser = self.event(code="1 + 1")
+        non_browser["item"]["result"]["_meta"].pop("codex/browserUse")
+        with self.assertRaisesRegex(ValueError, "browser-use evidence"):
+            codex.observe_event(non_browser, evidence, packet, surface)
+        self.assertIsNone(evidence["snapshot"])
         for mutate in (lambda e: e["item"].update(server="another-server"),
                        lambda e: e["item"]["result"]["_meta"]["browser_use"].update(url="https://other.example/")):
             event = self.event()
