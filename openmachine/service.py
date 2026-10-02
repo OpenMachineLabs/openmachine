@@ -369,7 +369,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         result = await session.call_tool("read_workspace_file", {
                             "machine": selected.machine, "workspace_name": probe["workspace"], "path": probe["path"]})
                         read = result.structured_content
-                        if result.is_error or not read["exists"] or read.get("content_redacted"):
+                        if result.is_error or not read["exists"]:
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
                         remote_records = {}
                         for name in remote_targets:
