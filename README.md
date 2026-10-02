@@ -2,24 +2,27 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.4
+## v0.2.5
 
-Open Machine v0.2.4 packages the post-v0.2.3 workflow and GitHub collaboration
-fixes from PRs #45 and #46: recoverable tool rejections now carry scoped
-continuation guidance, GitHub attribution defaults on with a local opt-out, and
-Spec Development linking accepts the repository's current `Issue: Refs #N` metadata.
+Open Machine v0.2.5 packages Spec #29's accepted durable task continuity and
+bounded recovery implementation from PRs #48-#58: structured task records,
+guarded claims and effect admission, original-result observation, SSH and managed
+MCP recovery, and signed task handoff Events. All three actual Work continuation
+cases passed on the single-user private Tunnel/native-account route recorded in
+[Spec #29](https://github.com/OpenMachineLabs/openmachine/issues/29).
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 5 and SSH protocol 6 are compatibility
+current readers accept both. State contract 9 and SSH protocol 6 are compatibility
 contracts, not release versions. Execution retains format 5 and opt-in PTY control.
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
 
-Version `0.2.4` is an initial-development release, not a stable 1.x API promise.
-Spec #32 remains the MCP SDK 2.2.0 migration baseline. This release adds the
-post-v0.2.3 maintenance fixes from PRs #45 and #46 without changing the SDK,
-state, SSH, execution or workspace receipt compatibility contracts.
+Version `0.2.5` is an initial-development release, not a stable 1.x API promise.
+Spec #32 remains the MCP SDK 2.2.0 migration baseline. Retained task, recovery and
+Events history requires a compatible state reader before a managed update or
+rollback. Automatic continuation is accepted only on the recorded Work route;
+other clients, cross-chat isolation and production deployment remain separate.
 
 Managed services support logged-in macOS controllers. Linux supports manual
 `serve` and configured SSH workers; managed Linux services and Windows are not
@@ -32,12 +35,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.4 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.5 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.4-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.5-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -50,7 +53,7 @@ state or arbitrary checkout files. Workers use the installed package, never a
 source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
 JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
 building. See [requirements.lock](requirements.lock) for the complete locked set.
-v0.2.4 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
+v0.2.5 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
 v0.2.2 tag remains on SDK 1.30.0 and retains its own matching lock.
 
 ## Configure and run
@@ -98,7 +101,7 @@ checkout, install the already-built artifact and register its file-read probe:
 
 ```sh
 .venv/bin/openmachine service install \
-  --wheel "$PWD/dist/openmachine-0.2.4-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.2.5-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
@@ -1092,7 +1095,7 @@ stop. Task format 1/index 2, execution format 5 and SSH protocol 6
 remain unchanged. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
 
-### Task handoff Events (unreleased source)
+### Task handoff Events
 
 On MCP `2026-07-28`, the private endpoint advertises `capabilities.events` and
 implements `events/list`, `events/subscribe` and `events/unsubscribe` through
@@ -1147,9 +1150,12 @@ cannot reactivate stopped work. No model loop, broker or new daemon is introduce
 Retained Events history must pass the actual candidate-reader check before a
 managed transition; deleting it to permit an older reader is not rollback.
 
-Installed-wheel/SDK tests exercise the implementation. Actual Work continuation
-for the three Issue #29 interruption cases remains a separate acceptance gate;
-passing local tests does not close that Spec or authorize a release/deployment.
+Installed-wheel/SDK tests exercise the implementation. All three actual Work
+continuation cases in [Spec #29](https://github.com/OpenMachineLabs/openmachine/issues/29)
+passed on the recorded single-user route on 2026-10-02: an original command still
+running, a result already committed, and an accepted plan with no execution.
+That acceptance does not extend to other accounts/routes or host reboot;
+production activation remains separately authorized work.
 
 Legacy `save_task` creates at revision zero and updates only the observed revision. It
 serializes saves under one stable store lock; an identical retry of the latest
