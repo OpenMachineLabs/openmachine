@@ -37,10 +37,9 @@ fixtures, not production projects or live SSH/ChatGPT acceptance.
 | `unit/test_continuity.py` | Legacy checkpoint/index integrity, real original-ID association, Skill resources and whole writes. |
 | `unit/test_tasks.py`, `test_task_admission.py` | Canonical publication, bounded index rebuild, process-loss boundaries, claims/epochs, stale intent, scope, plan invalidation, capacity and terminal acceptance. |
 | `unit/test_task_observer.py`, `test_task_ssh.py` | Absent-client original results, pause/terminal races, durable read budgets, actual slot ownership, stale snapshots and shared target recovery. |
-| `unit/test_events.py` | Verification, signatures/address pinning, rotation, stable event IDs, cancellation, revocation, connection budgets and delivery/read/claim/next-intent distinctions. |
 | `unit/test_service.py` | Selection, reader compatibility, before-stop rejection, configuration restoration, first-upgrade failures, bounded supervision and unchanged recovery budgets. |
 | `unit/test_ssh.py`, `test_github.py` | Pinned target transport/archive isolation; exact provider scope/account, complete paged evidence, merge gates and original-destination reconciliation. |
-| `contract/test_mcp*.py` | Installed private-socket SDK/wire contracts, workflow/restart continuity and independent admission; split by execution, workspace, patches, tasks and Events. |
+| `contract/test_mcp*.py` | Installed private-socket SDK/wire contracts, workflow/restart continuity and independent admission; split by execution, workspace, patches and tasks; retired Events methods are rejected. |
 | `system/test_repository.py` | Standard-library repository hygiene, templates, metadata and commit checking. |
 
 `support_tasks.py`, `support_execution.py`, `support_workspace.py` and
@@ -67,7 +66,7 @@ New source members change artifact hashes, not protocol/state semantics by asser
 
 Use independently installed old/new readers against disposable original records:
 legacy and structured tasks including terminal-only data, workspace formats 1/2,
-execution/control receipts, SSH/managed recovery and Events. Check exact bytes,
+execution/control receipts, SSH/managed recovery and retired Events archives. Check exact bytes,
 identity and outcome before/after; missing/unsupported history must not become an
 empty store, replay or permissive rollback. A matching version string alone is not
 an artifact identity. State/lock paths, inode ownership and acquisition order are
@@ -88,39 +87,21 @@ review of its deliberate fixture delta. Internal file moves require no fixture
 change. Deleting a duplicate test requires an explicit retained-coverage map;
 keep unique fault, corruption, permission, control and restart scenarios.
 
-## Read-only Events diagnostic
-
-For an explicitly authorized private socket:
-
-```sh
-"$PYTHON" "$REPO/test/contract/probe_task_handoff.py" --socket /absolute/private/state/mcp.sock
-```
-
-The probe sends only server/discover and events/list, never auto-discovers a
-socket, subscribes, sends a callback, claims a task or dispatches work. Exit 0 means
-Events discovery is ready; 2 means blocked/inconclusive; 1 means probe failure.
-Each response is at most 64 KiB, request five seconds, whole probe 15 seconds,
-without retries/redirects. Raw responses, paths and callback credentials are omitted.
-Incomplete catalogs are not absence. ai_continuation remains not_run unconditionally.
-The obsolete fake S0 SDK extension is not a second maintained implementation;
-real shipped-extension and negative probe cases own its relevant coverage.
-
 ## Evidence boundaries
 
 Mocked launchctl is not native service acceptance; private-socket SDK sessions are
-not real ChatGPT conversations; synthetic callback/SSH transport is not live delivery.
+not real ChatGPT conversations; synthetic SSH transport is not live target evidence.
 A true transition uses distinct immutable candidates, preserved original workers/
 records/configuration and verified restoration or explicit uncertainty. Run such
 checks only on authorized disposable resources, never production services or NAS/GPU
 workloads. Quiescent SDK upgrades remain stop -> upgrade -> original read -> resume,
 not a blanket zero-downtime promise. Preserve original target session/linger policy.
 
-Actual Work continuation separately proves an AI returns without a new user prompt,
-reads original evidence, claims current work and performs the next authorized step.
-Running command, committed result and plan-before-execution are distinct cases.
-A callback 2xx, scripted AI step or Retry click is not that acceptance. Capture only
-sanitized original handles, exact artifacts/platform/route and PASS/FAIL/NOT RUN.
-No credentials, transcripts, raw callback bodies or hidden reasoning in evidence.
+Work Events delivery and discovery probes are removed. The installed MCP checks
+reject Events methods on both supported protocols and retain the frozen ordinary
+tool catalog. Service tests preserve an inert private archive and reject missing,
+unsafe or reactivating readers. Existing absent-caller, claim, no-replay and restart
+checks retain ordinary Chat task-continuation coverage without an Events adapter.
 
 Historical milestone receipts remain in Specs
 [#18](https://github.com/OpenMachineLabs/openmachine/issues/18),

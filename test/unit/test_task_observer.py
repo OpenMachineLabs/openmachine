@@ -28,7 +28,7 @@ class TaskObserverTests(ObserverFixture, unittest.TestCase):
             self.app.find_tasks()
         self.assertEqual(self.path.read_bytes(), before)
         self.assertTrue(result["support"]["local_result_observation"])
-        self.assertEqual(result["observations"][0]["state"], "unsubscribed")
+        self.assertEqual(result["observations"][0]["state"], "unknown")
         self.assertFalse((self.state / "locks/task-observer.lock").exists())
         self.interval.stop()
         self.assertEqual((self.observer_module.INTERVAL_MS, self.observer_module.READ_SECONDS,
@@ -37,6 +37,9 @@ class TaskObserverTests(ObserverFixture, unittest.TestCase):
 
     def test_absent_caller_result_and_handoff_publish_without_replaying_or_accepting(self):
         args, started = self.owned()
+        archive = self.state / "events.json"
+        archive.write_text("obsolete malformed Events archive")
+        archive_before = archive.read_bytes()
         observer = self.app.task_observer
         with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No background effects")), observer.running():
             self.until(lambda: observer._snapshot["last"].get("structured-one"))
@@ -60,6 +63,9 @@ class TaskObserverTests(ObserverFixture, unittest.TestCase):
             self.until(lambda: "structured-one" not in observer._snapshot["active"])
         self.assertEqual((self.work / "counter").read_text(), "1")
         self.assertEqual(self.wait(started)["created_at"], started["created_at"])
+        self.assertEqual(archive.read_bytes(), archive_before)
+        self.assertFalse(self.view()["support"]["events_delivery"])
+        self.assertFalse((self.state / "locks/events.lock").exists())
 
     def test_observer_restart_collects_a_result_completed_while_it_was_stopped(self):
         args, started = self.owned()

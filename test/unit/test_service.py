@@ -52,6 +52,85 @@ class ServiceTests(unittest.TestCase):
             operation()
         self.assertEqual(caught.exception.code, code)
 
+    def retired_events_fixture(self):
+        # Original format-1 writer shape with synthetic, never-contacted values.
+        import base64
+        import hashlib
+        def digest(value):
+            return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        task, principal, url = "retired-task", "native-uid:0", "https://callback.example/retired"
+        identity = digest([principal, url, "task.handoff_ready", {"task_id": task}])
+        handoff = "a" * 32
+        budget = {"started_at_ms": 1000000, "deadline_ms": 4600000, "attempts": 1, "next_attempt_ms": 1001000}
+        delivery = {"id": digest([identity, handoff]), "payload": {"task_id": task,
+            "handoff_id": handoff, "task_revision": 1, "plan_revision": 1, "reason": "result_ready"},
+            "occurred_at_ms": 1000000, "epoch": 1, "budget": budget,
+            "accepted_at_ms": None, "read_at_ms": None, "blocker": None}
+        subscription = {"id": identity, "generation": "b" * 32, "principal": principal,
+            "task_id": task, "url": url, "secret": "whsec_" + base64.b64encode(b"f" * 32).decode(),
+            "previous_secret": None, "rotation_until_ms": 0, "verified_at_ms": 1000000,
+            "expires_at_ms": 4600000, "delivery": delivery}
+        value = {"format": 1, "subscriptions": {identity: subscription},
+                 "connections": {"callback.example:443": budget}}
+        save_json(self.state / "events.json", value)
+        with lease(self.state / "locks/events.lock"):
+            pass
+        return value, digest(value)
+
+    def test_retired_events_archive_is_passive_and_blocks_reactivation(self):
+        value, digest = self.retired_events_fixture()
+        path, lock = self.state / "events.json", self.state / "locks/events.lock"
+        before, inode, lock_inode = path.read_bytes(), path.stat().st_ino, lock.stat().st_ino
+        proof = service.check_state(self.config, self.state)
+        self.assertTrue(proof["events_retired"])
+        self.assertEqual((proof["events_subscriptions"], proof["events_sha256"]), (1, digest))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), proof)
+        self.assertNotIn("whsec_", json.dumps(proof))
+        self.assertNotIn("callback.example", json.dumps(proof))
+        legacy = {key: item for key, item in proof.items() if key != "events_retired"}
+        for candidate in (legacy, proof | {"events_retired": False}, proof | {"events_retired": 1},
+                          proof | {"events_sha256": "0" * 64}, proof | {"events_present": False}):
+            with self.subTest(candidate=candidate), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(candidate), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                    Path(sys.executable), self.config, self.state))
+        self.assertEqual((path.read_bytes(), path.stat().st_ino, lock.stat().st_ino), (before, inode, lock_inode))
+
+    def test_retired_events_archive_rejects_corrupt_unsafe_or_missing_history(self):
+        self.retired_events_fixture()
+        path, lock = self.state / "events.json", self.state / "locks/events.lock"
+        original = path.read_bytes()
+        for raw in (b'{"format":1,"format":1}', b'{}', b'[]', b'\xff', b'x' * 524289,
+                    b'{"format":true,"subscriptions":{},"connections":{}}',
+                    b'{"format":1,"subscriptions":[],"connections":{}}'):
+            with self.subTest(raw_size=len(raw)):
+                path.write_bytes(raw)
+                self.assert_fault("events_corrupt", lambda: service_checks._events_state(self.state))
+                self.assertEqual(path.read_bytes(), raw)
+        path.write_bytes(original)
+        path.chmod(0o644)
+        self.assert_fault("events_corrupt", lambda: service_checks._events_state(self.state))
+        path.chmod(0o600)
+        target = self.state / "archive-backup"
+        path.rename(target)
+        path.symlink_to(target)
+        self.assert_fault("events_corrupt", lambda: service_checks._events_state(self.state))
+        path.unlink()
+        self.assert_fault("events_corrupt", lambda: service_checks._events_state(self.state))
+        target.rename(path)
+        lock.unlink()
+        self.assert_fault("events_corrupt", lambda: service_checks._events_state(self.state))
+        self.assertFalse(lock.exists())
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_retired_archive_busy_lock_is_not_replaced_or_repaired(self):
+        self.retired_events_fixture()
+        path = self.state / "events.json"
+        before = path.read_bytes()
+        with lease(self.state / "locks/events.lock"):
+            self.assert_fault("resource_busy", lambda: service_checks._events_state(self.state))
+        self.assertEqual(path.read_bytes(), before)
+
     def activation_mocks(self):
         stack = ExitStack()
         self.addCleanup(stack.close)

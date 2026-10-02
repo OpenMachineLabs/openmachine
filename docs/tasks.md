@@ -170,51 +170,22 @@ budgets; tasks reference them. Receipt faults keep separate task budgets. Neithe
 adding tasks nor pausing/restarting renews a budget; verified original reads clear
 connection failure without replay or stage acceptance.
 
-## Task handoff Events
+## Chat continuation
 
-The single-user private endpoint exposes `task.handoff_ready` on MCP 2026-07-28
-through the existing SDK extension. Filter exactly by `{task_id}`; payload contains
-task/handoff IDs, task/plan revisions and reason, within a 4 KiB envelope. There is
-no replay cursor. Legacy clients retain their tools. Every connected chat shares
-native-account grants; anonymous subject/session data is not an authorization
-boundary. Supported Work-route acceptance does not extend to generic chats, local
-Codex or unsupported accounts, and does not promise cross-chat isolation.
+Open Machine does not expose MCP Events subscriptions or automatically wake a
+ChatGPT caller. `events_delivery` is false; caller presence remains unknown.
+Original results and pending handoffs are still retained independently of Chat.
 
-Subscribe only to an active, unexpired structured task. Callbacks require signed
-verification, HTTPS, public DNS resolution at every connection, address pinning,
-hostname-verified TLS and no redirects. Synthetic/private DNS is not bypassed.
-Callback URLs/secrets stay in private `events.json`, never task views. There are
-at most 64 subscriptions, TTL at most one hour or task expiry, and five-minute
-verification-cache/key-rotation windows. Refresh retains identity and budgets;
-unsubscribe is idempotent and invalidates in-flight receipts.
+On an explicitly authorized continuation, read the same task and original receipts,
+claim its current handoff or reuse a valid claim, then admit only the next safe
+operation with current task/plan revisions and epoch. A read is not a claim, and
+a claim is not stage acceptance. Pause, expiry, terminal state and uncertain
+original effects retain their existing guards. Do not rerun completed work merely
+because the previous Chat turn ended.
 
-The observer dispatches at most two webhook exchanges, one per subscription,
-without holding task locks across IO. An unexpired claim defers delivery. Current
-lifecycle/task admission and durable attempt reservation precede every send.
-Retries retain event ID/body/occurrence time: four fast attempts with 1/2/4-second
-delays, then 60-second jittered cooldown, up to one hour/60 attempts or earlier expiry.
-Connection failures coalesce. Verification has two slots/five seconds; delivery
-ten seconds; timed-out threads retain slots until exit. Responses are bounded to
-4 KiB. Permanent refusal, 410/413 and revoked/expired grants do not retry.
-
-A 2xx is receipt only. Readback exposes delivered, read-observed, claimed and actual
-next-intent-admitted facts separately, with original IDs. `pending_handoff_id`
-identifies a newer obligation. Reads may queue private in-memory event observation;
-service publication does not change canonical task progress or claim work. An
-acknowledged event is not resent to force a wake; missing takeover blocks after
-15 minutes or earlier expiry. The caller must read original receipts, claim the
-current handoff and submit a currently authorized effect. Pause/terminal/expiry
-remain authoritative, including late replies. Platform refusal never authorizes
-another event, polling loop, model backend or replacement task.
-
-All three actual Work continuation cases are retained in
-[Spec #29](https://github.com/OpenMachineLabs/openmachine/issues/29): an original
-command still running, a committed result, and an accepted plan before execution.
-Those are historical account/route-specific results, not acceptance of every new
-candidate. Installation tests, event delivery and actual AI continuation remain
-separate evidence. State contract 11 requires genuine readers of all retained task,
-SSH, managed recovery and Events history before transition, even terminal-only or
-disabled integrations. Never delete evidence to enable an old runtime.
+The former Work adapter is retired, not replaced by polling, a browser driver or
+a second model. Any old private Events archive remains inert and unchanged; the
+[lifecycle reader](service.md) checks its retention without sending callbacks.
 
 ## Legacy checkpoints
 
