@@ -17,8 +17,10 @@ from typing import Annotated, Literal
 from jsonschema import Draft202012Validator
 from mcp.server import MCPServer
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+from mcp.server.extension import Extension, MethodBinding
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.shared.exceptions import MCPError
+from mcp.types import CallToolResult, TextContent, ToolAnnotations, RequestParams, Result
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import uvicorn
 
@@ -53,6 +55,14 @@ class TerminalSize(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rows: Annotated[int, Field(strict=True, ge=1, le=1000)]
     cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
+
+
+class EventParams(RequestParams):
+    model_config = ConfigDict(extra="allow", strict=True)
+
+
+class EventResult(Result):
+    model_config = ConfigDict(extra="allow")
 
 
 def _task_context(value: tasks.TaskContext | None) -> dict | None:
@@ -111,7 +121,50 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     validators: dict[str, Draft202012Validator] = {}
 
+    async def events_request(ctx, params):
+        values = params.model_dump(mode="json", by_alias=True, exclude={"meta"})
+        if ctx.method == "events/list":
+            if values not in ({}, {"cursor": None}):
+                raise MCPError(-32602, "Events discovery has one complete page and no cursor.")
+            return EventResult(events=[{"name": "task.handoff_ready",
+                "description": "A scoped task has a pending decision. Read the original task, explicitly claim its current revision and epoch, reconcile original effects, then continue only within its grant. Delivery is not a claim or proof the caller ran.",
+                "delivery": ["webhook"],
+                "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}},
+                    "required": ["task_id"], "additionalProperties": False},
+                "payloadSchema": {"type": "object", "properties": {
+                    "task_id": {"type": "string"}, "handoff_id": {"type": "string"},
+                    "task_revision": {"type": "integer", "minimum": 1}, "plan_revision": {"type": "integer", "minimum": 1},
+                    "reason": {"enum": ["plan_ready", "result_ready", "decision_required"]}},
+                    "required": ["task_id", "handoff_id", "task_revision", "plan_revision", "reason"], "additionalProperties": False}}])
+        cancelled = threading.Event()
+        try:
+            if ctx.method == "events/subscribe":
+                result = await asyncio.wait_for(asyncio.to_thread(application.subscribe_event, values, cancelled), 5)
+            else:
+                result = await asyncio.to_thread(application.unsubscribe_event, values)
+            return EventResult(**result)
+        except TimeoutError as error:
+            raise MCPError(-32015, "Callback verification timed out.", {"reason": "callback_timeout"}) from error
+        except Fault as error:
+            code = -32602 if error.code.startswith("invalid_event_") else -32015 if error.code.startswith("callback_") else -32000
+            raise MCPError(code, str(error), {"reason": error.code}) from error
+        finally:
+            cancelled.set()
+
+    class TaskEvents(Extension):
+        identifier = "org.openmachine/task-events"
+
+        def methods(self):
+            return [MethodBinding(name, EventParams, events_request, frozenset({"2026-07-28"}))
+                    for name in ("events/list", "events/subscribe", "events/unsubscribe")]
+
     async def safe_tool_call(ctx: ServerRequestContext, call_next: CallNext) -> HandlerResult:
+        if ctx.method == "events/subscribe" and ctx.protocol_version == "2026-07-28":
+            # The SDK omits optional nulls; Events requires an explicit no-replay cursor.
+            return {**await call_next(ctx), "cursor": None}
+        if ctx.method == "server/discover" and ctx.protocol_version == "2026-07-28":
+            result = await call_next(ctx)
+            return {**result, "capabilities": {**result["capabilities"], "events": {}}}
         if ctx.method != "tools/call":
             return await call_next(ctx)
         invalid = _result({"error": {"code": "invalid_tool_call",
@@ -150,7 +203,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     mcp = MCPServer(
         "Open Machine", instructions="Read inspect_skills(action='read') before operating this runtime.",
-        version=__version__, middleware=[safe_tool_call], lifespan=lifespan,
+        version=__version__, middleware=[safe_tool_call], lifespan=lifespan, extensions=[TaskEvents()],
     )
 
     private_directory(state)

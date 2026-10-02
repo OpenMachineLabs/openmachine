@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import threading
+import time
 from types import ModuleType
 from typing import Literal
 
@@ -25,11 +26,12 @@ bound_workspace_result = workspace.bound_result
 
 
 class Application:
-    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None):
+    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, events=None):
         self.config = config
         self.state = state
         self.machines = machines
         self.github = github
+        self.events = events
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
 
@@ -59,7 +61,8 @@ class Application:
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
             "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
                       "index_format": 2, "supervised_admission": True, "runtime_recovery": False,
-                      "events_delivery": False, "local_result_observation": True,
+                      "events_delivery": self.events is not None, "events_authority": "native_account",
+                      "local_result_observation": True,
                       "ssh_result_observation": self.machines.ssh_recovery is not None},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
@@ -155,7 +158,71 @@ class Application:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
     def read_task(self, task_id: str) -> dict:
-        return self.task_observer.project(tasks.read(self.state, task_id))
+        view = self.task_observer.project(tasks.read(self.state, task_id))
+        if (self.events is not None and view.get("record", {}).get("handoff") is not None
+                and any(item.get("event_id") for item in view["observations"])):
+            self.events.note_read(task_id, view["record"]["handoff"]["id"])
+        return view
+
+    @contextmanager
+    def _event_authority(self, task_id: str):
+        # Private transport grants native-account access. Request metadata is
+        # correlation only, never a separate user's identity or authority.
+        with self._admit():
+            before = tasks.read(self.state, task_id).get("record")
+            if before is None:
+                raise Fault("task_contract_required", "Events require a structured task grant.")
+            self._validate_task_scope(before)
+            with tasks.locked_read(self.state, task_id) as view:
+                record = view["record"]
+                if record["revision"] != before["revision"]:
+                    raise Fault("task_conflict", "Task authority changed while it was being verified.")
+                if record["terminal"] is not None or record["control"]["stop_intent"] != "none":
+                    raise Fault("task_inactive", "A paused or terminal task cannot admit a notification.")
+                if record["contract"]["expires_at_ms"] <= time.time_ns() // 1000000:
+                    raise Fault("task_authority_expired", "The original task grant expired.")
+                yield record
+
+    def subscribe_event(self, params: dict, cancelled: threading.Event | None = None) -> dict:
+        @contextmanager
+        def authorize(task_id):
+            with self._event_authority(task_id) as record:
+                yield record["contract"]["expires_at_ms"]
+        result = self.events.subscribe(params, self.task_admission.principal, authorize, cancelled)
+        self.task_observer.notify(params["arguments"]["task_id"])
+        return result
+
+    def unsubscribe_event(self, params: dict) -> dict:
+        with self._admit():
+            result = self.events.unsubscribe(params, self.task_admission.principal)
+        self.task_observer.notify()
+        return result
+
+    def deliver_task_event(self, identity: str, task_id: str, stop: threading.Event) -> None:
+        with self._event_authority(task_id) as record:
+            handoff, owner = record["handoff"], record["control"]["owner"]
+            now = time.time_ns() // 1000000
+            if (stop.is_set() or handoff is None or handoff["expires_at_ms"] <= now
+                    or owner is not None and owner["expires_at_ms"] > now):
+                return
+            job = self.events.reserve(identity, self.task_admission.principal, {
+                "payload": {"task_id": task_id, "handoff_id": handoff["id"],
+                    "task_revision": record["revision"], "plan_revision": record["plan"]["revision"],
+                    "reason": handoff["reason"]}, "occurred_at_ms": handoff["created_at_ms"],
+                "expires_at_ms": min(handoff["expires_at_ms"], record["contract"]["expires_at_ms"]),
+                "epoch": record["control"]["epoch"]})
+        if job is None or stop.is_set():
+            return
+        try:
+            status, retry = self.events.deliver(job)
+            receipt = {"status": status, "retry": retry}
+        except Fault as error:
+            receipt = {"error": error.code}
+        if not stop.is_set():
+            # Publication failure is not a callback failure and must never cause
+            # a second write that could overwrite an uncertain acknowledgement.
+            with self._admit():
+                self.events.complete(job, **receipt)
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
                   anchors: list[str] | None = None) -> dict:

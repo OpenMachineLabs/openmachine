@@ -64,7 +64,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
             "openmachine.skills": ("openmachine.foundation.*",),
             "openmachine.service": ("openmachine", "openmachine.config", "openmachine.execution",
-                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx2", "mcp.*", "integrations.ssh.recovery"),
+                                    "openmachine.tasks", "openmachine.workspace", "openmachine.foundation.*", "httpx2", "mcp.*", "integrations.ssh.recovery", "integrations.events"),
             "openmachine.app": ("openmachine", "openmachine.app.machines", "openmachine.app.task_admission", "openmachine.app.task_observer", "openmachine.config",
                                 "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
                                 "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
@@ -74,13 +74,14 @@ class RuntimeTests(unittest.TestCase):
                                                "openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.app.task_observer": ("openmachine.tasks", "openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
-                                      "integrations.github", "integrations.ssh.client", "integrations.ssh.recovery"),
+                                      "integrations.github", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.events"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
                                    "openmachine.service", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
                                 "openmachine.bootstrap", "openmachine.server", "openmachine.service",
                                 "integrations.ssh.bundle"),
+            "integrations.events": ("pydantic", "openmachine.foundation.*"),
             "integrations.github": ("integrations.github.operations",),
             "integrations.github.connection": ("openmachine.config", "openmachine.foundation.*"),
             "integrations.github.client": ("integrations.github.connection", "openmachine.foundation.*"),
@@ -186,7 +187,7 @@ import sys
 from openmachine.config import Settings
 original_import = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name == "integrations" or name.startswith("integrations."):
+    if name == "integrations" or name.startswith(("integrations.github", "integrations.ssh")):
         raise AssertionError("Disabled integration imported: " + name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded

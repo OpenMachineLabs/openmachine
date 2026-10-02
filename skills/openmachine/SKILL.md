@@ -389,7 +389,9 @@ together, not stage acceptance or a new effect. Re-read task/plan/epoch after
 material background progress; an older caller can legitimately see a conflict.
 Do not restart an original command or resend input to recover that conflict.
 SSH observation reads only original receipts through the pinned target. The
-observer never calls GitHub or an AI, and leaves legacy history alone.
+receipt observer never calls GitHub or an AI, and leaves legacy history alone.
+Event admission may revalidate an existing configured GitHub repository grant;
+that read cannot publish or replay a mutation.
 
 Normal local observation is due every 2 seconds with four actual read slots and
 at most 32 active tasks. A timed-out thread keeps its slot/owner until actual
@@ -409,7 +411,36 @@ task budgets. Neither adding a task nor pausing/restarting renews them. Identity
 authentication, protocol, corrupt history and exhaustion require intervention;
 do not repair configuration, reset budgets or replay effects to make recovery pass.
 State contract 7 verifies retained SSH budgets before a managed runtime transition.
-Terminal history never reactivates. Complete runtime recovery, Events and actual
-AI wake remain separate; keep full S1 and A16 acceptance evidence distinct.
+Terminal history never reactivates. Events delivery and actual AI continuation
+are distinct observations; retain the account/surface-specific A16 acceptance.
+
+For a supported ChatGPT Work Events connection, subscribe to `task.handoff_ready`
+with exactly `{task_id}` after accepting its bounded contract. The private
+endpoint uses native-account authority: connected chats share current grants;
+anonymous subject/session fields are not a separate principal. Never treat
+callback possession or an event payload as permission. Do not use this endpoint
+as a multi-user authorization boundary.
+
+On notification, read the original task and outstanding receipts, then explicitly
+claim its current handoff or reuse a still-current claim. Carry current revisions,
+epoch and original operation IDs on the next authorized effect. Release an owned
+claim when deliberately handing work over. Do not repeat an original command,
+edit, input or GitHub publication to recover an old notification. Task pause,
+expiry, source/plan changes and terminal state retain normal admission guards.
+
+`read_task` exposes per-subscription receipt, read-observation, claim and actual
+next-intent admission independently. Match the event/handoff IDs; a separate
+`pending_handoff_id` identifies newer work. A 2xx is not AI completion. Read
+observations are private service facts, never canonical task progress or claims.
+An acknowledged event is not redelivered to force a wake; a missing claim blocks
+after 15 minutes or earlier expiry. Platform refusal is not permission to create
+another event, new task, polling loop or model backend.
+
+Subscription refresh keeps the original identity/budget; renew within its granted
+expiry and unsubscribe on completion. Credentials/callbacks stay in private Events
+state. Synthetic/private callback DNS, unsafe redirects, bad TLS, failed signed
+verification, capacity, corrupt history or exhaustion are real blockers. Preserve
+the guard and original obligation. State contract 9 checks retained Events facts
+before activation/rollback; do not delete them to bypass an older reader.
 State contract 6 requires actual compatible readers for every retained task,
 including terminal history, before a managed transition. Do not deploy implicitly.

@@ -639,3 +639,22 @@ original independent worker and counter=1, and publish its original result and
 handoff. Preserve pause/terminal records and intentional stop. Reuse unchanged
 activation, rollback, child/parent exit and SSH receipts. Record actual upstream
 Tunnel and ChatGPT evidence separately from this local responsiveness check.
+
+
+S3 adds bounded Events checks in `unit/test_events.py` and the existing MCP suite:
+verified subscribe/refresh/rotation, exact filters, cancellation, no SSRF/redirect,
+public-address pinning, dual signatures, stable IDs/body across uncertain sends,
+pre-send accounting, retry exhaustion/coalescing, revoke/recreate generations,
+read-versus-claim-versus-next-effect, pause races, actual slot drainage, and
+retained state-9 candidate-reader proof. The SDK check uses the shipped extension,
+including explicit null cursors and preserved legacy tools. Callback transport is
+mocked in CI and cannot establish actual ChatGPT continuation.
+
+For live S3 acceptance, use one authorized private connection and disposable
+workspace. Enroll each original task once, allow its initial Work turn to finish,
+and verify Events-driven original-task read, current claim and a real next effect
+for: a command still running, a result already committed, and an accepted plan
+before execution. Inject service loss around delivery and retain original IDs and
+single-effect evidence. A post-fault user prompt/Retry, callback 2xx, or synthetic
+handler is not acceptance. Keep account/route, source/artifact identity, observed
+facts and cleanup receipts; never retain callback secrets or raw payload logs.

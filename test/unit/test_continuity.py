@@ -1424,7 +1424,7 @@ class TaskObserverTests(unittest.TestCase):
             self.app.find_tasks()
         self.assertEqual(self.path.read_bytes(), before)
         self.assertTrue(result["support"]["local_result_observation"])
-        self.assertEqual(result["observations"][0]["state"], "unknown")
+        self.assertEqual(result["observations"][0]["state"], "unsubscribed")
         self.assertFalse((self.state / "locks/task-observer.lock").exists())
         self.interval.stop()
         self.assertEqual((self.observer_module.INTERVAL_MS, self.observer_module.READ_SECONDS,
