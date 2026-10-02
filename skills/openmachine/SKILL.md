@@ -321,6 +321,9 @@ browser/UI subtask; existing API/GitHub/SSH tools still handle non-browser work.
 Pass a self-contained goal, permitted actions, visible acceptance, exact origins,
 selected browser and any controller-owned tab context, never credentials or
 unrelated private data. Native browser installation/login is not implied by PATH.
+The child has an empty instruction home and only references the original private
+file-backed login; no auth content is copied. Global/project AGENTS are not inherited.
+Missing or unsupported login storage blocks setup; do not change credentials.
 A structured contract names the underlying start_execution grant; pass its current
 claim/task_context with operation_id equal to execution_id. Use the configured
 local machine and workspace cwd. Reuse cancel_execution/read_execution for lifecycle.

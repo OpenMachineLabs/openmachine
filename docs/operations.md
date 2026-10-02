@@ -456,7 +456,14 @@ CODEX_HOME/config.toml, then reads the browser Skill from that bridge's installe
 desktop-app resources. It does not install anything, copy browser libraries,
 read authentication files, or change configuration. A compatible native desktop
 bridge and a signed-in Codex installation are prerequisites, not supplied by CLI
-installation alone. Discovery metadata is passive; actual setup may be blocked.
+installation alone. The child uses an empty temporary instruction home and
+`project_doc_max_bytes=0`, so global and project AGENTS are not inherited. Only an
+original private file-backed `auth.json` is referenced by a symlink; the adapter
+never reads or copies its contents. Native Codex owns authentication and renewal.
+The temporary home is removed on ordinary completion without deleting the original
+auth file. Missing or unsafe file-backed login (including keyring-only setups)
+blocks this adapter; it never changes credential stores or creates a new login.
+Discovery metadata is passive; actual setup may be blocked.
 Only the configured native browser bridge is delegated; shell, connectors,
 subagents, memory and other plugins are disabled for this child. Native bridge
 access is not constrained by the CLI's read-only shell sandbox. Navigation origins

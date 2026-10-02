@@ -132,7 +132,9 @@ def discover() -> tuple[str, Path, dict]:
     skill = root / "skills/control-in-app-browser/SKILL.md"
     if not skill.is_file() or not (root / "scripts/browser-client.mjs").is_file():
         raise ValueError("native browser Skill unavailable")
-    bridge = bridge | {"enabled": True, "required": True, "enabled_tools": ["js"]}
+    bridge_env = dict(bridge.get("env", {}))
+    bridge_env.setdefault("CODEX_HOME", str(home.resolve()))
+    bridge = bridge | {"env": bridge_env, "enabled": True, "required": True, "enabled_tools": ["js"]}
     overrides = {"mcp_servers": {"node_repl": bridge}, "approval_policy": "never", "web_search": "disabled",
                  "features": {"apps": False, "plugins": False, "multi_agent": False, "memories": False, "shell_tool": False}}
     for key in ("model", "model_reasoning_effort"):
@@ -153,7 +155,25 @@ def _toml(value) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
+def delegation_home(job: Path) -> tempfile.TemporaryDirectory:
+    """Empty instruction home; only native Codex follows the original auth reference."""
+    original = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).resolve()
+    auth = original / "auth.json"
+    info = auth.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("a private file-backed Codex login is required")
+    temporary = tempfile.TemporaryDirectory(prefix="codex-home-", dir=job)
+    try:
+        (Path(temporary.name) / "auth.json").symlink_to(auth)
+    except OSError:
+        temporary.cleanup()
+        raise
+    return temporary
+
+
 def command(binary: str, job: Path, overrides: dict) -> list[str]:
+    # --ignore-user-config alone does not disable AGENTS instruction discovery.
+    overrides = overrides | {"project_doc_max_bytes": 0, "cli_auth_credentials_store": "file"}
     argv = [binary, "exec", "--ignore-user-config", "--ephemeral", "--json", "--skip-git-repo-check",
             "--sandbox", "read-only", "-C", str(job), "--output-schema", str(job / "codex-schema.json"),
             "--output-last-message", str(job / "codex-last.json")]
@@ -350,15 +370,17 @@ def run(job: Path, packet: dict) -> int:
     os.umask(0o077)
     evidence = {"calls": 0, "origins": [], "snapshot": None}
     report = Report(status="failed", summary="Codex browser task was not completed.", final_url="", tab_id="", evidence=[], pending_action="")
-    process, failure, stage = None, None, "setup"
+    process, failure, stage, home = None, None, "setup", None
     surface_state = {}
     try:
         binary, skill, overrides = discover()
         text = prompt(packet, skill)
+        home = delegation_home(job)
         save_json(job / "codex-schema.json", Report.model_json_schema())
         env = {k: v for k, v in os.environ.items() if k in {
             "HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE",
             "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}}
+        env["CODEX_HOME"] = home.name
         stage = "codex_start"
         print(canonical({"phase": stage}), flush=True)
         with tempfile.TemporaryFile() as source:
@@ -394,6 +416,8 @@ def run(job: Path, packet: dict) -> int:
             process.wait()
             process.stdout.close()
         (job / "codex-last.json").unlink(missing_ok=True)
+        if home is not None:
+            home.cleanup()
     # Redaction is best effort; the goal and final evidence must contain no secrets.
     def sanitize(value):
         if isinstance(value, str):

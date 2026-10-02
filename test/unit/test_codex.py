@@ -20,6 +20,8 @@ class CodexTests(TaskFixture, unittest.TestCase):
         super().setUp()
         self.home = self.root / "codex-home"
         self.home.mkdir()
+        save_json(self.home / "auth.json", {})
+        (self.home / "AGENTS.md").write_text("Unrelated fixture instructions must not be inherited.\n")
         resources = self.root / "App/Resources"
         bridge = resources / "cua_node/bin/node_repl"
         bridge.parent.mkdir(parents=True)
@@ -37,9 +39,12 @@ class CodexTests(TaskFixture, unittest.TestCase):
         (self.home / "config.toml").write_text(self.config_text)
         binary = self.root / "bin/codex"
         binary.parent.mkdir()
-        binary.write_text("#!" + sys.executable + "\n" + '''import json,sys,time
+        binary.write_text("#!" + sys.executable + "\n" + '''import json,os,sys,time
 from pathlib import Path
 text=sys.stdin.read()
+home=Path(os.environ["CODEX_HOME"])
+assert not (home/"AGENTS.md").exists() and not (home/"AGENTS.override.md").exists()
+assert (home/"auth.json").is_symlink()
 packet=json.loads(text.rsplit("Delegated request:\\n",1)[1])
 args=sys.argv[1:]
 assert all(k in args for k in ["--ephemeral","--ignore-user-config","--json","--sandbox"])
@@ -112,6 +117,7 @@ sys.exit(7 if packet["goal"]=="exit-failed" else 0)
         binary, skill, options = codex.discover()
         self.assertEqual(set(options["mcp_servers"]), {"node_repl"})
         self.assertEqual(options["mcp_servers"]["node_repl"]["enabled_tools"], ["js"])
+        self.assertEqual(options["mcp_servers"]["node_repl"]["env"]["CODEX_HOME"], str(self.home.resolve()))
         self.assertFalse(any(options["features"].values()))
         self.assertEqual(options["approval_policy"], "never")
         self.assertEqual(options["model"], "fixture-model")
@@ -261,3 +267,27 @@ sys.exit(7 if packet["goal"]=="exit-failed" else 0)
         codex.observe_event(event, evidence, packet, {})
         self.assertIsNone(evidence["snapshot"])
         self.assertLess(len(json.dumps(evidence)), 1024)
+
+    def test_delegation_home_is_empty_and_keeps_original_auth_reference(self):
+        (self.home / "AGENTS.override.md").write_text("Unrelated override fixture.\n")
+        auth = self.home / "auth.json"
+        before, inode = auth.read_bytes(), auth.stat().st_ino
+        binary, _, options = codex.discover()
+        argv = codex.command(binary, self.root, options | {"project_doc_max_bytes": 99999})
+        self.assertIn("project_doc_max_bytes=0", argv)
+        self.assertIn('cli_auth_credentials_store="file"', argv)
+        with codex.delegation_home(self.root) as name:
+            home = Path(name)
+            self.assertEqual({p.name for p in home.iterdir()}, {"auth.json"})
+            self.assertEqual(home.stat().st_mode & 0o777, 0o700)
+            self.assertTrue((home / "auth.json").is_symlink())
+            self.assertEqual((home / "auth.json").resolve(), auth.resolve())
+            self.assertEqual(os.environ["CODEX_HOME"], str(self.home))
+        self.assertFalse(home.exists())
+        self.assertEqual((auth.read_bytes(), auth.stat().st_ino), (before, inode))
+        auth.chmod(0o644)
+        with self.assertRaises(ValueError):
+            codex.delegation_home(self.root)
+        auth.unlink()
+        with self.assertRaises(FileNotFoundError):
+            codex.delegation_home(self.root)
