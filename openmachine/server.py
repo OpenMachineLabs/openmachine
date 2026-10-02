@@ -134,7 +134,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+        guarded = {"start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -321,6 +321,25 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                   anchors: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
         """Save a legacy private checkpoint and lookup metadata. Continue existing legacy work here; use create_task/control_task for new structured multi-stage work, without a parallel checkpoint or conversion. Expected revision zero creates; updates compare the observed revision under a store lock. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Lookup anchors are additive; omitting them preserves prior references. Keep goals, authority references, original executions, evidence and next action, not credentials, transcripts or hidden reasoning. No code execution, external publication or automatic resume. Torn two-file saves are reported, not silently repaired."""
         return _reply(lambda: application.save_task(task_id, expected_revision, title, body, anchors))
+
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    async def start_codex_task(machine: str, execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
+                               cwd: str, goal: Annotated[str, Field(min_length=1, max_length=6000)],
+                               start_url: Annotated[str, Field(min_length=1, max_length=2048)],
+                               allowed_origins: Annotated[list[Annotated[str, Field(max_length=2048)]], Field(min_length=1, max_length=8)],
+                               mode: Literal["browser"] = "browser", browser: Literal["auto", "iab", "chrome", "edge"] = "auto",
+                               timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=1800)] = 600,
+                               expected_head_sha: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40})?$")] = "",
+                               task_context: tasks.TaskContext | None = None) -> CallToolResult:
+        """Delegate one authorized browser/UI goal to installed native Codex. Chat remains controller. Use exact navigation origins and a task-owned tab; no secrets or unrelated context. Local execution grant, workspace scope and existing task_context/start_execution admission apply. CLI installation alone is not browser availability. Preserve the original execution_id; read before retrying uncertainty. Cancel with cancel_execution. No computer mode, model fallback or automatic Chat wake; native browser scope is not a sandbox."""
+        operation = partial(_reply, lambda: application.start_codex_task(machine, execution_id, cwd, goal,
+            start_url, allowed_origins, mode, browser, timeout_seconds, expected_head_sha, _task_context(task_context)), execution_output=True)
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=READ, structured_output=False)
+    def read_codex_task(machine: str, execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]) -> CallToolResult:
+        """Read the original Codex browser report and native final-page evidence without starting work. Process success is not semantic completion; Chat must inspect this report before stage acceptance. Missing evidence stays unknown, and cancellation/timeout is never promoted to completion."""
+        return _reply(lambda: application.read_codex_task(machine, execution_id))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     def start_execution(machine: str, execution_id: str, cwd: str,

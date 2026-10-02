@@ -156,6 +156,13 @@ independent approval, and a publication response is not verified merge evidence.
 [SSH operations](docs/operations.md#ssh) use explicitly prepared immutable workers
 and pinned target identity. Preserve original archives; no local fallback occurs.
 
+## Codex browser subtasks
+
+[Browser delegation](docs/operations.md#codex-browser-delegation) adds two tools
+while reusing execution IDs, cancellation and task continuity. Chat remains the
+controller; installed native Codex handles only the assigned browser goal.
+No browser UI, plugin manager or second runtime is installed by Open Machine.
+
 ## User Skills
 
 [Skills](docs/operations.md#skills) use explicit live sources, never account scans.

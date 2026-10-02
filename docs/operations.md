@@ -440,3 +440,33 @@ sources. Follow hashes, snapshots and paging; incomplete discovery is not absenc
 An empty read selector returns the single bundled `SKILL.md`. User edits are live
 on the next read; changing configured roots follows service restart. Instructions
 never confer grants, install tools or execute embedded resources automatically.
+
+## Codex browser delegation
+
+`start_codex_task` delegates an explicit browser/UI subtask, not the whole Chat
+workflow. Supply a local configured `machine`, workspace `cwd`, original
+`execution_id`, bounded `goal`, `start_url` and exact `allowed_origins`. `mode`
+is browser-only; `browser` is auto/iab/chrome/edge. Timeout is 1-1800 seconds.
+The existing local execution grant, lifecycle gate, task claim and native workspace
+scope apply. Structured contracts include `start_execution` (the underlying
+operation) and use the same operation/execution ID; no second task record exists.
+
+The adapter discovers `codex` on PATH and the enabled native `node_repl` bridge in
+CODEX_HOME/config.toml, then reads the browser Skill from that bridge's installed
+desktop-app resources. It does not install anything, copy browser libraries,
+read authentication files, or change configuration. A compatible native desktop
+bridge and a signed-in Codex installation are prerequisites, not supplied by CLI
+installation alone. Discovery metadata is passive; actual setup may be blocked.
+Only the configured native browser bridge is delegated; shell, connectors,
+subagents, memory and other plugins are disabled for this child. Native bridge
+access is not constrained by the CLI's read-only shell sandbox. Navigation origins
+are instructions plus observed checks, not a firewall or cross-chat isolation.
+
+Use `read_codex_task` for semantic status and final native page evidence. Generic
+`read_execution` success only says the wrapper finished; Chat reviews the report
+before accepting a stage. `blocked`/`needs_confirmation` require the indicated
+resolution, never implicit permission. Missing or mismatched evidence is unknown.
+`cancel_execution`, original log/readback, timeouts and the `browser:codex` resource
+lease are reused. The lease coordinates this OM runtime only, not manual browsing
+or independent Codex jobs. Cancellation is not rollback of browser side effects.
+No automatic Chat resume, desktop computer mode or alternative backend is added.

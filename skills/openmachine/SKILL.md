@@ -127,7 +127,7 @@ explicit continuation still reads and claims the original task safely.
    acceptance separate. Local SDK sessions are not real ChatGPT conversations.
 
 The timeout defaults to 600 seconds; explicitly requested commands may use up to
-86,400 seconds. There is no model loop or autonomous scheduling. Workspace locks
+86,400 seconds. OM has no general agent loop or autonomous scheduler. Workspace locks
 are exclusive by default; shared mode is only for cooperating read-only commands.
 Stable resource names coordinate current resources, not unrelated processes.
 Never bypass a busy lock, changed hash/HEAD or a platform refusal via another
@@ -313,3 +313,20 @@ or moving original tasks to native defaults. Renewable tokens and pinned stores
 survive ordinary restarts; revocation, expired refresh grants or unavailable stores
 remain real reauthorization boundaries. Native OAuth, deployment, installed-client
 acceptance and code merge require their own observed evidence, not mock responses.
+
+## Codex browser subtasks
+
+Keep Chat in control. Use start_codex_task only for an explicitly authorized
+browser/UI subtask; existing API/GitHub/SSH tools still handle non-browser work.
+Pass a self-contained goal, permitted actions, visible acceptance, exact origins,
+selected browser and any controller-owned tab context, never credentials or
+unrelated private data. Native browser installation/login is not implied by PATH.
+A structured contract names the underlying start_execution grant; pass its current
+claim/task_context with operation_id equal to execution_id. Use the configured
+local machine and workspace cwd. Reuse cancel_execution/read_execution for lifecycle.
+Read read_codex_task before accepting the stage: exit zero alone is not success.
+Review the actual report, matching final native snapshot and pending_action.
+Missing bridge/login/confirmation or uncertain side effects are blockers, not
+permission to install, switch backends or repeat the action. A newly authorized
+follow-up uses a new operation ID under the same parent task and exact tab context.
+The adapter never wakes Chat, and native browser access is not a network sandbox.

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import integrations.codex as codex
 from integrations.connections import Connections
 from openmachine.app import Application
 from openmachine.app.machines import Machines
@@ -26,4 +27,4 @@ def create_application(config: Settings, state: Path) -> Application:
         backend = connection
         provider = github
     connections = Connections(config, state, backend, native)
-    return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider, connections=connections)
+    return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider, connections=connections, codex=codex)

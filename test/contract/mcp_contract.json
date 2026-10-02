@@ -60,6 +60,11 @@
       "base_commit": "898d2f95edd4f2e53a97ec7000808aa01de6e5ce",
       "change": "Add native login cancellation and change the default connect method to device_code. Connection output protocol 2 retires new existing_gh attachment; original historical task bindings remain. Expectations are authored independently, not copied from discovery. No other tool inputs change.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/62"
+    },
+    {
+      "approval": "Current maintainer approved the minimal Codex browser adapter, one PR, self-review and merge.",
+      "base_commit": "ae4d2b9eabafb9cda1db17dbc481869d6cce88bc",
+      "change": "Add only start_codex_task/read_codex_task with browser-only scope. Expected fields are authored from the approved design; existing tool schemas and annotations are unchanged."
     }
   ],
   "baseline": {
@@ -2717,6 +2722,33 @@
         "type": "object"
       }
     },
+    "read_codex_task": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "execution_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id"
+        ],
+        "title": "read_codex_taskArguments",
+        "type": "object"
+      }
+    },
     "read_execution": {
       "annotations": {
         "destructiveHint": false,
@@ -2949,6 +2981,152 @@
           "body"
         ],
         "title": "save_taskArguments",
+        "type": "object"
+      }
+    },
+    "start_codex_task": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "allowed_origins": {
+            "items": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Allowed Origins",
+            "type": "array"
+          },
+          "browser": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "iab",
+              "chrome",
+              "edge"
+            ],
+            "title": "Browser",
+            "type": "string"
+          },
+          "cwd": {
+            "title": "Cwd",
+            "type": "string"
+          },
+          "execution_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{40})?$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "goal": {
+            "maxLength": 6000,
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "mode": {
+            "const": "browser",
+            "default": "browser",
+            "title": "Mode",
+            "type": "string"
+          },
+          "start_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Start Url",
+            "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "timeout_seconds": {
+            "default": 600,
+            "maximum": 1800,
+            "minimum": 1,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id",
+          "cwd",
+          "goal",
+          "start_url",
+          "allowed_origins"
+        ],
+        "title": "start_codex_taskArguments",
         "type": "object"
       }
     },
