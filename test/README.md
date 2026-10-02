@@ -629,3 +629,13 @@ Run the installed-wheel suites and repository checks; preserve artifact identity
 and sdist roundtrip evidence. These results do not establish continuous hang
 detection, Tunnel health, actual ChatGPT continuation, production activation,
 full S2 or A16. Keep `runtime_recovery` false until its full contract is accepted.
+
+Post-readiness recovery extends the existing service checks: a healthy or busy
+probe must leave the recovery record unchanged; an unresponsive owned child must
+be replaced only after durable accounting and bounded cleanup. Fatal identity
+errors block instead of relaunching. A native disposable SIGSTOP of an already
+ready MCP child must recover without a client or explicit restart, preserve the
+original independent worker and counter=1, and publish its original result and
+handoff. Preserve pause/terminal records and intentional stop. Reuse unchanged
+activation, rollback, child/parent exit and SSH receipts. Record actual upstream
+Tunnel and ChatGPT evidence separately from this local responsiveness check.
