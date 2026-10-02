@@ -305,8 +305,8 @@ store.create(Path(sys.argv[1]),request.pop("task_id"),**request)
         self.app.save_task("existing", 0, "Existing", "Retain.", [])
         barrier = threading.Barrier(2)
         original = self.app._validate_task_scope
-        def ready(request):
-            original(request)
+        def ready(request, **kwargs):
+            original(request, **kwargs)
             barrier.wait(timeout=5)
         def create():
             try:

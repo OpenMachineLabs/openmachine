@@ -16,10 +16,10 @@ from .connection import object_response
 SHA = r"[0-9a-f]{40}"
 
 
-def pull_request(repository: str, number: int, head: str = "", base: str = "", *, open_only: bool = False) -> dict:
+def pull_request(repository: str, number: int, head: str = "", base: str = "", *, open_only: bool = False, transport=None) -> dict:
     if number < 1 or (head and not re.fullmatch(SHA, head)) or (base and not re.fullmatch(SHA, base)):
         raise Fault("invalid_github_request", "Use a positive PR number and full observed commit SHAs.")
-    value = object_response(connection.request("GET", f"repos/{repository}/pulls/{number}"))
+    value = object_response((transport or connection.request)("GET", f"repos/{repository}/pulls/{number}"))
     if value.get("number") != number:
         raise Fault("github_invalid_response", "GitHub returned a different PR identity.")
     actual_head = object_response(value.get("head")).get("sha", "")
@@ -32,10 +32,10 @@ def pull_request(repository: str, number: int, head: str = "", base: str = "", *
     return value
 
 
-def thread_page(repository: str, number: int, head: str, base: str, cursor: str, limit: int) -> tuple[list, str | None]:
+def thread_page(repository: str, number: int, head: str, base: str, cursor: str, limit: int, *, transport=None) -> tuple[list, str | None]:
     value = client.graphql_pr(repository, number,
                         "reviewThreads(first:$limit,after:$cursor){nodes{id isResolved isOutdated path line "
-                        "comments(first:1){nodes{databaseId url}}} pageInfo{endCursor hasNextPage}}", cursor, limit)
+                        "comments(first:1){nodes{databaseId url}}} pageInfo{endCursor hasNextPage}}", cursor, limit, transport=transport)
     if value.get("headRefOid") != head or value.get("baseRefOid") != base:
         raise Fault("github_candidate_changed", "The PR changed while reading discussions.")
     connection = object_response(value.get("reviewThreads"))
@@ -53,9 +53,9 @@ def thread_page(repository: str, number: int, head: str, base: str, cursor: str,
     return nodes, next_cursor
 
 
-def _checks(repository: str, head: str) -> dict:
-    runs = client.all_pages(f"repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs")
-    statuses = client.all_pages(f"repos/{repository}/commits/{head}/status", "statuses")
+def _checks(repository: str, head: str, *, transport=None) -> dict:
+    runs = client.all_pages(f"repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs", transport=transport)
+    statuses = client.all_pages(f"repos/{repository}/commits/{head}/status", "statuses", transport=transport)
     latest_runs, latest_statuses = {}, {}
     for item in runs:
         if (item.get("head_sha") != head or type(item.get("id")) is not int
@@ -81,23 +81,23 @@ def _checks(repository: str, head: str) -> dict:
             "selection": "latest run ID per app/name; latest status ID per context; native policy is checked separately"}
 
 
-def merge_gate(repository: str, number: int, head: str, base: str = "") -> dict:
+def merge_gate(repository: str, number: int, head: str, base: str = "", *, transport=None) -> dict:
     if not re.fullmatch(SHA, head):
         raise Fault("invalid_github_request", "Read the PR first and supply its exact HEAD SHA.")
-    pr = pull_request(repository, number, head, base, open_only=True)
+    pr = pull_request(repository, number, head, base, open_only=True, transport=transport)
     base = pr["base"]["sha"]
-    checks = _checks(repository, head)
-    reviews = client.all_pages(f"repos/{repository}/pulls/{number}/reviews")
+    checks = _checks(repository, head, transport=transport)
+    reviews = client.all_pages(f"repos/{repository}/pulls/{number}/reviews", transport=transport)
     unresolved, cursor = [], ""
     for _ in range(client.MAX_GATE_PAGES):
-        threads, following = thread_page(repository, number, head, base, cursor, 100)
+        threads, following = thread_page(repository, number, head, base, cursor, 100, transport=transport)
         unresolved.extend(item["id"] for item in threads if not item["isResolved"])
         if following is None:
             break
         cursor = following
     else:
         raise Fault("github_evidence_unavailable", "More than 1,000 discussions prevent complete gate verification.")
-    policy = client.graphql_pr(repository, number, "state isDraft mergeable mergeStateStatus reviewDecision mergeQueueEntry{id}")
+    policy = client.graphql_pr(repository, number, "state isDraft mergeable mergeStateStatus reviewDecision mergeQueueEntry{id}", transport=transport)
     required = {"state", "isDraft", "mergeable", "mergeStateStatus", "reviewDecision", "mergeQueueEntry"}
     if (not required.issubset(policy) or type(policy["isDraft"]) is not bool
             or policy["reviewDecision"] not in {None, "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"}):
@@ -116,7 +116,7 @@ def merge_gate(repository: str, number: int, head: str, base: str = "") -> dict:
             effective[review["user"]["id"]] = state
         if review.get("commit_id") == head and review.get("submitted_at") and state in {"COMMENTED", "APPROVED"}:
             current.append({key: review.get(key) for key in ("id", "state", "commit_id", "html_url")})
-    pull_request(repository, number, head, base, open_only=True)
+    pull_request(repository, number, head, base, open_only=True, transport=transport)
     blockers = []
     if checks["state"] == "blocked":
         blockers.append("current_checks_not_passed")
@@ -136,11 +136,11 @@ def merge_gate(repository: str, number: int, head: str, base: str = "") -> dict:
             "boundary": "Sequential observations, not an atomic snapshot. GitHub enforces live protections at submission."}
 
 
-def read_file(repository: str, ref: str, path: str, offset: int) -> dict:
+def read_file(repository: str, ref: str, path: str, offset: int, *, transport=None) -> dict:
     if (not re.fullmatch(SHA, ref) or not path or path.startswith("/") or "\\" in path or "\0" in path
             or any(part in {"", ".", ".."} for part in path.split("/")) or excluded(Path(path.casefold()))):
         raise Fault("invalid_github_request", "File reads require an exact commit SHA and relative non-credential text path.")
-    commit = object_response(connection.request("GET", f"repos/{repository}/commits/{ref}"))
+    commit = object_response((transport or connection.request)("GET", f"repos/{repository}/commits/{ref}"))
     if commit.get("sha") != ref:
         raise Fault("github_invalid_response", "The file's commit identity changed.")
     tree_sha = object_response(object_response(commit.get("commit")).get("tree")).get("sha", "")
@@ -148,7 +148,7 @@ def read_file(repository: str, ref: str, path: str, offset: int) -> dict:
     for index, part in enumerate(parts):
         if not re.fullmatch(SHA, tree_sha):
             raise Fault("github_invalid_response", "The file's tree identity is missing.")
-        tree = object_response(connection.request("GET", f"repos/{repository}/git/trees/{tree_sha}"))
+        tree = object_response((transport or connection.request)("GET", f"repos/{repository}/git/trees/{tree_sha}"))
         if tree.get("sha") != tree_sha or tree.get("truncated") is not False or not isinstance(tree.get("tree"), list):
             raise Fault("github_evidence_unavailable", "The file's tree listing is incomplete.")
         matches = [item for item in tree["tree"] if isinstance(item, dict) and item.get("path") == part]
@@ -161,7 +161,7 @@ def read_file(repository: str, ref: str, path: str, offset: int) -> dict:
         tree_sha = entry.get("sha", "")
     if not re.fullmatch(SHA, tree_sha):
         raise Fault("github_invalid_response", "The file's blob identity is missing.")
-    value = object_response(connection.request("GET", f"repos/{repository}/git/blobs/{tree_sha}"))
+    value = object_response((transport or connection.request)("GET", f"repos/{repository}/git/blobs/{tree_sha}"))
     if value.get("encoding") != "base64" or value.get("sha") != tree_sha:
         raise Fault("github_unsupported_file", "Only complete base64-encoded GitHub blobs are supported.")
     try:

@@ -160,7 +160,7 @@ intent, select an exact wheel/lock, and never replace a live environment in plac
 Use explicit `update --candidate-config` for new routes; do not pre-edit the active
 file. Retain exact snapshots. Candidate local/target readers must accept every
 retained format before stop, including terminal tasks, workspace formats 1/2, SSH
-budgets, managed recovery and Events. State contract 9 is not a version label.
+budgets, managed recovery, Events and connections. State contract 10 is not a version label.
 Never delete history or replace stable locks to pass a gate. Idle PTYs and legacy
 non-Git lease compatibility can block transitions; let their original owners finish.
 
@@ -311,3 +311,16 @@ seconds and two delivery slots/ten seconds. Timed-out threads keep slots until e
 Four fast delivery attempts with 1/2/4-second delays precede 60-second jittered
 cooldown, bounded by one hour/60 attempts or expiry; permanent refusal/410/413 stops.
 Actual AI continuation is route/account-specific acceptance, not SDK discovery.
+
+## Existing GitHub connections
+
+Use `list_integrations` for passive retained metadata, not live health. Explicit
+`connect_integration(method="existing_gh")` attaches the existing configured
+account without login or token extraction. Keep its request ID and read the same
+login result after uncertainty. `disconnect_integration` uses the observed
+`authorization_revision`, affects only OM and never logs out `gh`. These management
+requests use their own ID/revision and existing lifecycle gate, not task_context.
+New GitHub tasks and operations bind the saved connection/account; optional
+connection_id must match. Never repair a denied request by changing accounts.
+Legacy task bindings remain unchanged. Native OAuth/refresh/cancellation is not
+advertised by PR1. Installed capabilities, not this source text, decide support.

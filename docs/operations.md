@@ -249,6 +249,44 @@ sequence; unresolved effects block new control but preserve authorized cancellat
 Slow controls do not block output/timeout/cancel. No shared temporary socket fallback,
 terminal UI, control takeover or restoration of dead-process memory is promised.
 
+## Account connections
+
+Spec #62 PR1 adds one runtime-owned connection boundary, using existing `gh`
+credentials only. No OAuth login, refresh, credential storage or cancellation
+placeholder is introduced; native authentication belongs to PR2.
+
+| Operation | Contract |
+| --- | --- |
+| `list_integrations` | Optional provider/connection filters; passive retained metadata and supported methods, never an authentication probe. |
+| `connect_integration` | Original 32-hex `request_id`, `provider=github`, `method=existing_gh`, optional original `connection_id` for reconnect. Probe and attach the configured account; repeated original requests return their retained result. |
+| `read_integration_login` | Read the original `login_id`, equal to the attach request ID, without restarting the probe. |
+| `disconnect_integration` | Connection ID and observed `expected_revision` (the connection's `authorization_revision`); stop subsequent OM use without logging out `gh` or revoking remote grants. |
+
+GitHub tools accept optional `connection_id`. A sole eligible saved connection
+is the default; multiple eligible accounts require explicit selection. Request
+plumbing captures an account binding instead of switching a module-global token.
+Numeric account identity is checked against the external `gh` owner before each
+request. Independently changing `gh` during a request is not an atomic credential
+snapshot; this increment does not own native multi-account credentials.
+
+Before any saved connection exists, the configured legacy `gh` path still works.
+An explicitly accepted new GitHub task also saves its resolved account binding.
+A saved disconnect is a tombstone: neither restart nor the old configuration
+reattaches it. Reconnect checks the original account, and changed authorization
+revisions invalidate previously bound tasks/requests instead of transferring them.
+Effective scope is the intersection of current configuration and saved policy.
+Configuration still owns operator enablement; ordinary account changes do not
+restart the runtime or alter tool definitions.
+
+`connections.json` contains bounded non-secret metadata (32 accounts, 128 retained
+attach attempts, 128 KiB), with a private stable lock and atomic writes. There is
+no automatic eviction or recovery by clearing history. Unsafe/missing/corrupt
+state is reported, not reset. Public projections contain no credential references.
+Saved account state survives restart; an interrupted pending probe is reported as
+`runtime_interrupted`, not silently resumed. Closing the caller does not own an
+already-dispatched attach request. Management writes use the existing lifecycle
+gate and their connection request/revision, not a second task executor.
+
 ## GitHub
 
 Use the existing `gh` login with explicit exact grants:

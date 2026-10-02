@@ -33,9 +33,14 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **_events_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
+
+
+def _connections_state(state: Path) -> dict:
+    from integrations.connections import check_state
+    return check_state(state)
 
 
 def _events_state(state: Path) -> dict:
@@ -79,10 +84,14 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in range(1, 10)
+                or value["state_contract"] not in range(1, STATE_CONTRACT + 1)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
+        connections = _connections_state(state)
+        if connections["connections_present"] and (value["state_contract"] < 10 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
+            raise ValueError("candidate ignores retained connection authority")
         events = _events_state(state)
         if events["events_present"] and (value["state_contract"] < 9 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):
@@ -100,7 +109,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
             formats = value.get("structured_task_read_formats")
             if (value["state_contract"] < 6 or not isinstance(formats, list) or not formats
                     or any(type(item) is not int or item not in tasks.READ_FORMATS for item in formats)
-                    or len(formats) != len(set(formats)) or not set(tasks.READ_FORMATS) <= set(formats)
+                    or len(formats) != len(set(formats)) or not ({1, 2} if connections["connections_present"] else {1}) <= set(formats)
                     or any(type(value.get(key)) is not type(retained_tasks[key]) or value[key] != retained_tasks[key] for key in (
                         "task_store_present", "task_records", "structured_task_records", "task_index_format",
                         "task_index_generation", "task_index_coverage"))):

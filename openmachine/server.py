@@ -189,7 +189,8 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         # The new contract forbids extra fields before SDK argument filtering.
         guarded = {"create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
-                   "github_pull_request", "github_comment", "github_review", "github_merge"}
+                   "github_pull_request", "github_comment", "github_review", "github_merge",
+                   "list_integrations", "connect_integration", "read_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
             return invalid
         try:
@@ -217,6 +218,33 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     def get_capabilities() -> CallToolResult:
         """Report implemented limits and configured targets, not live health or future features."""
         return _reply(lambda: application.get_capabilities())
+
+    @mcp.tool(annotations=READ, structured_output=False)
+    def list_integrations(provider: Annotated[str, Field(max_length=64)] = "",
+                          connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+        """List installed connection methods and retained accounts without network access or state writes. Saved connection status is not live provider health."""
+        return _reply(lambda: application.list_integrations(provider, connection_id))
+
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    async def connect_integration(request_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
+                                  provider: Annotated[str, Field(max_length=64)] = "github",
+                                  method: Annotated[str, Field(max_length=64)] = "existing_gh",
+                                  connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+        """Explicitly attach the configured existing gh account; no login, token extraction or global account change. Preserve request_id after uncertainty and read its original receipt. Native OAuth is not implemented."""
+        operation = lambda: _reply(lambda: application.connect_integration(request_id, provider, method, connection_id))
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=READ, structured_output=False)
+    def read_integration_login(login_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]) -> CallToolResult:
+        """Read the original attach result without probing or restarting it. Interrupted pending probes are not resumed. No native OAuth cancellation is advertised in this increment."""
+        return _reply(lambda: application.read_integration_login(login_id))
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
+    async def disconnect_integration(connection_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
+                                     expected_revision: Annotated[int, Field(strict=True, ge=1, le=2**53 - 1)]) -> CallToolResult:
+        """Disconnect only this saved OM connection using its observed authorization revision. Existing gh credentials and remote grants remain untouched; a completed disconnect survives runtime restarts."""
+        operation = lambda: _reply(lambda: application.disconnect_integration(connection_id, expected_revision))
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
     def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
@@ -411,9 +439,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                         ref: str = "", path: str = "", page: Annotated[int, Field(ge=1, le=1000)] = 1,
                         limit: Annotated[int, Field(ge=1, le=100)] = 30, cursor: Annotated[str, Field(max_length=1024)] = "",
                         expected_head_sha: str = "", expected_base_sha: str = "",
-                        offset: Annotated[int, Field(ge=0, le=1048576)] = 0) -> CallToolResult:
+                        offset: Annotated[int, Field(ge=0, le=1048576)] = 0, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Read scoped GitHub identity, repositories, Issues and version-bound PR evidence. Read pull_request before candidate pages; echo both HEAD/base on continuation. Follow next_page/next_cursor and evidence gaps. checks uses an exact commit ref. file uses a fixed commit and 16 KiB UTF-8 byte pages; no symlink/credential reads. API patches are not proof of complete diffs. status probes the existing gh identity without credentials or login changes. merge_context observes gates and never merges. No arbitrary endpoint or mutation dispatch."""
-            return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset))
+            return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_issue(action: Literal["create", "update"], repository: str,
@@ -421,9 +449,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                          body: Annotated[str | None, Field(max_length=60000)] = None,
                          number: Annotated[int, Field(ge=0)] = 0,
                          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                         task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
-            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, _task_context(task_context)))
+            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_pull_request(action: Literal["create", "update"], repository: str,
@@ -432,17 +460,17 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 number: Annotated[int, Field(ge=0)] = 0,
                                 head: str = "", base: str = "", draft: bool = False,
                                 state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-                                expected_head_sha: str = "", task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                                expected_head_sha: str = "", task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
-            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, _task_context(task_context)))
+            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_comment(action: Literal["create", "update"], repository: str,
                            body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
                            comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "",
-                           task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                           task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. updated_at detects an observed edit conflict without promising atomic CAS."""
-            return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at, _task_context(task_context)))
+            return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_review(action: Literal["create", "update"], repository: str,
@@ -450,9 +478,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                           number: Annotated[int, Field(ge=0)] = 0, review_id: Annotated[int, Field(ge=0)] = 0,
                           expected_head_sha: str = "",
                           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
-                          task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                          task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. Uncertain writes require original-review readback, never blind retry."""
-            return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event, _task_context(task_context)))
+            return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_merge(repository: str, number: Annotated[int, Field(ge=1)],
@@ -460,9 +488,9 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                          expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
                          commit_title: Annotated[str, Field(max_length=256)] = "",
                          commit_message: Annotated[str, Field(max_length=60000)] = "",
-                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                         task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
             """Merge only an explicitly authorized, current-HEAD reviewed PR with complete checks/discussions and clean native policy. No bypass, auto-merge or queue support. Bind both observed SHAs when available. Only merged_verified confirms the actual commit on the destination branch; pending/unknown results require readback, not resubmission."""
-            return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message, _task_context(task_context)))
+            return _reply(lambda: application.github_merge(repository, number, expected_head_sha, expected_base_sha, method, commit_title, commit_message, _task_context(task_context), connection_id=connection_id))
 
     return mcp
 

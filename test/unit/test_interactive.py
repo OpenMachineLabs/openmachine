@@ -53,7 +53,7 @@ class InteractiveTests(ExecutionFixture, unittest.TestCase):
                     self.assertEqual(self.finish(started)["status"], "cancelled")
                 before = record_path.read_bytes()
                 result = service.check_state(config_path, self.state)
-                self.assertEqual(result["state_contract"], 9)
+                self.assertEqual(result["state_contract"], 10)
                 self.assertEqual(result["execution_records"], 1)
                 self.assertEqual(record_path.read_bytes(), before)
                 self.assertEqual(json.loads(before)["control"]["last"], receipt)

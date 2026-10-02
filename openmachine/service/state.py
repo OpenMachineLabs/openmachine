@@ -17,7 +17,7 @@ from openmachine.foundation.state import private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 9
+STATE_CONTRACT = 10
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30
 RECOVERY_MS = 15 * 60 * 1000
@@ -94,7 +94,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in range(1, 10) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in range(1, STATE_CONTRACT + 1) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result

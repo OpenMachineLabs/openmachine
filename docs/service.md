@@ -63,7 +63,7 @@ on failure, including valid edits since the previous update. An independent raci
 edit is preserved with uncertainty, not overwritten. Cooperative locks do not
 fence external editors or another runtime/state root.
 
-Protocol 1/state contract 9 are not proof of compatibility. Actual readers must
+Protocol 1/state contract 10 are not proof of compatibility. Actual readers must
 cover every retained execution, task, workspace format, SSH budget, managed
 recovery and Events record, even terminal-only history or disabled integrations.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
@@ -113,3 +113,8 @@ disk loss or account tampering. A new runtime cannot reconstruct a dead PTY.
 Source merge, installed tests, native transitions and actual ChatGPT/Tunnel
 acceptance remain separate evidence; use disposable fixtures, not production
 workloads, for authorized transition tests.
+
+Connection state is checked by its own actual reader, including retained local
+disconnects and account-bound task records. A candidate that ignores that state
+cannot replace the active runtime. Old-only history retains its applicable reader
+requirements; no automatic credential or task migration is performed.

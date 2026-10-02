@@ -4,14 +4,14 @@ import hashlib
 import json
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
 
 from openmachine.foundation.sanitize import Fault, redact
 
 MAX_RECORD = 65536
 MAX_ACCEPTANCE = 49152
 MAX_INTEGER = 2**53 - 1
-READ_FORMATS = (1,)
+READ_FORMATS = (1, 2)
 
 
 def _text(value: str, limit: int) -> str:
@@ -84,6 +84,12 @@ class Source(Model):
     sha256: SHA
 
 
+class GitHubBinding(Model):
+    connection_id: ID
+    account_id: Revision
+    authorization_revision: Revision
+
+
 class Contract(Model):
     objective: Text1024
     scope: Text1024
@@ -96,6 +102,14 @@ class Contract(Model):
     tools: Annotated[list[Name], Field(max_length=16)]
     sources: Annotated[list[Source], Field(max_length=16)]
     expires_at_ms: Integer
+    github_connections: dict[Repository, GitHubBinding] = Field(default_factory=dict, max_length=8)
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if not self.github_connections:
+            value.pop("github_connections", None)
+        return value
 
     @model_validator(mode="after")
     def bindings(self):
@@ -106,6 +120,8 @@ class Contract(Model):
             _unique(values)
         if any(repo.split("/")[1] in {".", ".."} for repo in self.repositories):
             raise ValueError("invalid repository")
+        if not set(self.github_connections) <= set(self.repositories):
+            raise ValueError("connection binding outside the repository contract")
         return self
 
 
@@ -195,6 +211,14 @@ class GitHubLocator(Model):
     number: Revision | None
     parent_number: Revision | None
     anchor: Annotated[Text128, Field(min_length=1)]
+    connection: GitHubBinding | None = None
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.connection is None:
+            value.pop("connection", None)
+        return value
 
 
 class Result(Model):
@@ -276,7 +300,7 @@ class LastUpdate(Model):
 
 
 class Record(Model):
-    format: Annotated[int, Field(strict=True, ge=1, le=1)]
+    format: Annotated[int, Field(strict=True, ge=1, le=2)]
     task_id: TaskID
     revision: Revision
     title: Title
@@ -297,6 +321,9 @@ class Record(Model):
     @model_validator(mode="after")
     def references(self):
         _stages(self.contract, self.plan.stages)
+        if self.format == 1 and (self.contract.github_connections or any(
+                isinstance(op.locator, GitHubLocator) and op.locator.connection is not None for op in self.operations)):
+            raise ValueError("legacy records cannot acquire a new account binding")
         if self.anchors != sorted(set(self.anchors)) or self.created_at_ms > self.updated_at_ms or self.plan.revision > self.revision:
             raise ValueError("invalid record ordering")
         stages = {stage.id: stage for stage in self.plan.stages}
@@ -308,8 +335,15 @@ class Record(Model):
                     or operation.epoch > self.control.epoch or not self.created_at_ms <= operation.admitted_at_ms <= self.updated_at_ms
                     or operation.observed_at_ms is not None and operation.observed_at_ms > self.updated_at_ms):
                 raise ValueError("invalid operation binding")
+            if self.format == 2 and isinstance(operation.locator, GitHubLocator) and operation.locator.connection is None:
+                raise ValueError("new GitHub operations require their account binding")
             if operation.plan_revision == self.plan.revision and operation.source_sha256 != stages[operation.stage_id].source_sha256:
                 raise ValueError("operation source binding mismatch")
+            if self.format == 2 and operation.plan_revision == self.plan.revision and isinstance(operation.locator, GitHubLocator):
+                binding = next((item for repo, item in self.contract.github_connections.items()
+                                if repo.casefold() == operation.locator.repository.casefold()), None)
+                if operation.locator.connection != binding:
+                    raise ValueError("operation account differs from the accepted repository binding")
         for stage in self.plan.stages:
             _unique(stage.evidence)
             if any(key not in operations or operations[key].stage_id != stage.id for key in stage.evidence):
@@ -367,7 +401,7 @@ def new_record(request: dict, now_ms: int) -> dict:
         raise Fault("task_authority_expired", "Task creation requires a future explicit authority expiry.")
     stages = [dict(stage, state="pending", evidence=[]) for stage in request["stages"]]
     first = stages[0]
-    value = {"format": 1, "task_id": request["task_id"], "revision": 1, "title": request["title"],
+    value = {"format": 2 if contract.get("github_connections") else 1, "task_id": request["task_id"], "revision": 1, "title": request["title"],
              "anchors": request["anchors"], "created_at_ms": now_ms, "updated_at_ms": now_ms,
              "origin": request["origin"], "contract": contract, "plan": {"revision": 1, "stages": stages},
              "control": {"state": "waiting_for_ai", "current_stage_id": first["id"], "stop_intent": "none",

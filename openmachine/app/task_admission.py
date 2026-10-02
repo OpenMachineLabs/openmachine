@@ -17,7 +17,7 @@ METHODS = FILE_METHODS | GITHUB_METHODS | {"start_execution", "control_execution
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
 # else is unknown unless an original receipt proves its outcome.
-NO_EFFECT = {"execution_disabled", "workspace_write_disabled", "invalid_command", "invalid_timeout",
+NO_EFFECT = {"integration_disconnected", "integration_connection_changed", "integration_not_found", "integration_store_invalid", "execution_disabled", "workspace_write_disabled", "invalid_command", "invalid_timeout",
              "invalid_access", "invalid_resources", "invalid_head", "invalid_cwd", "context_mismatch",
              "context_unavailable", "path_denied", "legacy_workspace_busy",
              "ambiguous_workspace", "invalid_github_request", "github_not_allowed", "github_self_review",
@@ -118,11 +118,12 @@ class TaskAdmission:
                         raise
         return self.reconcile(tasks.read(self.app.state, view["task_id"]))
 
-    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False) -> dict:
+    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False, binding=None) -> dict:
         if method not in METHODS:
             raise Fault("unsupported_operation", "Task admission applies only to the explicit existing mutation entrypoints.")
         if method in GITHUB_METHODS:
-            return getattr(self.app._provider(), method.removeprefix("github_"))(self.app.config, **arguments)
+            return self.app._github_call(method.removeprefix("github_"), arguments,
+                                         binding=binding, legacy=supervised and binding is None)
         if method == "start_execution" and supervised:
             return self.app.machines.start_execution(**arguments, task_admitted=True)
         return getattr(self.app.machines, method)(**arguments)
@@ -282,7 +283,7 @@ class TaskAdmission:
                 self._publish(record["task_id"], [(operation["id"], _receipt("failed", summary="Not dispatched: derived task index publication failed."), locator)])
                 raise Fault("task_index_incomplete", "Intent was retained but not dispatched; rebuild derived metadata before new work.")
             try:
-                observed = self._dispatch(method, arguments, supervised=True)
+                observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
                 try:
@@ -304,7 +305,16 @@ class TaskAdmission:
         if method in GITHUB_METHODS:
             if arguments["repository"].casefold() not in {item.casefold() for item in contract["repositories"]}:
                 raise Fault("task_scope_denied", "This repository is outside the accepted task contract.")
-            observed = self.app._provider().read(self.app.config, "repository", arguments["repository"])
+            binding = next((item for repo, item in contract.get("github_connections", {}).items()
+                            if repo.casefold() == arguments["repository"].casefold()), None)
+            if binding is not None:
+                if arguments.get("connection_id") and arguments["connection_id"] != binding["connection_id"]:
+                    raise Fault("task_scope_denied", "The task is bound to another GitHub connection.")
+                locator["connection"] = binding
+            elif arguments.get("connection_id") or record["format"] == 2:
+                raise Fault("task_scope_denied", "This task has no accepted binding for the selected account.")
+            observed = self.app._github_call("read", dict(action="repository", repository=arguments["repository"]),
+                                             binding=binding, legacy=binding is None)
             if observed.get("configured_write") is not True or observed["data"].get("permissions", {}).get("push") is not True:
                 raise Fault("github_not_allowed", "The selected task repository has no current verified write grant.")
             return
@@ -389,7 +399,8 @@ class TaskAdmission:
     def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False, cancelled=None) -> dict:
         locator = operation["locator"]
         if locator["kind"] == "github":
-            observed = self.app._provider().reconcile(self.app.config, locator, arguments)
+            observed = self.app._github_call("reconcile", dict(locator=locator, request=arguments),
+                                             binding=locator.get("connection"), legacy="connection" not in locator)
             if verify and operation["result"] is not None and operation["result"]["receipt_sha256"] is not None:
                 if records.digest(observed.get("receipt") or {}) != operation["result"]["receipt_sha256"]:
                     raise Fault("task_evidence_changed", "The selected provider destination no longer matches its original verified observation.")
