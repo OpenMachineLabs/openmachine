@@ -19,6 +19,7 @@ from openmachine import service, tasks
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 import test_continuity as continuity
+from openmachine.service import checks as service_checks
 
 
 class EventsTests(unittest.TestCase):
@@ -344,8 +345,8 @@ class EventsTests(unittest.TestCase):
         self.assertEqual(proof["state_contract"], 9)
         self.assertEqual(proof["events_subscriptions"], 1)
         for change in ({"state_contract": 8}, {"events_present": False}, {"events_sha256": "0" * 64}):
-            with patch.object(service, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):
-                self.fault("incompatible_state", service._candidate_state, Path(sys.executable), config, self.state)
+            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):
+                self.fault("incompatible_state", service_checks._candidate_state, Path(sys.executable), config, self.state)
         path = self.state / "events.json"
         original = path.read_bytes()
         path.write_text('{"format":1,"format":1}')

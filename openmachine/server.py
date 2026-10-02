@@ -475,7 +475,7 @@ def serve(config: Settings, state: Path, *, managed: bool = False) -> None:
         if managed and os.path.lexists(path):
             identity = path.lstat()
             if (not stat.S_ISSOCK(identity.st_mode) or identity.st_uid != os.getuid()
-                    or identity.st_mode & 0o077 or service._live_socket(path)):
+                    or identity.st_mode & 0o077 or service.socket_alive(path)):
                 raise Fault("socket_in_use", "The existing socket is live or has unknown ownership; it was not replaced.")
             current = path.lstat()
             if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
