@@ -15,63 +15,38 @@ more-specific `AGENTS.md` before changing their scope.
 
 ## Task model recommendation
 
-- At the end of every substantive task, the final response must end with one
-  recommendation, rendered in the user's language, equivalent to:
-  `Next task "<task>" recommendation: GPT-6 Astra + <tier>. Reason: <specific reason>.`
-  Prefer the next task explicitly named by the user. Otherwise, only propose the
-  smallest follow-up directly supported by the completed result and mark the
-  task name as `candidate`. If there is not enough information, explicitly say
-  that the next task is not yet determined and that its GPT-6 Astra tier will be
-  recommended before work starts. Do not silently omit the recommendation or
-  invent a pending task.
-- When the user starts a new task or materially changes scope, include exactly
-  once in the first progress update a recommendation, rendered in the user's
-  language, equivalent to:
-  `Current task "<task>" recommendation: GPT-6 Astra + <tier>. Reason: <specific reason>.`
-  Then continue the authorized work. Do not repeat it for status questions,
-  clarifications, or repeated progress within the same task. The final next-task
-  recommendation is still required and is not replaced by the startup
-  recommendation, even when the tier is unchanged, the current tier is unknown,
-  or a recommendation was already given earlier.
-- The model is fixed to GPT-6 Astra (`gpt-6-astra`). Choose exactly one tier:
-  Ultra (`ultra`), Max (`max`), or Extra High (`xhigh`). Optimize for task
-  quality and overall work efficiency using uncertainty, consequence of error,
-  rework risk, and expected time. Do not optimize for either the lowest cost or
-  the highest tier by default.
-- Extra High is for clearly scoped, concentrated work with direct verification.
-  Max is for work that is difficult to decompose, tightly coupled in reasoning,
-  or costly to get wrong when additional reasoning is expected to improve
-  quality and reduce rework. Ultra is for work where parallel agents are allowed
-  and there are multiple substantively independent subtasks, when the expected
-  parallelism benefit exceeds decomposition, coordination, and merge overhead.
-  Do not choose only from task length or file count.
-- Recommend only the combinations confirmed available in the current session or
-  model menu. Do not guess the current tier or availability, and do not check
-  settings or search model documentation on every turn solely for this rule.
-- The user switches models or tiers manually. A recommendation does not change
-  settings, pause already authorized work, or automatically start extra agents.
-- Before finishing, check that the task is complete, the next task has evidence,
-  exactly one allowed tier was selected, the reason explains the concrete
-  quality/efficiency/time tradeoff, and the final response contains the
-  recommendation or the explicit unknown-next-task statement. When changing
-  this section, semantically verify: clear small task -> Extra High; tightly
-  coupled task -> Max; explicitly allowed parallel work with independent
-  subtasks -> Ultra; no parallel authorization -> do not select Ultra merely
-  because the task is large; unknown next task -> state it explicitly; a new
-  task with the same tier -> still recommend it. These checks do not prove every
-  future model response will obey the instruction.
-- Model basis:
-  [OpenAI model documentation](https://developers.openai.com/codex/models/) and
-  [GPT-6 Astra documentation](https://developers.openai.com/api/docs/models/gpt-6-astra).
-  Ultra is the Codex mode that uses subagents for parallel work, not an API
-  `reasoning.effort` value. The three-tier range in this section is the user's
-  selected recommendation range; it does not claim the model supports only
-  these three tiers.
-- When a later GPT-6 model or updated series is officially released and
-  available to the current account, remind the user to reassess the
-  recommendation range against the latest OpenAI model documentation. Until the
-  user explicitly expands the range, continue to recommend only the GPT-6 Astra
-  tiers above.
+For each new substantive task or material scope change, give exactly one startup
+recommendation in the user's language: `Current task "<task>" recommendation:
+GPT-6 Astra + <tier>. Reason: <specific quality/efficiency reason>.` Continue the
+authorized work; do not repeat it for status checks or ordinary progress.
+End substantive tasks with one equivalent next-task recommendation. Prefer the
+user's named next task; otherwise mark the smallest evidence-supported follow-up
+as candidate. When the next task is unknown, say it is not determined and the tier
+will be recommended before starting, rather than inventing a task or omitting it.
+
+Use fixed GPT-6 Astra (`gpt-6-astra`) and exactly one of the user-selected tiers,
+only when confirmed available in the session/menu. Do not guess current tier or
+availability, or repeatedly inspect settings/documentation solely for this rule.
+- Extra High (`xhigh`): concentrated, clearly scoped work with direct verification.
+- Max (`max`): tightly coupled reasoning or expensive mistakes where deeper work
+  is likely to reduce rework and improve quality/time.
+- Ultra (`ultra`): explicitly allowed parallel agents with independent subtasks
+  whose benefit exceeds coordination/merge overhead. Length alone is insufficient.
+
+The user switches manually; recommendations change no settings, pause no approved
+work and authorize no agents. Choose for uncertainty/consequences/rework, not
+lowest cost or highest tier by default. Before delivery verify a specific reason,
+known next task or explicit uncertainty, one available tier, and both required
+recommendations where applicable. Semantic examples: simple -> Extra High;
+coupled -> Max; authorized independent parallelism -> Ultra. A new task needs a
+new startup recommendation even with the same tier; these checks are not a promise
+that future model responses obey them. Reassess the range only after a later GPT-6
+release is confirmed available and the user approves expanding it.
+
+Basis: [model documentation](https://developers.openai.com/codex/models/) and
+[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra).
+Ultra denotes the Codex subagent mode, not an API reasoning-effort value; this
+policy does not claim these are the only model-supported modes.
 
 ## Write the smallest useful change
 

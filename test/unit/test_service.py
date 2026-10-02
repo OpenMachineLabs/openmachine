@@ -388,7 +388,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(paths[0].read_text())["format_version"], 999)
 
     def test_actual_task_reader_covers_terminal_history_and_rejects_partial_candidate_proof(self):
-        from test_continuity import task_contract, terminal_task_fixture
+        from support_tasks import task_contract, terminal_task_fixture
         from openmachine.tasks import records
         request = task_contract()
         created = tasks.create(self.state, request.pop("task_id"), **request)
@@ -412,7 +412,7 @@ class ServiceTests(unittest.TestCase):
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
 
     def test_candidate_ignoring_canonical_tasks_is_rejected_before_healthy_service_stop(self):
-        from test_continuity import task_contract
+        from support_tasks import task_contract
         request = task_contract()
         tasks.create(self.state, request.pop("task_id"), **request)
         path = self.state / "service/versions" / self.b / "installation.json"
@@ -447,7 +447,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual((self.state / "ssh-recovery.json").read_bytes(), before)
 
     def test_task_creation_and_index_maintenance_share_lifecycle_admission(self):
-        from test_continuity import task_contract
+        from support_tasks import task_contract
         config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}}})
         app = create_application(config, self.state)
         self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}

@@ -83,7 +83,8 @@ class SSHTests(unittest.TestCase):
                               "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
                               "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
-                              "openmachine/workspace/files.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/foundation/__init__.py",
+                              "openmachine/workspace/files.py", "openmachine/workspace/change_records.py",
+                              "openmachine/workspace/preparation.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
                               "openmachine/foundation/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
@@ -249,7 +250,7 @@ class SSHTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, "invalid_task_id")
 
     def test_structured_task_is_not_a_new_remote_execution_grant(self):
-        from test_continuity import task_contract
+        from support_tasks import task_contract
         state = self.root / "controller"
         app = create_application(self.settings, state)
         request = task_contract()

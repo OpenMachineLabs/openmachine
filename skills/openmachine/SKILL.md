@@ -138,309 +138,176 @@ cross-conversation continuation, rechecking current facts and authority. Read
 updated user Skills on demand without reinstalling. Preserve old execution receipts
 and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
-through OpenAI and redaction is best effort. Autonomous resume and automatic recovery after worker/host loss remain outside
-this increment.
+through OpenAI and redaction is best effort. Original worker/host loss does not authorize reconstruction or replay.
 
-For SSH work, select only a configured, identity-pinned machine. Read remote
-instructions and files through the same tools; never resolve its paths on the
-controller or substitute a local command. Use the selected remote project's
-interpreter. Native account permissions remain explicit; unavailable SSH/Python/
-user scopes or changed identity require diagnosis, not a fallback or privilege
-change. Worker preparation is explicit, never hidden in reads or execution.
+## Runtime and target compatibility
 
-Remote receipts/logs/locks belong to the target; checkpoints and user Skills stay
-on the controller. Preserve the original target identity, execution ID and worker
-archive when reconnecting. `finishing` means required cleanup/drain is still pending;
-an unreachable host or missing scope evidence is unknown. Read the same ID, never
-relaunch completed work. Alternate aliases share the target's canonical state and
-worktree locks. Do not install, update or remove another task's worker/runtime to
-make a check pass.
+Select only configured, identity-pinned SSH targets. Read their instructions and
+use their own interpreter; never resolve remote paths on the controller or fall
+back locally. Targets own receipts/logs/locks and checksum-named worker archives;
+tasks and Skills remain on the controller. Aliases share canonical state. Keep
+original archives/interpreters and supported read/cancel routes across transitions.
+New calls require a matching protocol-6 endpoint, prepared only when authorized.
 
-For an explicitly authorized lifecycle task, use the documented CLI through native
-execution on the macOS controller. Read service status and the original task before
-changing anything. Install/update select an exact trusted wheel and pinned lock;
-never upgrade a running environment in place, remove a retained worker dependency,
-or change the separately managed tunnel without authorization. A successful MCP
-handshake and real permitted file read establish local readiness, not tunnel/client
-acceptance. New MCP writes may return resource_busy during activation; active
-workers continue. activation_pending/recovery_required require original selection
-readback and explicit compatible rollback, not another update or workload replay.
-Distinguish candidate rejection, verified restoration and unknown recovery. Keep
-source merge, service activation and any ChatGPT metadata refresh separate.
+SSH user-manager lifetime must outlast the intended command. A probe during login
+does not prove last-login survival. Preserve existing account/linger policy; missing
+SSH/Python/scopes or changed identity requires diagnosis, not elevation, automatic
+provisioning or replacing another task's runtime. Host/worker loss cannot restore
+PTY memory. `finishing` means cleanup remains pending; unknown is not success.
 
-Managed MCP recovery retains one service-owned budget across restarts: 5 seconds
-per readiness attempt, three fast attempts (1/2-second delays), then 60-second
-cooldown with 0.8-1.2 jitter, bounded by 15 minutes/15 attempts. Read status/doctor
-for the original episode; reads do not advance it. Identity, permission and
-corrupt-history failures stop retries. After correcting the cause, renew a valid
-budget only through explicitly requested `service restart --reset-recovery`.
-Ordinary start/restart preserves it; never delete or replace corrupt history.
-State contract 8 requires an actual candidate reader of this retained state
-before stopping a healthy service. The single service parent owns its MCP child;
-selection and recovery share one atomic service record. Independent worker
-sessions and original task receipts remain untouched. This
-also checks post-readiness responsiveness every 30 seconds through the same
-5-second identity/file probe and single slot. A busy slot waits one second;
-healthy checks do not spend a recovery budget. An unresponsive owned MCP child
-is replaced only after durable episode accounting and bounded cleanup, while
-independent workers keep running. This does not establish Tunnel/AI-loop recovery.
+Use the documented CLI for authorized lifecycle work. Read service status/original
+intent, select an exact wheel/lock, and never replace a live environment in place.
+Use explicit `update --candidate-config` for new routes; do not pre-edit the active
+file. Retain exact snapshots. Candidate local/target readers must accept every
+retained format before stop, including terminal tasks, workspace formats 1/2, SSH
+budgets, managed recovery and Events. State contract 9 is not a version label.
+Never delete history or replace stable locks to pass a gate. Idle PTYs and legacy
+non-Git lease compatibility can block transitions; let their original owners finish.
 
-E1-E3 keep pipes as the default; PTY is explicit. New format-5 receipts separate command launch/exit, first
-stop reason, force use and cleanup. `termination_grace_seconds` accepts null or
-finite 0..30: null means 5 seconds for a new execution and the original effective
-value on an identical-ID retry. Old workers retain 0.5 seconds, not a retroactive
-upgrade. Do not change a start request to recover the same execution.
+Pending activation blocks new writes, not original evidence. Distinguish rejected
+candidate, verified restoration and activation_pending/recovery_required. Rollback
+restores compatible software/configuration, not user effects. An identical update
+is a no-op. Keep original controls/cursors. The tunnel is independently managed;
+local readiness is not ChatGPT acceptance. Stop is not permanent login disable,
+worker cancellation or renewal of the recovery budget.
 
-TERM grace continues draining output. A handled stop returning exit zero remains
-cancelled/timed-out; an already observed natural exit cannot be relabeled. Native
-cleanup covers verified POSIX-session work, not detached sessions or a sandbox.
-Unknown cleanup/ownership never authorizes another ID or arbitrary PID signaling.
-Facts absent from formats 1-3 remain null; format-4 facts stay intact. New readers
-do not strengthen historical guarantees.
+## Execution and source contracts
 
-Use the transition-capable CLI and the selected installation's actual contract.
-Prepare protocol-6 SSH endpoints explicitly alongside original archives. Pass an
-explicit `update --candidate-config` when changing endpoint routes; do not edit
-the active configuration in advance. Preserve service-owned configuration
-snapshots. Candidate local/remote readers must accept retained state before stop;
-completed v5 receipts also block incompatible rollback. Recovery restores the
-exact prior configuration or reports uncertainty, without replay or provisioning.
+| Capability | Current boundary |
+| --- | --- |
+| Command timeout / grace | Default 600 seconds, explicit up to 86,400; grace null or finite 0..30, new default five, original legacy value on retry |
+| Output / observation | Four 1 MiB segments; wait 0..5 seconds with 16 slots; waiting never changes command lifetime |
+| PTY | Explicit tty=true; initial rows/cols 1..1000, default 24x80; initial mode/size immutable |
+| Controls | Observed sequence, one action; stdin 1..16384 UTF-8 bytes; 128 KiB frames/two-second worker budget |
+| Source / payload | 2 MiB UTF-8 source/result; whole write, combined edits or patch text stay 128 KiB |
+| Source windows | Raw-byte mode or 1-based start_line with offset=0; line_count 1..500, default 200; pages/diffs 32 KiB |
+| Changes | 64 replacements, 32 patch paths counting moves, 64 hunks, 8 MiB aggregate; 64 KiB receipts and 10,000 retained IDs |
+| Parents | Explicit patch opt-in, only destination ancestors, at most 16 directories/eight missing levels |
 
-SSH scope durability requires a user manager that outlives the command's SSH
-connection. A reachable manager alone is insufficient when last-login logout
-stops it. Preserve existing login/linger policy; do not enable lingering or create
-an account/service as an execution side effect. State the maintained prerequisite
-in acceptance, and keep account-manager teardown distinct from executor recovery.
+Pipes remain default with closed stdin. TERM grace drains output; cancelled or
+timed-out work can return zero, and a natural exit cannot be relabeled. Cleanup
+covers owned POSIX-session work, not detached sessions or a sandbox. Formats 1..5
+retain original capabilities/facts without rewriting. Unknown ownership never
+permits arbitrary PID signalling or new execution IDs.
 
-For E2, optionally read the same execution/cursor with `wait_seconds=0..5`;
-default zero adds no observation wait. `wait_expired` is not command timeout,
-and quiet output is not evidence of a hang. A disconnected/cancelled observation
-never cancels the original command. `reader_busy` means the server's 16 waiting
-slots are occupied; immediate reads and explicit command cancellation remain
-available. `observation_busy` means a consistent snapshot could not be acquired
-within its budget; preserve the ID and state rather than relaunching.
+Cancelling/disconnecting observation never stops a command. wait_expired is not
+command timeout; reader_busy/observation_busy preserve identity. Read output decode,
+redaction, control-escaping and presentation flags separately from retention loss.
+Raw cursors may include undisplayed bytes; use smaller pages at the original offset,
+not source reconstruction from sanitized logs. Original SSH waits use one exchange,
+not per-poll reconnects. Missing data or unknown cleanup cannot become success.
 
-Follow original raw-byte cursors despite UTF-8 replacement, redaction, visible
-terminal-control escaping or presentation truncation. Read the four explicit
-`output_*` presentation flags separately from retention gaps and incomplete
-output. A consumed byte is not necessarily displayed. Use a smaller read from
-the same source offset when presentation was truncated; do not reconstruct a
-source file from sanitized console output. SSH waiting happens in one target
-request and does not change the original worker archive or user-manager policy.
+Read control_ready, actions, sequence and last receipt before controls. Stdin adds
+no newline/confirmation; resize takes dimensions; interrupt sends SIGINT to the
+verified foreground group without cancelling the execution. Pipes support interrupt
+only; old workers gain no controls and PTY failure has no pipe fallback. Exact
+retained duplicates return receipts; conflicting/retired sequences never replay.
+Applied is OS acceptance, partial a known prefix; do not resend a suffix. Pending
+with lost ownership stays unknown. Later input needs current authority; never send
+secrets or automate prompts. Echo can enter logs. Idle PTY keeps workspace leases;
+worker/host death cannot restore memory. Read original controls after transitions.
 
-For E3, request `tty=true` only for an authorized interactive program. Dimensions
-are `{rows,cols}`, each 1..1000, default 24x80; pipe mode has no dimensions. Initial
-mode/size are immutable start identity. Read the same execution until its actual
-`control_ready` and actions are available; old workers cannot acquire new controls.
-The original worker owns the terminal through client disconnects, not host death.
+Whole-source hashes and raw offsets do not prove full review of partial/redacted
+files. range_complete covers the available requested window, has_more the whole
+file. Continue truncated long lines in byte mode at original SHA/next_offset;
+next_line appears only at a known boundary. Segment globs are case-sensitive,
+do not cross '/', and lack '**'. Filtered discovery omits ignored/nested source;
+direct permitted reads remain. Incomplete discovery is not exhaustive absence or
+fallback. Redaction uses source context before slicing, without changing raw hashes.
 
-Use `control_execution` with the observed `expected_control_seq` and exactly one
-action. `write_stdin` sends 1..16384 UTF-8 bytes as-is, without implicit newline or
-confirmation. `resize` changes this terminal; `interrupt` sends SIGINT to its
-verified foreground operation and does not cancel the execution or erase REPL
-state. Pipes keep closed stdin but new control-capable workers support interrupt.
-Read output separately using retained byte cursors; no control consumes output.
+workspace_write_enabled is independent: omitted/null inherits command permission,
+explicit false denies edits. Preview/scoped original reads grant no mutation.
+Same-ID retries return original receipts before new-write checks; current drift
+does not erase history. Legacy no-ID whole writes keep weaker recovery guarantees.
+Do not infer abandoned attempted effects from matching current hashes. Checked
+rename is not kernel CAS. Preserve dirty/staged work, ordinary modes and raw bytes.
 
-Persist control identity and receipt references, never input bodies/credentials,
-in task evidence. Reconcile lost acknowledgements by original execution/sequence.
-Exact retained duplicates return their existing receipt without effects; conflicts
-and retired results never replay. `applied` is OS acceptance, not application
-completion; `partial` is the known prefix and must not cause an automatic suffix
-send. Pending control with lost ownership is unknown. Do not clear uncertainty or
-replace a worker/socket; read or explicitly cancel when ownership permits it.
+Use advertised om_patch_v1, exact LF markers/bare @@ hunks, unique ordered original
+matches and exact EOF assertions, never fuzzy or generated-new-text matching.
+Preconditions cover every touched path, including absent move destinations. Pure
+moves preserve bytes; updates retain BOM/terminators/final-newline presence.
+Reject overwrites, move chains and ambiguous aliases. Preview allocates no state.
+Preflight is not a transaction: moves may leave both files; directories/removals
+are separate effects. Partial/unknown keeps its applied prefix and stops; never
+replay, auto-rollback or label the whole proposal applied. Receipts are not source
+backups/historical diffs. Run tests explicitly with applicable post-hashes and the
+original change/execution references. Current-source drift invalidates old PASS.
 
-Later input needs its own current authorization; launch approval is not blanket
-stdin approval. Never send passwords/tokens or automate prompts. Terminal echo
-can appear in raw logs, even though control receipts retain only a fingerprint.
-Idle PTY retains workspace/resource leases. Do not weaken them to allow editing
-or restart a process merely to clear a busy control. New readers preserve v4
-lifecycle facts and all older bytes; state contract 5 and SSH protocol 6 are not
-release numbers. SDK tests are not actual Chat/fresh-conversation acceptance.
+## Canonical task controls
 
-After a controller transition, read capabilities, then the original execution
-and last control receipt before deciding on another input. Keep the original
-cursor; do not reset the sequence, relaunch the terminal or replace its runtime.
-A compatible rollback preserves live work, not permission to replay uncertain
-effects. An identical installation update is a no-op, not proof of a transition.
+For stage source_sha256, select complete {locator, sha256} objects from
+contract.sources by source_refs, sort by locator, and SHA256 the UTF-8 bytes of
+`json.dumps(selected, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"`.
+The final LF is required; empty selection hashes `[]\n`. Never guess/drop bindings.
+Creation rejects runtime assertions. Records are 64 KiB with 48 KiB creation;
+capacity is reserved for original results/stopping. Reads do not repair indexes
+or claim authority. Explicit bounded maintenance preserves generations and locks.
 
-W2 reads/edits sources up to 2 MiB; full-content writes and combined edit strings
-remain 128 KiB, with 1..64 exact replacements. Start lines are 1-based, require
-offset=0, and line_count is 1..500 (default 200). Pages/diffs remain 32 KiB; raw
-byte cursors and whole-source hashes do not refer to redacted text. For a truncated
-long line, continue in byte mode with next_offset and the original SHA. next_line
-is available only at a known boundary. range_complete describes available selected
-bytes; has_more describes the whole source. Never skip remaining text or infer
-complete negative search from incomplete coverage. Filtered Git discovery omits
-ignored/nested source; direct permitted ignored-file reads remain available.
-W3 adds strict coordinated patches. New range values can make a retained format-1
-receipt unreadable to W1, and format-2 patches cannot be read by W1/W2: require the
-actual candidate reader to pass, never alter history to enable rollback.
-Current new workspace calls require protocol-6 endpoints;
-prepare them only under explicit authorization alongside original worker archives.
-Typed writes use workspace_write_enabled independently of commands. Omitted/null
-inherits the legacy execution grant; explicit false denies editing. Preview and
-scoped receipt reads need no write grant. New init/examples disable both grants.
-Same-ID identical requests observe original results before new write checks;
-changed intent conflicts. A valid applied receipt can coexist with later source
-drift. An abandoned attempting effect remains unknown; current hashes do not prove
-historical authorship. Never delete/correct history to make an operation retry.
+Claim the current handoff and carry task/plan revisions, epoch and operation ID in
+task_context. Start/file IDs equal execution/change IDs; controls/cancel use distinct
+IDs and retain original execution/sequence. Reuse valid ownership or claim after
+release/expiry, never displace a live owner. Claims last at most 300 seconds or
+earlier expiry, which does not stop original commands. Release for handover. Final
+accepted work still needs explicit finish, not another run or legacy checkpoint.
 
-Keep change and execution references together in the existing task, without
-copying authoritative state. Explicitly run the selected check and verify touched
-post-hashes before and afterward; a successful old command is not a PASS for
-changed source. Change receipts are not source backups or automatic undo. The
-10,000-ID target store has no automatic eviction. A live idle PTY blocks conflicting
-edits, and legacy non-Git lease mapping can block an upgrade in either direction;
-let the original owner finish rather than replacing lock files or bypassing busy.
-Retained local/target change records require actual compatible readers before
-service stop. W1 source/SDK tests do not establish refreshed Chat, live SSH or
-managed-transition acceptance; record those separately under W4.
+Pause suppresses new admission, not admitted effects; cancel needs verified original
+worker outcomes. Original-ID cancellation stays usable with busy task metadata.
+Resume does not claim, extend authority or reopen terminal work. revise_plan
+invalidates affected/dependent stages, retaining other acceptance. Stale revisions
+need fresh readback. Unknown effects reconcile original receipts, never new IDs,
+deleted history or stripped supervised context. Do not save a second legacy journal.
 
-
-For W3, check `patch_language=om_patch_v1` before using apply_workspace_patch.
-Supply exactly one precondition for every touched path, including both move
-endpoints. Use observed raw hashes and explicit absence, never displayed text or
-an assumed destination. Keep one workspace/target and saved change ID per patch.
-The strict LF grammar supports add/update/delete/move, exact unique original-line
-hunks with bare @@, and optional exact End of File. It rejects fuzzy matches,
-move chains/overwrites and ambiguous path spellings. Pure moves preserve bytes
-and ordinary modes; updates retain BOM, line endings and final-newline presence.
-
-Preview creates no receipt or directory. Parent creation is explicit, only for
-add/move destinations, bounded to 16 directories and eight missing levels.
-Patch payloads remain 128 KiB, 32 paths, 64 hunks and 8 MiB aggregate original plus
-prepared bytes. Whole-plan preflight is not a multi-file transaction. A move can
-leave both files if source removal fails; directories are also separate effects.
-Partial/unknown results retain known applied effects and stop before remaining
-operations. Never auto-rollback, replay the batch or call the proposed diff an
-applied result. Read the same original ID; current.files observations are not
-historical proof. Format-1 receipts remain unchanged and format-2 patch history
-requires a compatible actual reader before a software transition.
-
-Use `create_task` only to accept a new structured contract,
-not to convert existing legacy work. Supply original request/source identities,
-explicit scope/expiry and backward-dependent stages. For each stage, select its
-`source_refs` from `contract.sources`, sort those complete `{locator, sha256}`
-objects by locator, and hash the UTF-8 bytes of
-`json.dumps(selected, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"`
-with SHA-256. The final newline is required; an empty selection hashes `[]\n`.
-Hash the source objects, not only their digests or referenced file bytes. Compute
-hashes exactly; do not guess them or drop source bindings to bypass validation.
-Creation rejects runtime fields and
-unknown arguments. Keep the same task/update IDs after lost acknowledgement.
-Canonical reads remain available when derived lookup is stale; they never repair
-the index, claim work or authorize continuation. Explicit index maintenance is
-one bounded CLI page under normal lifecycle admission; preserve its generation.
-Missing legacy metadata, locks, unknown or corrupt history are not repair approval.
-Structured work requires an explicit `control_task` claim of the current handoff
-before supervised effects. Echo task/plan revisions and epoch; retain the original
-update ID after uncertain control publication. Claims last at most 300 seconds
-or earlier expiry and do not resolve a handoff or prove caller presence. Identity
-comes from the native-account endpoint, not a model field or ChatGPT chat ID.
-On reattachment, read the original task and outstanding receipts first. Reuse a
-still-current owned claim, or claim the current handoff after release/expiry;
-never displace an unexpired owner. Claim expiry does not stop original work.
-Before deliberately handing work over, release the owned claim. A final accepted
-stage still has a handoff until `finish`; after interruption, reclaim it and
-finish from retained acceptance rather than repeating that stage. Terminal
-history is read-only; follow-up work gets a new linked task.
-
-Pass current `task_context` to command/file/GitHub/control/cancel mutations.
-It contains task ID, task/plan revisions, continuation epoch and operation ID.
-Start/file operation IDs equal their execution/change IDs; terminal control and
-cancellation have separate IDs while retaining the original execution/sequence.
-Before new work, read original evidence and reconcile any earlier uncertain
-intent. A conflict after a material result requires current task readback, not
-ignoring the revision or inventing a replacement execution. Original admitted
-IDs compare normalized intent and read their outcome; they never resend input
-or publication just because the reply was lost. Unprovable effects remain unknown.
-
-Pause suppresses new admission; already admitted effects may still finish.
-Cancel records the stop and requests termination only of owned original commands;
-verify their outcome rather than treating stop intent as terminal success. The
-existing original-ID cancellation stays usable when task metadata/capacity is
-blocked. Reads remain passive, including while paused and after completion.
-Resume does not claim ownership, extend expired authority or reopen terminal work.
-
-Use `revise_plan` for accepted changes, explicitly invalidating changed stages
-and their dependents; preserve unrelated acceptance, stage IDs and all operations.
-Use `record_decision` with verified applicable original evidence, then `finish`
-only after every required stage is accepted. Its transition is
+After applicable record_decision evidence, finish every accepted stage with:
 `{"action":"finish","outcome":"completed","acceptance":[{"stage_id":"stage-id","operation_id":"original-operation-id"}],"limitations":""}`.
-Cover every stage with its accepted original operation IDs. Use `operation_id: null`
-only for an accepted non-command decision with no operation evidence. `finish`
-does not take `reason`, `summary` or the `record_decision` field `evidence`.
-Empty evidence is an explicit
-non-command decision, never a substitute for an operation-backed stage. File
-and provider drift invalidates current acceptance, not historical authorship.
-Known partial outcomes need a new authorized judgment, never batch/input replay.
+Null is only an accepted non-command decision, not substitute operation evidence.
+Finish has no reason/summary/evidence field. Terminal history is read-only;
+follow-up is a linked new task. GitHub original-destination lookup is bounded to
+three 100-item pages; duplicate/partial/bodyless unknown effects can remain blocked.
+Receipt hashes cover semantic observations, not copied raw logs or source.
 
-Task storage reserves bounded result/stop/terminal capacity; do not delete history
-to admit more work. GitHub recovery reads stable markers and original destinations,
-with at most three 100-item lookup pages. Partial coverage, multiple matches and
-bodyless unknown effects are blockers when evidence cannot prove the result.
-Task receipt hashes cover bounded semantic observations, not copied logs/source.
-Legacy `save_task` remains the existing work journal; do not convert it or strip
-known supervised identities to bypass admission.
+## Observation, recovery and Events
 
-The service-owned observer collects already-admitted local and SSH command/control/
-cancel/change results while callers are absent. Result and handoff publish
-together, not stage acceptance or a new effect. Re-read task/plan/epoch after
-material background progress; an older caller can legitimately see a conflict.
-Do not restart an original command or resend input to recover that conflict.
-SSH observation reads only original receipts through the pinned target. The
-receipt observer never calls GitHub or an AI, and leaves legacy history alone.
-Event admission may revalidate an existing configured GitHub repository grant;
-that read cannot publish or replay a mutation.
+The service observer reads only admitted command/control/cancel/change results.
+Result and handoff publish together, not stage acceptance, new effects or AI calls.
+Quiet reads/heartbeats are not material progress. Stopped/stale observers have no
+live timer. Lifecycle admission remains; legacy history is not converted. GitHub
+grant revalidation cannot publish or replay a mutation.
 
-Normal local observation is due every 2 seconds with four actual read slots and
-at most 32 active tasks. A timed-out thread keeps its slot/owner until actual
-exit. Read failure budgets are persisted before retries: three fast attempts,
-then bounded cooldown, at most one hour/120 attempts or earlier expiry. Pause,
-cancel and restart do not renew those budgets. Unknown/corrupt original evidence
-remains a blocker, not permission to repair, replay or delete it. A service
-activation can defer observation; it never authorizes bypassing lifecycle guards.
-Use passive `read_task` to distinguish current observation, stale original facts,
-pending recovery and a stopped observer. Heartbeats and quiet reads are not
-material progress; a stored next-attempt value is not a live timer after stop.
-SSH adds two separate slots, one per pinned target across tasks/aliases, normally
-every 5 seconds. Recognized transient disconnects share a connection-owned budget:
-three fast attempts with 2/4-second delays, then 60-second cooldown with jitter,
-at most one hour/60 attempts or earlier task expiry. Receipt faults keep separate
-task budgets. Neither adding a task nor pausing/restarting renews them. Identity,
-authentication, protocol, corrupt history and exhaustion require intervention;
-do not repair configuration, reset budgets or replay effects to make recovery pass.
-State contract 7 verifies retained SSH budgets before a managed runtime transition.
-Terminal history never reactivates. Events delivery and actual AI continuation
-are distinct observations; retain the account/surface-specific A16 acceptance.
+| Owner | Finite recovery and actual capacity |
+| --- | --- |
+| Local task reads | Four readers/32 tasks, normally every two seconds; three attempts, 1/2-second delays, then 30-second jittered cooldown, one hour/120 attempts |
+| SSH connection reads | Two separate readers, one per pinned target across aliases/tasks, normally every five seconds; three attempts, 2/4-second delays, then 60-second jittered cooldown, one hour/60 attempts |
+| Managed MCP readiness | One five-second probe; three attempts, 1/2-second delays, then 60-second jittered cooldown, 15 minutes/15 attempts; healthy checks every 30 seconds, busy slot waits one second |
 
-For a supported ChatGPT Work Events connection, subscribe to `task.handoff_ready`
-with exactly `{task_id}` after accepting its bounded contract. The private
-endpoint uses native-account authority: connected chats share current grants;
-anonymous subject/session fields are not a separate principal. Never treat
-callback possession or an event payload as permission. Do not use this endpoint
-as a multi-user authorization boundary.
+Jitter is 0.8-1.2; earlier authority expiry wins. Timed-out threads keep slots/owners
+until exit. Attempts persist before retry; pause/restart/new tasks never renew
+budgets. Identity/permission/corruption/exhaustion block. Verified original reads
+clear connection failure; only explicit service restart --reset-recovery renews a
+valid managed budget after diagnosis. The parent replaces only its verified MCP
+child after durable accounting, leaving independent workers. This is not Tunnel
+or AI-loop recovery. Receipt failures and shared connection failures keep separate
+budgets; no configuration repair or workload replay is implicit.
 
-On notification, read the original task and outstanding receipts, then explicitly
-claim its current handoff or reuse a still-current claim. Carry current revisions,
-epoch and original operation IDs on the next authorized effect. Release an owned
-claim when deliberately handing work over. Do not repeat an original command,
-edit, input or GitHub publication to recover an old notification. Task pause,
-expiry, source/plan changes and terminal state retain normal admission guards.
+On supported Work Events routes, subscribe to task.handoff_ready for exactly
+{task_id} after the bounded contract. Single-user private/native-account authority
+means connected chats share grants; anonymous subject/session fields are not a
+principal or cross-chat isolation. Callback possession/payload confers no authority.
 
-`read_task` exposes per-subscription receipt, read-observation, claim and actual
-next-intent admission independently. Match the event/handoff IDs; a separate
-`pending_handoff_id` identifies newer work. A 2xx is not AI completion. Read
-observations are private service facts, never canonical task progress or claims.
-An acknowledged event is not redelivered to force a wake; a missing claim blocks
-after 15 minutes or earlier expiry. Platform refusal is not permission to create
-another event, new task, polling loop or model backend.
+After notification, read original task/receipts, claim current handoff or reuse
+valid ownership, then perform only the next authorized intent with current context.
+Match event/handoff IDs; pending_handoff_id identifies newer work. Delivery,
+read-observed, claim and real next intent are separate, not AI completion. Private
+read observations never change canonical progress or claim. Acknowledged events
+are not resent to force wake; missing takeover blocks after 15 minutes or expiry.
+Refusal permits no replacement event/task, polling loop or alternate model backend.
+Pause/expiry/terminal guards remain authoritative, including late receipts.
 
-Subscription refresh keeps the original identity/budget; renew within its granted
-expiry and unsubscribe on completion. Credentials/callbacks stay in private Events
-state. Synthetic/private callback DNS, unsafe redirects, bad TLS, failed signed
-verification, capacity, corrupt history or exhaustion are real blockers. Preserve
-the guard and original obligation. State contract 9 checks retained Events facts
-before activation/rollback; do not delete them to bypass an older reader.
-State contract 6 requires actual compatible readers for every retained task,
-including terminal history, before a managed transition. Do not deploy implicitly.
+Refresh preserves identity/budget; unsubscribe on completion. Secrets/callbacks
+stay private. Signed challenge, public DNS/address pinning, hostname TLS and no
+redirects remain mandatory. Synthetic/private DNS, bad signatures, corrupt state,
+capacity or exhaustion are blockers. At most 64 subscriptions, TTL one hour or
+expiry, five-minute verification/rotation windows; two verification slots/five
+seconds and two delivery slots/ten seconds. Timed-out threads keep slots until exit.
+Four fast delivery attempts with 1/2/4-second delays precede 60-second jittered
+cooldown, bounded by one hour/60 attempts or expiry; permanent refusal/410/413 stops.
+Actual AI continuation is route/account-specific acceptance, not SDK discovery.

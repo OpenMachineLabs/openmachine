@@ -21,7 +21,7 @@ packages = ["openmachine", "integrations"]
 "skills/openmachine/SKILL.md" = "openmachine/_skills/SKILL.md"
 
 [tool.hatch.build.targets.sdist]
-include = ["/openmachine", "/integrations", "/skills/openmachine", "/pyproject.toml", "/README.md", "/LICENSE"]
+include = ["/openmachine", "/integrations", "/skills/openmachine", "/pyproject.toml", "/README.md", "/docs", "/LICENSE"]
 
 [tool.hatch.version]
 path = "openmachine/__init__.py"

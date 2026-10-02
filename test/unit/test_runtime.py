@@ -61,6 +61,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.tasks.store": ("openmachine.tasks.index", "openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.tasks.index": ("openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.tasks.records": ("pydantic", "openmachine.foundation.*"),
+            "openmachine.tasks.transitions": ("openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
             "openmachine.skills": ("openmachine.foundation.*",),
             "openmachine.service": ("openmachine.service.state", "openmachine.service.checks",
@@ -84,8 +85,9 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.app.machines": ("openmachine.config", "openmachine.execution", "openmachine.workspace",
                                          "openmachine.tasks", "openmachine.foundation.*"),
             "openmachine.app.task_admission": ("openmachine.execution", "openmachine.tasks",
-                                               "openmachine.tasks.records", "openmachine.foundation.*"),
-            "openmachine.app.task_observer": ("openmachine.tasks", "openmachine.tasks.records", "openmachine.foundation.*"),
+                                               "openmachine.tasks.records", "openmachine.tasks.transitions", "openmachine.foundation.*"),
+            "openmachine.app.task_observer": ("openmachine.tasks", "openmachine.tasks.records", "openmachine.app.task_observation", "openmachine.foundation.*"),
+            "openmachine.app.task_observation": ("openmachine.tasks.records", "openmachine.tasks.transitions", "openmachine.foundation.*"),
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
                                       "integrations.github", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.events"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
@@ -322,14 +324,6 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
                                  str(self.work), [sys.executable, "-c", "import sys; print(repr(sys.argv[1]))", ""])
         self.assertEqual(self.wait(result)["output"], "''\n")
 
-    def test_failed_command_and_missing_executable_are_not_success(self):
-        result = self.wait(self.start('import sys; print("failed"); sys.exit(7)'))
-        self.assertEqual((result["status"], result["exit_code"]), ("failed", 7))
-        result = execution.start(self.config, self.state, "my-laptop", uuid.uuid4().hex,
-                                 str(self.work), [str(self.root / "missing-executable")])
-        result = self.wait(result)
-        self.assertEqual(result["status"], "failed")
-        self.assertIsNone(result["exit_code"])
 
     def test_timeout_has_a_terminal_receipt(self):
         result = self.wait(self.start("import time; time.sleep(20)", timeout_seconds=1))

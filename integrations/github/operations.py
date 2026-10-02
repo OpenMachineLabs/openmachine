@@ -182,6 +182,20 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     return _public(result)
 
 
+def _merge_destination(root: str, sha: str, base_ref: str) -> tuple[dict, str] | None:
+    """Verify the original commit in the destination without any mutation."""
+    commit = object_response(connection.request("GET", f"{root}/commits/{sha}"))
+    branch = object_response(connection.request("GET", f"{root}/branches/{quote(base_ref, safe='')}"))
+    tip = object_response(branch.get("commit")).get("sha", "")
+    if not re.fullmatch(evidence.SHA, tip):
+        return None
+    comparison = object_response(connection.request("GET", f"{root}/compare/{sha}...{tip}"))
+    if (commit.get("sha") != sha or comparison.get("status") not in {"ahead", "identical"}
+            or (comparison.get("merge_base_commit") or {}).get("sha") != sha):
+        return None
+    return commit, tip
+
+
 def reconcile(settings: Settings, locator: dict, request: dict | None = None) -> dict:
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
@@ -205,15 +219,10 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None) ->
         base_ref = object_response(value.get("base")).get("ref")
         if not isinstance(base_ref, str) or not isinstance(head, str) or not re.fullmatch(evidence.SHA, head):
             return unknown
-        commit = object_response(connection.request("GET", f"{root}/commits/{sha}"))
-        branch = object_response(connection.request("GET", f"{root}/branches/{quote(base_ref, safe='')}"))
-        tip = object_response(branch.get("commit")).get("sha", "")
-        if not re.fullmatch(evidence.SHA, tip):
+        destination = _merge_destination(root, sha, base_ref)
+        if destination is None:
             return unknown
-        comparison = object_response(connection.request("GET", f"{root}/compare/{sha}...{tip}"))
-        if (commit.get("sha") != sha or comparison.get("status") not in {"ahead", "identical"}
-                or (comparison.get("merge_base_commit") or {}).get("sha") != sha):
-            return unknown
+        commit, _ = destination
         message = object_response(commit.get("commit")).get("message", "")
         if request is not None and (
                 request.get("commit_title") and message.split("\n", 1)[0] != request["commit_title"]
@@ -460,15 +469,10 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
         sha = result.get("sha", "")
         if result.get("merged") is not True or not re.fullmatch(evidence.SHA, sha) or merged.get("merged") is not True or merged.get("merge_commit_sha") != sha:
             return receipt
-        commit = object_response(connection.request("GET", f"repos/{repository}/commits/{sha}"))
-        branch = object_response(connection.request("GET", f"repos/{repository}/branches/{quote(gate['base_ref'], safe='')}"))
-        tip = object_response(branch.get("commit")).get("sha", "")
-        if not re.fullmatch(evidence.SHA, tip):
+        destination = _merge_destination(f"repos/{repository}", sha, gate["base_ref"])
+        if destination is None or connection.read_actor(settings) != actor:
             return receipt
-        comparison = object_response(connection.request("GET", f"repos/{repository}/compare/{sha}...{tip}"))
-        if (commit.get("sha") != sha or comparison.get("status") not in {"ahead", "identical"}
-                or (comparison.get("merge_base_commit") or {}).get("sha") != sha or connection.read_actor(settings) != actor):
-            return receipt
+        _, tip = destination
         receipt.update(status="merged_verified", base_ref=gate["base_ref"], observed_base_tip=tip,
                        html_url=merged.get("html_url"), destination_verified=True,
                        checks_state=gate["checks"]["state"], self_review_is_independent_approval=False)
