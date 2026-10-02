@@ -71,7 +71,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.service.checks": ("openmachine", "openmachine.config", "openmachine.execution",
                                            "openmachine.tasks", "openmachine.workspace", "openmachine.service.state",
                                            "openmachine.foundation.*", "httpx2", "mcp.*",
-                                           "integrations.ssh.recovery", "integrations.events"),
+                                           "integrations.ssh.recovery", "integrations.events", "integrations.connections"),
             "openmachine.service.install": ("openmachine.config", "openmachine.service.checks",
                                             "openmachine.service.state", "openmachine.foundation.*"),
             "openmachine.service.runtime": ("openmachine.config", "openmachine.service.checks",
@@ -89,13 +89,14 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.app.task_observer": ("openmachine.tasks", "openmachine.tasks.records", "openmachine.app.task_observation", "openmachine.foundation.*"),
             "openmachine.app.task_observation": ("openmachine.tasks.records", "openmachine.tasks.transitions", "openmachine.foundation.*"),
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
-                                      "integrations.github", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.events"),
+                                      "integrations.github", "integrations.github.connection", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.events", "integrations.connections"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
                                    "openmachine.service", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
                                 "openmachine.bootstrap", "openmachine.server", "openmachine.service",
                                 "integrations.ssh.bundle"),
+            "integrations.connections": ("pydantic", "openmachine.config", "openmachine.foundation.*"),
             "integrations.events": ("pydantic", "openmachine.foundation.*"),
             "integrations.github": ("integrations.github.operations",),
             "integrations.github.connection": ("openmachine.config", "openmachine.foundation.*"),
@@ -215,7 +216,7 @@ app = create_application(config, state)
 assert app.get_capabilities()["integrations"] == []
 assert app.find_tasks()["status"] == "uninitialized"
 assert not state.exists()
-assert not any(name in sys.modules for name in ("integrations.github", "integrations.ssh.client", "mcp"))
+assert not any(name in sys.modules for name in ("integrations.github", "integrations.github.connection", "integrations.ssh.client", "mcp"))
 '''
         result = subprocess.run([sys.executable, "-I", "-c", code, str(self.state)],
                                 capture_output=True, text=True, timeout=15)

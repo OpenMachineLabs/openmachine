@@ -48,6 +48,12 @@
       "base_commit": "8fca25d7649863093fe7f7511f707eac1c7eb8a3",
       "change": "S1.2 adds control_task and optional strict task_context on all eleven existing mutation tools. Existing tool arguments, annotations, release evidence and unrelated schemas remain unchanged. New expectations are authored from the frozen S0.4 contract, not copied from candidate discovery. Native-account claims do not advertise Events, automatic recovery or ChatGPT identity.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/29"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/62#issuecomment-5953592298",
+      "base_commit": "f1c6e71407babf467e41adfcfa335177de08baeb",
+      "change": "PR1 adds four existing-gh connection operations, optional connection_id on six GitHub tools and optional account-bound task contracts. Native OAuth/cancellation is not advertised. Expectations are independently authored from the approved inputs; unrelated schemas and annotations remain exact.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/62"
     }
   ],
   "baseline": {
@@ -300,6 +306,46 @@
         "type": "object"
       }
     },
+    "connect_integration": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "method": {
+            "default": "existing_gh",
+            "maxLength": 64,
+            "title": "Method",
+            "type": "string"
+          },
+          "provider": {
+            "default": "github",
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "connect_integrationArguments",
+        "type": "object"
+      }
+    },
     "control_execution": {
       "annotations": {
         "destructiveHint": true,
@@ -543,6 +589,19 @@
                 "title": "Expires At Ms",
                 "type": "integer"
               },
+              "github_connections": {
+                "maxProperties": 8,
+                "patternProperties": {
+                  "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$": {
+                    "$ref": "#/$defs/GitHubBinding"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 140
+                },
+                "title": "Github Connections",
+                "type": "object"
+              },
               "objective": {
                 "maxLength": 1024,
                 "title": "Objective",
@@ -649,6 +708,37 @@
               "limitations"
             ],
             "title": "Finish",
+            "type": "object"
+          },
+          "GitHubBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "account_id": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Account Id",
+                "type": "integer"
+              },
+              "authorization_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Authorization Revision",
+                "type": "integer"
+              },
+              "connection_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Connection Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "connection_id",
+              "account_id",
+              "authorization_revision"
+            ],
+            "title": "GitHubBinding",
             "type": "object"
           },
           "ReasonedControl": {
@@ -1029,6 +1119,19 @@
                 "title": "Expires At Ms",
                 "type": "integer"
               },
+              "github_connections": {
+                "maxProperties": 8,
+                "patternProperties": {
+                  "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$": {
+                    "$ref": "#/$defs/GitHubBinding"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 140
+                },
+                "title": "Github Connections",
+                "type": "object"
+              },
               "objective": {
                 "maxLength": 1024,
                 "title": "Objective",
@@ -1096,6 +1199,37 @@
               "expires_at_ms"
             ],
             "title": "Contract",
+            "type": "object"
+          },
+          "GitHubBinding": {
+            "additionalProperties": false,
+            "properties": {
+              "account_id": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Account Id",
+                "type": "integer"
+              },
+              "authorization_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Authorization Revision",
+                "type": "integer"
+              },
+              "connection_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Connection Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "connection_id",
+              "account_id",
+              "authorization_revision"
+            ],
+            "title": "GitHubBinding",
             "type": "object"
           },
           "Origin": {
@@ -1316,6 +1450,35 @@
           "stages"
         ],
         "title": "create_taskArguments",
+        "type": "object"
+      }
+    },
+    "disconnect_integration": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "connection_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connection_id",
+          "expected_revision"
+        ],
+        "title": "disconnect_integrationArguments",
         "type": "object"
       }
     },
@@ -1618,6 +1781,12 @@
             "title": "Comment Id",
             "type": "integer"
           },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
           "expected_updated_at": {
             "default": "",
             "title": "Expected Updated At",
@@ -1731,6 +1900,12 @@
             ],
             "default": null,
             "title": "Body"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
           },
           "expected_updated_at": {
             "default": "",
@@ -1863,6 +2038,12 @@
             "default": "",
             "maxLength": 256,
             "title": "Commit Title",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
             "type": "string"
           },
           "expected_base_sha": {
@@ -1998,6 +2179,12 @@
             "default": null,
             "title": "Body"
           },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
           "draft": {
             "default": false,
             "title": "Draft",
@@ -2106,6 +2293,12 @@
               "merge_context"
             ],
             "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
             "type": "string"
           },
           "cursor": {
@@ -2242,6 +2435,12 @@
           "body": {
             "maxLength": 60000,
             "title": "Body",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
             "type": "string"
           },
           "event": {
@@ -2464,6 +2663,32 @@
         "type": "object"
       }
     },
+    "list_integrations": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "provider": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "title": "list_integrationsArguments",
+        "type": "object"
+      }
+    },
     "read_execution": {
       "annotations": {
         "destructiveHint": false,
@@ -2507,6 +2732,28 @@
           "execution_id"
         ],
         "title": "read_executionArguments",
+        "type": "object"
+      }
+    },
+    "read_integration_login": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "login_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Login Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login_id"
+        ],
+        "title": "read_integration_loginArguments",
         "type": "object"
       }
     },

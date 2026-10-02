@@ -11,7 +11,7 @@ from openmachine.foundation.sanitize import Fault
 
 
 MAX_API_BYTES = 2 * 1024 * 1024
-DEFINITE_FAILURES = {"github_unavailable", "github_authentication_required", "github_access_denied",
+DEFINITE_FAILURES = {"integration_disconnected", "integration_connection_changed", "integration_not_found", "integration_store_invalid", "resource_busy", "github_unavailable", "github_authentication_required", "github_access_denied",
                      "github_not_found", "github_conflict", "github_rejected"}
 
 
@@ -86,10 +86,10 @@ def request(method: str, endpoint: str, payload: dict | None = None):
     return value
 
 
-def read_actor(settings: Settings) -> dict:
+def read_actor(settings: Settings, *, transport=None) -> dict:
     if settings.github is None:
         raise Fault("github_not_allowed", "Enable GitHub before probing its connection.")
-    value = object_response(request("GET", "user"))
+    value = object_response((transport or request)("GET", "user"))
     if not isinstance(value.get("login"), str) or type(value.get("id")) is not int:
         raise Fault("github_invalid_response", "The authenticated GitHub identity could not be verified.")
     if settings.github.account and value["login"].casefold() != settings.github.account.casefold():
@@ -97,10 +97,10 @@ def read_actor(settings: Settings) -> dict:
     return {"id": value["id"], "login": value["login"]}
 
 
-def access(settings: Settings, repository: str, *, write: bool = False) -> tuple[dict, dict]:
+def access(settings: Settings, repository: str, *, write: bool = False, transport=None) -> tuple[dict, dict]:
     authorize(settings, repository, write=write)
-    actor = read_actor(settings)
-    metadata = object_response(request("GET", f"repos/{repository}"))
+    actor = read_actor(settings, transport=transport)
+    metadata = object_response((transport or request)("GET", f"repos/{repository}"))
     if str(metadata.get("full_name", "")).casefold() != repository.casefold():
         raise Fault("github_repository_changed", "The resolved repository identity differs from the configured target; review its move or rename locally.")
     return actor, metadata

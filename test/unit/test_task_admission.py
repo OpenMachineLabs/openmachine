@@ -419,6 +419,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         provider = SimpleNamespace(read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
             issue=Mock(return_value={"status": "write_outcome_unknown"}), reconcile=Mock())
         self.app.github = provider
+        # These tests isolate task admission; connection behavior has its own fixtures.
+        self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
+            "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
+        self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
         self.accept_plan(tools=["github_issue", "read_task", "control_task"])
         identity = uuid.uuid4().hex
@@ -443,6 +447,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         provider = SimpleNamespace(read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
             issue=Mock(return_value={"status": "write_outcome_unknown"}), reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
         self.app.github = provider
+        # These tests isolate task admission; connection behavior has its own fixtures.
+        self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
+            "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
+        self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
         self.accept_plan(tools=["github_issue", "read_task", "control_task"])
         identity = uuid.uuid4().hex

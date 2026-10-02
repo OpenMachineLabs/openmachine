@@ -9,9 +9,9 @@ from .connection import object_response
 MAX_GATE_PAGES = 10
 
 
-def list_page(endpoint: str, page: int, limit: int, key: str = "") -> tuple[list, int | None]:
+def list_page(endpoint: str, page: int, limit: int, key: str = "", *, transport=None) -> tuple[list, int | None]:
     separator = "&" if "?" in endpoint else "?"
-    value = connection.request("GET", f"{endpoint}{separator}per_page={limit}&page={page}")
+    value = (transport or connection.request)("GET", f"{endpoint}{separator}per_page={limit}&page={page}")
     items = object_response(value).get(key) if key else value
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
         raise Fault("github_invalid_response", "GitHub pagination returned an incomplete or invalid list.")
@@ -30,17 +30,17 @@ def list_page(endpoint: str, page: int, limit: int, key: str = "") -> tuple[list
     return items, page + 1 if more else None
 
 
-def all_pages(endpoint: str, key: str = "") -> list:
+def all_pages(endpoint: str, key: str = "", *, transport=None) -> list:
     items = []
     for page in range(1, MAX_GATE_PAGES + 1):
-        batch, following = list_page(endpoint, page, 100, key)
+        batch, following = list_page(endpoint, page, 100, key, transport=transport)
         items.extend(batch)
         if following is None:
             return items
     raise Fault("github_evidence_unavailable", "The gate exceeds 1,000 records; evidence is incomplete and no review or merge was submitted.")
 
 
-def graphql_pr(repository: str, number: int, fields: str, cursor: str = "", limit: int = 100) -> dict:
+def graphql_pr(repository: str, number: int, fields: str, cursor: str = "", limit: int = 100, *, transport=None) -> dict:
     owner, name = repository.split("/")
     paging = ", $cursor:String, $limit:Int!" if "$cursor" in fields else ""
     query = ("query($owner:String!, $name:String!, $number:Int!" + paging + "){repository(owner:$owner,name:$name){"
@@ -48,7 +48,7 @@ def graphql_pr(repository: str, number: int, fields: str, cursor: str = "", limi
     variables = {"owner": owner, "name": name, "number": number}
     if paging:
         variables.update(cursor=cursor or None, limit=limit)
-    result = object_response(connection.request("POST", "graphql", {"query": query, "variables": variables}))
+    result = object_response((transport or connection.request)("POST", "graphql", {"query": query, "variables": variables}))
     if result.get("errors"):
         raise Fault("github_evidence_unavailable", "GitHub could not verify requested policy/discussion evidence; no partial GraphQL success is accepted.")
     try:

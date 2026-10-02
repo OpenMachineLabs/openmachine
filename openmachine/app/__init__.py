@@ -26,12 +26,13 @@ bound_workspace_result = workspace.bound_result
 
 
 class Application:
-    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, events=None):
+    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, events=None, connections=None):
         self.config = config
         self.state = state
         self.machines = machines
         self.github = github
         self.events = events
+        self.connections = connections
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
 
@@ -47,6 +48,30 @@ class Application:
         if self.github is None:
             raise Fault("github_not_allowed", "GitHub is not enabled in this Open Machine configuration.")
         return self.github
+
+    def list_integrations(self, provider: str = "", connection_id: str = "") -> dict:
+        return self.connections.list(provider, connection_id)
+
+    def connect_integration(self, request_id: str, provider: str = "github", method: str = "existing_gh",
+                            connection_id: str = "") -> dict:
+        with self._admit():
+            return self.connections.connect(request_id, provider, method, connection_id)
+
+    def read_integration_login(self, login_id: str) -> dict:
+        return self.connections.read_login(login_id)
+
+    def disconnect_integration(self, connection_id: str, expected_revision: int) -> dict:
+        with self._admit():
+            return self.connections.disconnect(connection_id, expected_revision)
+
+    def _github_call(self, operation: str, arguments: dict, *, binding=None, legacy: bool = False) -> dict:
+        provider = self._provider()
+        arguments = dict(arguments)
+        selected = arguments.pop("connection_id", "")
+        repository = arguments.get("repository", (arguments.get("locator") or {}).get("repository", ""))
+        transport = self.connections.request(repository, connection_id=selected, binding=binding,
+            write=operation not in {"read", "reconcile"}, legacy=legacy)
+        return getattr(provider, operation)(self.config, **arguments, transport=transport)
 
     def probe_machine(self, machine: str) -> dict:
         return self.machines.probe(machine)
@@ -67,6 +92,8 @@ class Application:
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(), "backend": "gh",
                                                            "probe_status": "not_probed", "read_and_merge": True},
+            "connections": {"protocol": 1, "methods": ["existing_gh"], "native_login": False,
+                            "login_cancellation": False},
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
                           "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
@@ -239,14 +266,15 @@ class Application:
         self.task_observer.notify()
         return view
 
-    def _validate_task_scope(self, request: dict) -> None:
+    def _validate_task_scope(self, request: dict, *, bind_new: bool = False) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
-                 "github_pull_request", "github_comment", "github_review", "github_merge"}
+                 "github_pull_request", "github_comment", "github_review", "github_merge",
+                 "list_integrations", "connect_integration", "read_integration_login", "disconnect_integration"}
         if not tools <= known:
             raise Fault("invalid_task_contract", "Task scope must name implemented tools, not future actions.")
         if tools & {"start_execution", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
@@ -270,11 +298,19 @@ class Application:
             self._provider()
         if github_write and not contract["repositories"]:
             raise Fault("invalid_task_contract", "A GitHub mutation scope needs explicit repositories.")
+        bindings = dict(contract.get("github_connections", {}))
         for repository in contract["repositories"]:
-            observed = self._provider().read(self.config, "repository", repository)
+            binding = bindings.get(repository)
+            if bind_new and binding is None:
+                binding = self.connections.select(repository, write=github_write, persist=True).binding()
+                bindings[repository] = binding
+            observed = self._github_call("read", dict(action="repository", repository=repository),
+                                         binding=binding, legacy=not bind_new and binding is None)
             if github_write and (observed.get("configured_write") is not True
                     or observed["data"].get("permissions", {}).get("push") is not True):
                 raise Fault("github_not_allowed", "The task repository has no verified current write grant.")
+        if bind_new and bindings:
+            contract["github_connections"] = bindings
 
     def create_task(self, task_id: str, update_id: str, title: str, anchors: list[str], origin: dict,
                     contract: dict, stages: list[dict]) -> dict:
@@ -283,7 +319,7 @@ class Application:
             "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
         with self._admit():
             view = tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
-                                validate_new=self._validate_task_scope)
+                                validate_new=lambda request: self._validate_task_scope(request, bind_new=True))
         self.task_observer.notify()
         return view
 
@@ -316,48 +352,49 @@ class Application:
 
     def github_read(self, action: str, repository: str = "", number: int = 0, ref: str = "", path: str = "",
                     page: int = 1, limit: int = 30, cursor: str = "", expected_head_sha: str = "",
-                    expected_base_sha: str = "", offset: int = 0) -> dict:
-        return self._provider().read(self.config, action, repository, number, ref, path, page, limit, cursor,
-                                     expected_head_sha, expected_base_sha, offset)
+                    expected_base_sha: str = "", offset: int = 0, connection_id: str = "") -> dict:
+        return self._github_call("read", dict(action=action, repository=repository, number=number, ref=ref,
+            path=path, page=page, limit=limit, cursor=cursor, expected_head_sha=expected_head_sha,
+            expected_base_sha=expected_base_sha, offset=offset, connection_id=connection_id))
 
     def github_issue(self, action: Literal["create", "update"], repository: str, title: str | None = None,
                      body: str | None = None, number: int = 0, state: Literal["open", "closed"] | None = None,
-                     expected_updated_at: str = "", task_context: dict | None = None) -> dict:
+                     expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_issue", dict(action=action, repository=repository, title=title,
-                body=body, number=number, state=state, expected_updated_at=expected_updated_at), task_context)
+                body=body, number=number, state=state, expected_updated_at=expected_updated_at, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_pull_request(self, action: Literal["create", "update"], repository: str,
                             title: str | None = None, body: str | None = None, number: int = 0, head: str = "",
                             base: str = "", draft: bool = False, state: Literal["open", "closed"] | None = None,
                             expected_updated_at: str = "", expected_head_sha: str = "",
-                            task_context: dict | None = None) -> dict:
+                            task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_pull_request", dict(action=action, repository=repository,
                 title=title, body=body, number=number, head=head, base=base, draft=draft, state=state,
-                expected_updated_at=expected_updated_at, expected_head_sha=expected_head_sha), task_context)
+                expected_updated_at=expected_updated_at, expected_head_sha=expected_head_sha, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_comment(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
-                       comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None) -> dict:
+                       comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_comment", dict(action=action, repository=repository, body=body,
-                number=number, comment_id=comment_id, expected_updated_at=expected_updated_at), task_context)
+                number=number, comment_id=comment_id, expected_updated_at=expected_updated_at, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_review(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
                       review_id: int = 0, expected_head_sha: str = "",
                       event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
-                      task_context: dict | None = None) -> dict:
+                      task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_review", dict(action=action, repository=repository, body=body,
-                number=number, review_id=review_id, expected_head_sha=expected_head_sha, event=event), task_context)
+                number=number, review_id=review_id, expected_head_sha=expected_head_sha, event=event, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_merge(self, repository: str, number: int, expected_head_sha: str, expected_base_sha: str = "",
                      method: Literal["squash", "merge", "rebase"] = "squash", commit_title: str = "",
-                     commit_message: str = "", task_context: dict | None = None) -> dict:
+                     commit_message: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_merge", dict(repository=repository, number=number,
                 expected_head_sha=expected_head_sha, expected_base_sha=expected_base_sha,
-                method=method, commit_title=commit_title, commit_message=commit_message), task_context)
+                method=method, commit_title=commit_title, commit_message=commit_message, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def control_execution(self, machine: str, execution_id: str, expected_control_seq: int,
                           action: Literal["write_stdin", "interrupt", "resize"], text: str | None = None,

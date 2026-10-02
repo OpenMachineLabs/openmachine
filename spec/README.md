@@ -15,6 +15,7 @@ acceptance receipts remain in the linked Issues, not this index.
 | [#13](https://github.com/OpenMachineLabs/openmachine/issues/13) | `direct_issue_contract`, [maintainer-approved W4 scope](https://github.com/OpenMachineLabs/openmachine/issues/13) | Closed: guarded reads/edits/patches and durable changes; the recorded live-SSH waiver remains historical. |
 | [#32](https://github.com/OpenMachineLabs/openmachine/issues/32) | `direct_issue_contract`, [implementation authorization](https://github.com/OpenMachineLabs/openmachine/issues/32#issuecomment-5918946285) | Closed: MCP 2026-07-28 / SDK 2.2.0 with retained 2025-11-25 compatibility. |
 | [#29](https://github.com/OpenMachineLabs/openmachine/issues/29) | `direct_issue_contract`, [maintainer-approved S3 and final acceptance](https://github.com/OpenMachineLabs/openmachine/issues/29) | Closed: task admission, original-result observation/recovery and scoped Work Events continuation. |
+| [#62](https://github.com/OpenMachineLabs/openmachine/issues/62) | `direct_issue_contract`, [PR1 authorization](https://github.com/OpenMachineLabs/openmachine/issues/62#issuecomment-5953592298) | PR1: runtime-owned existing-gh connections, account bindings and retained-state compatibility. Native authentication remains PR2; Spec stays open. |
 
 ## Survey Issues
 

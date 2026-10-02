@@ -46,6 +46,20 @@ A committed canonical record remains readable when the index is stale. A lost
 durability acknowledgement is uncertain; retain the original task/update IDs and
 observe them, rather than allocating replacement work. No arbitrary overwrite API.
 
+## GitHub account binding
+
+New GitHub task contracts resolve `github_connections` per repository and retain
+`connection_id`, numeric `account_id` and `authorization_revision`. Their format-2
+operation locators keep that exact binding for dispatch and destination recovery.
+Changing the default, disconnecting or reconnecting cannot silently change a task's
+account. Explicit connection selectors must match the accepted binding.
+
+Format-1 records retain their original serialization, request hashes and external
+`gh` policy; reads and continuation never migrate them to a new account. Empty
+optional fields are omitted from legacy canonical bytes. New creation retries
+compare the original caller request, not subsequently resolved connection state.
+Account recovery does not replay a GitHub mutation or renew task authority.
+
 ## Claims, effects and completion
 
 Read the current record, claim its eligible handoff, and carry this context on
@@ -195,7 +209,7 @@ All three actual Work continuation cases are retained in
 command still running, a committed result, and an accepted plan before execution.
 Those are historical account/route-specific results, not acceptance of every new
 candidate. Installation tests, event delivery and actual AI continuation remain
-separate evidence. State contract 9 requires genuine readers of all retained task,
+separate evidence. State contract 10 requires genuine readers of all retained task,
 SSH, managed recovery and Events history before transition, even terminal-only or
 disabled integrations. Never delete evidence to enable an old runtime.
 

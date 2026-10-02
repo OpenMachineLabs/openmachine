@@ -403,9 +403,12 @@ def create(state: Path, identity: str, update_id: str, title: str, anchors: list
             return original
     # Preflight size/expiry before initialization; no task lock spans target reads.
     records.new_record(request, time.time_ns() // 1000000)
+    prepared = deepcopy(request)
     if validate_new is not None:
-        validate_new(request)
-    record = records.new_record(request, time.time_ns() // 1000000)
+        validate_new(prepared)
+    record = records.new_record(prepared, time.time_ns() // 1000000)
+    # Resolved authority is saved, but original-ID retries retain caller intent.
+    record["last_update"]["request_sha256"] = records.digest({"method": "create_task", **request})
     raw = records.canonical(record)
     with _writing(state, initialize=True) as root:
         original = _original_create(root, request)

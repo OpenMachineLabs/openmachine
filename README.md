@@ -12,7 +12,7 @@ Events and tests without changing the public tool contract or persisted formats.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 9 and SSH protocol 6 are compatibility
+current readers accept both. State contract 10 and SSH protocol 6 are compatibility
 contracts, not release versions. Execution retains format 5 and opt-in PTY control.
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
@@ -133,6 +133,13 @@ edits and `om_patch_v1`. Whole-plan preflight is not a multi-file transaction;
 partial/unknown results preserve the original ID and known applied prefix.
 
 ## GitHub collaboration
+
+Current source includes Spec #62 PR1's runtime-owned existing-`gh` connection
+management: explicit attach/list/disconnect, account-bound GitHub requests and
+new task bindings. [Connection operations](docs/operations.md#account-connections)
+work through the existing private MCP; no GUI or new server is required. Native
+GitHub OAuth and refresh remain PR2. This source increment is not a new release
+or evidence that an existing installation has been updated.
 
 [GitHub operations](docs/operations.md#github) use exact scopes and the existing
 account, current-head review gates and destination readback. A self-review is not
