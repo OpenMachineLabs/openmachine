@@ -335,7 +335,8 @@ explains how callers finish already-authorized work without routine handback.
 Task-read `resume_authorized: false` means the read grants no authority, not a
 revocation of current user consent. Recognized preflight rejections with no file
 effects include a derived `recovery_hint`; existing receipts and guards are
-unchanged. This guidance does not implement Spec #29 or restart ended AI turns.
+unchanged. Automatic handoff notifications use the separate Events contract below;
+operating guidance alone never restarts an ended AI turn.
 
 ### Workspace inspection bounds
 
@@ -1027,7 +1028,8 @@ lifespan, independent of client sessions and Desktop. Constructing an Applicatio
 or reading a task does not start it. Startup reconstructs a bounded active set
 from registered canonical records; normal discovery inspects changed metadata
 in pages of at most 50 records/2 MiB, not unchanged historical records forever.
-Terminal records and tasks without pending execution/change operations leave observation.
+Terminal records leave observation. Pending execution/change receipts and subscribed
+handoffs share the bounded active set; other records are not repeatedly polled.
 Unregistered/corrupt history or an incomplete index remains an explicit blocker;
 the observer never repairs the index or converts legacy checkpoints.
 
@@ -1060,10 +1062,10 @@ cancellation retires only when original evidence permits it.
 `read_task` adds passive runtime/execution observations with their evidence ages,
 last material progress, blockers and applicable next attempt. A live observer
 heartbeat is not command progress; a stopped observer has no live retry timer.
-Capability `local_result_observation` is distinct from complete runtime recovery
-and Events delivery, which remain unsupported here. Caller state stays unknown.
-Actual unattended AI continuation and production activation retain their separate
-acceptance; result observation does not restart ChatGPT.
+Capability `local_result_observation` reports original-receipt observation.
+`events_delivery` reports the Events implementation below; it does not assert
+that a particular account, connection or model resumed. Actual unattended AI
+continuation and production activation retain their separate acceptance.
 
 S2.1 extends that same observer to configured SSH targets, exposing
 `ssh_result_observation`. Two additional readers observe original remote receipts
@@ -1080,14 +1082,74 @@ Receipt-specific failures retain their own task budget. Pause, cancellation,
 restart or another task cannot reset either budget. A successful verified read
 clears connection recovery without replaying effects or accepting a task stage.
 
-Controller state contract 8 requires actual candidate-reader coverage before a
+Controller state contract 9 requires actual candidate-reader coverage before a
 managed transition, including terminal-only tasks, retained SSH budgets (even
-after SSH is disabled) and managed MCP recovery history. A first upgrade creates
+after SSH is disabled), managed MCP recovery history and retained Events delivery
+facts. A first upgrade creates
 recovery history atomically with the verified selection, preserving first-upgrade
 rollback after a crash before commit. Retained history rejects an older reader before service
 stop. Task format 1/index 2, execution format 5 and SSH protocol 6
 remain unchanged. An incompatible old runtime
 must not be selected by deleting records or merely changing a version number.
+
+### Task handoff Events (unreleased source)
+
+On MCP `2026-07-28`, the private endpoint advertises `capabilities.events` and
+implements `events/list`, `events/subscribe` and `events/unsubscribe` through
+SDK 2.2's public extension API. The sole event is `task.handoff_ready`, filtered
+by exactly `{task_id}`. Its payload contains only `task_id`, `handoff_id`,
+`task_revision`, `plan_revision` and `reason`; the full envelope is at most 4 KiB.
+There is no replay cursor. Legacy MCP clients retain their existing tools.
+
+This is single-user private Tunnel/native-account authority. Every connected
+chat shares that account's configured grants. Anonymous subject/session metadata
+is not authorization, and claim epochs do not isolate mutually untrusted chats.
+Do not expose the endpoint to untrusted users. Multi-user OAuth is outside this
+increment. The supported platform contract is ChatGPT Work Events; generic chats,
+local Codex and unsupported accounts have no automatic-wake guarantee.
+
+Subscribe only to an existing, active structured task with an unexpired grant.
+Callbacks require a signed challenge, HTTPS, public-address resolution at every
+connection, address pinning, hostname-verified TLS and no redirects. DNS setups
+that return synthetic/private addresses must supply a normal public resolution
+path before use; Open Machine does not bypass that guard. Subscription secrets
+and callback URLs remain in private `events.json`, outside task views. There are
+at most 64 subscriptions; refresh preserves identity and delivery budgets, TTL is
+at most one hour or task expiry, and verification caching/dual-key rotation last
+at most five minutes. Unsubscribe is idempotent and invalidates in-flight receipts.
+
+The existing observer dispatches at most two webhook exchanges, one per
+subscription, without holding task locks over network IO. An unexpired claim
+defers delivery. Before every send, current task and lifecycle admission are
+checked and retry accounting is durably reserved. Retries preserve event ID,
+payload and occurrence time across restart: four fast attempts with 1/2/4-second
+delays, then 60-second cooldown with jitter, at most one hour/60 attempts or
+earlier expiry. Shared connection failures coalesce. Verification is limited to
+two outstanding exchanges and five seconds; delivery is ten seconds. A timed-out
+thread retains its slot until actual exit. Responses are bounded to 4 KiB;
+410/413, permanent refusal and revoked/expired grants do not retry.
+
+A webhook 2xx means receipt only. `read_task` separately exposes delivered,
+read-observed, claimed and next-intent-admitted facts, with the relevant event,
+handoff and operation IDs. A newer obligation is identified separately by
+`pending_handoff_id`; old delivery facts never authorize it. Reads queue only an
+in-memory observation; the service observer may persist it without changing the
+canonical task revision. Reads never claim or start work. After an acknowledged
+event, Open Machine does not resend to force the AI awake; missing takeover is
+blocked after 15 minutes or earlier expiry.
+
+The resumed caller reads the original task and receipts, claims its current
+handoff through `control_task`, and submits the next authorized effect using
+current `task_context`. Late/duplicate events must follow these same guards.
+Pause suppresses notification admission; terminal retirement releases task
+subscriptions. Already admitted exchanges can still return late receipts but
+cannot reactivate stopped work. No model loop, broker or new daemon is introduced.
+Retained Events history must pass the actual candidate-reader check before a
+managed transition; deleting it to permit an older reader is not rollback.
+
+Installed-wheel/SDK tests exercise the implementation. Actual Work continuation
+for the three Issue #29 interruption cases remains a separate acceptance gate;
+passing local tests does not close that Spec or authorize a release/deployment.
 
 Legacy `save_task` creates at revision zero and updates only the observed revision. It
 serializes saves under one stable store lock; an identical retry of the latest

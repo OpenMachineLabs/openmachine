@@ -203,8 +203,8 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     async with Client(self.client(), mode=mode, cache=None) as client:
                         view = await self.observer_task_view(client, identity)
                         self.assertTrue(view["support"]["local_result_observation"])
-                        self.assertFalse(view["support"]["events_delivery"])
-                        self.assertEqual(view["observations"][0]["state"], "unknown")
+                        self.assertTrue(view["support"]["events_delivery"])
+                        self.assertEqual(view["observations"][0]["state"], "unsubscribed")
                         original = (await client.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})).structured_content
                         self.assertEqual(original["created_at"], started["created_at"])
                         self.assertEqual(original["status"], "succeeded")
@@ -421,10 +421,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 8)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 9)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
-                self.assertFalse(caps["tasks"]["events_delivery"])
+                self.assertTrue(caps["tasks"]["events_delivery"])
         snapshots = {identity: (self.state / "tasks" / identity / "task.json").read_bytes() for identity in retained}
         self.stop(self.processes[-1])
         self.launch()
@@ -435,7 +435,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
             for identity, record in retained.items():
                 read = (await client.call_tool("read_task", {"task_id": identity})).structured_content
                 self.assertEqual(read["record"], record)
-                self.assertEqual(read["observations"][0]["state"], "unknown")
+                self.assertEqual(read["observations"][0]["state"], "unsubscribed")
                 self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), snapshots[identity])
 
     async def test_canonical_contract_rejects_runtime_fields_and_invalid_bindings_on_both_protocols(self):
@@ -1747,7 +1747,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("untrusted-sentinel", response.text)
                 for method in ("events/list", "events/subscribe", "events/unsubscribe"):
                     response = await self.wire_call(client, method, {})
-                    self.assertEqual(response.json()["error"]["code"], -32601)
+                    if version == "2026-07-28" and method == "events/list":
+                        self.assertEqual(response.json()["result"]["events"][0]["name"], "task.handoff_ready")
+                    else:
+                        self.assertEqual(response.json()["error"]["code"], -32602 if version == "2026-07-28" else -32601)
         self.assertFalse((self.state / "executions").exists())
         self.assertFalse((self.state / "tasks").exists())
 
@@ -1837,10 +1840,10 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(probe.private_socket(str(self.socket)), self.socket)
         async with self.wire_client(probe.PROTOCOL) as client:
             report = await probe.observe(client)
-        self.assertEqual(report["discovery"], "blocked")
+        self.assertEqual(report["discovery"], "ready")
         self.assertTrue(report["protocol_supported"])
-        self.assertFalse(report["events_advertised"])
-        self.assertEqual(report["method_errors"]["events/list"], -32601)
+        self.assertTrue(report["events_advertised"])
+        self.assertIsNone(report["method_errors"]["events/list"])
         self.assertEqual(report["ai_continuation"], "not_run")
         self.assertFalse((self.state / "tasks").exists())
         self.assertFalse((self.state / "executions").exists())
@@ -1849,6 +1852,61 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
         for path in (str(alias), str(self.config), "relative.sock"):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 probe.private_socket(path)
+
+    async def test_delivered_events_extension_discovers_verifies_and_revokes_on_public_sdk(self):
+        import base64
+        from integrations import events
+        from openmachine.bootstrap import create_application
+        from openmachine.config import load
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        self.stop_all()
+        application = create_application(load(self.config), self.state)
+        context = application.read_workspace_file("desktop", "example", "AGENTS.md")["context"]
+        application.create_task(**self.task_request(context, "events-sdk"))
+        with patch.object(server, "create_application", return_value=application):
+            runtime = server.create_server(load(self.config), self.state)
+        app = runtime.streamable_http_app(json_response=True, stateless_http=True,
+            transport_security=TransportSecuritySettings(allowed_hosts=["localhost"]))
+        params = {"name": "task.handoff_ready", "arguments": {"task_id": "events-sdk"}, "cursor": None,
+            "delivery": {"mode": "webhook", "url": "https://callback.example/event",
+                         "secret": "whsec_" + base64.b64encode(b"s" * 32).decode()}}
+        def callback(url, body, *args):
+            value = json.loads(body)
+            return (200, json.dumps({"challenge": value["challenge"]}).encode(), None) if value.get("type") == "verification" else (204, b"", None)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), trust_env=False, timeout=6,
+                    headers={"MCP-Protocol-Version": "2026-07-28", "accept": "application/json, text/event-stream"}) as client:
+                discovery = (await self.wire_call(client, "server/discover", {})).json()["result"]
+                self.assertEqual(discovery["capabilities"]["events"], {})
+                catalog = (await self.wire_call(client, "events/list", {})).json()["result"]
+                self.assertEqual([event["name"] for event in catalog["events"]], ["task.handoff_ready"])
+                for error_params in (params | {"cursor": "replay"}, params | {"principal": "forged"}, params | {"principal": None}):
+                    invalid = (await self.wire_call(client, "events/subscribe", error_params)).json()
+                    self.assertEqual(invalid["error"]["code"], -32602)
+                with patch.object(events, "post", return_value=(200, b'{"challenge":"wrong"}', None)):
+                    rejected = (await self.wire_call(client, "events/subscribe", params)).json()
+                    self.assertEqual(rejected["error"]["code"], -32015)
+                with patch.object(events, "post", side_effect=callback):
+                    subscribed = (await self.wire_call(client, "events/subscribe", params)).json()["result"]
+                    repeat_reply = (await self.wire_call(client, "events/subscribe", params)).json()
+                    self.assertIn("result", repeat_reply, repeat_reply)
+                    repeated = repeat_reply["result"]
+                    self.assertEqual(subscribed["id"], repeated["id"])
+                    self.assertIsNone(subscribed["cursor"])
+                    self.assertFalse(subscribed["truncated"])
+                    # No private signing material or callback URL in the task view.
+                    read = (await self.wire_call(client, "tools/call", {"name": "read_task", "arguments": {"task_id": "events-sdk"}})).json()
+                    self.assertNotIn(params["delivery"]["secret"], json.dumps(read))
+                    self.assertNotIn(params["delivery"]["url"], json.dumps(read))
+                    unsubscribe = {"name": params["name"], "arguments": params["arguments"],
+                                   "delivery": {"mode": "webhook", "url": params["delivery"]["url"]}}
+                    for _ in range(2):
+                        reply = (await self.wire_call(client, "events/unsubscribe", unsubscribe)).json()["result"]
+                        self.assertEqual({k: v for k, v in reply.items() if k not in {"_meta", "resultType"}}, {})
+                self.assertEqual(application.events.task_ids(), set())
+                client.headers["MCP-Protocol-Version"] = "2025-11-25"
+                self.assertEqual((await self.wire_call(client, "events/list", {})).json()["error"]["code"], -32601)
 
     async def test_task_events_public_sdk_seam_is_not_subscription_acceptance(self):
         from importlib.metadata import version

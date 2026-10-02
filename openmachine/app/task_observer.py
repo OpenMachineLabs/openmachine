@@ -135,6 +135,14 @@ class _Read:
     contacted: bool = False
 
 
+@dataclass
+class _Delivery:
+    task_id: str
+    started_at_ms: int
+    thread: threading.Thread | None = None
+    error: str | None = None
+
+
 class TaskObserver:
     """One coordinator, four local and two SSH readers, one per pinned target."""
 
@@ -152,6 +160,10 @@ class TaskObserver:
         self._last: dict[str, dict[str, int]] = {}
         self._errors: dict[str, str] = {}
         self._reads: dict[str, _Read] = {}
+        self._deliveries: dict[str, _Delivery] = {}
+        self._event_tasks: set[str] = set()
+        self._event_errors: dict[str, str] = {}
+        self._event_refresh: set[str] = set()
         self._connections: dict[str, dict | None] = {}
         self._discover_at = 0
         self._discovery_error = None
@@ -177,6 +189,9 @@ class TaskObserver:
             self._last.clear()
             self._errors.clear()
             self._connections.clear()
+            self._event_tasks.clear()
+            self._event_errors.clear()
+            self._event_refresh.clear()
             self._discovery_error = None
             self._admission_at = 0
             self._admission_error = None
@@ -193,7 +208,10 @@ class TaskObserver:
         # A blocked daemon reader cannot be killed safely. The coordinator retains
         # the owner lease until it exits, but never publishes after stopping.
 
-    def notify(self) -> None:
+    def notify(self, task_id: str | None = None) -> None:
+        if task_id is not None:
+            with self._lock:
+                self._event_refresh.add(task_id)
         self._dirty.set()
         self._wake.set()
 
@@ -201,7 +219,8 @@ class TaskObserver:
         with self._lock:
             self._snapshot = {"state": state, "observed_at_ms": now_ms(), "blocker": blocker or self._admission_error,
                 "active": dict(self._active), "last": dict(self._last), "errors": dict(self._errors),
-                "connections": dict(self._connections)}
+                "connections": dict(self._connections), "event_errors": dict(self._event_errors),
+                "deliveries": {key: job.started_at_ms for key, job in self._deliveries.items()}}
 
     def _run(self) -> None:
         failure = None
@@ -214,7 +233,7 @@ class TaskObserver:
             locks = private_directory(self.app.state / "locks")
             with lease(locks / "task-observer.lock"):
                 try:
-                    while not self._stop.is_set() or self._reads:
+                    while not self._stop.is_set() or self._reads or self._deliveries:
                         self._harvest()
                         if self._stop.is_set():
                             for read in self._reads.values():
@@ -233,13 +252,15 @@ class TaskObserver:
                     failure = error_code(error)
                 finally:
                     self._stop.set()
-                    while any(read.thread is not None and read.thread.is_alive() for read in self._reads.values()):
+                    while any(read.thread is not None and read.thread.is_alive()
+                              for read in (*self._reads.values(), *self._deliveries.values())):
                         for read in self._reads.values():
                             read.stop.set()
                         self._status("blocked" if failure else "stopping", failure)
                         self._wake.wait(0.05)
                         self._wake.clear()
                     self._reads.clear()
+                    self._deliveries.clear()
         except Exception as error:
             failure = error_code(error)
         # Even an unexpected coordinator fault drains readers INSIDE the owner
@@ -247,6 +268,16 @@ class TaskObserver:
         self._status("blocked" if failure else "stopped", failure)
 
     def _discover(self, now: int) -> None:
+        with self._lock:
+            refreshed, self._event_refresh = self._event_refresh, set()
+        for identity in refreshed:
+            self._known.pop(identity, None)
+        if self.app.events is not None:
+            subscribed = self.app.events.task_ids()
+            for identity in subscribed ^ self._event_tasks:
+                self._known.pop(identity, None)
+            self._event_tasks = subscribed
+            self._event_errors = {key: value for key, value in self._event_errors.items() if key in subscribed}
         page = tasks.observation_page(self.app.state, self._known)
         present = set(page["identities"])
         self._known = {key: value for key, value in self._known.items() if key in present}
@@ -257,12 +288,16 @@ class TaskObserver:
                 self._errors[identity] = entry["error"]
             else:
                 record = entry["record"]
-                if record["terminal"] is not None or not pending(record):
+                self._event_errors.pop(identity, None)
+                if record["terminal"] is not None and identity in self._event_tasks:
+                    with self.app._admit():
+                        self.app.events.retire(identity)
+                if record["terminal"] is not None or not (pending(record) or self._wants_event(record)):
                     self._active.pop(identity, None)
                     self._last.pop(identity, None)
                     self._errors.pop(identity, None)
                 elif identity in self._active or len(self._active) < MAX_ACTIVE:
-                    self._active.setdefault(identity, now)
+                    self._active[identity] = now
                     self._errors.pop(identity, None)
                 else:
                     self._errors[identity] = "task_observer_capacity"
@@ -291,6 +326,9 @@ class TaskObserver:
             self._admission_at = now + INTERVAL_MS if self._admission_error in {"resource_busy", "activation_pending"} else records.MAX_INTEGER
             return
         self._admission_error = None
+        if self.app.events is not None:
+            with self.app._admit():
+                self.app.events.flush_reads()
         for identity in sorted(self._active, key=lambda key: (self._active[key], key)):
             if self._stop.is_set():
                 break
@@ -299,9 +337,13 @@ class TaskObserver:
             try:
                 view = tasks.read(self.app.state, identity)
                 record = view["record"]
-                if record["terminal"] is not None or not pending(record):
+                if record["terminal"] is not None or not (pending(record) or self._wants_event(record)):
                     self._active.pop(identity, None)
                     self._last.pop(identity, None)
+                    continue
+                self._schedule_events(record, now)
+                if not pending(record):
+                    self._active[identity] = now + INTERVAL_MS
                     continue
                 targets = {item["locator"]["target_identity"] for item in pending(record)}
                 if len(targets) != 1:
@@ -456,6 +498,17 @@ class TaskObserver:
             self._last.pop(identity, None)
 
     def _harvest(self) -> None:
+        for identity, job in list(self._deliveries.items()):
+            if not job.thread.is_alive():
+                if job.error in {"resource_busy", "task_conflict", "activation_pending"}:
+                    self._active[job.task_id] = now_ms() + INTERVAL_MS
+                elif job.error is not None:
+                    self._event_errors[job.task_id] = job.error
+                else:
+                    # Private delivery facts changed without a task revision.
+                    self._known.pop(job.task_id, None)
+                    self._dirty.set()
+                del self._deliveries[identity]
         for identity, read in list(self._reads.items()):
             finished = not read.thread.is_alive()
             timeout = not finished and not read.timed_out and time.monotonic() - read.started >= (SSH_READ_SECONDS if read.target else READ_SECONDS)
@@ -480,6 +533,127 @@ class TaskObserver:
             if finished:
                 # A deadline or a cancelled await never frees this slot early.
                 del self._reads[identity]
+
+    def _wants_event(self, record: dict) -> bool:
+        eligible = (record["task_id"] in self._event_tasks and record["handoff"] is not None
+                and record["control"]["stop_intent"] == "none"
+                and record["task_id"] not in self._event_errors
+                and record["contract"]["expires_at_ms"] > now_ms())
+        if not eligible:
+            return False
+        now = now_ms()
+        for fact in self.app.events.facts(record["task_id"]):
+            if fact["expires_at_ms"] <= now:
+                continue
+            delivery = fact["delivery"]
+            if delivery is None or delivery["payload"]["handoff_id"] != record["handoff"]["id"]:
+                connection = fact["connection"]
+                if connection is None or connection["attempts"] < 60 and now < connection["deadline_ms"]:
+                    return True
+                continue
+            if delivery["accepted_at_ms"] is not None:
+                if now < delivery["accepted_at_ms"] + 900000:
+                    return True
+            elif (delivery["blocker"] is None and delivery["budget"]["attempts"] < 60
+                  and now < delivery["budget"]["deadline_ms"]):
+                connection = fact["connection"]
+                if connection is None or connection["attempts"] < 60 and now < connection["deadline_ms"]:
+                    return True
+        return False
+
+    def _schedule_events(self, record: dict, now: int) -> None:
+        if not self._wants_event(record) or len(self._deliveries) >= 2:
+            return
+        owner = record["control"]["owner"]
+        if owner is not None and owner["expires_at_ms"] > now:
+            return
+        for identity in self.app.events.due(record["task_id"], record["handoff"]["id"], now):
+            if identity in self._deliveries or len(self._deliveries) >= 2:
+                continue
+            job = _Delivery(record["task_id"], now)
+            job.thread = threading.Thread(target=self._deliver, args=(identity, job), name="om-task-event", daemon=True)
+            self._deliveries[identity] = job
+            job.thread.start()
+
+    def _deliver(self, identity: str, job: _Delivery) -> None:
+        try:
+            self.app.deliver_task_event(identity, job.task_id, self._stop)
+        except Exception as error:
+            job.error = error_code(error)
+        finally:
+            self._wake.set()
+
+    def _caller(self, record: dict, snapshot: dict, now: int) -> list[dict]:
+        observation = {"kind": "caller", "state": "unsubscribed", "source": "task_events",
+            "observed_at_ms": now, "last_progress_at_ms": None, "next_attempt_at_ms": None,
+            "blocker": None}
+        try:
+            facts = self.app.events.facts(record["task_id"])
+        except Fault as error:
+            return [dict(observation, state="blocked", blocker=error.code)]
+        if not facts:
+            return [dict(observation, state="retired" if record["terminal"] is not None else "unsubscribed")]
+        result = []
+        for fact in facts:
+            item = dict(observation, subscription_id=fact["subscription_id"], state="pending")
+            delivery = fact["delivery"]
+            if delivery is None and fact["connection"] is not None:
+                connection = fact["connection"]
+                ended = connection["attempts"] >= 60 or now >= connection["deadline_ms"]
+                item.update(state="blocked" if ended else "pending",
+                    blocker="delivery_budget_exhausted" if ended else None,
+                    next_attempt_at_ms=None if ended else connection["next_attempt_ms"])
+            if delivery is not None:
+                budget = delivery["budget"]
+                item.update(event_id=delivery["id"], handoff_id=delivery["payload"]["handoff_id"],
+                    accepted_at_ms=delivery["accepted_at_ms"], read_at_ms=delivery["read_at_ms"],
+                    attempts=budget["attempts"], deadline_ms=budget["deadline_ms"])
+                current_handoff = (record["handoff"] or {}).get("id")
+                item["pending_handoff_id"] = current_handoff if current_handoff != delivery["payload"]["handoff_id"] else None
+                admitted = [op for op in record["operations"] if op["epoch"] > delivery["epoch"]
+                    and op["plan_revision"] == delivery["payload"]["plan_revision"]
+                    and op["admitted_at_ms"] >= delivery["occurred_at_ms"]]
+                owner = record["control"]["owner"]
+                claimed = (owner is not None and record["control"]["epoch"] > delivery["epoch"]
+                           and current_handoff == delivery["payload"]["handoff_id"]
+                           and record["plan"]["revision"] == delivery["payload"]["plan_revision"])
+                if admitted:
+                    item.update(state="next_intent_admitted", operation_id=admitted[0]["id"],
+                                last_progress_at_ms=admitted[0]["admitted_at_ms"])
+                elif claimed:
+                    item.update(state="claimed", last_progress_at_ms=record["updated_at_ms"])
+                    if owner["expires_at_ms"] <= now:
+                        item.update(state="blocked", blocker="continuation_claim_expired")
+                elif (record["plan"]["revision"] != delivery["payload"]["plan_revision"]
+                      or current_handoff != delivery["payload"]["handoff_id"]):
+                    item.update(state="superseded")
+                elif delivery["accepted_at_ms"] is not None:
+                    item.update(state="read_observed" if delivery["read_at_ms"] else "delivered",
+                        last_progress_at_ms=delivery["read_at_ms"] or delivery["accepted_at_ms"])
+                    if now >= min(fact["expires_at_ms"], delivery["accepted_at_ms"] + 900000):
+                        item.update(state="blocked", blocker="claim_wait_expired")
+                else:
+                    connection = fact["connection"]
+                    ended = now >= budget["deadline_ms"] or budget["attempts"] >= 60
+                    connection_ended = connection is not None and (now >= connection["deadline_ms"] or connection["attempts"] >= 60)
+                    blocker = delivery["blocker"] or ("delivery_budget_exhausted" if ended or connection_ended else None)
+                    item.update(state="blocked" if blocker else "retrying", blocker=blocker,
+                        next_attempt_at_ms=None if blocker else max(budget["next_attempt_ms"], (connection or {}).get("next_attempt_ms", 0)))
+            blocker = snapshot.get("event_errors", {}).get(record["task_id"])
+            started = snapshot.get("deliveries", {}).get(fact["subscription_id"])
+            if started is not None and now >= started + 10000:
+                blocker = "callback_still_outstanding"
+            if record["terminal"] is not None or record["control"]["stop_intent"] != "none":
+                item.update(state="retired" if record["terminal"] else "paused", next_attempt_at_ms=None, blocker=None)
+            elif now >= min(fact["expires_at_ms"], record["contract"]["expires_at_ms"]):
+                item.update(state="blocked", next_attempt_at_ms=None, blocker="subscription_expired")
+            elif blocker:
+                item.update(state="blocked", next_attempt_at_ms=None, blocker=blocker)
+            if (snapshot["state"] != "running" or snapshot["observed_at_ms"] is None
+                    or now - snapshot["observed_at_ms"] > 2 * INTERVAL_MS):
+                item["next_attempt_at_ms"] = None
+            result.append(item)
+        return result
 
     def project(self, view: dict) -> dict:
         if "record" not in view:
@@ -521,7 +695,7 @@ class TaskObserver:
             next_attempt = None
         if ssh and next_attempt is not None and next_attempt >= record["contract"]["expires_at_ms"]:
             next_attempt = None
-        observations = list(view["observations"])
+        observations = self._caller(record, snapshot, now) if self.app.events is not None else list(view["observations"])
         observations.append({"kind": "runtime", "state": state, "source": "ssh_task_observer" if ssh else "local_task_observer",
             "observed_at_ms": snapshot["observed_at_ms"],
             "last_progress_at_ms": max((item["observed_at_ms"] or 0 for item in record["operations"]), default=0) or None,
@@ -543,4 +717,5 @@ class TaskObserver:
                 "last_progress_at_ms": operation["observed_at_ms"], "next_attempt_at_ms": None,
                 "blocker": "Original state is last-known; no current result is verified." if stale else None})
         return {**view, "support": {**view["support"], "local_result_observation": True,
+            "events_delivery": self.app.events is not None,
             "ssh_result_observation": self.app.machines.ssh_recovery is not None}, "observations": observations}

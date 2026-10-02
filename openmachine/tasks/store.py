@@ -100,21 +100,29 @@ def _view(root: Path, record: dict, raw: bytes, *, index_status: str | None = No
                 "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
 
 
-def read(state: Path, identity: str) -> dict:
+@contextmanager
+def locked_read(state: Path, identity: str):
+    """Hold a canonical read stable during a short, non-network admission."""
     task_id(identity)
     with _reading(state) as root:
         if root is None:
             raise Fault("tasks_uninitialized", "This private task store has not been initialized.")
         if os.path.lexists(root / identity / "task.json"):
             record, raw = read_structured(root, identity)
-            return _view(root, record, raw)
+            yield _view(root, record, raw)
+            return
         index = read_index(root)
         if index["tasks"].get(identity, {}).get("owner") == "structured":
             raise Fault("corrupt_tasks", "The canonical record is missing; legacy fallback is forbidden.")
         item, raw = read_checkpoint(root, index, identity)
         body = raw.decode("utf-8")
-        return {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
+        yield {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
                 "generation": index["generation"], "resume_authorized": False}
+
+
+def read(state: Path, identity: str) -> dict:
+    with locked_read(state, identity) as view:
+        return view
 
 
 def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from integrations.events import Events
 from openmachine.app import Application
 from openmachine.app.machines import Machines
 from openmachine.config import Settings
@@ -19,4 +20,4 @@ def create_application(config: Settings, state: Path) -> Application:
     if config.github is not None:
         from integrations import github
         provider = github
-    return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider)
+    return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider, Events(state))
