@@ -7,8 +7,8 @@ An open-source runtime for AI to operate your machines.
 Open Machine v0.2.6 keeps the accepted v0.2.5 runtime contracts while simplifying
 their implementation and documentation. PR #60 splits the macOS service lifecycle
 into focused state, checks, install, runtime and transition owners. PR #61 reduces
-historical guidance and mixed responsibilities across workspace, tasks, GitHub,
-Events and tests without changing the public tool contract or persisted formats.
+historical guidance and mixed responsibilities across workspace, tasks, GitHub
+and tests without changing the public tool contract or persisted formats.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
@@ -18,10 +18,12 @@ Inspect installed capabilities; a checkout or version label alone is not evidenc
 that the client exposes the current tools.
 
 Version `0.2.6` is an initial-development release, not a stable 1.x API promise.
-Spec #32 remains the MCP SDK 2.2.0 migration baseline. Retained task, recovery and
-Events history requires a compatible state reader before a managed update or
-rollback. Automatic continuation is accepted only on the recorded Work route;
-other clients, cross-chat isolation and production deployment remain separate.
+Spec #32 remains the MCP SDK 2.2.0 migration baseline. The current source removes
+Work MCP Events and automatic caller wake. Ordinary Chat tools and explicit
+continuation of the same task remain available; an ended Chat turn is not
+automatically restarted. Retained task, recovery, connection and retired Events
+archive readers still guard managed updates and rollback. This source change
+does not deploy a runtime or add browser-based recovery.
 
 Managed services support logged-in macOS controllers. Linux supports manual
 `serve` and configured SSH workers; managed Linux services and Windows are not
@@ -162,8 +164,8 @@ Instructions and resources do not install tools or confer permissions.
 ## Durable task continuity
 
 [Task operations](docs/tasks.md) explain contracts/claims, legacy checkpoints,
-original-result recovery, index maintenance and task handoff Events. Notification,
-readback, claim and actual next intent are different facts.
+original-result recovery, index maintenance and explicit Chat continuation. A
+persisted handoff, readback, claim and actual next intent are different facts.
 
 ## Development and review
 
@@ -176,7 +178,7 @@ readback, claim and actual next intent are different facts.
 | `tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
 | `service/` | Installation, compatibility/readiness, supervision and activation/restoration. |
 | `foundation/` | Shared IO, private state, locks and safe errors; no domain ownership. |
-| `integrations/` | Complete GitHub, SSH and Events implementations; no second engine. |
+| `integrations/` | Complete GitHub and SSH implementations; no second engine. |
 
 Workspace preparation and record ownership are separate from application.
 Task models remain in `records.py`; pure decisions live in `transitions.py`.

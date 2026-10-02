@@ -65,13 +65,20 @@ fence external editors or another runtime/state root.
 
 Protocol 1/state contract 11 are not proof of compatibility. Actual readers must
 cover every retained execution, task, workspace format, SSH budget, managed
-recovery, Events and connection record, even terminal-only history or disabled
+recovery, retired Events archive and connection record, even terminal-only history or disabled
 integrations. Native connection format 2 needs the contract-11 reader; old-only
 format-1 connection state retains its exact hash for supported prior readers.
 Metadata checks do not read or print credential values and do not prove live OAuth.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
+
+The removed Work adapter leaves any private `events.json` and its original lock
+untouched. Lifecycle checks validate the bounded archive envelope and canonical
+fingerprint without interpreting or scheduling its nested delivery records.
+`events_retired: true` is required from a candidate when that archive exists;
+older candidates that could reactivate Work notifications are rejected. No task,
+connection, execution or workspace format changes as part of this retirement.
 
 Remote updates are explicit: new requests need a matching checksum-named endpoint;
 preserve old archives/interpreters and original-ID read/cancel routes. Offline,

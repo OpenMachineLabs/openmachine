@@ -97,8 +97,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     async with Client(self.client(), mode=mode, cache=None) as client:
                         view = await self.observer_task_view(client, identity)
                         self.assertTrue(view["support"]["local_result_observation"])
-                        self.assertTrue(view["support"]["events_delivery"])
-                        self.assertEqual(view["observations"][0]["state"], "unsubscribed")
+                        self.assertFalse(view["support"]["events_delivery"])
+                        self.assertEqual(view["observations"][0]["state"], "unknown")
                         original = (await client.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})).structured_content
                         self.assertEqual(original["created_at"], started["created_at"])
                         self.assertEqual(original["status"], "succeeded")
@@ -318,7 +318,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caps["lifecycle"]["state_contract"], 11)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
-                self.assertTrue(caps["tasks"]["events_delivery"])
+                self.assertFalse(caps["tasks"]["events_delivery"])
         snapshots = {identity: (self.state / "tasks" / identity / "task.json").read_bytes() for identity in retained}
         self.stop(self.processes[-1])
         self.launch()
@@ -329,7 +329,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             for identity, record in retained.items():
                 read = (await client.call_tool("read_task", {"task_id": identity})).structured_content
                 self.assertEqual(read["record"], record)
-                self.assertEqual(read["observations"][0]["state"], "unsubscribed")
+                self.assertEqual(read["observations"][0]["state"], "unknown")
                 self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), snapshots[identity])
 
     async def test_canonical_contract_rejects_runtime_fields_and_invalid_bindings_on_both_protocols(self):

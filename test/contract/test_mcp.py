@@ -353,10 +353,12 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("untrusted-sentinel", response.text)
                 for method in ("events/list", "events/subscribe", "events/unsubscribe"):
                     response = await self.wire_call(client, method, {})
-                    if version == "2026-07-28" and method == "events/list":
-                        self.assertEqual(response.json()["result"]["events"][0]["name"], "task.handoff_ready")
-                    else:
-                        self.assertEqual(response.json()["error"]["code"], -32602 if version == "2026-07-28" else -32601)
+                    self.assertEqual(response.json()["error"]["code"], -32601)
+                if version == "2026-07-28":
+                    discovery = (await self.wire_call(client, "server/discover", {})).json()["result"]
+                    self.assertNotIn("events", discovery["capabilities"])
+        self.assertFalse((self.state / "events.json").exists())
+        self.assertFalse((self.state / "locks/events.lock").exists())
         self.assertFalse((self.state / "executions").exists())
         self.assertFalse((self.state / "tasks").exists())
 

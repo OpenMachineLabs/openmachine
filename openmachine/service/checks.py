@@ -1,10 +1,12 @@
 """Actual state readers, candidate compatibility and bounded readiness checks."""
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -12,6 +14,7 @@ import time
 from openmachine import __version__, execution, tasks, workspace
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease
 
 from . import state as service_state
 from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
@@ -44,10 +47,56 @@ def _connections_state(state: Path) -> dict:
 
 
 def _events_state(state: Path) -> dict:
-    if os.path.lexists(state / "events.json") or os.path.lexists(state / "locks/events.lock"):
-        from integrations.events import check_state as check_events
-        return check_events(state)
-    return {"events_present": False, "events_format": 1, "events_subscriptions": 0, "events_sha256": None}
+    """Fingerprint a retired private archive; never load callbacks as live work."""
+    path, lock = state / "events.json", state / "locks/events.lock"
+    absent = {"events_present": False, "events_format": 1, "events_subscriptions": 0,
+              "events_sha256": None, "events_retired": True}
+    if not os.path.lexists(path) and not os.path.lexists(lock):
+        return absent
+
+    def private(path, directory=False):
+        info = path.lstat()
+        if (not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1)
+                or info.st_uid != os.getuid() or info.st_mode & 0o077):
+            raise ValueError("unsafe retired archive")
+        return info
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate archive key")
+            result[key] = value
+        return result
+
+    try:
+        private(state, True)
+        private(lock.parent, True)
+        private(lock)
+        with lease(lock, shared=True, create=False):
+            before = private(path)
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if ((info.st_dev, info.st_ino) != (before.st_dev, before.st_ino)
+                        or info.st_size > 524288):
+                    raise ValueError("archive identity or size changed")
+                raw = stream.read(524289)
+            if len(raw) > 524288:
+                raise ValueError("archive exceeds capacity")
+            value = json.loads(raw, object_pairs_hook=pairs)
+            if (not isinstance(value, dict) or set(value) != {"format", "subscriptions", "connections"}
+                    or type(value["format"]) is not int or value["format"] != 1
+                    or any(not isinstance(value[key], dict) or len(value[key]) > 64
+                           for key in ("subscriptions", "connections"))):
+                raise ValueError("unsupported retired archive envelope")
+            # Match the former reader's canonical fingerprint for original writer
+            # records. Nested delivery data stays opaque and is never scheduled.
+            fingerprint = hashlib.sha256(json.dumps(value, sort_keys=True,
+                separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+            return {**absent, "events_present": True,
+                    "events_subscriptions": len(value["subscriptions"]), "events_sha256": fingerprint}
+    except (OSError, ValueError, TypeError, RecursionError) as error:
+        raise Fault("events_corrupt", "Retired Events history is missing, unsafe or corrupt; preserve it without activation.") from error
 
 
 def _ssh_recovery_state(state: Path) -> dict:
@@ -96,7 +145,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
         events = _events_state(state)
         if events["events_present"] and (value["state_contract"] < 9 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):
-            raise ValueError("candidate ignores or changes retained Events delivery budgets")
+            raise ValueError("candidate cannot preserve retired Events history without reactivating delivery")
         recovery = _ssh_recovery_state(state)
         if recovery["ssh_recovery_present"] and (value["state_contract"] < 7 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in recovery.items())):

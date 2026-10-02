@@ -42,7 +42,8 @@ request; use evidence to change the approach, or report the blocker when no safe
 progress remains. Never promise background continuation after ending the turn.
 
 These are caller instructions, not an autonomous supervisor or a guarantee that
-an ended ChatGPT turn will restart. That separate capability belongs to Spec #29.
+an ended ChatGPT turn will restart. Open Machine has no automatic caller wake;
+explicit continuation still reads and claims the original task safely.
 
 ## Operating steps
 
@@ -160,7 +161,8 @@ intent, select an exact wheel/lock, and never replace a live environment in plac
 Use explicit `update --candidate-config` for new routes; do not pre-edit the active
 file. Retain exact snapshots. Candidate local/target readers must accept every
 retained format before stop, including terminal tasks, workspace formats 1/2, SSH
-budgets, managed recovery, Events and connections. State contract 10 is not a version label.
+budgets, managed recovery, retired Events archives and connections. A version
+label alone is not compatibility evidence.
 Never delete history or replace stable locks to pass a gate. Idle PTYs and legacy
 non-Git lease compatibility can block transitions; let their original owners finish.
 
@@ -265,7 +267,7 @@ follow-up is a linked new task. GitHub original-destination lookup is bounded to
 three 100-item pages; duplicate/partial/bodyless unknown effects can remain blocked.
 Receipt hashes cover semantic observations, not copied raw logs or source.
 
-## Observation, recovery and Events
+## Observation and recovery
 
 The service observer reads only admitted command/control/cancel/change results.
 Result and handoff publish together, not stage acceptance, new effects or AI calls.
@@ -287,30 +289,6 @@ valid managed budget after diagnosis. The parent replaces only its verified MCP
 child after durable accounting, leaving independent workers. This is not Tunnel
 or AI-loop recovery. Receipt failures and shared connection failures keep separate
 budgets; no configuration repair or workload replay is implicit.
-
-On supported Work Events routes, subscribe to task.handoff_ready for exactly
-{task_id} after the bounded contract. Single-user private/native-account authority
-means connected chats share grants; anonymous subject/session fields are not a
-principal or cross-chat isolation. Callback possession/payload confers no authority.
-
-After notification, read original task/receipts, claim current handoff or reuse
-valid ownership, then perform only the next authorized intent with current context.
-Match event/handoff IDs; pending_handoff_id identifies newer work. Delivery,
-read-observed, claim and real next intent are separate, not AI completion. Private
-read observations never change canonical progress or claim. Acknowledged events
-are not resent to force wake; missing takeover blocks after 15 minutes or expiry.
-Refusal permits no replacement event/task, polling loop or alternate model backend.
-Pause/expiry/terminal guards remain authoritative, including late receipts.
-
-Refresh preserves identity/budget; unsubscribe on completion. Secrets/callbacks
-stay private. Signed challenge, public DNS/address pinning, hostname TLS and no
-redirects remain mandatory. Synthetic/private DNS, bad signatures, corrupt state,
-capacity or exhaustion are blockers. At most 64 subscriptions, TTL one hour or
-expiry, five-minute verification/rotation windows; two verification slots/five
-seconds and two delivery slots/ten seconds. Timed-out threads keep slots until exit.
-Four fast delivery attempts with 1/2/4-second delays precede 60-second jittered
-cooldown, bounded by one hour/60 attempts or expiry; permanent refusal/410/413 stops.
-Actual AI continuation is route/account-specific acceptance, not SDK discovery.
 
 ## Native GitHub connections
 

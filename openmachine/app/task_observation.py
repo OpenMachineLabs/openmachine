@@ -110,80 +110,7 @@ def clear_observation(record: dict) -> None:
             record["control"]["state"] = "running" if any(records.pending(item) for item in record["operations"]) else "waiting_for_ai"
 
 
-def caller(events, record: dict, snapshot: dict, now: int) -> list[dict]:
-    observation = {"kind": "caller", "state": "unsubscribed", "source": "task_events",
-        "observed_at_ms": now, "last_progress_at_ms": None, "next_attempt_at_ms": None,
-        "blocker": None}
-    try:
-        facts = events.facts(record["task_id"])
-    except Fault as error:
-        return [dict(observation, state="blocked", blocker=error.code)]
-    if not facts:
-        return [dict(observation, state="retired" if record["terminal"] is not None else "unsubscribed")]
-    result = []
-    for fact in facts:
-        item = dict(observation, subscription_id=fact["subscription_id"], state="pending")
-        delivery = fact["delivery"]
-        if delivery is None and fact["connection"] is not None:
-            connection = fact["connection"]
-            ended = connection["attempts"] >= 60 or now >= connection["deadline_ms"]
-            item.update(state="blocked" if ended else "pending",
-                blocker="delivery_budget_exhausted" if ended else None,
-                next_attempt_at_ms=None if ended else connection["next_attempt_ms"])
-        if delivery is not None:
-            budget = delivery["budget"]
-            item.update(event_id=delivery["id"], handoff_id=delivery["payload"]["handoff_id"],
-                accepted_at_ms=delivery["accepted_at_ms"], read_at_ms=delivery["read_at_ms"],
-                attempts=budget["attempts"], deadline_ms=budget["deadline_ms"])
-            current_handoff = (record["handoff"] or {}).get("id")
-            item["pending_handoff_id"] = current_handoff if current_handoff != delivery["payload"]["handoff_id"] else None
-            admitted = [op for op in record["operations"] if op["epoch"] > delivery["epoch"]
-                and op["plan_revision"] == delivery["payload"]["plan_revision"]
-                and op["admitted_at_ms"] >= delivery["occurred_at_ms"]]
-            owner = record["control"]["owner"]
-            claimed = (owner is not None and record["control"]["epoch"] > delivery["epoch"]
-                       and current_handoff == delivery["payload"]["handoff_id"]
-                       and record["plan"]["revision"] == delivery["payload"]["plan_revision"])
-            if admitted:
-                item.update(state="next_intent_admitted", operation_id=admitted[0]["id"],
-                            last_progress_at_ms=admitted[0]["admitted_at_ms"])
-            elif claimed:
-                item.update(state="claimed", last_progress_at_ms=record["updated_at_ms"])
-                if owner["expires_at_ms"] <= now:
-                    item.update(state="blocked", blocker="continuation_claim_expired")
-            elif (record["plan"]["revision"] != delivery["payload"]["plan_revision"]
-                  or current_handoff != delivery["payload"]["handoff_id"]):
-                item.update(state="superseded")
-            elif delivery["accepted_at_ms"] is not None:
-                item.update(state="read_observed" if delivery["read_at_ms"] else "delivered",
-                    last_progress_at_ms=delivery["read_at_ms"] or delivery["accepted_at_ms"])
-                if now >= min(fact["expires_at_ms"], delivery["accepted_at_ms"] + 900000):
-                    item.update(state="blocked", blocker="claim_wait_expired")
-            else:
-                connection = fact["connection"]
-                ended = now >= budget["deadline_ms"] or budget["attempts"] >= 60
-                connection_ended = connection is not None and (now >= connection["deadline_ms"] or connection["attempts"] >= 60)
-                blocker = delivery["blocker"] or ("delivery_budget_exhausted" if ended or connection_ended else None)
-                item.update(state="blocked" if blocker else "retrying", blocker=blocker,
-                    next_attempt_at_ms=None if blocker else max(budget["next_attempt_ms"], (connection or {}).get("next_attempt_ms", 0)))
-        blocker = snapshot.get("event_errors", {}).get(record["task_id"])
-        started = snapshot.get("deliveries", {}).get(fact["subscription_id"])
-        if started is not None and now >= started + 10000:
-            blocker = "callback_still_outstanding"
-        if record["terminal"] is not None or record["control"]["stop_intent"] != "none":
-            item.update(state="retired" if record["terminal"] else "paused", next_attempt_at_ms=None, blocker=None)
-        elif now >= min(fact["expires_at_ms"], record["contract"]["expires_at_ms"]):
-            item.update(state="blocked", next_attempt_at_ms=None, blocker="subscription_expired")
-        elif blocker:
-            item.update(state="blocked", next_attempt_at_ms=None, blocker=blocker)
-        if (snapshot["state"] != "running" or snapshot["observed_at_ms"] is None
-                or now - snapshot["observed_at_ms"] > 2 * INTERVAL_MS):
-            item["next_attempt_at_ms"] = None
-        result.append(item)
-    return result
-
-
-def project(view: dict, snapshot: dict, events, ssh_supported: bool) -> dict:
+def project(view: dict, snapshot: dict, ssh_supported: bool) -> dict:
     if "record" not in view:
         return view
     record, now = view["record"], now_ms()
@@ -221,7 +148,7 @@ def project(view: dict, snapshot: dict, events, ssh_supported: bool) -> dict:
         next_attempt = None
     if ssh and next_attempt is not None and next_attempt >= record["contract"]["expires_at_ms"]:
         next_attempt = None
-    observations = caller(events, record, snapshot, now) if events is not None else list(view["observations"])
+    observations = list(view["observations"])
     observations.append({"kind": "runtime", "state": state, "source": "ssh_task_observer" if ssh else "local_task_observer",
         "observed_at_ms": snapshot["observed_at_ms"],
         "last_progress_at_ms": max((item["observed_at_ms"] or 0 for item in record["operations"]), default=0) or None,
@@ -243,5 +170,4 @@ def project(view: dict, snapshot: dict, events, ssh_supported: bool) -> dict:
             "last_progress_at_ms": operation["observed_at_ms"], "next_attempt_at_ms": None,
             "blocker": "Original state is last-known; no current result is verified." if stale else None})
     return {**view, "support": {**view["support"], "local_result_observation": True,
-        "events_delivery": events is not None,
         "ssh_result_observation": ssh_supported}, "observations": observations}
