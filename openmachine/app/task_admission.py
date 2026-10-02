@@ -9,7 +9,7 @@ import re
 from openmachine import execution, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
-from openmachine.tasks import records
+from openmachine.tasks import records, transitions
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
 GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"}
@@ -65,13 +65,13 @@ class TaskAdmission:
             {"method": "control_task", "principal": self.principal, **request})}
         action = request["transition"]["action"]
         if record["last_update"]["id"] != update["id"]:
-            records.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
+            transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
             if action not in {"pause", "cancel", "release"}:
                 contract = request["transition"].get("contract", record["contract"])
                 self.app._validate_task_scope({"contract": contract})
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)
-                records.guards(view["record"], request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
+                transitions.guards(view["record"], request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
                 selected = request["transition"].get("evidence", []) if action == "record_decision" else [
                     item["operation_id"] for item in request["transition"].get("acceptance", []) if item["operation_id"]]
                 for identity in selected:
@@ -83,7 +83,7 @@ class TaskAdmission:
                     if current != operation["result"]:
                         raise Fault("task_evidence_changed", "Selected evidence changed; reconcile its original result before accepting it.")
         view = tasks.update(self.app.state, request["task_id"],
-            lambda value, now: records.apply_control(value, request, self.principal, now),
+            lambda value, now: transitions.apply_control(value, request, self.principal, now),
             expected_revision=request["expected_revision"], last_update=update,
             require_current=action not in {"pause", "cancel"})
         if action == "cancel" and view["record"]["terminal"] is None:
@@ -253,7 +253,7 @@ class TaskAdmission:
                 result, enriched = self._observation(operation, observed)
                 current = self._publish(record["task_id"], [(operation["id"], result, enriched)])
                 return {**observed, "task": _reference(current), "task_operation_replayed": False}
-            records.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"])
+            transitions.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"])
             if method != "cancel_execution":
                 binding = tasks.operation_binding(self.app.state, key, context["operation_id"])
                 if binding is not None and binding["task_id"] != context["task_id"]:
@@ -269,8 +269,8 @@ class TaskAdmission:
             self._scope(record, method, arguments, locator)
             # Observe only already known identities, without writing through read_task.
             current = self.reconcile(view)
-            records.guards(current["record"], context["task_revision"], context["plan_revision"], context["continuation_epoch"])
-            stage = records.stage_for(record)
+            transitions.guards(current["record"], context["task_revision"], context["plan_revision"], context["continuation_epoch"])
+            stage = transitions.stage_for(record)
             operation = {"id": context["operation_id"], "stage_id": stage["id"], "plan_revision": record["plan"]["revision"],
                 "epoch": record["control"]["epoch"], "request_sha256": "", "source_sha256": stage["source_sha256"],
                 "locator": locator, "admitted_at_ms": 0, "state": "admitted", "observed_at_ms": None, "result": None}
@@ -353,16 +353,16 @@ class TaskAdmission:
         raise Fault("task_scope_denied", "This target or workspace is outside the accepted task contract.")
 
     def _admit(self, record: dict, operation: dict, context: dict, method: str, now_ms: int) -> None:
-        records.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"])
+        transitions.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"])
         stopping = method == "cancel_execution"
         if not stopping:
-            records.require_owner(record, self.principal, now_ms)
+            transitions.require_owner(record, self.principal, now_ms)
         elif record["terminal"] is not None:
             raise Fault("task_terminal", "Terminal history cannot admit another effect.")
         if any(item["id"] == operation["id"] for item in record["operations"]):
             raise Fault("task_operation_conflict", "The operation appeared concurrently; observe its original identity.")
-        stage = records.stage_for(record)
-        if not stopping and (stage["state"] == "accepted" or any(records.stage_for(record, key)["state"] != "accepted" for key in stage["depends_on"])):
+        stage = transitions.stage_for(record)
+        if not stopping and (stage["state"] == "accepted" or any(transitions.stage_for(record, key)["state"] != "accepted" for key in stage["depends_on"])):
             raise Fault("task_stage_conflict", "Admit only a remaining stage whose dependencies were accepted.")
         outstanding = [item for item in record["operations"] if records.pending(item)]
         for item in outstanding:
@@ -384,7 +384,7 @@ class TaskAdmission:
             if len(record["operations"]) > 64 or len(records.canonical(record)) > records.MAX_RECORD - 6144:
                 raise Fault("task_capacity", "Use the original-ID cancellation route; no room remains for another associated intent.")
         else:
-            records.reserve(record, operation_limit=63 if method == "control_execution" else 62)
+            transitions.reserve(record, operation_limit=63 if method == "control_execution" else 62)
 
     def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False, cancelled=None) -> dict:
         locator = operation["locator"]
@@ -497,16 +497,16 @@ class TaskAdmission:
             record["recovery"] = None
         control = record["control"]
         if control["stop_intent"] == "cancel" and not any(records.pending(item) for item in record["operations"]):
-            records.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
+            transitions.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
         elif control["stop_intent"] == "none":
-            stage = records.stage_for(record)
+            stage = transitions.stage_for(record)
             decisive = next((item for item in reversed(changed) if item["result"]["status"] != "running"
                 and item["stage_id"] == stage["id"] and item["plan_revision"] == record["plan"]["revision"]
                 and item["source_sha256"] == stage["source_sha256"]), None)
             if decisive is not None:
                 control["state"] = "waiting_for_ai"
                 control["pending_decision"] = None if decisive["result"]["status"] == "succeeded" else "Review the original operation outcome before new work."
-                records.handoff(record, decisive["id"], now_ms,
+                transitions.handoff(record, decisive["id"], now_ms,
                                 "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
 
     def _publish(self, identity: str, observations: list[tuple[str, dict, dict]]) -> dict:

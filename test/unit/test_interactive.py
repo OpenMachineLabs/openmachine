@@ -1,9 +1,7 @@
-"""Real PTY/control behavior and bounded, owned persistence failure windows."""
+"""Interactive controls using the same owned-process fixture."""
 
 from concurrent.futures import ThreadPoolExecutor
 import json
-import os
-from pathlib import Path
 import shlex
 import socket
 import sys
@@ -11,26 +9,16 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-
 from openmachine import execution, service
 from openmachine.bootstrap import create_application
 from openmachine.execution import control
 from openmachine.execution.records import CONTROL_PROTOCOL, MAX_CONTROL_SEQ, MAX_INPUT, TERMINAL
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine.foundation.state import lease, save_json
+from support_execution import ExecutionFixture
 
-import test_execution as fixtures
 
-
-class InteractiveTests(unittest.TestCase):
-    # Share the existing disposable execution owner, not another test runner.
-    setUp = fixtures.ExecutionTests.setUp
-    stop_owned = fixtures.ExecutionTests.stop_owned
-    until = fixtures.ExecutionTests.until
-    finish = fixtures.ExecutionTests.finish
-    output = fixtures.ExecutionTests.output
-    injected_worker = fixtures.ExecutionTests.injected_worker
-
+class InteractiveTests(ExecutionFixture, unittest.TestCase):
     def start(self, code, *, execution_id=None, cwd=None, tty=True, timeout_seconds=10, **options):
         identity = execution_id or uuid.uuid4().hex
         self.ids.append(identity)
@@ -480,4 +468,4 @@ class InteractiveTests(unittest.TestCase):
         self.assertEqual((result["io_mode"], result["control_actions"]), ("pipe", []))
 
     def test_pty_owned_job_groups_are_cleaned_without_stopping_other_sessions(self):
-        fixtures.ExecutionTests.test_forced_cleanup_covers_other_owned_groups_but_not_a_sentinel(self)
+        self.assert_owned_cleanup()

@@ -1,4 +1,4 @@
-"""Private Events durability, admission and transport; mocked callbacks are not Work acceptance."""
+"""Behavior checks for EventsTests."""
 
 import base64
 from copy import deepcopy
@@ -13,27 +13,15 @@ import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
-
 from integrations import events
 from openmachine import service, tasks
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-import test_continuity as continuity
 from openmachine.service import checks as service_checks
+from support_tasks import ObserverFixture
 
 
-class EventsTests(unittest.TestCase):
-    setUp = continuity.TaskObserverTests.setUp
-    create = continuity.StructuredTaskTests.create
-    fault = continuity.ContinuityTests.fault
-    view = continuity.TaskAdmissionTests.view
-    control_arguments = continuity.TaskAdmissionTests.control_arguments
-    control = continuity.TaskAdmissionTests.control
-    context_for = continuity.TaskAdmissionTests.context_for
-    accept_plan = continuity.TaskAdmissionTests.accept_plan
-    write_arguments = continuity.TaskAdmissionTests.write_arguments
-    until = continuity.TaskObserverTests.until
-
+class EventsTests(ObserverFixture, unittest.TestCase):
     def params(self, **changes):
         return {"name": events.EVENT, "arguments": {"task_id": "structured-one"},
             "delivery": {"mode": "webhook", "url": "https://callback.example/event",

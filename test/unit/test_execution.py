@@ -1,78 +1,27 @@
-"""Execution lifecycle contracts using small real processes and owned fault windows."""
+"""Pipe execution and retained process evidence."""
 
 from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import threading
 import signal
-import subprocess
 import sys
-import tempfile
 import time
 import unittest
 from unittest.mock import patch
 import uuid
-
 from openmachine import execution
-from openmachine.config import Settings, Workspace
 from openmachine.execution import api, logs
-from openmachine.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
+from support_execution import ExecutionFixture
 
 
-class ExecutionTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="om-e1-", dir="/tmp")
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name).resolve()
-        self.work = self.root / "work"
-        self.work.mkdir()
-        self.state = self.root / "state"
-        self.config = Settings.model_validate({
-            "schema_version": 1, "machines": {"local": {"transport": "local", "execution_enabled": True}},
-            "workspaces": {"project": {"machine": "local", "root": str(self.work)}},
-        })
-        self.ids = []
-        self.addCleanup(self.stop_owned)
-
-    def stop_owned(self):
-        for identity in self.ids:
-            try:
-                result = execution.read(self.config, self.state, "local", identity)
-                if result["status"] not in TERMINAL:
-                    execution.cancel(self.config, self.state, "local", identity)
-                    self.until(identity, lambda item: item["status"] in TERMINAL)
-            except Fault:
-                # Corruption tests retain their intentionally unreadable disposable record.
-                pass
-
+class ExecutionTests(ExecutionFixture, unittest.TestCase):
     def start(self, code, *, execution_id=None, cwd=None, **options):
         identity = execution_id or uuid.uuid4().hex
         self.ids.append(identity)
         return execution.start(self.config, self.state, "local", identity, str(cwd or self.work),
                                [sys.executable, "-c", code], timeout_seconds=5, **options)
-
-    def until(self, identity, predicate):
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            result = execution.read(self.config, self.state, "local", identity)
-            if predicate(result):
-                return result
-            time.sleep(0.02)
-        self.fail(f"Original execution did not reach the expected observation: {identity}")
-
-    def finish(self, result):
-        return self.until(result["execution_id"], lambda item: item["status"] in TERMINAL)
-
-    def output(self, identity):
-        chunks, offset = [], 0
-        while True:
-            page = execution.read(self.config, self.state, "local", identity, offset=offset)
-            chunks.append(page["output"])
-            if page["next_offset"] == offset:
-                return "".join(chunks)
-            offset = page["next_offset"]
 
     def test_pipe_default_and_effective_request_identity(self):
         code = 'import sys; from pathlib import Path; p=Path("count"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print(repr(sys.stdin.read())); print("stderr",file=sys.stderr)'
@@ -137,25 +86,6 @@ while True: time.sleep(0.05)
         self.assertIn("final-diagnostic", self.output(identity))
         self.assertFalse(result["output_incomplete"])
 
-    def test_forced_cleanup_covers_other_owned_groups_but_not_a_sentinel(self):
-        other = self.root / "other"
-        other.mkdir()
-        self.config.workspaces["other"] = Workspace(machine="local", root=str(other))
-        child = 'import os,signal,time; from pathlib import Path; os.setpgid(0,0); signal.signal(signal.SIGTERM,signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1); Path("escaped").touch(); time.sleep(2)'
-        code = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(4)'
-        owned = self.start(code, termination_grace_seconds=0.1)
-        sentinel = self.start('import time; from pathlib import Path; time.sleep(0.4); Path("sentinel").touch()', cwd=other)
-        self.until(owned["execution_id"], lambda item: "child-ready" in item["output"])
-        execution.cancel(self.config, self.state, "local", owned["execution_id"])
-        result = self.finish(owned)
-        self.assertEqual(result["status"], "cancelled")
-        self.assertTrue(result["stop"]["force_used"])
-        self.assertEqual(result["cleanup"]["status"], "verified")
-        self.assertEqual(self.finish(sentinel)["status"], "succeeded")
-        time.sleep(1)
-        self.assertFalse((self.work / "escaped").exists())
-        self.assertTrue((other / "sentinel").exists())
-
     def test_natural_leader_exit_waits_for_children_and_late_cancel_does_not_relabel(self):
         child = 'import signal,time; from pathlib import Path; signal.signal(signal.SIGTERM,signal.SIG_IGN); Path("ready").touch(); time.sleep(3)'
         code = 'import subprocess,sys,time; from pathlib import Path; subprocess.Popen([sys.executable,"-c",' + repr(child) + ']);\nwhile not Path("ready").exists(): time.sleep(.01)'
@@ -182,15 +112,6 @@ while True: time.sleep(0.05)
         before = path.read_bytes()
         self.assertEqual(execution.cancel(self.config, self.state, "local", identity)["status"], "cancelled")
         self.assertEqual(path.read_bytes(), before)
-
-    def injected_worker(self, setup):
-        original = subprocess.Popen
-        script = 'import sys; from pathlib import Path; import openmachine.execution.worker as w\n' + setup + '\nw.worker(Path(sys.argv[1]),*(int(x) for x in sys.argv[2:]))'
-        def launch(argv, *args, **kwargs):
-            if len(argv) > 3 and argv[1:4] == ["-I", "-m", "openmachine.execution"]:
-                argv = [argv[0], "-I", "-c", script, *argv[4:]]
-            return original(argv, *args, **kwargs)
-        return patch.object(api.subprocess, "Popen", side_effect=launch)
 
     def test_log_and_receipt_failures_do_not_become_success_or_replay(self):
         cases = (
@@ -281,7 +202,6 @@ while True: time.sleep(0.05)
         final = self.finish(result)
         self.assertEqual((final["status"], final["exit_code"], final["stop"]["reason"]), ("timed_out", 0, "timeout"))
         self.assertFalse(final["stop"]["force_used"])
-
 
     def test_wait_inputs_reject_invalid_values_without_observation(self):
         for value in (True, False, None, "1", -1, 5.01, float("nan"), float("inf"), 10 ** 1000):
@@ -440,6 +360,5 @@ while True: time.sleep(0.05)
             execution.bound_output(original | {"context": "x" * 1000}, measure, 200)
         self.assertEqual(caught.exception.code, "response_limit")
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_forced_cleanup_covers_other_owned_groups_but_not_a_sentinel(self):
+        self.assert_owned_cleanup()

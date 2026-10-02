@@ -56,7 +56,7 @@ def _discover(config: "Settings") -> tuple[dict, list[dict]]:
                 if len(selected) > remaining:
                     warnings.append({"source": configured, "code": "discovery_limit"})
                 candidates = [Path(e.path) for e in sorted(selected[:remaining], key=lambda e: e.name)
-                              if not excluded(Path(e.name.casefold())) and e.name.casefold() != ".git"]
+                              if not excluded(Path(e.name.casefold()))]
                 remaining -= min(remaining, len(selected))
             for candidate in candidates:
                 try:
@@ -121,7 +121,7 @@ def inspect(config: "Settings", action: str = "list", skill: str = "", path: str
                 found = list(islice(listing, MAX_SCAN_ENTRIES + 1))
             entries = [{"name": e.name, "directory": e.is_dir(follow_symlinks=False), "symlink": e.is_symlink()}
                        for e in sorted(found[:MAX_SCAN_ENTRIES], key=lambda e: e.name)
-                       if not excluded(Path(e.name.casefold())) and e.name.casefold() != ".git"]
+                       if not excluded(Path(e.name.casefold()))]
             clipped = len(found) > MAX_SCAN_ENTRIES
     snapshot = hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
     if expected_snapshot and snapshot != expected_snapshot:

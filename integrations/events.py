@@ -374,6 +374,11 @@ def same_attempt(current: dict, job: dict) -> bool:
             and delivery["budget"]["attempts"] == job["delivery"]["budget"]["attempts"])
 
 
+def _prune_connections(value: dict) -> None:
+    live = {origin(item["url"]) for item in value["subscriptions"].values()}
+    value["connections"] = {k: v for k, v in value["connections"].items() if k in live}
+
+
 class Events:
     def __init__(self, state: Path):
         self.state = state
@@ -443,8 +448,7 @@ class Events:
                 value["subscriptions"][identity] = item
                 if not cached:
                     value["connections"].pop(origin(url), None)  # Actual health, never an unobserved budget reset.
-                live = {origin(item["url"]) for item in value["subscriptions"].values()}
-                value["connections"] = {k: v for k, v in value["connections"].items() if k in live}
+                _prune_connections(value)
         return {"id": identity, "refreshBefore": instant(expiry), "cursor": None, "truncated": False}
 
     def unsubscribe(self, params: dict, principal: str) -> dict:
@@ -454,8 +458,7 @@ class Events:
             return {}
         with _locked(self.state, True) as value:
             value["subscriptions"].pop(identity, None)
-            live = {origin(item["url"]) for item in value["subscriptions"].values()}
-            value["connections"] = {k: v for k, v in value["connections"].items() if k in live}
+            _prune_connections(value)
         return {}
 
     def task_ids(self) -> set[str]:
@@ -472,8 +475,7 @@ class Events:
             return
         with _locked(self.state, True) as value:
             value["subscriptions"] = {k: v for k, v in value["subscriptions"].items() if v["task_id"] != task_id}
-            live = {origin(item["url"]) for item in value["subscriptions"].values()}
-            value["connections"] = {k: v for k, v in value["connections"].items() if k in live}
+            _prune_connections(value)
 
     def due(self, task_id: str, handoff_id: str, now: int) -> list[str]:
         value = read(self.state)

@@ -1,0 +1,216 @@
+"""Pure task state transitions and capacity guards; no IO or operation dispatch."""
+
+from openmachine.foundation.sanitize import Fault
+from .records import MAX_ACCEPTANCE, MAX_INTEGER, MAX_RECORD, _unique, canonical, digest, pending
+
+
+def stage_for(record: dict, identity: str | None = None) -> dict:
+    wanted = record["control"]["current_stage_id"] if identity is None else identity
+    for stage in record["plan"]["stages"]:
+        if stage["id"] == wanted:
+            return stage
+    raise Fault("task_stage_conflict", "The selected stage does not exist in the current plan.")
+
+
+def guards(record: dict, revision: int, plan_revision: int, epoch: int) -> None:
+    if (revision, plan_revision, epoch) != (record["revision"], record["plan"]["revision"], record["control"]["epoch"]):
+        raise Fault("task_conflict", "Task, plan or continuation ownership changed; read the original task before a new action.",
+                    {"task_id": record["task_id"], "task_revision": record["revision"],
+                     "plan_revision": record["plan"]["revision"], "continuation_epoch": record["control"]["epoch"]})
+
+
+def require_owner(record: dict, principal: str, now_ms: int) -> None:
+    control = record["control"]
+    if control["stop_intent"] != "none" or record["terminal"] is not None:
+        raise Fault("task_stopped", "The original task is paused, cancelling or terminal; no new continuation is allowed.")
+    if now_ms >= record["contract"]["expires_at_ms"]:
+        raise Fault("task_authority_expired", "Task authority expired; read and explicitly revise its accepted scope.")
+    owner = control["owner"]
+    if owner is None or owner["principal_ref"] != principal or owner["expires_at_ms"] <= now_ms:
+        raise Fault("task_owner_conflict", "A current explicit continuation claim is required; expiry does not prove original work stopped.")
+
+
+def material(record: dict, now_ms: int, kind: str, summary: str, stage_id: str | None = None,
+             operation_id: str | None = None) -> None:
+    record["history"].append({"at_ms": now_ms, "kind": kind, "stage_id": stage_id, "operation_id": operation_id,
+                              "summary": summary.encode("utf-8")[:256].decode("utf-8", errors="ignore")})
+
+
+def handoff(record: dict, identity: str, now_ms: int, reason: str) -> None:
+    control = record["control"]
+    if (control["stop_intent"] != "none" or record["terminal"] is not None
+            or control["current_stage_id"] is None or now_ms >= record["contract"]["expires_at_ms"]):
+        record["handoff"] = None
+        return
+    stage = stage_for(record)
+    record["handoff"] = {"id": digest([record["task_id"], identity, record["plan"]["revision"], reason])[:32],
+        "plan_revision": record["plan"]["revision"], "source_sha256": stage["source_sha256"],
+        "stage_id": stage["id"], "reason": reason, "created_at_ms": now_ms,
+        "expires_at_ms": record["contract"]["expires_at_ms"]}
+
+
+def reserve(record: dict, *, operation_limit: int = 62, new_work: bool = True) -> None:
+    """Bound new work while retaining room for original results, decisions and stop."""
+    remaining = sum(stage["state"] != "accepted" for stage in record["plan"]["stages"])
+    if (new_work and (len(canonical(record)) > MAX_ACCEPTANCE or len(record["operations"]) > operation_limit)
+            or len(record["history"]) + remaining + 3 > 64):
+        raise Fault("task_capacity", "Task capacity is reserved for original results and stopping; no new work was admitted.")
+    # Worst-case enrichment of unresolved operations, not synthetic persisted facts.
+    extra = 0
+    for operation in record["operations"]:
+        if pending(operation):
+            future = dict(operation, observed_at_ms=MAX_INTEGER, state="observed",
+                result={"status": "cancelled", "receipt_sha256": "f" * 64, "summary": "x" * 256, "log_offset": MAX_INTEGER})
+            if future["locator"]["kind"] == "github":
+                future["locator"] = dict(future["locator"], number=MAX_INTEGER, parent_number=MAX_INTEGER)
+            extra += max(0, len(canonical(future)) - len(canonical(operation)))
+    # Final record, pending decision, handoff, remaining material decisions and evidence references.
+    if len(canonical(record)) + extra + 4096 + (3072 if new_work else 512) + 768 + (remaining + 3) * 384 + 2240 > MAX_RECORD:
+        raise Fault("task_capacity", "The admitted work must leave bounded final-evidence capacity; preserve current history.")
+
+
+def finish_record(record: dict, outcome: str, acceptance: list[dict], limitations: str, now_ms: int) -> None:
+    if any(pending(operation) for operation in record["operations"]):
+        raise Fault("task_effect_unresolved", "Original live, partial or unknown effects must be reconciled before terminal retirement.")
+    record["control"].update(state=outcome, current_stage_id=None, owner=None, pending_decision=None,
+                              epoch=record["control"]["epoch"] + 1)
+    record["handoff"] = record["recovery"] = None
+    record["terminal"] = {"outcome": outcome, "finished_at_ms": now_ms,
+        "summary": f"Task {outcome}: {record['contract']['objective']}", "acceptance": acceptance, "limitations": limitations}
+    material(record, now_ms, "terminal", f"Task {outcome}; original evidence retained.")
+
+
+def acceptance_refs(record: dict, evidence: list[dict], *, complete: bool) -> None:
+    seen = set()
+    operations = {item["id"]: item for item in record["operations"]}
+    for item in evidence:
+        stage = stage_for(record, item["stage_id"])
+        key = (item["stage_id"], item["operation_id"])
+        if key in seen or stage["state"] != "accepted":
+            raise Fault("task_evidence_invalid", "Final acceptance requires unique references to accepted stages.")
+        seen.add(key)
+        identity = item["operation_id"]
+        if identity is None:
+            if stage["evidence"]:
+                raise Fault("task_evidence_invalid", "A non-command decision cannot replace existing operation evidence.")
+        elif (identity not in stage["evidence"] or identity not in operations
+                or pending(operations[identity]) or operations[identity]["result"]["status"] != "succeeded"
+                or operations[identity]["source_sha256"] != stage["source_sha256"]):
+            raise Fault("task_evidence_invalid", "Final evidence must retain a validated, applicable original result.")
+    if complete and {item[0] for item in seen} != {stage["id"] for stage in record["plan"]["stages"]}:
+        raise Fault("task_evidence_invalid", "Completion requires acceptance evidence for every stage, not an exit code alone.")
+
+
+def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> None:
+    """Pure state transition. Application supplies identity and verified domain evidence."""
+    guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
+    if record["terminal"] is not None:
+        raise Fault("task_terminal", "Terminal history cannot be resumed or reclassified.")
+    change, control = request["transition"], record["control"]
+    action, identity = change["action"], request["update_id"]
+    reason = change.get("reason", f"Continuation {action}.")
+    if action in {"pause", "cancel"}:
+        desired = "pause" if action == "pause" else "cancel"
+        if control["stop_intent"] == "cancel" and desired == "pause":
+            raise Fault("task_stopped", "A cancellation cannot be downgraded to a pause.")
+        if control["stop_intent"] != desired:
+            control.update(state="paused", stop_intent=desired, owner=None, epoch=control["epoch"] + 1,
+                           pending_decision="Await original operation outcomes." if desired == "cancel" else None)
+            record["handoff"] = None
+            # Pause/cancel suppress continuation, not evidence collection for
+            # already-owned work. Neither action resets its observation budget.
+            if record["recovery"] is not None and record["recovery"]["category"] not in {"local_observation", "ssh_observation"}:
+                record["recovery"] = None
+            material(record, now_ms, "stopped", reason)
+        if desired == "cancel" and not any(pending(item) for item in record["operations"]):
+            finish_record(record, "cancelled", [], "Explicit cancellation does not undo prior effects.", now_ms)
+        return
+    if now_ms >= record["contract"]["expires_at_ms"]:
+        raise Fault("task_authority_expired", "Expired task authority cannot be extended by a continuation request.")
+    if action == "resume":
+        if control["state"] != "paused" or control["stop_intent"] != "pause":
+            raise Fault("task_stopped", "Resume applies only to an explicitly paused, non-cancelling task.")
+        control.update(state="waiting_for_ai", stop_intent="none", owner=None, epoch=control["epoch"] + 1,
+                       pending_decision=None)
+        handoff(record, identity, now_ms, "decision_required")
+    elif action == "claim":
+        pending_handoff = record["handoff"]
+        if (control["stop_intent"] != "none" or pending_handoff is None
+                or pending_handoff["id"] != change["handoff_id"] or pending_handoff["expires_at_ms"] <= now_ms):
+            raise Fault("task_handoff_conflict", "Read the current eligible handoff before claiming continuation.")
+        if control["owner"] is not None and control["owner"]["expires_at_ms"] > now_ms:
+            raise Fault("task_owner_conflict", "Another unexpired claim owns continuation; read or explicitly release it.")
+        control.update(epoch=control["epoch"] + 1, owner={"principal_ref": principal, "claim_id": identity,
+            "expires_at_ms": min(now_ms + 300000, pending_handoff["expires_at_ms"], record["contract"]["expires_at_ms"])})
+        control["state"] = "running" if any((item["result"] or {}).get("status") == "running" for item in record["operations"]) else "planned"
+        # Reading and claiming do not resolve the handoff; a later admitted intent does.
+    else:
+        require_owner(record, principal, now_ms)
+        if action == "release":
+            control.update(owner=None, epoch=control["epoch"] + 1, state="waiting_for_ai")
+            if record["handoff"] is None:
+                handoff(record, identity, now_ms, "decision_required")
+        elif action == "revise_plan":
+            if any(pending(item) for item in record["operations"]):
+                raise Fault("task_effect_unresolved", "Reconcile outstanding original effects before replacing their plan.")
+            old = {stage["id"]: stage for stage in record["plan"]["stages"]}
+            definitions = change["stages"]
+            retained_order = [stage["id"] for stage in definitions if stage["id"] in old]
+            if retained_order != list(old):
+                raise Fault("task_plan_conflict", "Retain original stage IDs and their order; never remove or reassign historical stages.")
+            affected = set(change["invalidated_stage_ids"])
+            if not affected <= old.keys():
+                raise Fault("task_plan_conflict", "Explicit invalidation must identify retained stages.")
+            required = {stage["id"] for stage in definitions if stage["id"] in old
+                        and stage != {key: old[stage["id"]][key] for key in stage}}
+            stable = {"sources", "expires_at_ms", "authority_refs"}
+            if any(record["contract"][key] != change["contract"][key] for key in record["contract"] if key not in stable):
+                required.update(old)
+            while True:
+                prior = set(required)
+                for stage in [*old.values(), *definitions]:
+                    if set(stage["depends_on"]) & (required | affected) and stage["id"] in old:
+                        required.add(stage["id"])
+                if prior == required:
+                    break
+            if not required <= affected:
+                raise Fault("task_plan_conflict", "Invalidate every changed stage and affected dependent, preserving unaffected evidence.")
+            stages = [dict(stage, state="invalidated" if stage["id"] in affected else old[stage["id"]]["state"]
+                           if stage["id"] in old else "pending", evidence=[] if stage["id"] in affected or stage["id"] not in old
+                           else old[stage["id"]]["evidence"]) for stage in definitions]
+            record["contract"] = change["contract"]
+            record["plan"] = {"revision": record["plan"]["revision"] + 1, "stages": stages}
+            control.update(current_stage_id=next((s["id"] for s in stages if s["state"] != "accepted"), stages[-1]["id"]),
+                           owner=None, epoch=control["epoch"] + 1, state="waiting_for_ai", pending_decision=None)
+            handoff(record, identity, now_ms, "plan_ready")
+        elif action == "record_decision":
+            stage = stage_for(record, change["stage_id"])
+            if stage["id"] != control["current_stage_id"] or stage["state"] == "accepted":
+                raise Fault("task_stage_conflict", "Decide the current remaining stage; accepted work is not silently reopened.")
+            _unique(change["evidence"])
+            operations = {item["id"]: item for item in record["operations"]}
+            for key in change["evidence"]:
+                operation = operations.get(key)
+                if (operation is None or operation["stage_id"] != stage["id"]
+                        or operation["source_sha256"] != stage["source_sha256"] or pending(operation)
+                        or change["outcome"] == "accepted" and operation["result"]["status"] != "succeeded"):
+                    raise Fault("task_evidence_invalid", "Decision evidence must identify applicable, verified original results.")
+            if change["outcome"] == "accepted":
+                if any(pending(item) for item in record["operations"]):
+                    raise Fault("task_effect_unresolved", "Acceptance cannot hide live or uncertain original effects.")
+                if (not change["evidence"] and any(item["stage_id"] == stage["id"] for item in record["operations"])):
+                    raise Fault("task_evidence_invalid", "An operation-backed stage requires original evidence, not an empty decision.")
+                if any(stage_for(record, key)["state"] != "accepted" for key in stage["depends_on"]):
+                    raise Fault("task_stage_conflict", "Dependencies must be accepted before this stage.")
+            stage.update(state=change["outcome"], evidence=change["evidence"])
+            control["pending_decision"] = reason if change["outcome"] == "blocked" else None
+            control["current_stage_id"] = next((s["id"] for s in record["plan"]["stages"] if s["state"] != "accepted"), stage["id"])
+            control["state"] = "waiting_for_ai"
+            handoff(record, identity, now_ms, "decision_required" if change["outcome"] == "blocked" else "plan_ready")
+        elif action == "finish":
+            acceptance_refs(record, change["acceptance"], complete=change["outcome"] == "completed")
+            finish_record(record, change["outcome"], change["acceptance"], change["limitations"], now_ms)
+            return
+    material(record, now_ms, "plan_changed" if action == "revise_plan" else "decision", reason,
+             change.get("stage_id"))
+    reserve(record, new_work=action not in {"claim", "record_decision"})
