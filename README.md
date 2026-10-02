@@ -2,14 +2,13 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.5
+## v0.2.6
 
-Open Machine v0.2.5 packages Spec #29's accepted durable task continuity and
-bounded recovery implementation from PRs #48-#58: structured task records,
-guarded claims and effect admission, original-result observation, SSH and managed
-MCP recovery, and signed task handoff Events. All three actual Work continuation
-cases passed on the single-user private Tunnel/native-account route recorded in
-[Spec #29](https://github.com/OpenMachineLabs/openmachine/issues/29).
+Open Machine v0.2.6 keeps the accepted v0.2.5 runtime contracts while simplifying
+their implementation and documentation. PR #60 splits the macOS service lifecycle
+into focused state, checks, install, runtime and transition owners. PR #61 reduces
+historical guidance and mixed responsibilities across workspace, tasks, GitHub,
+Events and tests without changing the public tool contract or persisted formats.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
@@ -18,7 +17,7 @@ contracts, not release versions. Execution retains format 5 and opt-in PTY contr
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
 
-Version `0.2.5` is an initial-development release, not a stable 1.x API promise.
+Version `0.2.6` is an initial-development release, not a stable 1.x API promise.
 Spec #32 remains the MCP SDK 2.2.0 migration baseline. Retained task, recovery and
 Events history requires a compatible state reader before a managed update or
 rollback. Automatic continuation is accepted only on the recorded Work route;
@@ -35,12 +34,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.5 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.6 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.5-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.6-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -53,7 +52,7 @@ state or arbitrary checkout files. Workers use the installed package, never a
 source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
 JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
 building. See [requirements.lock](requirements.lock) for the complete locked set.
-v0.2.5 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
+v0.2.6 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
 v0.2.2 tag remains on SDK 1.30.0 and retains its own matching lock.
 
 ## Configure and run
