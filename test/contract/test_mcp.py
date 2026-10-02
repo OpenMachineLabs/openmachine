@@ -74,7 +74,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_workspace", "inspect_skills", "start_execution", "read_execution", "list_executions", "cancel_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_read", "github_merge", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration", "start_codex_task", "read_codex_task"})
                 self.assertFalse(tools["start_execution"].annotations.read_only_hint)
                 self.assertTrue(tools["start_execution"].annotations.destructive_hint)
                 self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)
@@ -400,3 +400,32 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     response = await client.post("http://localhost/mcp", json=mutation, headers=headers)
                     self.assertEqual(response.status_code, status, response.text)
         self.assertFalse((self.state / "tasks").exists())
+
+    async def test_codex_browser_tools_keep_original_execution_and_block_missing_bridge(self):
+        self.stop_all()
+        environment = dict(os.environ, CODEX_HOME=str(self.root / "missing-codex-home"))
+        self.launch(environment)
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                args = {"machine": "desktop", "execution_id": uuid.uuid4().hex,
+                    "cwd": str(self.work), "goal": "Inspect only a disposable public page",
+                    "start_url": "https://example.com/", "allowed_origins": ["https://example.com"]}
+                for delta in ({"mode": "computer"}, {"unknown": True}, {"timeout_seconds": True}):
+                    invalid = await session.call_tool("start_codex_task", args | delta)
+                    self.assertTrue(invalid.is_error)
+                    self.assertFalse((self.state / "executions" / args["execution_id"]).exists())
+                started = await session.call_tool("start_codex_task", args)
+                self.assertFalse(started.is_error, started)
+                identity = {"machine": "desktop", "execution_id": args["execution_id"]}
+                original = await self.execution_until(session, identity, lambda v: v["status"] == "succeeded")
+                semantic = (await session.call_tool("read_codex_task", identity)).structured_content
+                self.assertEqual(semantic["status"], "blocked")
+                self.assertEqual(semantic["native"]["calls"], 0)
+                self.assertTrue(semantic["controller_review_required"])
+                again = await session.call_tool("start_codex_task", args)
+                self.assertFalse(again.is_error)
+                self.assertEqual(again.structured_content["created_at"], original["created_at"])
+                conflict = await session.call_tool("start_codex_task", args | {"goal": "Different goal"})
+                self.assertTrue(conflict.is_error)
+                self.assertEqual(conflict.structured_content["error"]["code"], "execution_conflict")

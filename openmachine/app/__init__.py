@@ -25,12 +25,13 @@ bound_workspace_result = workspace.bound_result
 
 
 class Application:
-    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, connections=None):
+    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, connections=None, codex=None):
         self.config = config
         self.state = state
         self.machines = machines
         self.github = github
         self.connections = connections
+        self.codex = codex
         if connections is not None:
             connections.admit = self._admit
         self.task_admission = TaskAdmission(self)
@@ -101,6 +102,7 @@ class Application:
                             "methods": ["device_code"] if self.config.github and self.connections.native.CLIENT_ID else [],
                             "native_login": bool(self.config.github and self.connections.native.CLIENT_ID),
                             "login_cancellation": True},
+            "codex": self.codex.capabilities(self.config) if self.codex is not None else None,
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
                           "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
@@ -218,7 +220,9 @@ class Application:
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_merge",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
-                 "disconnect_integration"}
+                 "disconnect_integration", "start_codex_task", "read_codex_task"}
+        if "start_codex_task" in tools and "start_execution" not in tools:
+            raise Fault("invalid_task_contract", "Codex delegation requires the underlying start_execution grant.")
         if not tools <= known:
             raise Fault("invalid_task_contract", "Task scope must name implemented tools, not future actions.")
         if tools & {"start_execution", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
@@ -270,6 +274,19 @@ class Application:
     def rebuild_task_index(self, expected_generation: int = -1) -> dict:
         with self._admit():
             return tasks.rebuild_index(self.state, expected_generation)
+
+    def start_codex_task(self, machine: str, execution_id: str, cwd: str, goal: str,
+                         start_url: str, allowed_origins: list[str], mode: str = "browser", browser: str = "auto",
+                         timeout_seconds: int = 600, expected_head_sha: str = "", task_context: dict | None = None) -> dict:
+        if self.codex is None:
+            raise Fault("codex_unavailable", "The Codex adapter is not assembled in this runtime.")
+        return self.codex.start(self.config, self.state, self.start_execution, machine, execution_id, cwd,
+            goal, start_url, allowed_origins, mode, browser, timeout_seconds, expected_head_sha, task_context)
+
+    def read_codex_task(self, machine: str, execution_id: str) -> dict:
+        if self.codex is None:
+            raise Fault("codex_unavailable", "The Codex adapter is not assembled in this runtime.")
+        return self.codex.read(self.config, self.state, self.read_execution, machine, execution_id)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",

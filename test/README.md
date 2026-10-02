@@ -29,6 +29,7 @@ fixtures, not production projects or live SSH/ChatGPT acceptance.
 
 | Group | Important behavior |
 | --- | --- |
+| `unit/test_codex.py` | Browser scope, native evidence, original execution reuse, cancellation, setup failure and private result boundaries. |
 | `unit/test_runtime.py` | Configuration, passive discovery, workspace/Git reading, shared resources, retained logs and dependency boundaries. |
 | `unit/test_execution.py`, `test_interactive.py` | Launch versus exit 127, signals/grace/cleanup, original-ID conflicts, waiting, pipe/PTY controls, lost replies, backpressure and cancellation isolation. |
 | `unit/test_workspace_changes.py` | Exact edits, original-byte matching, preview purity, grants, hashes/identities, leases, record ownership, races and no replay. |
