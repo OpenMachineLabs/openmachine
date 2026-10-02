@@ -61,14 +61,16 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.fail(process.stderr.read().decode())
             if self.socket.exists():
                 try:
-                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                        connection.settimeout(0.2)
-                        connection.connect(str(self.socket))
-                    return process
-                except OSError:
+                    # A listening socket precedes ASGI startup. Restart fixtures
+                    # must wait for HTTP readiness before sending SIGTERM.
+                    with httpx.Client(trust_env=False, timeout=0.2,
+                                      transport=httpx.HTTPTransport(uds=str(self.socket))) as client:
+                        if client.options("http://localhost/mcp").status_code == 405:
+                            return process
+                except httpx.TransportError:
                     pass
             time.sleep(0.03)
-        self.fail("Private MCP socket was not created")
+        self.fail("Private MCP HTTP listener was not ready")
 
     def stop(self, process):
         if process.poll() is None:
@@ -411,7 +413,7 @@ class MCPContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 6)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 7)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

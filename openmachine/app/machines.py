@@ -10,10 +10,11 @@ from openmachine.foundation.sanitize import Fault
 
 
 class Machines:
-    def __init__(self, config: Settings, state: Path, ssh_call: Callable[..., dict] | None):
+    def __init__(self, config: Settings, state: Path, ssh_call: Callable[..., dict] | None, ssh_recovery=None):
         self.config = config
         self.state = state
         self.ssh_call = ssh_call
+        self.ssh_recovery = ssh_recovery
 
     def _ssh(self, machine: str, operation: str, **arguments) -> dict:
         if self.ssh_call is None:
@@ -79,9 +80,10 @@ class Machines:
         return workspace.apply_patch(self.config, self.state, machine, **arguments,
             validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
 
-    def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
+    def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False,
+                              *, cancelled: threading.Event | None = None) -> dict:
         if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current)
+            return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current, cancelled=cancelled)
         return workspace.read_change(self.config, self.state, machine, change_id, observe_current)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],

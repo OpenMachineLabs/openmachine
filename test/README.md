@@ -564,3 +564,22 @@ failed attempt and repeat only the affected client workflow on fresh disposable
 state after a guidance repair. Stop and retire the owned test connection after
 acceptance. No new runner, model backend, production activation or Events route
 is required.
+
+## Spec #29 S2.1 original SSH receipt recovery
+
+Installed-wheel continuity and SSH checks exercise original receipt recovery,
+shared alias/task connection budgets, separate local/remote slots, timed-out
+reader ownership, durable pause/restart cooldown and exhaustion, earlier task
+expiry, conservative transport classification and corrupt/missing budget history.
+Existing result, control/cancel, file-change and revision-race cases retain the
+same admission/result owners. Service checks require actual retained-budget
+coverage before stopping a healthy runtime; old readers cannot silently reset it.
+
+Live SSH acceptance uses a separately authorized Linux target and disposable
+workspace/state. Freeze the installed controller wheel and checksum-named worker;
+run one short counter command, interrupt only receipt observation, disconnect the
+caller and verify the original result/handoff arrives after bounded recovery.
+Restart during cooldown and verify its original episode/deadline/attempt count;
+the command counter must remain one. State isolation or transport fault fixtures
+must be disclosed. Offline mocks, CI and SDK fixtures do not establish live SSH,
+production activation, unattended AI continuation or complete S2 acceptance.

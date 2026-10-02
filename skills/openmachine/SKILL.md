@@ -366,12 +366,13 @@ Task receipt hashes cover bounded semantic observations, not copied logs/source.
 Legacy `save_task` remains the existing work journal; do not convert it or strip
 known supervised identities to bypass admission.
 
-S1.3's service-owned observer collects already-admitted local command/control/
+The service-owned observer collects already-admitted local and SSH command/control/
 cancel/change results while callers are absent. Result and handoff publish
 together, not stage acceptance or a new effect. Re-read task/plan/epoch after
 material background progress; an older caller can legitimately see a conflict.
 Do not restart an original command or resend input to recover that conflict.
-The observer never calls SSH, GitHub or an AI, and leaves legacy history alone.
+SSH observation reads only original receipts through the pinned target. The
+observer never calls GitHub or an AI, and leaves legacy history alone.
 
 Normal local observation is due every 2 seconds with four actual read slots and
 at most 32 active tasks. A timed-out thread keeps its slot/owner until actual
@@ -383,6 +384,14 @@ activation can defer observation; it never authorizes bypassing lifecycle guards
 Use passive `read_task` to distinguish current observation, stale original facts,
 pending recovery and a stopped observer. Heartbeats and quiet reads are not
 material progress; a stored next-attempt value is not a live timer after stop.
+SSH adds two separate slots, one per pinned target across tasks/aliases, normally
+every 5 seconds. Recognized transient disconnects share a connection-owned budget:
+three fast attempts with 2/4-second delays, then 60-second cooldown with jitter,
+at most one hour/60 attempts or earlier task expiry. Receipt faults keep separate
+task budgets. Neither adding a task nor pausing/restarting renews them. Identity,
+authentication, protocol, corrupt history and exhaustion require intervention;
+do not repair configuration, reset budgets or replay effects to make recovery pass.
+State contract 7 verifies retained SSH budgets before a managed runtime transition.
 Terminal history never reactivates. Complete runtime recovery, Events and actual
 AI wake remain separate; keep full S1 and A16 acceptance evidence distinct.
 State contract 6 requires actual compatible readers for every retained task,

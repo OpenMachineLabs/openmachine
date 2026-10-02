@@ -386,7 +386,7 @@ class TaskAdmission:
         else:
             records.reserve(record, operation_limit=63 if method == "control_execution" else 62)
 
-    def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False) -> dict:
+    def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False, cancelled=None) -> dict:
         locator = operation["locator"]
         if locator["kind"] == "github":
             observed = self.app._provider().reconcile(self.app.config, locator, arguments)
@@ -398,7 +398,7 @@ class TaskAdmission:
         if (target.ssh_identity or None) != locator["target_identity"]:
             raise Fault("task_target_changed", "The original target identity no longer matches; do not follow another host.")
         if locator["kind"] == "change":
-            observed = self.app.machines.read_workspace_change(locator["machine"], locator["change_id"], observe_current=verify)
+            observed = self.app.machines.read_workspace_change(locator["machine"], locator["change_id"], observe_current=verify, cancelled=cancelled)
             if verify:
                 current, plan = observed.get("current") or {}, observed.get("plan") or {}
                 if observed.get("format") == 2:
@@ -410,7 +410,7 @@ class TaskAdmission:
                 if not matches:
                     raise Fault("task_evidence_changed", "Current files differ from original accepted change evidence.")
             return observed
-        observed = self.app.machines.read_execution(locator["machine"], locator["execution_id"], max_bytes=1)
+        observed = self.app.machines.read_execution(locator["machine"], locator["execution_id"], max_bytes=1, cancelled=cancelled)
         if locator["control_seq"] is not None:
             last = (observed.get("control") or {}).get("last")
             if last is None or last["seq"] != locator["control_seq"]:
@@ -492,9 +492,8 @@ class TaskAdmission:
         if not changed:
             return
         recovery = record["recovery"]
-        if recovery is not None and recovery["category"] == "local_observation" and not any(
-                records.pending(item) and item["locator"]["kind"] in {"execution", "change"}
-                and item["locator"]["target_identity"] is None for item in record["operations"]):
+        if recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"} and not any(
+                records.pending(item) and item["locator"]["kind"] in {"execution", "change"} for item in record["operations"]):
             record["recovery"] = None
         control = record["control"]
         if control["stop_intent"] == "cancel" and not any(records.pending(item) for item in record["operations"]):

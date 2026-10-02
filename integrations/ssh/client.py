@@ -28,7 +28,7 @@ def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | N
         raise Fault("request_limit", "Narrow the request to at most one MiB of encoded JSON.")
     output, diagnostic = bytearray(), bytearray()
     with subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          bufsize=0) as process:
+                          bufsize=0, env=os.environ | {"LC_ALL": "C"}) as process:
         try:
             with selectors.DefaultSelector() as selector:
                 for stream in (process.stdin, process.stdout, process.stderr):
@@ -45,7 +45,14 @@ def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | N
                         raise TimeoutError
                     for key, _ in selector.select(0.05):
                         if key.fileobj is process.stdin:
-                            offset += os.write(key.fd, payload[offset:offset + 65536])
+                            try:
+                                offset += os.write(key.fd, payload[offset:offset + 65536])
+                            except BrokenPipeError:
+                                # Early SSH refusal still owns bounded diagnostics
+                                # needed to distinguish transport from identity faults.
+                                selector.unregister(key.fileobj)
+                                process.stdin.close()
+                                continue
                             if offset == len(payload):
                                 selector.unregister(key.fileobj)
                                 process.stdin.close()
@@ -57,7 +64,22 @@ def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | N
                             key.data.extend(chunk)
                             if len(key.data) > (MAX_MESSAGE if key.data is output else 8192):
                                 raise Fault("response_limit", "SSH output exceeded its bound; no complete response was verified.")
-                return process.wait(timeout=max(0.1, deadline - time.monotonic())), bytes(output)
+                code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+                if code == 255:
+                    # Inspect bounded diagnostics locally; never retain or return
+                    # hostnames, account details or raw authentication messages.
+                    detail = bytes(diagnostic).lower()
+                    if any(item in detail for item in (b"host key verification failed", b"host identification has changed", b"offending ")):
+                        raise Fault("ssh_host_key_mismatch", "SSH host-key verification failed; automatic recovery is stopped.")
+                    if any(item in detail for item in (b"permission denied", b"authentication failed", b"no supported authentication", b"too many authentication failures")):
+                        raise Fault("ssh_authentication_required", "SSH authentication was refused; automatic recovery is stopped.")
+                    if any(item in detail for item in (b"connection timed out", b"connection refused", b"no route to host",
+                            b"network is unreachable", b"connection reset by peer", b"connection closed by remote host",
+                            b"temporary failure in name resolution", b"operation timed out")) or re.search(
+                            rb"(?:connection to [^\r\n]+ closed by remote host\.?|connection closed by [^\r\n]+ port [0-9]+)\s*$",
+                            detail, re.MULTILINE):
+                        raise Fault("ssh_unavailable", "The original SSH connection is temporarily unavailable.", {"ssh_retryable": True})
+                return code, bytes(output)
         finally:
             if process.poll() is None:
                 process.kill()
@@ -66,8 +88,8 @@ def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | N
 
 def call(config: "Settings", machine: str, operation: str, *,
          cancelled: threading.Event | None = None, **arguments) -> dict:
-    if cancelled is not None and operation != "read_execution":
-        raise Fault("invalid_request", "Observer cancellation is only valid for execution reads.")
+    if cancelled is not None and operation not in {"read_execution", "read_workspace_change"}:
+        raise Fault("invalid_request", "Observer cancellation is only valid for original receipt reads.")
     if cancelled is not None and cancelled.is_set():
         raise Fault("observation_cancelled", "The observation was cancelled before contacting the target.")
     target = config.machine(machine, write=(operation == "start_execution"
@@ -94,8 +116,11 @@ def call(config: "Settings", machine: str, operation: str, *,
     except (OSError, TimeoutError, subprocess.SubprocessError, Fault) as error:
         if isinstance(error, Fault) and (error.code == "request_limit" or not mutating):
             raise
+        evidence = identity_evidence
+        if not mutating and isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+            evidence = {"ssh_retryable": True}
         raise Fault("outcome_unknown" if mutating else "ssh_unavailable",
-                    "No complete SSH response was verified. Read the original execution/change before any mutation retry.", identity_evidence) from error
+                    "No complete SSH response was verified. Read the original execution/change before any mutation retry.", evidence) from error
     try:
         response = json.loads(raw)
         if not isinstance(response, dict):

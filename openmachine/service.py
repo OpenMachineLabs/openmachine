@@ -26,7 +26,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 6
+STATE_CONTRACT = 7
 LAUNCHER = '''"""Stable stdlib-only launcher; exec the selected immutable environment."""
 import json
 import os
@@ -99,7 +99,7 @@ def _runtime(state: Path, identity: str) -> Path:
 def _installed(state: Path, identity: str) -> dict:
     result = _json(_runtime(state, identity) / "installation.json")
     if (result.get("identity") != identity or result.get("protocol") != PROTOCOL
-            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5, 6) or not isinstance(result.get("version"), str)
+            or type(result.get("state_contract")) is not int or result["state_contract"] not in (1, 2, 3, 4, 5, 6, 7) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
     return result
@@ -133,9 +133,19 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
+
+
+def _ssh_recovery_state(state: Path) -> dict:
+    # Import only for retained integration state, including when SSH was disabled
+    # later. The connection owner validates its own history; service never edits it.
+    if os.path.lexists(state / "ssh-recovery.json") or os.path.lexists(state / "locks/ssh-recovery.lock"):
+        from integrations.ssh.recovery import check_state
+        return check_state(state)
+    return {"ssh_recovery_present": False, "ssh_recovery_format": 1,
+            "ssh_recovery_targets": 0, "ssh_recovery_sha256": None}
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
@@ -162,10 +172,14 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int
-                or value["state_contract"] not in (1, 2, 3, 4, 5, 6)
+                or value["state_contract"] not in (1, 2, 3, 4, 5, 6, 7)
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
+        recovery = _ssh_recovery_state(state)
+        if recovery["ssh_recovery_present"] and (value["state_contract"] < 7 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in recovery.items())):
+            raise ValueError("candidate ignores or changes retained SSH observation budgets")
         retained_tasks = tasks.check_state(state)
         if retained_tasks["task_index_format"] == 2:
             formats = value.get("structured_task_read_formats")

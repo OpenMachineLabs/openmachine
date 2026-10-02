@@ -587,8 +587,8 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                            pending_decision="Await original operation outcomes." if desired == "cancel" else None)
             record["handoff"] = None
             # Pause/cancel suppress continuation, not evidence collection for
-            # already-owned local work. Neither action resets its retry budget.
-            if record["recovery"] is not None and record["recovery"]["category"] != "local_observation":
+            # already-owned work. Neither action resets its observation budget.
+            if record["recovery"] is not None and record["recovery"]["category"] not in {"local_observation", "ssh_observation"}:
                 record["recovery"] = None
             material(record, now_ms, "stopped", reason)
         if desired == "cancel" and not any(pending(item) for item in record["operations"]):
