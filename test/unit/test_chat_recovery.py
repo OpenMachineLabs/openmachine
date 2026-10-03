@@ -1,5 +1,6 @@
 """Focused behavior checks for the same-Chat recovery delivery slice."""
 
+import hashlib
 import json
 import time
 import unittest
@@ -9,6 +10,7 @@ import uuid
 from integrations import chatgpt, codex
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease
 from support_tasks import TaskFixture, task_contract
 
 
@@ -38,19 +40,20 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         self.assertEqual((enabled["state"], enabled["binding_revision"]), ("bound", 1))
         self.assertTrue(self.app.read_task("structured-one")["chat_recovery"]["bound"])
 
-        # Semantically identical configuration is a no-op and cannot renew state.
+        # A new update ID consumes a revision, but does not renew authority.
         same = self.enable(expected_revision=1)
-        self.assertEqual(same["binding_revision"], 1)
+        self.assertEqual(same["binding_revision"], 2)
+        self.assertEqual(same["expires_at_ms"], enabled["expires_at_ms"])
         original = (self.state / "chat_recovery.json").read_bytes()
 
         self.app = create_application(self.config, self.state)
         restarted = self.app.read_task("structured-one")["chat_recovery"]
-        self.assertEqual((restarted["state"], restarted["binding_revision"]), ("bound", 1))
+        self.assertEqual((restarted["state"], restarted["binding_revision"]), ("bound", 2))
         self.assertEqual((self.state / "chat_recovery.json").read_bytes(), original)
 
-        disabled = self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, 1,
+        disabled = self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, 2,
             {"action": "disable"})
-        self.assertEqual((disabled["state"], disabled["binding_revision"]), ("disabled", 2))
+        self.assertEqual((disabled["state"], disabled["binding_revision"]), ("disabled", 3))
         self.assertEqual(self.app.read_task("structured-one")["chat_recovery"]["state"], "disabled")
 
     def test_binding_rejects_ambiguous_routes_authority_and_shared_conversation(self):
@@ -175,3 +178,85 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         self.assertEqual(error.exception.code, "chat_recovery_store_invalid")
         self.assertFalse(lock.exists())
         self.assertEqual(path.read_bytes(), before)
+
+    def test_nonterminal_delivery_states_remain_observable(self):
+        self.create()
+        self.enable()
+        identity = uuid.uuid4().hex
+        with patch.object(codex, "start", return_value={"status": "accepted"}):
+            self.app._start_chat_recovery_delivery("structured-one", uuid.uuid4().hex, identity)
+        for status in ("accepted", "preparing", "running", "stopping", "finishing"):
+            with self.subTest(status=status), patch.object(codex, "read", return_value={"status": status}):
+                result = self.app._read_chat_recovery_delivery("structured-one")
+                self.assertEqual(result["execution_status"], status)
+                self.assertEqual(result["chat_recovery"]["delivery"]["status"], "reserved")
+        with patch.object(codex, "read", return_value={"status": "completed"}):
+            result = self.app._read_chat_recovery_delivery("structured-one")
+        self.assertEqual(result["chat_recovery"]["delivery"]["status"], "sent_reported")
+
+    def test_prelaunch_rejection_releases_only_proven_unsent_reservation(self):
+        view = self.create()
+        self.enable()
+        for code in ("task_stopped", "chat_recovery_conflict", "task_authority_expired"):
+            with self.subTest(code=code), patch.object(self.app.chat_recovery, "_task",
+                    side_effect=[(view, False), Fault(code, "Rejected before launch.")]), \
+                    patch.object(codex, "start") as start:
+                self.fault(code, self.app._start_chat_recovery_delivery,
+                           "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+                start.assert_not_called()
+                self.assertIsNone(chatgpt.get(self.state, "structured-one").delivery)
+        resource = hashlib.sha256(codex.RESOURCE.encode()).hexdigest()
+        with lease(self.state / "locks" / f"resource-{resource}.lock"):
+            self.fault("resource_busy", self.app._start_chat_recovery_delivery,
+                       "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+        self.assertIsNone(chatgpt.get(self.state, "structured-one").delivery)
+        identity = uuid.uuid4().hex
+        with patch.object(self.app.machines, "start_execution",
+                          side_effect=Fault("execution_start_unverified", "Original launch is uncertain.")):
+            self.fault("execution_start_unverified", self.app._start_chat_recovery_delivery,
+                       "structured-one", uuid.uuid4().hex, identity)
+        retained = chatgpt.get(self.state, "structured-one").delivery
+        self.assertEqual((retained.execution_id, retained.status), (identity, "reserved"))
+
+    def test_reserved_delivery_keeps_its_original_controller_until_observed(self):
+        self.create()
+        self.enable()
+        identity = uuid.uuid4().hex
+        with patch.object(codex, "start", return_value={"status": "accepted"}):
+            self.app._start_chat_recovery_delivery("structured-one", uuid.uuid4().hex, identity)
+        binding = chatgpt.get(self.state, "structured-one")
+        fields = {key: getattr(binding, key) for key in (
+            "task_id", "chat_url", "machine", "workspace", "workspace_identity",
+            "authority_ref", "authority_sha256", "expires_at_ms")}
+        fields.update(machine="another-controller")
+        self.fault("chat_recovery_delivery_busy", chatgpt.configure, self.state,
+            **fields, update_id=uuid.uuid4().hex, expected_revision=1,
+            action="enable", request_sha256="a" * 64)
+        self.assertEqual(chatgpt.get(self.state, "structured-one"), binding)
+        # Disable must still work without changing the original receipt route.
+        self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, 1, {"action": "disable"})
+        self.app = create_application(self.config, self.state)
+        with patch.object(codex, "read", return_value={"status": "completed"}) as read:
+            self.app._read_chat_recovery_delivery("structured-one")
+        self.assertEqual(read.call_args.args[-2:], ("desktop", identity))
+
+    def test_unchanged_policy_consumes_ids_but_exact_retries_preserve_bytes(self):
+        self.create()
+        self.enable()
+        binding = chatgpt.get(self.state, "structured-one")
+        enabled = {key: getattr(binding, key) for key in (
+            "chat_url", "machine", "workspace", "expires_at_ms")}
+        enabled.update(action="enable", authorization_ref=binding.authority_ref)
+        disabled = {"action": "disable"}
+        for change, conflicting in ((enabled, disabled), (disabled, enabled)):
+            revision = chatgpt.get(self.state, "structured-one").revision
+            self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, revision, change)
+            identity = uuid.uuid4().hex
+            arguments = ("structured-one", identity, revision + 1, change)
+            result = self.app.configure_chat_recovery(*arguments)
+            self.assertEqual(result["binding_revision"], revision + 2)
+            before = (self.state / "chat_recovery.json").read_bytes()
+            self.assertEqual(self.app.configure_chat_recovery(*arguments), result)
+            self.fault("chat_recovery_change_conflict", self.app.configure_chat_recovery,
+                       "structured-one", identity, revision + 1, conflicting)
+            self.assertEqual((self.state / "chat_recovery.json").read_bytes(), before)

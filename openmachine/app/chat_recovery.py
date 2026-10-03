@@ -1,10 +1,12 @@
 """Task-aware same-Chat recovery delivery; automatic scheduling is a later slice."""
 
+import os
 import re
 
 import integrations.chatgpt as chatgpt
 from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease
 from openmachine.tasks import records, transitions
 
 
@@ -197,6 +199,7 @@ class ChatRecovery:
             return self.read_delivery(task_id)
         message = chatgpt.recovery_message(task_id, recovery_id, reconciliation_only=reconciliation_only)
         goal = chatgpt.browser_goal(binding.chat_url, message, recovery_id)
+        launch_attempted = False
         try:
             # Revalidate under lifecycle admission immediately before this narrow dispatch.
             with self.app._admit():
@@ -211,7 +214,9 @@ class ChatRecovery:
                 def launch(**arguments):
                     # Codex's generic seam accepts task_context; this private delivery is
                     # deliberately outside business-task admission.
+                    nonlocal launch_attempted
                     arguments.pop("task_context", None)
+                    launch_attempted = True
                     return self.app.machines.start_execution(**arguments)
                 timeout = min(chatgpt.BROWSER_SECONDS, (deadline - chatgpt.now_ms()) // 1000)
                 if timeout < 1:
@@ -221,7 +226,16 @@ class ChatRecovery:
                     self.app.config.workspaces[binding.workspace].root, goal, binding.chat_url,
                     [chatgpt.ORIGIN], "browser", "chrome", timeout, "", None)
         except Fault as error:
-            if error.code in {"resource_busy", "execution_disabled"}:
+            unsent = not launch_attempted or error.code == "execution_disabled"
+            if error.code == "resource_busy":
+                # A rejected local start is unsent only with its original launch
+                # lock free and no execution directory; absence alone is not proof.
+                try:
+                    with lease(self.app.state / "locks" / f"{execution_id}.lock", create=False):
+                        unsent = not os.path.lexists(self.app.state / "executions" / execution_id)
+                except (Fault, OSError):
+                    pass  # Preserve uncertainty and the original failure.
+            if unsent:
                 with self.app._admit():
                     chatgpt.release_reservation(self.app.state, task_id, execution_id)
             raise
@@ -245,7 +259,7 @@ class ChatRecovery:
             observed = "sent_reported"
         elif status in {"blocked", "needs_confirmation"}:
             observed = "blocked"
-        elif status in {"running", "accepted", "finishing"}:
+        elif status in {"accepted", "preparing", "running", "stopping", "finishing"}:
             return {"task_id": task_id, "chat_recovery": chatgpt.public(binding),
                     "delivery_execution_id": delivery.execution_id, "execution_status": status}
         else:

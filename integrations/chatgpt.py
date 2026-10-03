@@ -302,8 +302,6 @@ def configure(state: Path, *, task_id: str, update_id: str, expected_revision: i
                         {"binding_revision": revision})
         timestamp = now_ms()
         if action == "disable":
-            if current is not None and current.disabled:
-                return public(current)
             binding = Binding(task_id=task_id, revision=1, disabled=True,
                 updated_at_ms=timestamp, last_update_id=update_id,
                 last_request_sha256=request_sha256) if current is None else current.model_copy(
@@ -317,8 +315,9 @@ def configure(state: Path, *, task_id: str, update_id: str, expected_revision: i
                 and current.workspace_identity == workspace_identity
                 and current.authority_ref == authority_ref and current.authority_sha256 == authority_sha256
                 and current.expires_at_ms == expires_at_ms)
-            if same:
-                return public(current)
+            if current and current.delivery and current.delivery.status == "reserved" and not same:
+                raise Fault("chat_recovery_delivery_busy",
+                            "Observe the original delivery before changing its recovery binding.")
             active = [item for item in value.bindings.values()
                       if item.task_id != task_id and not item.disabled and item.chat_url
                       and (item.expires_at_ms or 0) > timestamp]
@@ -337,6 +336,8 @@ def configure(state: Path, *, task_id: str, update_id: str, expected_revision: i
                 expires_at_ms=expires_at_ms, updated_at_ms=timestamp,
                 last_update_id=update_id, last_request_sha256=request_sha256,
                 delivery=current.delivery if current else None)
+        # Every newly accepted update ID consumes a revision, even for unchanged
+        # policy. Only the exact retained ID/hash retry above is a pure no-op.
         value.bindings[task_id] = binding
         _save(state, value)
         return public(binding)

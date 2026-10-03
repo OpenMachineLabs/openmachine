@@ -19,6 +19,51 @@ from support_tasks import TaskFixture, task_contract, terminal_task_fixture
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_committed_head_can_reattach_but_requires_revision_before_new_effects(self):
+        git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"]
+        subprocess.run(["git", "init", "-q", str(self.work)], check=True, capture_output=True)
+        subprocess.run(git + ["commit", "--allow-empty", "-qm", "runtime(fixture): initial head"],
+                       cwd=self.work, check=True, capture_output=True)
+        self.context = self.app.read_workspace_file("desktop", "project", "AGENTS.md")["context"]
+        self.request = task_contract(self.context)
+        self.accept_plan()
+        args = self.start_arguments(expected_head_sha=self.context["head_sha"])
+        args["argv"] = git + ["commit", "--allow-empty", "-qm", "runtime(fixture): advance head"]
+        self.assertEqual(self.wait(self.app.start_execution(**args))["status"], "succeeded")
+        original = self.app.task_admission.reconcile(self.view())["record"]
+        owner = original["control"]["owner"]
+        with patch.object(task_store.time, "time_ns", return_value=(owner["expires_at_ms"] + 1) * 1000000):
+            claimed = self.control("claim", handoff_id=original["handoff"]["id"])["record"]
+        self.assertEqual(claimed["operations"], original["operations"])
+        self.assertEqual(claimed["contract"], original["contract"])
+        write = self.write_arguments()
+        write["expected_head_sha"] = self.context["head_sha"]
+        self.fault("context_mismatch", self.app.write_workspace_file, **write)
+        self.fault("context_mismatch", self.control, "record_decision", stage_id="verify",
+                   outcome="accepted", evidence=[args["execution_id"]], reason="Stale HEAD is not acceptance.")
+        self.control("pause", reason="Reattach after the task's own commit.")
+        current = self.app.read_workspace_file("desktop", "project", "AGENTS.md")["context"]
+        with patch.object(self.app.machines, "read_workspace_file",
+                          return_value={"context": dict(current, workspace_identity="f" * 64)}):
+            self.fault("context_mismatch", self.control, "resume", reason="Wrong workspace must remain blocked.")
+        resumed = self.control("resume", reason="Continue in the original workspace.")["record"]
+        with patch.object(self.app.machines, "read_workspace_file",
+                          return_value={"context": dict(current, workspace_identity="f" * 64)}):
+            self.fault("context_mismatch", self.control, "claim", handoff_id=resumed["handoff"]["id"])
+        self.control("claim", handoff_id=resumed["handoff"]["id"])
+        contract = json.loads(json.dumps(original["contract"]))
+        contract["targets"][0]["head_sha"] = current["head_sha"]
+        revised = self.control("revise_plan", contract=contract, stages=self.request["stages"],
+            invalidated_stage_ids=["verify"], reason="Reconcile the verified original commit.")["record"]
+        self.assertEqual(revised["operations"], original["operations"])
+        self.control("claim", handoff_id=revised["handoff"]["id"])
+        write = self.write_arguments()
+        write["expected_head_sha"] = current["head_sha"]
+        self.assertEqual(self.app.write_workspace_file(**write)["status"], "applied")
+        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+        self.assertEqual(subprocess.check_output(["git", "rev-list", "--count", "HEAD"],
+                         cwd=self.work, text=True).strip(), "2")
+
     def test_pre_dispatch_busy_is_failed_and_old_unknown_reconciles(self):
         self.accept_plan()
         args = self.start_arguments()

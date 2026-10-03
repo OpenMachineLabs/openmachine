@@ -223,7 +223,7 @@ class Application:
             raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
         return self.chat_recovery.configure(task_id, update_id, expected_revision, change)
 
-    def _validate_task_scope(self, request: dict, *, bind_new: bool = False) -> None:
+    def _validate_task_scope(self, request: dict, *, bind_new: bool = False, check_head: bool = True) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
@@ -251,7 +251,7 @@ class Application:
                 self.config.workspace_machine(machine)
             observed = self.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1)["context"]
             if (observed.get("workspace_identity") != target["workspace_identity"]
-                    or (observed.get("head_sha") or None) != target["head_sha"]):
+                    or check_head and (observed.get("head_sha") or None) != target["head_sha"]):
                 raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")
         github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"})
         if any(name.startswith("github_") for name in tools):

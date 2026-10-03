@@ -85,6 +85,11 @@ owner. Release a claim when deliberately handing work over. Claim expiry does
 not stop admitted work or erase its results. The final accepted stage still has
 a handoff until explicit completion; reclaim and finish without repeating it.
 
+Claim and resume revalidate workspace identity and current grants, but tolerate a
+historical HEAD so a task can reattach after its own commit. They neither change
+the accepted HEAD nor authorize new work against it. Reconcile the original commit
+and explicitly revise the plan before new effects or acceptance on a changed HEAD.
+
 Application persists normalized intent before dispatch, then releases the task
 lock before domain IO. Each domain retains source, sequence, permission and lease
 checks. Per-effect locks span bounded dispatch, not a command's lifetime. Capacity
@@ -190,6 +195,12 @@ not claim the business task, extend its authority or send a message. One canonic
 conversation may own one active task; at most 32 active and 128 retained bindings
 fit in the bounded private `chat_recovery.json` store. Service compatibility checks
 retain this authority/deduplication state before managed activation.
+
+Each newly accepted configuration update ID consumes one binding revision, even
+when the policy is unchanged. Exact retained ID/request retries leave the bytes
+unchanged; neither case resets delivery history or extends authority implicitly.
+A reserved delivery must be observed before rebinding its destination/controller.
+Per-task disable remains available and retains the original receipt route.
 
 The private delivery path rechecks task stop/expiry/ownership, current handoff,
 recovery authority and controller identity, then reserves one delivery identity
