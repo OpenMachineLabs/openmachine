@@ -16,6 +16,7 @@ acceptance receipts remain in the linked Issues, not this index.
 | [#32](https://github.com/OpenMachineLabs/openmachine/issues/32) | `direct_issue_contract`, [implementation authorization](https://github.com/OpenMachineLabs/openmachine/issues/32#issuecomment-5918946285) | Closed: MCP 2026-07-28 / SDK 2.2.0 with retained 2025-11-25 compatibility. |
 | [#29](https://github.com/OpenMachineLabs/openmachine/issues/29) | `direct_issue_contract`, [maintainer-approved S3 and final acceptance](https://github.com/OpenMachineLabs/openmachine/issues/29) | Closed: task admission and original-result observation/recovery retained; Work Events continuation retired by current maintenance. |
 | [#62](https://github.com/OpenMachineLabs/openmachine/issues/62) | `direct_issue_contract`, [PR1 authorization](https://github.com/OpenMachineLabs/openmachine/issues/62#issuecomment-5953592298) | PR1: runtime-owned existing-gh connections, account bindings and retained-state compatibility. Native authentication remains PR2; Spec stays open. |
+| [#68](https://github.com/OpenMachineLabs/openmachine/issues/68) | `direct_issue_contract`, [PR1 authorization and live-route evidence](https://github.com/OpenMachineLabs/openmachine/issues/68#issuecomment-5970576144) | PR1: default-on same-Chat binding and bounded Chrome delivery path. Automatic unattended scheduling remains PR2; Spec stays open. |
 
 ## Survey Issues
 

@@ -55,6 +55,24 @@ class TerminalSize(BaseModel):
     cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
 
 
+class RecoveryEnable(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["enable"]
+    chat_url: Annotated[str, Field(min_length=1, max_length=2048)]
+    machine: Annotated[str, Field(min_length=1, max_length=128)]
+    workspace: Annotated[str, Field(min_length=1, max_length=128)]
+    authorization_ref: Annotated[str, Field(min_length=1, max_length=512)]
+    expires_at_ms: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)]
+
+
+class RecoveryDisable(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: Literal["disable"]
+
+
+RecoveryChange = Annotated[RecoveryEnable | RecoveryDisable, Field(discriminator="action")]
+
+
 def _task_context(value: tasks.TaskContext | None) -> dict | None:
     return value.model_dump() if value is not None else None
 
@@ -134,7 +152,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+        guarded = {"start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -300,6 +318,15 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
             expected_plan_revision, expected_epoch, update_id, transition.model_dump()))
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
+
+    @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
+    def configure_chat_recovery(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
+                                update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
+                                expected_revision: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
+                                change: RecoveryChange) -> CallToolResult:
+        """Configure the default-on same-Chat recovery binding or explicitly disable it for one structured task. Enable binds one exact ordinary Chat URL, configured local controller workspace, original authority reference and bounded expiry. Binding does not claim the task, extend business authority or send a message. Disable suppresses future recovery dispatch while retaining prior delivery evidence. Automatic unattended detection is not delivered in this slice."""
+        return _reply(lambda: application.configure_chat_recovery(
+            task_id, update_id, expected_revision, change.model_dump()))
 
     @mcp.tool(annotations=READ, structured_output=False)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],

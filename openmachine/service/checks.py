@@ -36,13 +36,18 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **_events_state(state), **_connections_state(state), **_chat_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
 
 
 def _connections_state(state: Path) -> dict:
     from integrations.connections import check_state
+    return check_state(state)
+
+
+def _chat_recovery_state(state: Path) -> dict:
+    from integrations.chatgpt import check_state
     return check_state(state)
 
 
@@ -142,6 +147,10 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
         if connections["connections_present"] and (value["state_contract"] < required_connection_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")
+        chat_recovery = _chat_recovery_state(state)
+        if chat_recovery["chat_recovery_present"] and (value["state_contract"] < 12 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in chat_recovery.items())):
+            raise ValueError("candidate ignores retained Chat recovery authority or delivery identity")
         events = _events_state(state)
         if events["events_present"] and (value["state_contract"] < 9 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):

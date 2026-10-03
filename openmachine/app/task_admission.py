@@ -68,7 +68,11 @@ class TaskAdmission:
             transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
             if action not in {"pause", "cancel", "release"}:
                 contract = request["transition"].get("contract", record["contract"])
-                self.app._validate_task_scope({"contract": contract})
+                # Reattachment acquires ownership, not permission for a new effect.
+                # Keep identity/grant checks; a changed HEAD still requires an
+                # explicit plan revision before admission or acceptance.
+                self.app._validate_task_scope(
+                    {"contract": contract}, check_head=action not in {"claim", "resume"})
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)
                 transitions.guards(view["record"], request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])

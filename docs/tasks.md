@@ -85,6 +85,11 @@ owner. Release a claim when deliberately handing work over. Claim expiry does
 not stop admitted work or erase its results. The final accepted stage still has
 a handoff until explicit completion; reclaim and finish without repeating it.
 
+Claim and resume revalidate workspace identity and current grants, but tolerate a
+historical HEAD so a task can reattach after its own commit. They neither change
+the accepted HEAD nor authorize new work against it. Reconcile the original commit
+and explicitly revise the plan before new effects or acceptance on a changed HEAD.
+
 Application persists normalized intent before dispatch, then releases the task
 lock before domain IO. Each domain retains source, sequence, permission and lease
 checks. Per-effect locks span bounded dispatch, not a command's lifetime. Capacity
@@ -172,20 +177,52 @@ connection failure without replay or stage acceptance.
 
 ## Chat continuation
 
-Open Machine does not expose MCP Events subscriptions or automatically wake a
-ChatGPT caller. `events_delivery` is false; caller presence remains unknown.
-Original results and pending handoffs are still retained independently of Chat.
+Open Machine does not expose MCP Events subscriptions. `events_delivery` remains
+false and native task ownership is not proof that a ChatGPT caller is present.
+Original results and pending handoffs stay durable independently of Chat.
 
-On an explicitly authorized continuation, read the same task and original receipts,
-claim its current handoff or reuse a valid claim, then admit only the next safe
-operation with current task/plan revisions and epoch. A read is not a claim, and
-a claim is not stage acceptance. Pause, expiry, terminal state and uncertain
-original effects retain their existing guards. Do not rerun completed work merely
-because the previous Chat turn ended.
+Same-Chat recovery is default-enabled for eligible structured tasks, but this
+increment delivers only the binding and bounded delivery path; automatic unattended
+detection/scheduling is a later increment. `read_task` projects `chat_recovery`
+without mutating the task. A task with no verified ordinary-Chat destination reports
+`waiting_for_binding`, while an explicit per-task disable is retained across restart.
+Legacy checkpoints remain ineligible.
 
-The former Work adapter is retired, not replaced by polling, a browser driver or
-a second model. Any old private Events archive remains inert and unchanged; the
-[lifecycle reader](service.md) checks its retention without sending callbacks.
+`configure_chat_recovery` binds one exact authenticated `https://chatgpt.com/c/...`
+conversation to one configured local controller workspace and an existing task
+authority reference, with expiry no later than the task contract. The binding does
+not claim the business task, extend its authority or send a message. One canonical
+conversation may own one active task; at most 32 active and 128 retained bindings
+fit in the bounded private `chat_recovery.json` store. Service compatibility checks
+retain this authority/deduplication state before managed activation.
+
+Each newly accepted configuration update ID consumes one binding revision, even
+when the policy is unchanged. Exact retained ID/request retries leave the bytes
+unchanged; neither case resets delivery history or extends authority implicitly.
+A reserved delivery must be observed before rebinding its destination/controller.
+Per-task disable remains available and retains the original receipt route.
+
+The private delivery path rechecks task stop/expiry/ownership, current handoff,
+recovery authority and controller identity, then reserves one delivery identity
+before using the existing Codex/Chrome execution path. Codex opens a new task-owned
+tab for the exact bound conversation, refuses unsafe page/composer states, sends
+only the fixed sub-2-KiB recovery message, verifies the marker with native browser
+evidence and exits. A sent report, task claim and later business-task advancement
+remain distinct observations. Timeout or missing evidence is `outcome_unknown` and
+is never a reason to resend blindly. Recovery delivery is not recorded as the next
+business operation and never claims the business task on Chat's behalf.
+
+After re-entry, Chat reads the same task and original receipts, claims its current
+handoff or reuses a valid claim, and admits only the next safe operation with current
+task/plan revisions and epoch. A read is not a claim, and a claim is not stage
+acceptance. Pause, cancellation, expiry, terminal state and uncertain original
+effects keep their existing guards; unknown effects receive reconciliation-only
+instructions. Do not rerun completed work because the previous Chat turn ended.
+
+The former Work adapter remains retired. Old private Events archives stay inert and
+unchanged; the [lifecycle reader](service.md) checks their retention without sending
+callbacks. No second model loop, browser backend or automatic scheduler is introduced
+by this delivery slice.
 
 ## Legacy checkpoints
 

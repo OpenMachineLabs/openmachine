@@ -332,4 +332,24 @@ Review the actual report, matching final native snapshot and pending_action.
 Missing bridge/login/confirmation or uncertain side effects are blockers, not
 permission to install, switch backends or repeat the action. A newly authorized
 follow-up uses a new operation ID under the same parent task and exact tab context.
-The adapter never wakes Chat, and native browser access is not a network sandbox.
+The generic Codex adapter does not itself wake Chat, and native browser access is
+not a network sandbox.
+
+For structured same-Chat recovery, inspect `read_task.chat_recovery`. Recovery is
+default-enabled but remains `waiting_for_binding` until one exact authenticated
+ordinary `https://chatgpt.com/c/...` conversation is validated. Use
+`configure_chat_recovery` only to establish/refresh that bounded binding or to
+explicitly disable recovery for this task; binding does not claim the business task,
+extend its authority or send a message. Preserve the binding revision/update ID
+across uncertainty. Legacy checkpoints are not eligible.
+
+The current delivery slice has a private typed Application path that reserves one
+fixed-message Chrome delivery before using the existing Codex/execution receipt.
+It does not expose an arbitrary prompt/debug tool, does not make delivery a business
+task operation, and does not claim the task on Chat's behalf. Sent, blocked and
+uncertain outcomes are retained separately; never resend a sent or uncertain marker
+because the Chat stayed quiet. After re-entry, reread the original task/receipts and
+claim its current handoff before business effects. If continuation requires human
+permission or a user decision, pause the task with the existing control instead of
+leaving an ambiguous free-text wait. Automatic unattended detection/scheduling is
+not delivered by this slice; do not claim that an ended Chat will yet self-wake.
