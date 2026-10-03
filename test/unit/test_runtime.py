@@ -82,7 +82,7 @@ class RuntimeTests(unittest.TestCase):
             "openmachine.app": ("openmachine", "openmachine.app.chat_recovery", "openmachine.app.machines", "openmachine.app.task_admission", "openmachine.app.task_observer", "openmachine.config",
                                 "openmachine.execution", "openmachine.workspace", "openmachine.tasks",
                                 "openmachine.skills", "openmachine.service", "openmachine.foundation.*"),
-            "openmachine.app.chat_recovery": ("integrations.chatgpt", "openmachine.tasks", "openmachine.tasks.records",
+            "openmachine.app.chat_recovery": ("integrations.chatgpt", "openmachine.app.task_observation", "openmachine.tasks", "openmachine.tasks.records",
                                               "openmachine.tasks.transitions", "openmachine.foundation.*"),
             "openmachine.app.machines": ("openmachine.config", "openmachine.execution", "openmachine.workspace",
                                          "openmachine.tasks", "openmachine.foundation.*"),

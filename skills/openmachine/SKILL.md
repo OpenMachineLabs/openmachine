@@ -41,9 +41,9 @@ recovery budget remain real stop conditions. Do not repeat an unchanged failing
 request; use evidence to change the approach, or report the blocker when no safe
 progress remains. Never promise background continuation after ending the turn.
 
-These are caller instructions, not an autonomous supervisor or a guarantee that
-an ended ChatGPT turn will restart. Open Machine has no automatic caller wake;
-explicit continuation still reads and claims the original task safely.
+These are caller instructions, not a guarantee that an ended ChatGPT turn will
+restart. Eligible bound tasks have the bounded same-Chat recovery path described
+below; every continuation still reads and claims the original task safely.
 
 ## Operating steps
 
@@ -127,7 +127,7 @@ explicit continuation still reads and claims the original task safely.
    acceptance separate. Local SDK sessions are not real ChatGPT conversations.
 
 The timeout defaults to 600 seconds; explicitly requested commands may use up to
-86,400 seconds. OM has no general agent loop or autonomous scheduler. Workspace locks
+86,400 seconds. OM has no general agent loop or arbitrary-task scheduler. Workspace locks
 are exclusive by default; shared mode is only for cooperating read-only commands.
 Stable resource names coordinate current resources, not unrelated processes.
 Never bypass a busy lock, changed hash/HEAD or a platform refusal via another
@@ -158,6 +158,10 @@ PTY memory. `finishing` means cleanup remains pending; unknown is not success.
 
 Use the documented CLI for authorized lifecycle work. Read service status/original
 intent, select an exact wheel/lock, and never replace a live environment in place.
+For a newer state contract, run the reviewed incoming installed environment's CLI;
+the old CLI deliberately cannot validate a future contract. Preserve failed
+preparations and use a corrected reviewed artifact, never a fabricated installation
+manifest or removal of an immutable runtime to make an update pass.
 Use explicit `update --candidate-config` for new routes; do not pre-edit the active
 file. Retain exact snapshots. Candidate local/target readers must accept every
 retained format before stop, including terminal tasks, workspace formats 1/2, SSH
@@ -269,8 +273,10 @@ Receipt hashes cover semantic observations, not copied raw logs or source.
 
 ## Observation and recovery
 
-The service observer reads only admitted command/control/cancel/change results.
-Result and handoff publish together, not stage acceptance, new effects or AI calls.
+The service's receipt observer reads admitted command/control/cancel/change results.
+Result and handoff publish together, not stage acceptance or new business effects.
+Its separate bounded same-Chat recovery slot may deliver a fixed continuation
+message; it never makes business decisions or claims the task for Chat.
 Quiet reads/heartbeats are not material progress. Stopped/stale observers have no
 live timer. Lifecycle admission remains; legacy history is not converted. GitHub
 grant revalidation cannot publish or replay a mutation.
@@ -338,12 +344,23 @@ not a network sandbox.
 For structured same-Chat recovery, inspect `read_task.chat_recovery`. Recovery is
 default-enabled but remains `waiting_for_binding` until one exact authenticated
 ordinary `https://chatgpt.com/c/...` conversation is validated. Use
-`configure_chat_recovery` only to establish/refresh that bounded binding or to
+`configure_chat_recovery` during normal task setup/continuation to establish that
+bounded binding; do not ask for a separate per-task opt-in. Supply/confirm the URL
+once when it is not reliably known; never guess it from tabs or MCP metadata.
+Use the same operation to refresh a validated binding or to
 explicitly disable recovery for this task; binding does not claim the business task,
 extend its authority or send a message. Preserve the binding revision/update ID
 across uncertainty. Legacy checkpoints are not eligible.
 
-The current delivery slice has a private typed Application path that reserves one
+The existing TaskObserver checks every 30 seconds after a ten-minute external-task
+activity grace and a fresh ten-minute restart grace. No-active-execution handoffs
+and final `finish` obligations are included. Reads/internal probes do not accept
+work; a quiet verified-running command and an unexpired claim suppress dispatch.
+Inspect observer state, original receipts, delivery IDs/timestamps and blockers,
+not an assumed Chat heartbeat. One bounded background slot shares the existing
+global Codex browser lease and remains owned/drained by the TaskObserver.
+
+The private typed Application path reserves one
 fixed-message Chrome delivery before using the existing Codex/execution receipt.
 It does not expose an arbitrary prompt/debug tool, does not make delivery a business
 task operation, and does not claim the task on Chat's behalf. Sent, blocked and
@@ -351,5 +368,15 @@ uncertain outcomes are retained separately; never resend a sent or uncertain mar
 because the Chat stayed quiet. After re-entry, reread the original task/receipts and
 claim its current handoff before business effects. If continuation requires human
 permission or a user decision, pause the task with the existing control instead of
-leaving an ambiguous free-text wait. Automatic unattended detection/scheduling is
-not delivered by this slice; do not claim that an ended Chat will yet self-wake.
+leaving an ambiguous free-text wait. Never use automatic resume to undo a pause.
+Finish the original task explicitly once accepted stages are complete.
+
+Only verified no-send/generating evidence permits another browser attempt: at
+most three per one-hour episode, ten minutes apart, with each execution bounded
+to 180 seconds or earlier authority expiry. Reads, claim expiry, handoff churn,
+restart and re-enable do not renew budgets. Sent episodes wait up to 15 minutes
+for actual continuation and never automatically resend. Unknown effects receive
+reconciliation-only instructions; submission, claim, business advancement and
+manual supersession remain separate observations. Report concrete blockers rather
+than promising recovery through sleep/offline hosts, persistent Thinking, missing
+login, human decisions or exhausted/uncertain delivery.

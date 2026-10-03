@@ -477,8 +477,8 @@ class ServiceTests(unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (12, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 12)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (13, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13)
         self.assertEqual(actual, proof)
         for change in ({"structured_task_records": 0}, {"task_records": True},
                        {"task_store_present": 1}, {"structured_task_read_formats": [True]},
@@ -486,7 +486,7 @@ class ServiceTests(unittest.TestCase):
                        {"task_index_generation": proof["task_index_generation"] - 1}):
             with self.subTest(change=change), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | change), "")):
-                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 12))
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13))
         self.assertEqual(path.read_bytes(), raw)
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
@@ -514,8 +514,8 @@ class ServiceTests(unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (12, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 12), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (13, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -535,11 +535,11 @@ class ServiceTests(unittest.TestCase):
             authority_ref="fixture:authority", authority_sha256="d" * 64, expires_at_ms=4600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (12, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 12), proof)
-        for delta in ({"state_contract": 11}, {"chat_recovery_present": False},
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (13, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13), proof)
+        for delta in ({"state_contract": 12}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
-                      {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 2}):
+                      {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):
             with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(
                     service_checks, "_run", return_value=subprocess.CompletedProcess(
                         [], 0, json.dumps(proof | delta), "")), patch.object(service_runtime, "_stop") as stop:
@@ -622,7 +622,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 12)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 13)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):

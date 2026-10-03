@@ -181,10 +181,11 @@ Open Machine does not expose MCP Events subscriptions. `events_delivery` remains
 false and native task ownership is not proof that a ChatGPT caller is present.
 Original results and pending handoffs stay durable independently of Chat.
 
-Same-Chat recovery is default-enabled for eligible structured tasks, but this
-increment delivers only the binding and bounded delivery path; automatic unattended
-detection/scheduling is a later increment. `read_task` projects `chat_recovery`
-without mutating the task. A task with no verified ordinary-Chat destination reports
+Same-Chat recovery is default-enabled for eligible structured tasks. The existing
+service-owned TaskObserver checks bound tasks every 30 seconds, including tasks
+with no active execution and accepted final stages still awaiting `finish`.
+`read_task` projects `chat_recovery` without changing canonical task revisions.
+A task with no verified ordinary-Chat destination reports
 `waiting_for_binding`, while an explicit per-task disable is retained across restart.
 Legacy checkpoints remain ineligible.
 
@@ -202,15 +203,47 @@ unchanged; neither case resets delivery history or extends authority implicitly.
 A reserved delivery must be observed before rebinding its destination/controller.
 Per-task disable remains available and retains the original receipt route.
 
+Successful external MCP calls attributable to a bound task record activity in the
+private recovery store, not the task. Internal reads, readiness probes and Codex
+delivery activity do not count; neither attribution nor a native claim authenticates
+presence in that Chat. Dispatch waits ten minutes after attributable activity and
+after observer restart, and requires no live claim or verified running original
+operation. Stop/expiry/identity/grant and original observation-budget guards remain.
+Unknown original effects allow only a reconciliation-only wake. A missing handoff
+is constructed through the existing revision-checked task transition, never by
+resetting operations or accepting stages.
+
+One observer-owned background slot keeps native dispatch/receipt reads off the MCP
+event loop and ordinary receipt coordinator. The observer retains its coordination
+lease until that slot drains. The existing global `browser:codex` lease prevents
+overlap with ordinary browser subtasks; no second daemon or planner is installed.
+
 The private delivery path rechecks task stop/expiry/ownership, current handoff,
 recovery authority and controller identity, then reserves one delivery identity
 before using the existing Codex/Chrome execution path. Codex opens a new task-owned
 tab for the exact bound conversation, refuses unsafe page/composer states, sends
-only the fixed sub-2-KiB recovery message, verifies the marker with native browser
-evidence and exits. A sent report, task claim and later business-task advancement
+only the fixed single-line sub-2-KiB recovery message, verifies both the complete
+message and marker with native browser evidence and exits. Marker-only submission
+is uncertain, not successful delivery. A sent report, task claim and business-task advancement
 remain distinct observations. Timeout or missing evidence is `outcome_unknown` and
 is never a reason to resend blindly. Recovery delivery is not recorded as the next
 business operation and never claims the business task on Chat's behalf.
+
+An episode permits at most three browser attempts, at least ten minutes apart,
+within one hour or earlier authority expiry. Each browser execution is bounded to
+180 seconds or remaining authority. Only verified native no-send evidence for a
+generating page permits a retry. Proven pre-launch contention consumes no attempt
+but retains the original episode deadline. Other unsafe preflight states block;
+missing receipts or ambiguous clicks remain uncertain. Reads, claims, handoff-only
+changes, restarts and equivalent re-enables never renew a consumed budget.
+
+Submission, predetermined claim and actual new intent/accepted decision/finish
+have separate timestamps and projections. Manual progress is reported separately.
+After 15 minutes without continuation, a sent episode reports
+`continuation_not_observed`, without resending. Only genuine later business progress
+can establish a new continuation obligation; uncertain delivery remains blocked.
+Format-2 recovery state retains original execution IDs and finite budgets across
+restart. The original execution store owns detailed receipts, not this small index.
 
 After re-entry, Chat reads the same task and original receipts, claims its current
 handoff or reuses a valid claim, and admits only the next safe operation with current
@@ -221,8 +254,9 @@ instructions. Do not rerun completed work because the previous Chat turn ended.
 
 The former Work adapter remains retired. Old private Events archives stay inert and
 unchanged; the [lifecycle reader](service.md) checks their retention without sending
-callbacks. No second model loop, browser backend or automatic scheduler is introduced
-by this delivery slice.
+callbacks. Sleeping/offline controllers, persistent generation, unavailable login,
+human decisions and exhausted or uncertain episodes remain visible limits. This is
+bounded same-Chat re-entry, not guaranteed restoration or exactly-once UI execution.
 
 ## Legacy checkpoints
 

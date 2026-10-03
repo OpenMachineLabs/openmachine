@@ -148,7 +148,8 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")
         chat_recovery = _chat_recovery_state(state)
-        if chat_recovery["chat_recovery_present"] and (value["state_contract"] < 12 or any(
+        required_recovery_contract = 13 if chat_recovery["chat_recovery_format"] >= 2 else 12
+        if chat_recovery["chat_recovery_present"] and (value["state_contract"] < required_recovery_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in chat_recovery.items())):
             raise ValueError("candidate ignores retained Chat recovery authority or delivery identity")
         events = _events_state(state)
