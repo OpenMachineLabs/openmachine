@@ -65,6 +65,12 @@
       "approval": "Current maintainer approved the minimal Codex browser adapter, one PR, self-review and merge.",
       "base_commit": "ae4d2b9eabafb9cda1db17dbc481869d6cce88bc",
       "change": "Add only start_codex_task/read_codex_task with browser-only scope. Expected fields are authored from the approved design; existing tool schemas and annotations are unchanged."
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/68#issuecomment-5970576144",
+      "base_commit": "e26c636122caceb19e8b91677663c3d0dbf40d3d",
+      "change": "PR 1 adds only configure_chat_recovery as the public default-on same-Chat binding/disable operation. Automatic scheduling and a public delivery/debug tool remain absent; unrelated schemas and annotations stay unchanged. Expectations are authored from the approved contract and checked against installed discovery.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/68"
     }
   ],
   "baseline": {
@@ -376,6 +382,131 @@
           "request_id"
         ],
         "title": "connect_integrationArguments",
+        "type": "object"
+      }
+    },
+    "configure_chat_recovery": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "RecoveryDisable": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "disable",
+                "title": "Action",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "title": "RecoveryDisable",
+            "type": "object"
+          },
+          "RecoveryEnable": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "enable",
+                "title": "Action",
+                "type": "string"
+              },
+              "authorization_ref": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Authorization Ref",
+                "type": "string"
+              },
+              "chat_url": {
+                "maxLength": 2048,
+                "minLength": 1,
+                "title": "Chat Url",
+                "type": "string"
+              },
+              "expires_at_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Expires At Ms",
+                "type": "integer"
+              },
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "workspace": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Workspace",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "chat_url",
+              "machine",
+              "workspace",
+              "authorization_ref",
+              "expires_at_ms"
+            ],
+            "title": "RecoveryEnable",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "change": {
+            "discriminator": {
+              "mapping": {
+                "disable": "#/$defs/RecoveryDisable",
+                "enable": "#/$defs/RecoveryEnable"
+              },
+              "propertyName": "action"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/RecoveryEnable"
+              },
+              {
+                "$ref": "#/$defs/RecoveryDisable"
+              }
+            ],
+            "title": "Change"
+          },
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "update_id": {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Update Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "update_id",
+          "expected_revision",
+          "change"
+        ],
+        "title": "configure_chat_recoveryArguments",
         "type": "object"
       }
     },

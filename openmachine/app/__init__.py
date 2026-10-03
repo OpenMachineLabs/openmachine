@@ -15,6 +15,7 @@ from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_P
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
+from .chat_recovery import ChatRecovery
 from .machines import Machines
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
@@ -25,17 +26,20 @@ bound_workspace_result = workspace.bound_result
 
 
 class Application:
-    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None, connections=None, codex=None):
+    def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None,
+                 connections=None, codex=None, chatgpt=None):
         self.config = config
         self.state = state
         self.machines = machines
         self.github = github
         self.connections = connections
         self.codex = codex
+        self.chatgpt = chatgpt
         if connections is not None:
             connections.admit = self._admit
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
+        self.chat_recovery = ChatRecovery(self) if chatgpt is not None else None
 
     @contextmanager
     def _admit(self) -> Iterator[None]:
@@ -103,6 +107,7 @@ class Application:
                             "native_login": bool(self.config.github and self.connections.native.CLIENT_ID),
                             "login_cancellation": True},
             "codex": self.codex.capabilities(self.config) if self.codex is not None else None,
+            "chat_recovery": self.chat_recovery.capabilities() if self.chat_recovery is not None else None,
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
                           "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
@@ -194,7 +199,8 @@ class Application:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
     def read_task(self, task_id: str) -> dict:
-        return self.task_observer.project(tasks.read(self.state, task_id))
+        view = self.task_observer.project(tasks.read(self.state, task_id))
+        return self.chat_recovery.project(view) if self.chat_recovery is not None else view
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
                   anchors: list[str] | None = None) -> dict:
@@ -211,12 +217,18 @@ class Application:
         self.task_observer.notify()
         return view
 
+    def configure_chat_recovery(self, task_id: str, update_id: str,
+                                expected_revision: int, change: dict) -> dict:
+        if self.chat_recovery is None:
+            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
+        return self.chat_recovery.configure(task_id, update_id, expected_revision, change)
+
     def _validate_task_scope(self, request: dict, *, bind_new: bool = False) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
-                 "find_tasks", "read_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
+                 "find_tasks", "read_task", "save_task", "create_task", "control_task", "configure_chat_recovery", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_merge",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
@@ -287,6 +299,16 @@ class Application:
         if self.codex is None:
             raise Fault("codex_unavailable", "The Codex adapter is not assembled in this runtime.")
         return self.codex.read(self.config, self.state, self.read_execution, machine, execution_id)
+
+    def _start_chat_recovery_delivery(self, task_id: str, recovery_id: str, execution_id: str) -> dict:
+        if self.chat_recovery is None:
+            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
+        return self.chat_recovery.start_delivery(task_id, recovery_id, execution_id)
+
+    def _read_chat_recovery_delivery(self, task_id: str) -> dict:
+        if self.chat_recovery is None:
+            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
+        return self.chat_recovery.read_delivery(task_id)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
