@@ -19,6 +19,9 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
+    prepare = commands.add_parser("prepare-runtime", help="Prepare a verified offline payload without starting or selecting a service")
+    prepare.add_argument("--payload", type=Path, required=True)
+    prepare.add_argument("--sha256", required=True, help="Manifest digest from the trusted product artifact")
     doctor = commands.add_parser("doctor", help="Inspect configuration or explicitly probe one integration or managed service")
     target = doctor.add_mutually_exclusive_group()
     target.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
@@ -51,6 +54,10 @@ def main() -> int:
     commands.add_parser("rollback", help="Verify and restore the retained compatible installation, never user work")
     args = parser.parse_args()
     try:
+        if args.command == "prepare-runtime":
+            from openmachine.service import prepare_payload
+            print(json.dumps(prepare_payload(args.config, args.state_dir, args.payload, args.sha256)))
+            return 0
         if args.command == "init":
             text = 'schema_version = 1\n\n[machines.local]\ntransport = "local"\nexecution_enabled = false\nworkspace_write_enabled = false\n'
             if args.workspace is not None:

@@ -114,10 +114,10 @@ def _ssh_recovery_state(state: Path) -> dict:
             "ssh_recovery_targets": 0, "ssh_recovery_sha256": None}
 
 
-def _run(argv: list[str], timeout: float = 30) -> subprocess.CompletedProcess:
+def _run(argv: list[str], timeout: float = 30, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=timeout, cwd="/", check=False)
+                              timeout=timeout, cwd="/", check=False, env=env)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
 
@@ -133,8 +133,10 @@ def _change_support(value: dict) -> set[int]:
     return set(formats)
 
 
-def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None) -> dict:
-    result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)])
+def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
+                     *, env: dict[str, str] | None = None) -> dict:
+    result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
+                  **({"env": env} if env is not None else {}))
     try:
         value = json.loads(result.stdout)
         if (result.returncode or value["protocol"] != PROTOCOL or type(value["state_contract"]) is not int

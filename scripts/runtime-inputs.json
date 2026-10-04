@@ -1,0 +1,14 @@
+{
+  "python": {
+    "version": "3.13.16",
+    "build": "20261003",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "9e01f63bbb08576cd9c8bc2d0564d098cb30c8453a0cd4bcf6aef458f6d2a147"
+  },
+  "git": {
+    "version": "2.53.0",
+    "build": "v2.53.0-3/f49d009",
+    "url": "https://github.com/desktop/dugite-native/releases/download/v2.53.0-3/dugite-native-v2.53.0-f49d009-macOS-arm64.tar.gz",
+    "sha256": "e561cfc80c755e6f3e938653e81efcd025c9827a5b76dd42778b1159b3fab437"
+  }
+}
