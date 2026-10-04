@@ -2,28 +2,32 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.7
+## v0.2.8
 
-Open Machine v0.2.7 keeps the existing task, execution, workspace and service
-contracts while adding the current native GitHub account lifecycle and bounded
-Codex browser delegation used by ordinary Chat. It also retires the unused Work
-Events wake path and makes delegated browser evidence fail closed when a successful
-native REPL call lacks explicit browser-use evidence.
+Open Machine v0.2.8 adds bounded same-Chat recovery for eligible structured tasks
+through the existing TaskObserver and Chrome delivery path. Recovery remains
+default-on only after an exact ordinary-Chat binding is established, preserves
+original task/execution receipts, and uses finite retry and no-replay guards. This
+release also standardizes GitHub attribution on the two canonical `Created via`
+and `Posted via` footers behind the existing default-on
+`[github].attribution` boolean.
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 11 and SSH protocol 6 are compatibility
+current readers accept both. State contract 13 and SSH protocol 6 are compatibility
 contracts, not release versions. Execution retains format 5 and opt-in PTY control.
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
 
-Version `0.2.7` is an initial-development release, not a stable 1.x API promise.
-Spec #32 remains the MCP SDK 2.2.0 migration baseline. The current source removes
-Work MCP Events and automatic caller wake. Ordinary Chat tools and explicit
-continuation of the same task remain available; an ended Chat turn is not
-automatically restarted. Retained task, recovery, connection and retired Events
-archive readers still guard managed updates and rollback. This source change
-does not deploy a runtime or add browser-based recovery.
+Version `0.2.8` is an initial-development release, not a stable 1.x API promise.
+Spec #32 remains the MCP SDK 2.2.0 migration baseline. Spec #68 adds bounded
+same-Chat recovery without another task system: the observer can wake a bound
+ordinary Chat after verified inactivity so it can reconcile original receipts and
+continue remaining authorized work. Offline hosts, missing login, human decisions
+and exhausted or uncertain delivery remain real stop conditions. GitHub Issue/PR
+bodies use the canonical `Created via` footer; top-level comments and review
+summaries use `Posted via`. Automatic attribution defaults on and can be disabled
+with `[github].attribution = false`; edits preserve existing provenance.
 
 Managed services support logged-in macOS controllers. Linux supports manual
 `serve` and configured SSH workers; managed Linux services and Windows are not
@@ -36,12 +40,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.7 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.8 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.7-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.8-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -54,7 +58,7 @@ state or arbitrary checkout files. Workers use the installed package, never a
 source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
 JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
 building. See [requirements.lock](requirements.lock) for the complete locked set.
-v0.2.7 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
+v0.2.8 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
 v0.2.2 tag remains on SDK 1.30.0 and retains its own matching lock.
 
 ## Configure and run
