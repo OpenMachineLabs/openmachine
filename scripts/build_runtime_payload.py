@@ -42,6 +42,20 @@ def run(argv: list[str], env: dict[str, str]) -> None:
     subprocess.run(argv, cwd="/", env=env, stdin=subprocess.DEVNULL, check=True, timeout=300)
 
 
+def git_entry(root: Path) -> None:
+    """Dugite's native Git needs explicit, relocatable helper and template paths."""
+    (root / "bin").mkdir(exist_ok=True)
+    entry = root / "bin/git"
+    entry.write_text('''#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")/../git" && pwd)
+export GIT_EXEC_PATH="$root/libexec/git-core"
+export GIT_TEMPLATE_DIR="$root/share/git-core/templates"
+exec "$root/bin/git" "$@"
+''')
+    entry.chmod(0o755)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
@@ -77,6 +91,7 @@ def main() -> None:
         destination = output if name == "python" else output / "git"
         destination.mkdir(exist_ok=True)
         extract(archive, destination)
+    git_entry(output)
     python = str(output / "python/bin/python3")
     env = payload.environment(output)
     wheels = output / "wheels"
@@ -96,7 +111,7 @@ def main() -> None:
          "openmachine==" + version], env)
     run([python, "-I", "-B", "-m", "pip", "check"], env)
     run([python, "-I", "-B", "-m", "openmachine.cli", "--version"], env)
-    run([str(output / "git/bin/git"), "--version"], env)
+    run([str(output / "bin/git"), "--version"], env)
     # Generated entry-point scripts contain the build path. The relocatable
     # bootstrap uses python -m; the final venv creates its own correct entries.
     for entry in set((output / "python/bin").iterdir()) - original_entries:

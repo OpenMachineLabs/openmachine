@@ -105,7 +105,7 @@ def prepare_payload(config_path: Path, state: Path, source: Path, expected_sha25
         python = retained / "python/bin/python3"
         observed_python = checks._run([str(python), "-I", "-B", "-c",
             "import platform; print(platform.python_version())"], env=env)
-        observed_git = checks._run([str(retained / "git/bin/git"), "--version"], env=env)
+        observed_git = checks._run([str(retained / "bin/git"), "--version"], env=env)
         if (observed_python.returncode or observed_python.stdout.strip() != manifest["python"]["version"]
                 or observed_git.returncode or observed_git.stdout.strip() != "git version " + manifest["git"]["version"]):
             raise Fault("installation_identity_mismatch", "The retained Python or Git does not match the payload declaration.")

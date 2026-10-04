@@ -26,7 +26,7 @@ class PayloadTests(unittest.TestCase):
         self.addCleanup(self.cleanup)
         self.source = self.root / "app-payload"
         self.source.mkdir()
-        for name in ("python/bin/python3.13", "git/bin/git"):
+        for name in ("python/bin/python3.13", "git/bin/git", "bin/git"):
             path = self.source / name
             path.parent.mkdir(parents=True)
             path.write_text("#!/bin/sh\nexit 0\n")
@@ -222,7 +222,21 @@ class PayloadTests(unittest.TestCase):
             env = payload.environment(self.source)
         self.assertFalse({"PIP_EXTRA_INDEX_URL", "PYTHONPATH", "DYLD_LIBRARY_PATH"} & env.keys())
         self.assertEqual(env["PIP_NO_INDEX"], "1")
-        self.assertTrue(env["PATH"].startswith(str(self.source / "git/bin") + os.pathsep))
+        self.assertTrue(env["PATH"].startswith(str(self.source / "bin") + os.pathsep))
+
+    def test_git_entry_resolves_helpers_after_relocation_and_preserves_arguments(self):
+        builder = runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/build_runtime_payload.py"))
+        (self.source / "git/bin/git").write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$GIT_EXEC_PATH" "$GIT_TEMPLATE_DIR" "$@"\n')
+        builder["git_entry"](self.source)
+        moved = self.root / "relocated payload 'quoted'"
+        self.source.rename(moved)
+        result = subprocess.run([str(moved / "bin/git"), "a b", "$(not-a-command)"],
+            cwd="/", env={"PATH": "/bin:/usr/bin", "GIT_EXEC_PATH": "/foreign"},
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [str(moved / "git/libexec/git-core"),
+            str(moved / "git/share/git-core/templates"), "a b", "$(not-a-command)"])
 
     def test_producer_rejects_hardlinks_and_archive_path_escape(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/build_runtime_payload.py"))

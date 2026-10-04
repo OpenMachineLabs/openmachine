@@ -15,6 +15,11 @@ bootstrap interpreter, installer implementation, or developer tool is required.
 Only `python -m` is supported for this relocatable bootstrap. Its generated
 build-path entry-point scripts are not distributed.
 
+The payload's `bin/git` entry binds Git's bundled helpers and templates relative
+to its retained directory; adding only the native Git binary to PATH is not
+sufficient. The underlying Git binaries and libraries are kept in their original
+layout. Normal Git arguments are forwarded unchanged, without shell evaluation.
+
 `manifest.json` format 1 binds the target (Apple Silicon, macOS 13+), exact Core
 version/source commit, Python/Git builds and upstream archive digests, and every
 payload file/directory/symlink. Files bind content, size, and executable status;

@@ -117,11 +117,11 @@ def verify(root: Path, expected_sha256: str) -> dict:
                 raise ValueError("invalid input provenance")
         if not isinstance(value["files"], dict) or inventory(root) != value["files"]:
             raise ValueError("payload contents differ from the complete manifest")
-        for name in ("python/bin/python3", "git/bin/git", core["wheel"],
+        for name in ("python/bin/python3", "bin/git", "git/bin/git", core["wheel"],
                      "requirements.lock", "THIRD_PARTY_NOTICES.md"):
             if name not in value["files"] or not (root / name).is_file():
                 raise ValueError("missing required payload member")
-        for name in ("python/bin/python3", "git/bin/git"):
+        for name in ("python/bin/python3", "bin/git", "git/bin/git"):
             if not os.access(root / name, os.X_OK):
                 raise ValueError("payload entry is not executable")
         return value
@@ -165,7 +165,7 @@ def retain(state: Path, source: Path, expected_sha256: str) -> tuple[Path, dict]
 
 def environment(root: Path) -> dict[str, str]:
     """Offline installation never inherits pip, Python, loader or Git configuration."""
-    return {"PATH": str(root / "git/bin") + os.pathsep + os.defpath,
+    return {"PATH": os.pathsep.join((str(root / "bin"), str(root / "git/bin"), os.defpath)),
             "HOME": str(Path.home()), "LANG": "en_US.UTF-8", "PIP_CONFIG_FILE": os.devnull,
             "PIP_NO_INDEX": "1", "PIP_NO_CACHE_DIR": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
