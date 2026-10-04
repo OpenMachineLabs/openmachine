@@ -312,7 +312,7 @@ class ChatRecovery:
             if result is not None and result["status"] == "running":
                 raise Fault("chat_recovery_work_running",
                             "Original work is still running or awaiting its authoritative receipt.")
-            reconciliation_only |= result is None or result["status"] == "unknown"
+            reconciliation_only |= result is None or result["status"] in {"unknown", "partial"}
         return view, reconciliation_only
 
     def _ensure_handoff(self, view: dict, recovery_id: str) -> dict:

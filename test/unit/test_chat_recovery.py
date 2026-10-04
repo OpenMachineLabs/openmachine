@@ -389,6 +389,9 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
                 self.fault("chat_recovery_work_running", self.app.chat_recovery._task, "structured-one")
             with patch.object(self.app.task_admission, "_read", side_effect=Fault("execution_not_found", "Unknown original receipt.")):
                 self.assertTrue(self.app.chat_recovery._task("structured-one")[1])
+            with patch.object(self.app.task_admission, "_observation", return_value=(
+                    {"status": "partial"}, record["operations"][0]["locator"])):
+                self.assertTrue(self.app.chat_recovery._task("structured-one")[1])
             self.assertEqual(self.path.read_bytes(), before)
             self.assertFalse(self.app.chat_recovery._task("structured-one")[1])
         self.control("pause", reason="Explicit human wait.")
