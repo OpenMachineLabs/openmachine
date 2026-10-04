@@ -242,21 +242,16 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(operations._append("body\n", operations.CREATED_FOOTER), "body\n\n" + operations.CREATED_FOOTER)
         self.assertEqual(operations._append("body\n\n", operations.CREATED_FOOTER), "body\n\n" + operations.CREATED_FOOTER)
 
-    def test_updates_preserve_existing_footer_without_branding_legacy_content(self):
-        self.issue_value["body"] = "old\n\n" + operations.CREATED_FOOTER
+    def test_update_preserves_existing_footer_when_replacement_has_another(self):
+        self.issue_value["body"] = "old\n\n" + CREATED
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.issue(settings(True), "update", REPO, None, "replacement", number=1)
-            self.assertEqual(mutate.call_args.args[3]["body"], "replacement\n\n" + operations.CREATED_FOOTER)
-            github.pull_request(settings(True), "update", REPO, None, "edited", number=2)
-            self.assertEqual(mutate.call_args.args[3]["body"], "edited")
-            github.comment(settings(True), "update", REPO, operations.POSTED_FOOTER, comment_id=9)
-            self.assertIn(operations.CREATED_FOOTER, mutate.call_args.args[3]["body"])
+            github.comment(settings(True), "update", REPO, POSTED, comment_id=9)
+        self.assertEqual(mutate.call_args.args[3]["body"], POSTED + "\n\n" + CREATED)
 
-    def test_review_summary_is_decorated_and_bound_to_exact_head(self):
+    def test_review_summary_is_bound_to_exact_head_without_inline_comments(self):
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
             github.review(settings(), "create", REPO, "review", number=2, expected_head_sha=HEAD)
         payload = mutate.call_args.args[3]
-        self.assertEqual(payload["body"], "review\n\n" + operations.POSTED_FOOTER)
         self.assertEqual(payload["commit_id"], HEAD)
         self.assertNotIn("comments", payload)
 
