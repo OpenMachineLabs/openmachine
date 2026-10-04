@@ -2,22 +2,23 @@
 
 import argparse
 import json
-import os
 from pathlib import Path
 import sys
 
 from openmachine import __version__
-from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE, load
+from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE, initialize, load
 from openmachine.foundation.sanitize import Fault
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="openmachine")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--state-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
+    init.add_argument("--enable-commands", action="store_true")
+    init.add_argument("--enable-workspace-writes", action="store_true")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
     prepare = commands.add_parser("prepare-runtime", help="Prepare a verified offline payload without starting or selecting a service")
     prepare.add_argument("--payload", type=Path, required=True)
@@ -52,25 +53,68 @@ def main() -> int:
     update.add_argument("--requirements", type=Path, required=True)
     update.add_argument("--candidate-config", type=Path, help="Explicit candidate configuration; preserve and restore the original on activation failure")
     commands.add_parser("rollback", help="Verify and restore the retained compatible installation, never user work")
+    manage = commands.add_parser("manage", help="Typed product management; explicit config/state binding and original operation readback")
+    manage.add_argument("--contract", type=int, default=1)
+    management = manage.add_subparsers(dest="management_action", required=True)
+    for action in ("status", "start", "stop", "rollback"):
+        management.add_parser(action)
+    bind = management.add_parser("bind", help="Bind the stable entry to an exact retained payload implementation")
+    bind.add_argument("--identity", required=True)
+    startup = management.add_parser("startup")
+    startup.add_argument("--enabled", choices=("true", "false"), required=True)
+    configure = management.add_parser("configure", help="Create first-run config without overwrite; grants are independent")
+    configure.add_argument("--workspace", type=Path, required=True)
+    configure.add_argument("--enable-commands", action="store_true")
+    configure.add_argument("--enable-workspace-writes", action="store_true")
+    for action in ("install", "update"):
+        operation = management.add_parser(action)
+        operation.add_argument("--operation-id", required=True)
+        operation.add_argument("--payload", type=Path, required=True)
+        operation.add_argument("--sha256", required=True)
+        if action == "install":
+            operation.add_argument("--probe-workspace", required=True)
+            operation.add_argument("--probe-path", required=True)
+        else:
+            operation.add_argument("--candidate-config", type=Path)
+    for action in ("operation", "continue"):
+        operation = management.add_parser(action)
+        operation.add_argument("--operation-id", required=True)
     args = parser.parse_args()
+    if args.command == "manage" and (args.config is None or args.state_dir is None):
+        parser.error("manage requires explicit --config and --state-dir before the subcommand")
+    args.config = args.config if args.config is not None else DEFAULT_CONFIG
+    args.state_dir = args.state_dir if args.state_dir is not None else DEFAULT_STATE
     try:
+        if args.command == "manage":
+            from openmachine.service.maintenance import dispatch
+            inputs = {}
+            action = args.management_action
+            if action in {"install", "update", "operation", "continue"}:
+                inputs["identity"] = args.operation_id
+            if action in {"install", "update"}:
+                inputs.update(source=args.payload, sha256=args.sha256)
+                if action == "install":
+                    inputs.update(workspace=args.probe_workspace, path=args.probe_path)
+                else:
+                    inputs["candidate_config"] = args.candidate_config
+            if action == "bind":
+                inputs["identity"] = args.identity
+            if action == "startup":
+                inputs["enabled"] = args.enabled == "true"
+            if action == "configure":
+                inputs.update(workspace=args.workspace, commands=args.enable_commands,
+                              workspace_writes=args.enable_workspace_writes)
+            result = dispatch(args.config, args.state_dir, action, contract=args.contract, **inputs)
+            print(json.dumps(result))
+            return int(result["status"] in {"unknown", "incompatible", "busy", "unready", "recovering", "blocked",
+                                            "activation_pending", "recovery_required", "rejected", "restored"})
         if args.command == "prepare-runtime":
             from openmachine.service import prepare_payload
             print(json.dumps(prepare_payload(args.config, args.state_dir, args.payload, args.sha256)))
             return 0
         if args.command == "init":
-            text = 'schema_version = 1\n\n[machines.local]\ntransport = "local"\nexecution_enabled = false\nworkspace_write_enabled = false\n'
-            if args.workspace is not None:
-                if not args.workspace.is_absolute() or not args.workspace.is_dir():
-                    raise Fault("invalid_workspace", "--workspace must be an existing absolute directory.")
-                text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(args.workspace.resolve())) + '\n'
-            args.config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd = os.open(args.config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as output:
-                output.write(text)
-                output.flush()
-                os.fsync(output.fileno())
-            print(json.dumps({"created": str(args.config), "execution_enabled": False, "workspace_write_enabled": False}))
+            print(json.dumps(initialize(args.config, args.workspace, commands=args.enable_commands,
+                                        workspace_writes=args.enable_workspace_writes)))
             return 0
         if args.command == "worker-bundle":
             from integrations.ssh.bundle import build_bundle

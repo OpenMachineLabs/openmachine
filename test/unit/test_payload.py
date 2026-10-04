@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import zipfile
 
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
+from openmachine.foundation.state import lease, private_directory
 from openmachine.service import checks, install, payload
 
 
@@ -189,7 +189,10 @@ class PayloadTests(unittest.TestCase):
         with patch.object(checks, "_run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
             result = install.prepare_payload(self.config, self.state, self.source, self.digest)
             again = install.prepare_payload(self.config, self.state, self.source, self.digest)
+            with lease(self.state / "service/operation.lock"):
+                inherited = install._prepare_payload(self.config, self.state, self.source, self.digest)
         self.assertEqual(result, again)
+        self.assertEqual(result, inherited)
         self.assertEqual(result["status"], "prepared")
         self.assertEqual(result["selection"], "unchanged")
         self.assertFalse((self.state / "service/service.json").exists())

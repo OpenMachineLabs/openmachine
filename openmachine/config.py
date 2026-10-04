@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import tomllib
@@ -138,3 +139,26 @@ def load(path: Path) -> Settings:
         raise Fault("invalid_config", "Check the schema, transport settings, absolute roots, machine references, and integration settings.") from error
     except OSError as error:
         raise Fault("config_unavailable", "Cannot read configuration; run init or select an existing --config file.") from error
+
+
+def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
+               workspace_writes: bool = False) -> dict:
+    """One first-run writer shared by init and management; never adopt or overwrite."""
+    if type(commands) is not bool or type(workspace_writes) is not bool:
+        raise Fault("invalid_config", "First-run grants must be explicit booleans.")
+    text = ('schema_version = 1\n\n[machines.local]\ntransport = "local"\n'
+            f'execution_enabled = {str(commands).lower()}\n'
+            f'workspace_write_enabled = {str(workspace_writes).lower()}\n')
+    if workspace is not None:
+        if not workspace.is_absolute() or not workspace.is_dir():
+            raise Fault("invalid_workspace", "The workspace must be an existing absolute directory.")
+        text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(workspace.resolve())) + '\n'
+    Settings.model_validate(tomllib.loads(text))
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as output:
+        output.write(text)
+        output.flush()
+        os.fsync(output.fileno())
+    return {"created": str(path), "execution_enabled": commands, "workspace_write_enabled": workspace_writes,
+            "configuration_sha256": load(path).configuration_sha256()}

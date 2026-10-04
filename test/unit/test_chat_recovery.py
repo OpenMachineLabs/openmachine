@@ -168,6 +168,8 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         proof = chatgpt.check_state(self.state)
         self.assertTrue(proof["chat_recovery_present"])
         self.assertNotIn("chatgpt.com/c/", json.dumps(proof))
+        from openmachine.service.checks import activation_safe
+        self.fault("activation_deferred", activation_safe, self.state)
         original_delivery = chatgpt.get(self.state, "structured-one").delivery
         self.enable(expected_revision=1,
                     chat_url="https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")

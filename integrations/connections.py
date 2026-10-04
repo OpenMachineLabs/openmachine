@@ -179,8 +179,10 @@ def _read(state: Path) -> Store | None:
         raise Fault("integration_store_invalid", "Connection state is missing or invalid; preserve it.") from None
 
 
-def check_state(state: Path) -> dict:
+def check_state(state: Path, *, require_idle: bool = False) -> dict:
     value = _read(state)
+    if require_idle and value is not None and any(item.status == "pending" for item in value.attempts.values()):
+        raise Fault("activation_deferred", "An original native login is pending; activation must wait for its owner.")
     data = None if value is None else value.model_dump()
     if value is not None and value.format == 1:
         for item in data["connections"].values():

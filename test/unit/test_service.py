@@ -17,6 +17,7 @@ from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
 from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
@@ -26,7 +27,7 @@ from openmachine.service import transition as service_transition
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="om-service-", dir="/tmp")
+        temporary = tempfile.TemporaryDirectory(prefix="om-m2-service-", dir="/tmp")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.state = private_directory(self.root / "state")
@@ -477,8 +478,8 @@ class ServiceTests(unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (13, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (14, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14)
         self.assertEqual(actual, proof)
         for change in ({"structured_task_records": 0}, {"task_records": True},
                        {"task_store_present": 1}, {"structured_task_read_formats": [True]},
@@ -486,7 +487,7 @@ class ServiceTests(unittest.TestCase):
                        {"task_index_generation": proof["task_index_generation"] - 1}):
             with self.subTest(change=change), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | change), "")):
-                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13))
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14))
         self.assertEqual(path.read_bytes(), raw)
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
@@ -514,8 +515,8 @@ class ServiceTests(unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (13, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (14, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -535,8 +536,8 @@ class ServiceTests(unittest.TestCase):
             authority_ref="fixture:authority", authority_sha256="d" * 64, expires_at_ms=4600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (13, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 13), proof)
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (14, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14), proof)
         for delta in ({"state_contract": 12}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
                       {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):
@@ -622,7 +623,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 13)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 14)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):
@@ -967,6 +968,471 @@ class ServiceTests(unittest.TestCase):
         with patch.object(service_checks,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(current),"")):
             service_checks._candidate_state(Path(sys.executable),self.config,self.state)
         self.assertEqual([path.read_bytes() for path in records],before)
+
+    def policy_fixture(self):
+        binding = {"identity": self.a, "launch_python": str(Path(sys._base_executable).resolve())}
+        record = self.record | {"format": 2, "management": binding,
+                                "policy": {"desired": "stopped", "start_at_login": True}}
+        for identity in (self.a, self.b):
+            path = self.state / "service/versions" / identity / "installation.json"
+            save_json(path, service_state._json(path) | {"state_contract": 14, "management_contract": 1})
+        self.save(record)
+        return record
+
+    def operation_fixture(self, phase="prepared"):
+        import hashlib
+        private_directory(self.state / "service/operations")
+        digest = hashlib.sha256(self.config.read_bytes()).hexdigest()
+        record = {"format": 1, "operation_id": "c" * 32, "created_at_ms": 1000, "updated_at_ms": 1000,
+                  "phase": phase, "reason": "", "outcome": None,
+                  "request": {"action": "update", "config": str(self.config), "source": str(self.root / "payload"),
+                              "candidate_config": str(self.config), "payload_sha256": "d" * 64,
+                              "config_sha256": digest, "candidate_sha256": digest,
+                              "selection_sha256": maintenance._selection(self.state), "workspace": "", "path": ""},
+                  "prepared": {"identity": self.b, "payload_sha256": "d" * 64,
+                               "runtime": str(self.state / "service/versions" / self.b),
+                               "status": "prepared", "version": "0.1.0a7", "launch_python": sys.executable,
+                               "path_environment": os.defpath, "selection": "unchanged", "service": "not_started"}}
+        if phase in {"accepted", "retaining", "retained", "preparing"}:
+            record["prepared"] = None
+        if phase == "completed":
+            record["outcome"] = {"status": "ready"}
+        maintenance._save(self.state, record, phase)
+        with lease(self.state / "service/operation.lock"):
+            pass
+        return maintenance._read(self.state, record["operation_id"])
+
+    def test_persistent_policy_requires_actual_new_reader_and_blocks_old_selection_format(self):
+        record = self.policy_fixture()
+        proof = service.check_state(self.config, self.state)
+        self.assertTrue(proof["service_policy_present"])
+        self.assertEqual(proof["management_contract"], 1)
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), proof)
+        for delta in ({"state_contract": 13}, {"service_policy_present": False},
+                      {"service_policy_sha256": "0" * 64}, {"service_policy_format": True}):
+            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
+        self.save(record | {"format": 1})
+        self.assert_fault("service_state_invalid", lambda: service_state._record(self.state))
+        self.save(record)
+        self.assert_fault("runtime_stopped", lambda: service.guard_writes(self.state))
+        self.assert_fault("runtime_stopped", lambda: service_runtime._start(self.state, record))
+
+    def test_product_definition_selects_retained_git_and_accepts_exact_prior_profile(self):
+        import plistlib
+        original = service_runtime._definition(self.state, self.record)
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service_state._json(path) | {"state_contract": 14, "management_contract": 1,
+                                                   "payload_sha256": "d" * 64})
+        pending = self.record | {"current": self.b, "pending": {"from": self.a, "to": self.b, "previous": None}}
+        selected = service_runtime._definition(self.state, pending)
+        self.assertEqual(selected["EnvironmentVariables"]["PATH"].split(os.pathsep)[0],
+                         str(self.state / "service/payloads" / ("d" * 64) / "bin"))
+        owned = self.root / "fixture.plist"
+        for path, content in ((owned, plistlib.dumps(original)),
+                              (self.state / "service/launch.py", service_state.LAUNCHER.encode()),
+                              (self.state / "service/service.log", b"")):
+            path.write_bytes(content)
+            path.chmod(0o600)
+        with patch.object(service_runtime, "_plist_path", return_value=owned):
+            service_runtime._verify_files(self.state, pending)
+            service_runtime._sync_definition(self.state, pending)
+            self.assertEqual(owned.read_bytes(), plistlib.dumps(selected))
+            restored = pending | {"current": self.a}
+            service_runtime._sync_definition(self.state, restored)
+            self.assertEqual(owned.read_bytes(), plistlib.dumps(original))
+
+    def test_stopped_update_and_restoration_preserve_recovery_without_starting(self):
+        record = self.policy_fixture()
+        episode = service_runtime._recovery_attempt(self.state, None, 1000000)
+        verify, stop, start = self.activation_mocks()
+        with patch.object(service_runtime, "_sync_definition"):
+            result = service_transition._activate(self.state, record, self.b)
+        self.assertEqual(result["status"], "stopped")
+        start.assert_not_called()
+        self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
+        current = service_state._record(self.state)
+        with patch.object(service_runtime, "_sync_definition", side_effect=[OSError("fixture"), None]):
+            self.assert_fault("activation_failed_restored", lambda: service_transition._activate(self.state, current, self.a))
+        self.assertEqual(service_state._record(self.state)["current"], self.b)
+        self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
+        start.assert_not_called()
+
+    def test_policy_native_definition_preserves_exact_legacy_files_and_rejects_changed_bytes(self):
+        import plistlib
+        old = self.record
+        record = self.policy_fixture()
+        owned = self.root / "fixture.plist"
+        for path, content in ((owned, plistlib.dumps(service_runtime._definition(self.state, old))),
+                              (self.state / "service/launch.py", service_state.LAUNCHER.encode()),
+                              (self.state / "service/manage.py", service_state.management_entry(self.state, record)),
+                              (self.state / "service/service.log", b"")):
+            path.write_bytes(content)
+            path.chmod(0o600)
+        legacy = (self.state / "service/launch.py").read_bytes()
+        with patch.object(service_runtime, "_plist_path", return_value=owned):
+            service_runtime._verify_files(self.state, record)
+            service_runtime._sync_definition(self.state, record)
+            self.assertEqual(plistlib.loads(owned.read_bytes())["ProgramArguments"][-1], "--launch")
+            self.assertEqual((self.state / "service/launch.py").read_bytes(), legacy)
+            owned.write_bytes(owned.read_bytes() + b"\n")
+            self.assert_fault("service_definition_mismatch", lambda: service_runtime._verify_files(self.state, record))
+        # Login takes the same entry, which exits before any selected runtime.
+        entry = self.state / "service/manage.py"
+        result = subprocess.run([sys.executable, "-I", str(entry), "--launch"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_startup_observes_effective_override_and_denial(self):
+        label = service_runtime._label(self.state)
+        def reply(disabled):
+            return subprocess.CompletedProcess([], 0, f'disabled services = {{\n "{label}" => {disabled}\n}}', "")
+        with patch.object(service_checks, "_run", return_value=reply("true")):
+            self.assertFalse(service_runtime._startup(self.state)["enabled"])
+            self.assert_fault("startup_denied", lambda: service_runtime._set_startup(self.state, True))
+        with patch.object(service_checks, "_run", return_value=reply("false")):
+            self.assertTrue(service_runtime._startup(self.state)["enabled"])
+        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "unrecognized", "")):
+            self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
+
+    def test_explicit_policy_controls_keep_login_stop_and_recovery_separate(self):
+        record = self.policy_fixture()
+        episode = service_runtime._recovery_attempt(self.state, None, 1000000)
+        with patch.object(service_runtime, "_verify_files"), patch.object(service_checks, "_candidate_state"), \
+                patch.object(service_state, "_bind_management", side_effect=lambda state, record, identity: record), \
+                patch.object(service_runtime, "_sync_definition"), patch.object(maintenance, "observe", return_value={}), \
+                patch.object(service_runtime, "_set_startup") as startup, patch.object(service_runtime, "_start") as start, \
+                patch.object(service_runtime, "_stop") as stop:
+            maintenance.control(self.config, self.state, "startup", enabled=False)
+            self.assertTrue(service_state.stopped(service_state._record(self.state)))
+            stop.assert_not_called()
+            start.assert_not_called()
+            maintenance.control(self.config, self.state, "start")
+            self.assertFalse(service_state.stopped(service_state._record(self.state)))
+            self.assertFalse(service_state._record(self.state)["policy"]["start_at_login"])
+            maintenance.control(self.config, self.state, "stop")
+            self.assertTrue(service_state.stopped(service_state._record(self.state)))
+            stop.assert_called_once()
+            start.assert_called_once()
+            startup.assert_called_once_with(self.state, False)
+            self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
+
+    def test_management_contract_reports_timestamp_busy_incompatible_and_actual_selection(self):
+        self.policy_fixture()
+        with patch.object(service_runtime, "status", return_value={"status": "stopped", "loaded": False}), \
+                patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                patch.object(service_runtime, "socket_alive", return_value=False):
+            result = maintenance.dispatch(self.config, self.state, "status")
+        self.assertEqual((result["status"], result["management_contract"], result["state_contract"]), ("stopped", 1, 14))
+        self.assertEqual(result["entry"]["identity"], self.a)
+        self.assertTrue(result["observed_at_ms"] > 0)
+        self.assertFalse(result["startup"]["enabled"])
+        self.assertTrue(result["policy"]["start_at_login"])
+        self.assertEqual(maintenance.dispatch(self.config, self.state, "status", contract=99)["status"], "incompatible")
+        with patch.object(maintenance, "observe", side_effect=Fault("resource_busy", "fixture")):
+            self.assertEqual(maintenance.dispatch(self.config, self.state, "status")["status"], "busy")
+
+    def test_operation_same_id_reads_original_and_conflicting_ids_are_busy(self):
+        record = self.operation_fixture()
+        with patch.object(maintenance, "_spawn") as spawn, patch.object(service_checks, "_run") as run:
+            result = maintenance.submit(self.config, self.state, "update", record["operation_id"], Path("missing"), "wrong")
+            self.assertEqual(result["operation"], record)
+            self.assertEqual(result["status"], "continuation_required")
+            spawn.assert_not_called()
+            run.assert_not_called()
+        self.assert_fault("maintenance_busy", lambda: maintenance._available(self.state))
+        with lease(self.state / "service/operation.lock"):
+            self.assertEqual(maintenance.read_operation(self.config, self.state, record["operation_id"])["status"], "busy")
+        self.assertEqual(maintenance._read(self.state, record["operation_id"]), record)
+
+    def test_uncertain_phases_never_replay_and_interrupted_known_steps_require_continuation(self):
+        for phase in ("retaining", "preparing", "activating", "recovery_required"):
+            record = self.operation_fixture(phase)
+            with patch.object(maintenance, "_spawn") as spawn:
+                self.assertEqual(maintenance.read_operation(self.config, self.state, record["operation_id"])["status"], "recovery_required")
+                self.assert_fault("maintenance_not_continuable", lambda: maintenance.continue_operation(self.config, self.state, record["operation_id"]))
+                spawn.assert_not_called()
+        for phase in ("accepted", "retained", "prepared", "deferred"):
+            record = self.operation_fixture(phase)
+            with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.payload, "verify"):
+                result = maintenance.continue_operation(self.config, self.state, record["operation_id"])
+            self.assertEqual(result["operation"]["operation_id"], record["operation_id"])
+            spawn.assert_called_once()
+
+    def test_prepared_operation_defers_without_repreparing_then_explicitly_activates(self):
+        record = self.operation_fixture()
+        with patch.object(service_install, "_prepare_payload") as prepare, \
+                patch.object(maintenance, "_bound"), patch.object(service_transition, "_activate",
+                    side_effect=Fault("activation_deferred", "fixture")) as activate:
+            with lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            deferred = maintenance._read(self.state, record["operation_id"])
+            self.assertEqual(deferred["phase"], "deferred")
+            prepare.assert_not_called()
+            def effect(state, selected, identity, snapshot, *, before_change, require_safe):
+                before_change()
+                self.assertEqual(maintenance._read(state, record["operation_id"])["phase"], "activating")
+                self.assertTrue(require_safe)
+                return {"status": "ready", "current": identity}
+            activate.side_effect = effect
+            with patch.object(service_state, "_bind_management", side_effect=lambda state, selected, identity: selected), \
+                    lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            original = maintenance.read_operation(self.config, self.state, record["operation_id"])
+            self.assertEqual(original["status"], "completed")
+            self.assertEqual(original["operation"]["outcome"]["current"], self.b)
+            prepare.assert_not_called()
+
+    def test_operation_binds_configuration_and_never_rebases_after_policy_drift(self):
+        record = self.operation_fixture()
+        original = self.config.read_bytes()
+        self.config.write_bytes(original + b"\n# External edit\n")
+        with patch.object(service_transition, "_activate") as activate, lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        result = maintenance._read(self.state, record["operation_id"])
+        self.assertEqual((result["phase"], result["reason"]), ("rejected", "maintenance_input_changed"))
+        activate.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), original + b"\n# External edit\n")
+
+    def test_lost_activation_result_is_uncertain_with_original_id(self):
+        record = self.operation_fixture()
+        def lost(*args, before_change, **kwargs):
+            before_change()
+            self.save(self.record | {"current": self.b, "previous": self.a})
+            raise OSError("lost result after effect")
+        with patch.object(maintenance, "_bound"), patch.object(service_transition, "_activate", side_effect=lost), \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        result = maintenance.read_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual(result["status"], "recovery_required")
+        self.assertEqual(result["operation"]["operation_id"], record["operation_id"])
+        self.assertEqual(service_state._record(self.state)["current"], self.b)
+        self.assert_fault("maintenance_not_continuable", lambda: maintenance.continue_operation(self.config, self.state, record["operation_id"]))
+
+    def test_maintenance_spawn_is_independent_and_inherits_original_lease(self):
+        record = self.operation_fixture("accepted")
+        with lease(self.state / "service/operation.lock") as lock, patch.object(maintenance.subprocess, "Popen") as spawn:
+            maintenance._spawn(self.state, record["operation_id"], lock, sys.executable)
+            args, kwargs = spawn.call_args
+            self.assertEqual(kwargs["pass_fds"], (lock.fileno(),))
+            self.assertTrue(kwargs["start_new_session"])
+            self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+            self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+            self.assertIn(record["operation_id"], args[0])
+
+    def test_service_subprocess_reply_and_deadline_are_bounded(self):
+        result = service_checks._run([sys.executable, "-c", 'print("bounded")'])
+        self.assertEqual(result.stdout, "bounded\n")
+        self.assert_fault("service_output_limit", lambda: service_checks._run([sys.executable, "-c", 'print("x" * 70000)']))
+        self.assert_fault("service_command_unverified", lambda: service_checks._run([sys.executable, "-c", 'import time; time.sleep(10)'], timeout=0.05))
+
+
+    def test_product_install_registers_bound_stopped_service_before_reporting_completion(self):
+        record = self.operation_fixture()
+        (self.state / "service/service.json").unlink()
+        record["request"].update(action="install", selection_sha256=None, workspace="project", path="config.toml")
+        maintenance._save(self.state, record, "prepared")
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service_state._json(path) | {"state_contract": 14, "management_contract": 1,
+                                                   "payload_sha256": "d" * 64})
+        python = self.state / "service/payloads" / ("d" * 64) / "python/bin/python3"
+        python.parent.mkdir(parents=True)
+        python.symlink_to(sys.executable)
+        owned = self.root / "fixture.plist"
+        with patch.object(service_runtime, "_plist_path", return_value=owned), \
+                patch.object(service_runtime, "_native", return_value={"loaded": False, "pid": None}), \
+                patch.object(service_install, "_verify_candidate"), patch.object(service_runtime, "_start") as start, \
+                patch.object(service_runtime, "_set_startup", return_value={"enabled": False}) as startup, \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            selected = service_state._record(self.state)
+            service_runtime._verify_files(self.state, selected)
+        self.assertEqual(selected["current"], self.b)
+        self.assertEqual(selected["policy"], {"desired": "stopped", "start_at_login": False})
+        self.assertEqual(selected["management"]["identity"], self.b)
+        self.assertEqual((self.state / "service/launch.py").read_text(), service_state.LAUNCHER)
+        original = maintenance.read_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual(original["status"], "completed")
+        self.assertEqual(original["operation"]["outcome"]["service"], "stopped")
+        start.assert_not_called()
+        startup.assert_called_once_with(self.state, False)
+
+    def test_maintenance_capacity_and_corruption_are_not_reinitialized(self):
+        record = self.operation_fixture("completed")
+        with patch.object(maintenance, "MAX_OPERATIONS", 1):
+            self.assert_fault("maintenance_store_full", lambda: maintenance._available(self.state))
+        path = maintenance._operation_path(self.state, record["operation_id"])
+        path.write_text('{"format": 99}')
+        before = path.read_bytes()
+        self.assert_fault("maintenance_state_invalid", lambda: maintenance._available(self.state))
+        self.assertEqual(path.read_bytes(), before)
+        self.assert_fault("invalid_operation_id", lambda: maintenance.read_operation(self.config, self.state, "../other"))
+
+    def test_incoming_handoff_is_retained_verified_and_keeps_original_lock(self):
+        record = self.operation_fixture("accepted")
+        retained = self.state / "service/payloads" / record["request"]["payload_sha256"]
+        proof = {"management_contract": 1, "version": "next", "prefix": str(retained / "python")}
+        def handoff(python, argv, env):
+            self.assertEqual(maintenance._read(self.state, record["operation_id"])["phase"], "retained")
+            self.assertEqual(python, str(retained / "python/bin/python3"))
+            self.assertIn(record["operation_id"], argv)
+            self.assertEqual(env["PIP_NO_INDEX"], "1")
+            self.assertTrue(os.get_inheritable(int(argv[-1])))
+            raise SystemExit(0)
+        with patch.object(maintenance.payload, "retain", return_value=(retained, {"core": {"version": "next"}})), \
+                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")), \
+                patch.object(maintenance.os, "execve", side_effect=handoff), \
+                patch.object(service_install, "_prepare_payload") as prepare, lease(self.state / "service/operation.lock") as lock:
+            with self.assertRaises(SystemExit):
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            prepare.assert_not_called()
+        self.assertEqual(maintenance.read_operation(self.config, self.state, record["operation_id"])["status"], "continuation_required")
+
+    def test_uncertain_preparation_and_original_terminal_records_are_never_replayed(self):
+        record = self.operation_fixture("retained")
+        with patch.object(service_install, "_prepare_payload", side_effect=Fault("service_command_unverified", "fixture")), \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        self.assertEqual(maintenance._read(self.state, record["operation_id"])["phase"], "recovery_required")
+        for phase in ("completed", "restored", "rejected", "preparing", "activating"):
+            record = self.operation_fixture(phase)
+            with patch.object(maintenance, "_inputs_unchanged", side_effect=AssertionError("No replay")), \
+                    lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            self.assertEqual(maintenance._read(self.state, record["operation_id"]), record)
+
+    def test_real_detached_maintenance_process_keeps_inherited_lock_and_original_record(self):
+        record = self.operation_fixture("preparing")
+        # This interrupted phase admits no effects. The real module startup
+        # validates the inherited lock and exits without touching native jobs.
+        original = maintenance._operation_path(self.state, record["operation_id"]).read_bytes()
+        with lease(self.state / "service/operation.lock") as lock:
+            process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.service.maintenance",
+                str(self.state), record["operation_id"], str(lock.fileno())], cwd="/",
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                pass_fds=(lock.fileno(),), start_new_session=True)
+            self.assertEqual(process.communicate(timeout=10), (b"", b""))
+            self.assertEqual(process.returncode, 0)
+            self.assert_fault("resource_busy", lambda: maintenance.continue_operation(self.config, self.state, record["operation_id"]))
+        self.assertEqual(maintenance._operation_path(self.state, record["operation_id"]).read_bytes(), original)
+
+    def test_foreign_first_run_state_and_old_persistent_controls_are_rejected(self):
+        private_directory(self.state / "executions")
+        self.assert_fault("service_adoption_required", lambda: maintenance._uninstalled(self.state))
+        with patch.object(service_runtime, "_verify_files"), patch.object(service_runtime, "_stop") as stop:
+            self.assert_fault("incompatible_management", lambda: maintenance.control(self.config, self.state, "stop"))
+            stop.assert_not_called()
+        self.assertEqual(service_state._record(self.state), self.record)
+
+    def test_product_admission_defers_actual_unresolved_task_and_execution_readers(self):
+        from support_tasks import task_contract
+        from openmachine.tasks import records
+        request = task_contract()
+        created = tasks.create(self.state, request.pop("task_id"), **request)
+        service_checks.activation_safe(self.state)
+        # Compatibility still uses the actual canonical reader. An incomplete
+        # canonical write cannot become an empty or safe task store.
+        path = self.state / "tasks/structured-one/task.json"
+        original = path.read_bytes()
+        path.write_bytes(b'{}')
+        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        path.write_bytes(original)
+        with patch.object(service_checks.tasks, "observation_page", return_value={
+                "complete": True, "has_more": False, "entries": [{"task_id": "original", "metadata_sha256": "a" * 64,
+                "record": {"operations": [{"state": "unknown", "result": None}]}}]}):
+            self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        private_directory(self.state / "executions/original")
+        with patch.object(service_checks.execution, "read_record", return_value={"status": "running"}):
+            self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        self.assertEqual(path.read_bytes(), records.canonical(created["record"]))
+
+    def test_stable_entry_is_a_real_cli_consumer_and_cannot_follow_a_changed_binding(self):
+        record = self.policy_fixture()
+        import sysconfig
+        import venv
+        for identity in (self.a, self.b):
+            directory = self.state / "service/versions" / identity
+            venv.EnvBuilder(with_pip=False).create(directory)
+            site = directory / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+            (site / "fixture-dependencies.pth").write_text(sysconfig.get_path("purelib") + "\n")
+        entry = self.state / "service/manage.py"
+        entry.write_bytes(service_state.management_entry(self.state, record))
+        entry.chmod(0o600)
+        command = [sys.executable, "-I", str(entry), "--contract", "99", "status"]
+        # Unsupported contract is rejected before any native observation.
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertTrue(result.stdout, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"], "incompatible_management")
+        self.save(record | {"current": self.b, "previous": self.a})
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertTrue(result.stdout, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"], "incompatible_management")
+        self.save(record | {"config": str(self.root / "foreign.toml")})
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout)["reason"], "management_identity_unavailable")
+
+
+    def test_startup_choice_does_not_change_cached_legacy_launch_arguments(self):
+        path = self.state / "service/versions" / self.a / "installation.json"
+        save_json(path, service_state._json(path) | {"state_contract": 14, "management_contract": 1})
+        before = (self.state / "service/service.json").read_bytes()
+        with patch.object(service_runtime, "_verify_files"), patch.object(maintenance, "observe", return_value={}), \
+                patch.object(service_runtime, "_set_startup") as startup, patch.object(service_runtime, "_stop") as stop, \
+                patch.object(service_runtime, "_start") as start:
+            maintenance.control(self.config, self.state, "startup", enabled=False)
+            startup.assert_called_once_with(self.state, False)
+            stop.assert_not_called()
+            start.assert_not_called()
+        self.assertEqual((self.state / "service/service.json").read_bytes(), before)
+
+    def test_idle_stopped_login_reports_stopped_and_start_reloads_disabled_job(self):
+        record = self.policy_fixture()
+        with patch.object(service_runtime, "status", return_value={"status": "unready", "loaded": True,
+                    "pid": None, "supervisor_pid": None}), patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                patch.object(service_runtime, "socket_alive", return_value=False):
+            self.assertEqual(maintenance.observe(self.config, self.state)["status"], "stopped")
+        running = record | {"policy": record["policy"] | {"desired": "running", "start_at_login": False}}
+        self.save(running)
+        with patch.object(service_runtime, "_native", side_effect=[{"loaded": True, "pid": None},
+                    {"loaded": False, "pid": None}, {"loaded": True, "pid": 123}]), \
+                patch.object(service_runtime, "_stop") as stop, patch.object(service_runtime, "_sync_definition"), \
+                patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                patch.object(service_runtime, "_set_startup") as startup, \
+                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                patch.object(service_checks, "_managed_probe", return_value={"status": "ready"}):
+            self.assertEqual(service_runtime._start(self.state, running)["status"], "ready")
+        stop.assert_called_once_with(self.state)
+        self.assertEqual(startup.call_args_list, [call(self.state, True), call(self.state, False)])
+        self.assertFalse(service_state._record(self.state)["policy"]["start_at_login"])
+
+
+    def test_policy_and_binding_preserve_recovery_advanced_before_admission(self):
+        from contextlib import contextmanager
+        self.policy_fixture()
+        episode = service_runtime._recovery_attempt(self.state, None, 1000000)
+        later = episode | {"attempts": 2}
+        @contextmanager
+        def admission(path, **options):
+            if path.name == "lifecycle.lock":
+                service_state._save_recovery(self.state, later)
+            with lease(path, **options) as owned:
+                yield owned
+        with patch.object(maintenance, "lease", side_effect=admission), \
+                patch.object(service_runtime, "_verify_files"), patch.object(service_checks, "_candidate_state"), \
+                patch.object(service_state, "_bind_management", side_effect=lambda state, record, identity: record), \
+                patch.object(service_runtime, "_sync_definition"), patch.object(service_runtime, "_stop"), \
+                patch.object(maintenance, "observe", return_value={}):
+            for action in ("stop", "bind"):
+                service_state._save_recovery(self.state, episode)
+                maintenance.control(self.config, self.state, action)
+                self.assertEqual(service_state._read_recovery(self.state)["episode"], later)
+        with patch.object(service_transition, "lease", side_effect=admission), \
+                patch.object(service_runtime, "_verify_files"), patch.object(service_checks, "_candidate_state"), \
+                patch.object(service_runtime, "_start", return_value={"status": "ready"}):
+            service_state._save_recovery(self.state, episode)
+            service_transition.operate(self.config, self.state, "start")
+            self.assertFalse(service_state.stopped(service_state._record(self.state)))
+            self.assertEqual(service_state._read_recovery(self.state)["episode"], later)
+
 
 if __name__ == "__main__":
     unittest.main()

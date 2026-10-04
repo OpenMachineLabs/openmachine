@@ -14,7 +14,7 @@ and `Posted via` footers behind the existing default-on
 
 Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
 remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 13 and SSH protocol 6 are compatibility
+current readers accept both. State contract 14 and SSH protocol 6 are compatibility
 contracts, not release versions. Execution retains format 5 and opt-in PTY control.
 Inspect installed capabilities; a checkout or version label alone is not evidence
 that the client exposes the current tools.
@@ -74,7 +74,7 @@ Start with an existing disposable workspace; replace the example path:
 Default configuration: `~/.config/openmachine/config.toml`. Private state:
 `~/.local/state/openmachine/`. Global `--config` and `--state-dir` options go
 before the subcommand. `init` creates mode-0600 configuration without overwriting
-files and leaves execution **disabled**. `init` also explicitly sets
+files and leaves execution **disabled** unless `--enable-commands` is explicit. `--enable-workspace-writes` is an independent first-run grant. By default, `init` explicitly sets
 `workspace_write_enabled = false`. Enable `execution_enabled = true` only for
 intended native commands, and `workspace_write_enabled = true` only for typed
 file edits. Existing configurations omitting the new field inherit their old

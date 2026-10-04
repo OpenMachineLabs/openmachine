@@ -93,7 +93,7 @@ The JSON result reports `status: prepared`, the installation/payload identities,
 actual version, runtime path, retained `launch_python`, and `path_environment` with
 portable Git first. `selection: unchanged` and `service: not_started` are explicit:
 this is not service readiness, activation, transport readiness, or ChatGPT acceptance.
-The existing lifecycle owner will consume these retained paths in M2. Do not point
+The M2 lifecycle owner consumes these retained paths through `manage install/update`. Do not point
 a LaunchAgent or original worker at the replaceable source App.
 
 Retained copies and previous environments are not moved, overwritten, or garbage
@@ -116,3 +116,8 @@ configuration/state/workspace, never an active service or production job.
 M1 evidence does not claim clean-machine GUI onboarding, persistent-stop behavior,
 signed distribution, automatic updates, or public plugin availability. Those
 remain the separate modules in the canonical Issue.
+
+Managed product installation/update now uses [management contract 1](service.md#product-management-m2),
+which records the original operation before independent preparation and invokes
+the verified incoming implementation from retained paths. `prepare-runtime` remains
+a preparation-only primitive; it neither selects a service nor creates update consent.

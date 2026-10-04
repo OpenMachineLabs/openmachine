@@ -31,6 +31,9 @@ move a venv or delete an old worker's installation. Tasks, executions, changes,
 Skills and their stable locks retain their existing owners and paths.
 
 The captured installation `PATH`, not shell startup files, supplies Git/gh/SSH.
+M2 payload installations derive their native `PATH` from the selected retained
+payload, so activation/restoration selects that candidate's Git without changing
+the legacy definition or the prior installation's captured environment.
 The private `service/service.log` is separate from bounded execution logs.
 No privileged daemon, tunnel or remote service is installed. `stop` unloads the
 current job; its installed LaunchAgent can load at the next GUI login. It is not
@@ -56,8 +59,8 @@ Failed preparations remain immutable diagnostic evidence. Use a corrected review
 artifact for a subsequent attempt; do not invent `installation.json`, delete the
 failed runtime, or weaken reader checks to reuse an incomplete preparation.
 
-An identical update is a no-op, not a restart. Update/rollback activate the selected
-service even when it was stopped. Brief MCP disconnection is possible; read the
+An identical update is a no-op, not a restart. Legacy unload-only stop allows update/rollback to activate the selected
+service. Explicit M2 deliberate Stop is preserved through both operations. Brief MCP disconnection is possible; read the
 same task/execution/control identities afterward, never repeat input or work merely
 because a response disappeared. Original workers retain their own interpreter,
 session, receipts and immutable files; software rollback does not undo effects.
@@ -140,3 +143,139 @@ Connection state is checked by its own actual reader, including retained local
 disconnects and account-bound task records. A candidate that ignores that state
 cannot replace the active runtime. Old-only history retains its applicable reader
 requirements; no automatic credential or task migration is performed.
+
+## Product management (M2)
+
+`manage` is the management-contract-1 CLI. Both absolute `--config` and
+`--state-dir` are required, before `manage`. It does not discover, adopt or scan
+other installations. Commands emit one bounded JSON result on stdout; syntax
+errors use argparse's stderr/exit 2. Result envelopes separate
+`management_contract`, `capabilities`, `implementation_version`, and
+`implementation_state_contract`. Installed status additionally reports actual
+`product_version`, `state_contract`, selection, policy and native startup state.
+Every result has `observed_at_ms`; a retained result is a timestamped observation,
+not a continuing health guarantee. Consumers must validate the contract and JSON,
+not infer support from the product version string.
+
+| Command after `manage --contract 1` | Effect |
+| --- | --- |
+| `status` | Actual native identity and MCP/configuration/file readiness; no repair. |
+| `configure --workspace /absolute/project` | Create validated private first-run config, never overwrite. Optional `--enable-commands` and `--enable-workspace-writes` grant the two capabilities independently; both default off. The same inputs are available on `init`. |
+| `bind --identity SHA256` | Bind an existing owned managed registration to an exact verified retained payload implementation. Inspect status first. No service start or policy change. |
+| `start` | Clear deliberate Stop and request actual readiness, retaining recovery budgets. |
+| `stop` | Persist deliberate Stop before unloading the verified job; workers retain their original IDs and sessions. |
+| `startup --enabled true` / `false` | Persist runtime login preference and request native enable/disable, without changing stopped intent or terminating a running service. |
+| `install --operation-id HEX32 --payload /absolute/payload --sha256 SHA256 --probe-workspace project --probe-path README.md` | Submit one finite offline preparation/registration operation. A clean installation finishes deliberately stopped, with runtime login startup disabled. Use explicit `startup` and `start` afterward. |
+| `update --operation-id HEX32 --payload /absolute/payload --sha256 SHA256 [--candidate-config /absolute/candidate.toml]` | Submit the exact trusted payload and configuration for compatibility checks and activation. No download or feed discovery. |
+| `operation --operation-id HEX32` | Read the original request, phase, outcome, ownership and actual selection fingerprint. Never retries. |
+| `continue --operation-id HEX32` | Explicitly continue only a recorded known-unperformed or deferred step under the original configuration/selection identity. |
+| `rollback` | Explicit existing compatible restoration; never reverses user workload effects. |
+
+Normal status distinguishes `not_installed`, `stopped`, `ready`, `unready`,
+`recovering`, `blocked`, `activation_pending`, `busy`, `incompatible` and `unknown`.
+Sanitized `reason` codes identify unavailable permissions, definitions or state.
+A PID alone is not readiness. `startup.enabled` comes from the owning GUI user's
+`launchctl print-disabled` override and the verified RunAtLoad definition, separate
+from `policy.start_at_login`. A denied or unverified change is not success; read
+status to compare requested policy with the effective native registration.
+Tunnel and ChatGPT evidence remain `not_probed`.
+
+A bound result's `entry` contains `python`, `path`, `config`, `state` and retained
+anchor `identity`. The actual command-line consumer is:
+
+```sh
+/retained/python -I /absolute/state/service/manage.py --contract 1 status
+/retained/python -I /absolute/state/service/manage.py --contract 1 stop
+```
+
+Use the exact returned paths, not these example paths. Core's entry resolves the
+selected implementation on each call. It does not pin the companion to an obsolete
+venv or a replaceable App. The retained anchor supplies management for a selected
+pre-M2 Core; its selected old runtime still owns serving. The entry's configuration,
+state and anchor binding cannot be silently repointed.
+
+For first installation, the verified M1 payload's bootstrap Python can run
+`-I -B -m openmachine.cli` with the explicit global paths and the commands above.
+After successful product install/update, the registration has the bound entry.
+For an already prepared M2 payload, `bind` accepts its returned installation
+identity. The product host owns validation of its stable Applications location;
+Core registers only retained Python/entry/environment paths, never donor App
+paths. First-run configuration is local-only; later grant changes use the existing
+explicit configuration workflow and candidate snapshots.
+
+### Policy and old-Core limits
+
+Persistent Stop uses service selection format 2 and state contract 14. The policy
+is independent of login startup, so relaunch, login, ordinary recovery, update and
+restoration cannot clear it. An update or restoration of a deliberately stopped
+runtime validates a disposable candidate but never leaves the registered service
+running and never clears a recovery episode by skipping readiness. Only explicit
+Start clears Stop. Legacy `service stop` retains its unload-only contract;
+`service start` is also an explicit Start, while restart does not clear deliberate
+Stop. Budget renewal still requires the existing explicit reset command.
+
+The original `launch.py` remains byte-exact. Format-2 native startup uses the bound
+management entry; exact prior/generated plist definitions cover interrupted policy
+publication without permitting arbitrary changed files. First-upgrade activation
+and failed restoration keep the old selection/launcher contracts until commit.
+For an existing format-1 installation, Start keeps the original launch format;
+a login-choice change persists through native registration alone. The first
+deliberate Stop adopts format 2 before bootout. This avoids changing launchd's
+cached arguments underneath a running service. A stopped-intent login can leave
+an idle loaded job; management reports it as stopped, and explicit Start reloads
+its verified definition while preserving the login choice.
+Policy fingerprints are checked with actual candidate readers. A pre-14 reader
+cannot consume format 2, and a candidate that omits the policy proof is rejected
+before native stop. There is no permissive old-reader downgrade.
+
+Supported old-Core transition is deliberately limited: the retained M2 manager can
+observe and explicitly Start an owned pre-M2 managed Core. Old Core does not gain
+`manage`, persistent Stop or runtime-login controls. Those require selecting M2;
+legacy `service stop` remains available with its documented semantics. Bind from
+the reviewed incoming retained implementation, rather than calling new commands
+on an old CLI. During update, the worker verifies/retains the incoming payload,
+checks its management contract and identity, then execs that incoming bootstrap
+before environment preparation or future-state validation. Unsupported incoming
+management contracts require their reviewed implementation, never a forced old
+reader. This is not a promise of arbitrary future management compatibility.
+
+### Original maintenance operations
+
+The finite worker runs in its own native session, independent of GUI and managed
+MCP process groups. Submission publishes intent before spawn and passes the
+existing `service/operation.lock` descriptor to the worker; preparation and
+transition do not reacquire it. The lifecycle lock, immutable environments, actual
+readers and exact configuration snapshots remain their existing owners.
+
+Records retain exact payload digest/source, original configuration and selection
+fingerprints, candidate snapshot identity, bounded phase and outcome. There are at
+most 128 retained records, each at most 64 KiB; no cleanup or scheduler is included.
+Subprocess replies are bounded to 64 KiB per stream and finite deadlines. Worker
+stdio is detached to `/dev/null`, not a GUI-owned pipe or unbounded log.
+
+Phases are `accepted`, `retaining`, `retained`, `preparing`, `prepared`, `activating`,
+`deferred`, `completed`, `rejected`, `restored`, or `recovery_required`. Same-ID
+submission reads the original even if new arguments differ. Another pending,
+deferred or uncertain operation is busy; it is not a queue. Reads report live lock
+ownership separately. `completed`, `rejected` and verified `restored` are final;
+a lost reply does not change a recorded outcome.
+
+An interrupted `accepted`, `retained`, `prepared` or `deferred` phase is
+`continuation_required`; only an explicit `continue` may advance it. Interrupted
+retention, preparation or activation remains `recovery_required`. Never replace
+its ID or replay the phase, even when current selection happens to match the
+requested target. A pending selection remains `activation_pending` in status.
+Explicit compatible rollback can reconcile the native selection but does not
+fabricate the missing original operation outcome or unblock uncertain history.
+
+Product activation conservatively defers active/unresolved execution, task,
+workspace-write, native-login or Chat-delivery work and busy lifecycle admission. Original
+workers, target archives, receipts and local/SSH/Chat recovery budgets are never
+cancelled or reset to pass a gate. A deferred operation does not auto-activate when
+work becomes idle. Configuration or policy drift rejects continuation rather than
+rebasing the accepted request. Incomplete preparation is retained; no immutable
+runtime or original history is replaced to retry it.
+
+These CLI/reader tests are separate from native GUI startup permission, signed
+product installation/update and real ChatGPT-route acceptance. Desktop M3/M4 own
+those integrations; M2 adds no daemon, HTTP service, transport or release feed.

@@ -300,6 +300,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
             result = self.apply(args, change_id=identity)
         self.assertEqual(result["status"], "outcome_unknown")
         self.assertNotIn("recovery_hint", result)
+        self.fault("activation_deferred", lambda: workspace.check_change_state(self.state, require_idle=True))
         self.assertNotIn("recovery_hint", self.app.read_workspace_change("local", identity))
         self.assertEqual(result["effects"][0]["stage"], "unknown")
         self.assertIn(b"42", self.file.read_bytes())

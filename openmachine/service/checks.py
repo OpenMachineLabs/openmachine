@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -36,7 +38,8 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **_events_state(state), **_connections_state(state), **_chat_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), **_chat_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+            "management_contract": service_state.MANAGEMENT_CONTRACT,
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
 
@@ -116,10 +119,74 @@ def _ssh_recovery_state(state: Path) -> dict:
 
 def _run(argv: list[str], timeout: float = 30, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=timeout, cwd="/", check=False, env=env)
+        with subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              cwd="/", env=env, start_new_session=True) as process:
+            completed = False
+            try:
+                buffers = {process.stdout: bytearray(), process.stderr: bytearray()}
+                deadline = time.monotonic() + timeout
+                with selectors.DefaultSelector() as selector:
+                    for stream in buffers:
+                        selector.register(stream, selectors.EVENT_READ)
+                    while selector.get_map():
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(argv, timeout)
+                        for key, _ in selector.select(min(remaining, 0.1)):
+                            data = os.read(key.fd, 8192)
+                            if not data:
+                                selector.unregister(key.fileobj)
+                            else:
+                                buffers[key.fileobj].extend(data)
+                                if len(buffers[key.fileobj]) > 65536:
+                                    raise Fault("service_output_limit", "The service subprocess exceeded its bounded reply; inspect original state.")
+                    code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                completed = True
+                return subprocess.CompletedProcess(argv, code, *(bytes(buffers[stream]).decode("utf-8", errors="replace")
+                                                               for stream in (process.stdout, process.stderr)))
+            finally:
+                if not completed:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=5)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
+
+
+def activation_safe(state: Path) -> None:
+    """Conservative product admission under lifecycle.lock; no receipt repair."""
+    root = state / "executions"
+    if root.exists():
+        for directory in root.iterdir():
+            record = execution.read_record(directory)
+            if (record["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
+                    or record.get("cleanup", {}).get("status", "verified") != "verified"
+                    or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
+                raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+    known = {}
+    while True:
+        page = tasks.observation_page(state, known)
+        if not page["complete"]:
+            raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.")
+        for item in page["entries"]:
+            record = item["record"]
+            if any(operation["state"] != "observed" or operation["result"] is None
+                   or operation["result"]["status"] in {"running", "unknown"} for operation in record["operations"]):
+                raise Fault("activation_deferred", "An original task operation is active or unresolved; no worker was stopped.")
+            known[item["task_id"]] = item["metadata_sha256"]
+        if not page["has_more"]:
+            break
+    # The owning readers validate their records before classifying in-flight
+    # writes or authentication. No service-owned copy of either schema exists.
+    from integrations.connections import check_state as connections_state
+    from integrations.chatgpt import bindings
+    workspace.check_change_state(state, require_idle=True)
+    connections_state(state, require_idle=True)
+    if any(item.delivery is not None and item.delivery.status in {"reserved", "outcome_unknown"}
+           and item.delivery.continuation_at_ms is None for item in bindings(state)):
+        raise Fault("activation_deferred", "An original Chat recovery delivery is active or unresolved; preserve its delivery and budget.")
 
 
 def _change_support(value: dict) -> set[int]:
@@ -166,6 +233,10 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
         if runtime_recovery["runtime_recovery_present"] and (value["state_contract"] < 8 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in runtime_recovery.items())):
             raise ValueError("candidate ignores or changes retained runtime recovery budgets")
+        policy = service_state._policy_state(state)
+        if policy["service_policy_present"] and (value["state_contract"] < 14 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in policy.items())):
+            raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
         if retained_tasks["task_index_format"] == 2:
             formats = value.get("structured_task_read_formats")

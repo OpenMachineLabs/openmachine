@@ -59,11 +59,19 @@ def _plist_path(state: Path) -> Path:
 
 
 def _definition(state: Path, record: dict) -> dict:
-    return {"Label": _label(state), "ProgramArguments": [record["launch_python"], "-I", str(state / "service/launch.py")],
+    installed = service_state._installed(state, record["current"])
+    environment = record["path_environment"]
+    if installed["state_contract"] >= 14 and installed.get("payload_sha256"):
+        retained = state / "service/payloads" / installed["payload_sha256"]
+        environment = os.pathsep.join((str(retained / "bin"), str(retained / "git/bin"), os.defpath))
+    arguments = [record["launch_python"], "-I", str(state / "service/launch.py")]
+    if record["format"] == 2:
+        arguments = [record["management"]["launch_python"], "-I", str(state / "service/manage.py"), "--launch"]
+    return {"Label": _label(state), "ProgramArguments": arguments,
             "WorkingDirectory": str(state), "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
             "ThrottleInterval": 10, "ExitTimeOut": 10,
-            "AbandonProcessGroup": service_state._installed(state, record["current"])["state_contract"] < 8,
-            "EnvironmentVariables": {"PATH": record["path_environment"]},
+            "AbandonProcessGroup": installed["state_contract"] < 8,
+            "EnvironmentVariables": {"PATH": environment},
             "StandardOutPath": "/dev/null", "StandardErrorPath": str(state / "service/service.log")}
 
 
@@ -78,11 +86,68 @@ def _verify_files(state: Path, record: dict) -> None:
         selections = {record["current"]}
         if record["pending"] is not None:
             selections.update((record["pending"]["from"], record["pending"]["to"]))
-        if (plistlib.loads(path.read_bytes()) not in [_definition(state, dict(record, current=identity)) for identity in selections]
+        definitions = [_definition(state, dict(record, current=identity)) for identity in selections]
+        if record["format"] == 2:
+            # A policy commit may precede native definition publication. Only
+            # the exact former definition is admissible, and its old launcher
+            # rejects format 2 without ever starting the stopped service.
+            definitions.extend(_definition(state, dict(record, current=identity, format=1)) for identity in selections)
+        if (path.read_bytes() not in [plistlib.dumps(item) for item in definitions]
                 or (state / "service/launch.py").read_text() != LAUNCHER):
             raise ValueError("service definition changed")
+        if "management" in record:
+            anchor = service_state._installed(state, record["management"]["identity"])
+            if anchor.get("management_contract") != service_state.MANAGEMENT_CONTRACT or not Path(record["management"]["launch_python"]).is_file():
+                raise ValueError("retained management identity unavailable")
+            entry = state / "service/manage.py"
+            info = entry.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                    or info.st_nlink != 1 or entry.read_bytes() != service_state.management_entry(state, record)):
+                raise ValueError("management entry changed")
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
         raise Fault("service_definition_mismatch", "The installed launcher or LaunchAgent differs; do not overwrite or control another service.") from error
+
+
+def _startup(state: Path) -> dict:
+    result = checks._run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"])
+    if result.returncode:
+        raise Fault("startup_unknown", "The effective user-service startup registration could not be observed.")
+    match = re.search(r'"' + re.escape(_label(state)) + r'"\s*=>\s*(true|false)', result.stdout)
+    # An omitted override uses this verified RunAtLoad LaunchAgent's default.
+    if "disabled services = {" not in result.stdout:
+        raise Fault("startup_unknown", "The native startup registration reply was not recognized.")
+    return {"enabled": match is None or match[1] == "false", "source": "launchctl",
+            "observed_at_ms": time.time_ns() // 1000000}
+
+
+def _set_startup(state: Path, enabled: bool) -> dict:
+    result = checks._run(["/bin/launchctl", "enable" if enabled else "disable", f"gui/{os.getuid()}/{_label(state)}"])
+    observed = _startup(state)
+    if result.returncode or observed["enabled"] != enabled:
+        raise Fault("startup_denied", "The requested startup registration was not verified; read effective OS policy.")
+    return observed
+
+
+def _sync_definition(state: Path, record: dict) -> None:
+    _verify_files(state, record)
+    path = _plist_path(state)
+    desired = plistlib.dumps(_definition(state, record))
+    if path.read_bytes() == desired:
+        return
+    fd, temporary = tempfile.mkstemp(prefix=".openmachine-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(desired)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _native(state: Path) -> dict:
@@ -129,31 +194,29 @@ def _stop(state: Path) -> None:
 
 
 def _start(state: Path, record: dict) -> dict:
+    if service_state.stopped(record):
+        raise Fault("runtime_stopped", "Explicit Start is required before launching a deliberately stopped runtime.")
     if record["pending"] is None and service_state._installed(state, record["current"])["state_contract"] >= 8:
         if service_state._read_recovery(state) is None:
             service_state._save_recovery(state, None)
     observed = _native(state)
+    if record["format"] == 2 and observed["loaded"] and observed["pid"] is None:
+        # A successful stopped-intent login leaves an idle registered job.
+        # Reload its verified definition, including any disabled startup policy.
+        _stop(state)
+        observed = _native(state)
     if not observed["loaded"]:
         # Only verified transition definitions are accepted; write the selected
         # profile after bootout. Interrupted transitions retain both identities.
-        _verify_files(state, record)
-        desired = plistlib.dumps(_definition(state, record))
-        if _plist_path(state).read_bytes() != desired:
-            fd, temporary = tempfile.mkstemp(prefix=".openmachine-", dir=_plist_path(state).parent)
-            try:
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(desired)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, _plist_path(state))
-                directory = os.open(_plist_path(state).parent, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
-            finally:
-                Path(temporary).unlink(missing_ok=True)
-        checks._run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(_plist_path(state))])
+        _sync_definition(state, record)
+        disabled = record["format"] == 2 and not _startup(state)["enabled"]
+        try:
+            if disabled:
+                _set_startup(state, True)
+            checks._run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(_plist_path(state))])
+        finally:
+            if disabled:
+                _set_startup(state, False)
     elif observed["pid"] is None:
         checks._run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
@@ -194,7 +257,7 @@ def _publish_recovery(state: Path, record: dict, episode: dict | None, stop: thr
         try:
             with lease(state / "locks/lifecycle.lock", shared=True):
                 current = service_state._record(state)
-                if current["current"] != record["current"] or current["pending"] is not None:
+                if current["current"] != record["current"] or current["pending"] is not None or service_state.stopped(current):
                     return False
                 service_state._save_recovery(state, episode)
                 return True
@@ -243,6 +306,8 @@ def supervise(config_path: Path, state: Path) -> None:
     try:
         record = service_state._record(state)
         _verify_files(state, record)
+        if service_state.stopped(record):
+            return
         if (str(config_path.resolve()) != record["config"] or _native(state)["pid"] != os.getpid()
                 or Path(sys.prefix).resolve() != service_state._runtime(state, record["current"])
                 or os.getpgrp() != os.getpid()):
@@ -277,7 +342,7 @@ def supervise(config_path: Path, state: Path) -> None:
                         # or probe, but serialize accounting with activation.
                         with lease(state / "locks/lifecycle.lock", shared=True):
                             current = service_state._record(state)
-                            if current["current"] != record["current"] or current["pending"] is not None:
+                            if current["current"] != record["current"] or current["pending"] is not None or service_state.stopped(current):
                                 return
                             episode = _recovery_attempt(state, episode, now)
                         deadline = time.monotonic() + min(READINESS_SECONDS, (episode["deadline_ms"] - now) / 1000)
@@ -309,7 +374,7 @@ def supervise(config_path: Path, state: Path) -> None:
                             try:
                                 with lease(state / "locks/lifecycle.lock", shared=True):
                                     current = service_state._record(state)
-                                    if current["current"] != record["current"] or current["pending"] is not None:
+                                    if current["current"] != record["current"] or current["pending"] is not None or service_state.stopped(current):
                                         return
                                     episode = _recovery_attempt(state, None, time.time_ns() // 1000000)
                                 break

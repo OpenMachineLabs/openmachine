@@ -38,7 +38,7 @@ fixtures, not production projects or live SSH/ChatGPT acceptance.
 | `unit/test_continuity.py` | Legacy checkpoint/index integrity, real original-ID association, Skill resources and whole writes. |
 | `unit/test_tasks.py`, `test_task_admission.py` | Canonical publication, bounded index rebuild, process-loss boundaries, claims/epochs, stale intent, scope, plan invalidation, capacity and terminal acceptance. |
 | `unit/test_task_observer.py`, `test_task_ssh.py` | Absent-client original results, pause/terminal races, durable read budgets, actual slot ownership, stale snapshots and shared target recovery. |
-| `unit/test_service.py` | Selection, reader compatibility, before-stop rejection, configuration restoration, first-upgrade failures, bounded supervision and unchanged recovery budgets. |
+| `unit/test_service.py` | Selection, reader compatibility, before-stop rejection, configuration restoration, first-upgrade failures, bounded supervision, persistent Stop/login policy, exact legacy definitions, stable management CLI, original maintenance phases and unchanged recovery budgets. |
 | `unit/test_ssh.py`, `test_github.py` | Pinned target transport/archive isolation; exact provider scope/account, complete paged evidence, merge gates and original-destination reconciliation. |
 | `contract/test_mcp*.py` | Installed private-socket SDK/wire contracts, workflow/restart continuity and independent admission; split by execution, workspace, patches and tasks; retired Events methods are rejected. |
 | `system/test_repository.py` | Standard-library repository hygiene, templates, metadata and commit checking. |
@@ -113,3 +113,9 @@ Historical milestone receipts remain in Specs
 Reuse applicable evidence; do not repeat completed milestones or call historical
 passes new-candidate acceptance. Source merge, release, deployment and real-client
 acceptance require their own explicit authority and verification.
+
+M2 advances only the persistent service contract from 13 to 14 and adds management
+contract 1. The corresponding explicit state-contract assertions change; the frozen
+MCP tool catalog does not. Service tests exercise the installed management module
+and actual CLI entry, with mocked native mutations. Unix-socket or launchctl
+restrictions must be reported as blockers, not converted to native acceptance.
