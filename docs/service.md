@@ -218,6 +218,10 @@ The original `launch.py` remains byte-exact. Format-2 native startup uses the bo
 management entry; exact prior/generated plist definitions cover interrupted policy
 publication without permitting arbitrary changed files. First-upgrade activation
 and failed restoration keep the old selection/launcher contracts until commit.
+After bootout and exact profile restoration, the remaining pending handoff names
+only the restored installation, so its original older supervisor can validate it.
+Admission stays closed until readiness; the failed candidate and original
+operation remain retained.
 For an existing format-1 installation, Start keeps the original launch format;
 a login-choice change persists through native registration alone. The first
 deliberate Stop adopts format 2 before bootout. This avoids changing launchd's

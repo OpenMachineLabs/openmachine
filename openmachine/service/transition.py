@@ -78,11 +78,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         try:
             service_state._select_configuration(state, config_path, candidate_digest, allowed)
             runtime._stop(state)
-            if service_state.stopped(record):
-                runtime._sync_definition(state, record)
-                ready = {"status": "stopped", "readiness": "not_probed"}
-            else:
-                ready = runtime._start(state, record)
+            ready = _start_selected(state, record)
         except (Fault, OSError) as error:
             restored = {**original, "current": previous, "previous": previous_previous,
                         "configurations": configurations,
@@ -92,10 +88,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
                 service_state._select_configuration(state, config_path, prior_digest, allowed)
                 install._verify_candidate(state, restored, previous, check_remote=True)
                 runtime._stop(state)
-                if service_state.stopped(restored):
-                    runtime._sync_definition(state, restored)
-                else:
-                    runtime._start(state, restored)
+                _start_selected(state, restored)
             except (Fault, OSError):
                 raise Fault("recovery_required", "Activation and restoration are unverified; exact configuration/selection intent is retained.") from None
             restored = {**original, "current": previous, "previous": previous_previous, "pending": None}
@@ -113,6 +106,23 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             record = service_state._bind_management(state, record, target)
         _commit_ready(state, record)
         return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
+
+
+def _start_selected(state: Path, record: dict) -> dict:
+    """The original job is unloaded; retain admission until readiness is proven."""
+    pending = record["pending"]
+    if (pending is not None and record["current"] == pending["from"]
+            and service_state._installed(state, record["current"])["state_contract"]
+                < service_state._installed(state, pending["to"])["state_contract"]):
+        # Publish the exact restored profile before an older supervisor reads it.
+        # Its remaining handoff must not name an unreadable newer installation.
+        runtime._sync_definition(state, record)
+        record["pending"] = pending | {"to": record["current"]}
+        save_json(state / "service/service.json", record)
+    if service_state.stopped(record):
+        runtime._sync_definition(state, record)
+        return {"status": "stopped", "readiness": "not_probed"}
+    return runtime._start(state, record)
 
 
 def _commit_ready(state: Path, record: dict) -> None:

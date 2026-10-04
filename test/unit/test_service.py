@@ -397,8 +397,9 @@ class ServiceTests(unittest.TestCase):
             if record["current"] == self.b:
                 raise Fault("service_unready", "fixture")
             return {"status": "ready"}
-        with patch.object(service_runtime, "_start", side_effect=start):
+        with patch.object(service_runtime, "_start", side_effect=start), patch.object(service_runtime, "_sync_definition") as sync:
             self.assert_fault("activation_failed_restored", lambda: service_transition._activate(self.state, self.record, self.b))
+            sync.assert_called_once()
         self.assertIsNone(service_state._read_recovery(self.state))
         self.assertTrue(service_runtime._definition(self.state, self.record)["AbandonProcessGroup"])
         with patch.object(service_runtime, "_start", return_value={"status": "ready"}):
@@ -1404,6 +1405,40 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(startup.call_args_list, [call(self.state, True), call(self.state, False)])
         self.assertFalse(service_state._record(self.state)["policy"]["start_at_login"])
 
+
+    def test_old_reader_restoration_keeps_only_the_remaining_native_handoff(self):
+        for identity, contract in ((self.a, 13), (self.b, 14)):
+            path = self.state / "service/versions" / identity / "installation.json"
+            save_json(path, service_state._json(path) | {"state_contract": contract})
+        _, _, start = self.activation_mocks()
+        def actual_reader_boundary(state, selected):
+            if selected["current"] == self.b:
+                raise Fault("service_unready", "Rejected candidate fixture")
+            # Old supervisors validate every installation named by pending.
+            # Keep the admission marker, but never ask that reader to load 14.
+            pending = service_state._record(state)["pending"]
+            self.assertIsNotNone(pending)
+            with patch.object(service_state, "STATE_CONTRACT", 13):
+                for identity in {selected["current"], pending["from"], pending["to"]}:
+                    service_state._installed(state, identity)
+            return {"status": "ready"}
+        start.side_effect = actual_reader_boundary
+        with patch.object(service_runtime, "_sync_definition") as sync:
+            for interrupted in (False, True):
+                with self.subTest(interrupted=interrupted):
+                    record = dict(self.record)
+                    if interrupted:
+                        record.update(current=self.b, pending={"from": self.a, "to": self.b, "previous": None})
+                    self.save(record)
+                    if interrupted:
+                        result = service_transition._activate(self.state, record, self.a)
+                        self.assertEqual(result["status"], "ready")
+                    else:
+                        self.assert_fault("activation_failed_restored", lambda: service_transition._activate(self.state, record, self.b))
+                    self.assertEqual(service_state._record(self.state)["current"], self.a)
+                    self.assertIsNone(service_state._record(self.state)["pending"])
+                    self.assertEqual(sync.call_args.args[1]["current"], self.a)
+                    self.assertTrue((self.state / "service/versions" / self.b).is_dir())
 
     def test_policy_and_binding_preserve_recovery_advanced_before_admission(self):
         from contextlib import contextmanager
