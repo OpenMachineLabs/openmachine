@@ -1118,6 +1118,7 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
 
     def test_management_contract_reports_timestamp_busy_incompatible_and_actual_selection(self):
+        self.enterContext(patch.object(service_transition.sys, "platform", "darwin"))
         self.policy_fixture()
         with patch.object(service_runtime, "status", return_value={"status": "stopped", "loaded": False}), \
                 patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
@@ -1454,6 +1455,7 @@ class ServiceTests(unittest.TestCase):
                     self.assertTrue((self.state / "service/versions" / self.b).is_dir())
 
     def test_policy_and_binding_preserve_recovery_advanced_before_admission(self):
+        self.enterContext(patch.object(service_transition.sys, "platform", "darwin"))
         from contextlib import contextmanager
         self.policy_fixture()
         episode = service_runtime._recovery_attempt(self.state, None, 1000000)
