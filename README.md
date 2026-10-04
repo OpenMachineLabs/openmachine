@@ -107,9 +107,10 @@ status, exact candidate updates, compatible rollback and recovery. A service sto
 unloads the current job; it is not permanent login disable or workload cancellation.
 
 Current source also supports [offline runtime preparation](docs/runtime-payload.md)
-for Desktop Spec #7 M1: a verified Python/Core/Git payload creates a retained
-environment without selecting or starting a service. This source increment is
-not a v0.2.8 release artifact or a completed Desktop installer.
+through a verified Python/Core/Git payload that creates a retained environment
+without selecting or starting a service. [Product management](docs/service.md#product-management)
+adds explicit lifecycle controls and original install/update operation readback.
+Source support is not a published release artifact.
 
 ## Connect the official tunnel
 

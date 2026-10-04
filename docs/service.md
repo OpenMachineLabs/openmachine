@@ -31,7 +31,7 @@ move a venv or delete an old worker's installation. Tasks, executions, changes,
 Skills and their stable locks retain their existing owners and paths.
 
 The captured installation `PATH`, not shell startup files, supplies Git/gh/SSH.
-M2 payload installations derive their native `PATH` from the selected retained
+Packaged runtime installations derive their native `PATH` from the selected retained
 payload, so activation/restoration selects that candidate's Git without changing
 the legacy definition or the prior installation's captured environment.
 The private `service/service.log` is separate from bounded execution logs.
@@ -60,7 +60,7 @@ artifact for a subsequent attempt; do not invent `installation.json`, delete the
 failed runtime, or weaken reader checks to reuse an incomplete preparation.
 
 An identical update is a no-op, not a restart. Legacy unload-only stop allows update/rollback to activate the selected
-service. Explicit M2 deliberate Stop is preserved through both operations. Brief MCP disconnection is possible; read the
+service. Explicit deliberate Stop is preserved through both operations. Brief MCP disconnection is possible; read the
 same task/execution/control identities afterward, never repeat input or work merely
 because a response disappeared. Original workers retain their own interpreter,
 session, receipts and immutable files; software rollback does not undo effects.
@@ -144,7 +144,7 @@ disconnects and account-bound task records. A candidate that ignores that state
 cannot replace the active runtime. Old-only history retains its applicable reader
 requirements; no automatic credential or task migration is performed.
 
-## Product management (M2)
+## Product management
 
 `manage` is the management-contract-1 CLI. Both absolute `--config` and
 `--state-dir` are required, before `manage`. It does not discover, adopt or scan
@@ -191,13 +191,13 @@ anchor `identity`. The actual command-line consumer is:
 Use the exact returned paths, not these example paths. Core's entry resolves the
 selected implementation on each call. It does not pin the companion to an obsolete
 venv or a replaceable App. The retained anchor supplies management for a selected
-pre-M2 Core; its selected old runtime still owns serving. The entry's configuration,
+Core without management support; its selected old runtime still owns serving. The entry's configuration,
 state and anchor binding cannot be silently repointed.
 
-For first installation, the verified M1 payload's bootstrap Python can run
+For first installation, the verified payload's bootstrap Python can run
 `-I -B -m openmachine.cli` with the explicit global paths and the commands above.
 After successful product install/update, the registration has the bound entry.
-For an already prepared M2 payload, `bind` accepts its returned installation
+For an already prepared management-capable payload, `bind` accepts its returned installation
 identity. The product host owns validation of its stable Applications location;
 Core registers only retained Python/entry/environment paths, never donor App
 paths. First-run configuration is local-only; later grant changes use the existing
@@ -232,9 +232,9 @@ Policy fingerprints are checked with actual candidate readers. A pre-14 reader
 cannot consume format 2, and a candidate that omits the policy proof is rejected
 before native stop. There is no permissive old-reader downgrade.
 
-Supported old-Core transition is deliberately limited: the retained M2 manager can
-observe and explicitly Start an owned pre-M2 managed Core. Old Core does not gain
-`manage`, persistent Stop or runtime-login controls. Those require selecting M2;
+Supported old-Core transition is deliberately limited: the retained manager can
+observe and explicitly Start an owned legacy managed Core. Old Core does not gain
+`manage`, persistent Stop or runtime-login controls. Those require selecting a management-capable runtime;
 legacy `service stop` remains available with its documented semantics. Bind from
 the reviewed incoming retained implementation, rather than calling new commands
 on an old CLI. During update, the worker verifies/retains the incoming payload,
@@ -281,5 +281,5 @@ rebasing the accepted request. Incomplete preparation is retained; no immutable
 runtime or original history is replaced to retry it.
 
 These CLI/reader tests are separate from native GUI startup permission, signed
-product installation/update and real ChatGPT-route acceptance. Desktop M3/M4 own
-those integrations; M2 adds no daemon, HTTP service, transport or release feed.
+product installation/update and real ChatGPT-route acceptance. Management adds
+no daemon, HTTP service, transport or release feed.

@@ -114,7 +114,7 @@ Reuse applicable evidence; do not repeat completed milestones or call historical
 passes new-candidate acceptance. Source merge, release, deployment and real-client
 acceptance require their own explicit authority and verification.
 
-M2 advances only the persistent service contract from 13 to 14 and adds management
+Managed lifecycle support advances the persistent service contract from 13 to 14 and adds management
 contract 1. The corresponding explicit state-contract assertions change; the frozen
 MCP tool catalog does not. Service tests exercise the installed management module
 and actual CLI entry, with mocked native mutations. Unix-socket or launchctl
