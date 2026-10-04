@@ -210,7 +210,7 @@ def _start(state: Path, record: dict) -> dict:
         # Only verified transition definitions are accepted; write the selected
         # profile after bootout. Interrupted transitions retain both identities.
         _sync_definition(state, record)
-        disabled = record["format"] == 2 and not _startup(state)["enabled"]
+        disabled = not _startup(state)["enabled"]
         try:
             if disabled:
                 _set_startup(state, True)

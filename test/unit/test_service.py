@@ -1484,5 +1484,21 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(service_state._read_recovery(self.state)["episode"], later)
 
 
+    def test_explicit_start_preserves_disabled_login_for_legacy_format(self):
+        self.policy_fixture()
+        self.save(self.record)
+        with patch.object(service_runtime, "_native", side_effect=[
+                    {"loaded": False, "pid": None}, {"loaded": True, "pid": 123}]), \
+                patch.object(service_runtime, "_sync_definition"), \
+                patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                patch.object(service_runtime, "_set_startup") as startup, \
+                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                patch.object(service_checks, "_managed_probe", return_value={"status": "ready"}):
+            self.assertEqual(service_runtime._start(self.state, self.record)["status"], "ready")
+        self.assertEqual(startup.call_args_list, [call(self.state, True), call(self.state, False)])
+        self.assertEqual(service_state._record(self.state)["format"], 1)
+        self.assertNotIn("policy", service_state._record(self.state))
+
+
 if __name__ == "__main__":
     unittest.main()
