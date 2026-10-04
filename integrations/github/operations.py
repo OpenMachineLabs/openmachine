@@ -84,8 +84,9 @@ def _project(kind: str, value: dict) -> dict:
     return result
 
 
-def _enabled(settings: Settings, repository: str, metadata: dict | None = None) -> bool:
-    return connection.authorize(settings, repository).attribution
+def _attribute(settings: Settings, body: str, footer: str) -> str:
+    """Apply the single configured policy after the writer has checked access."""
+    return _append(body, footer) if settings.github.attribution else body
 
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
@@ -347,12 +348,12 @@ def _update_fields(current: dict, title: str | None, body: str | None, state: st
 def issue(settings: Settings, action: Literal["create", "update"], repository: str,
           title: str | None, body: str | None, number: int = 0,
           state: Literal["open", "closed"] | None = None, expected_updated_at: str = "", *, transport=None) -> dict:
-    actor, metadata = connection.access(settings, repository, write=True, transport=transport)
+    actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/issues"
     if action == "create":
         if not title or state is not None:
             raise Fault("invalid_github_request", "Creating an Issue requires a title; state is update-only.")
-        submitted = _append(body or "", CREATED_FOOTER) if _enabled(settings, repository, metadata) else body or ""
+        submitted = _attribute(settings, body or "", CREATED_FOOTER)
         return _mutate(repository, "POST", root, {"title": title, "body": submitted},
                        lambda result: f"{root}/{result['number']}", settings=settings, actor=actor, transport=transport)
     if action != "update" or number < 1:
@@ -369,7 +370,7 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
                  head: str = "", base: str = "", draft: bool = False,
                  state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                  expected_head_sha: str = "", *, transport=None) -> dict:
-    actor, metadata = connection.access(settings, repository, write=True, transport=transport)
+    actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/pulls"
     if action == "create":
         if not title or not head or not base or head == base or state is not None:
@@ -380,7 +381,7 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
             branch = object_response((transport or connection.request)("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
             if object_response(branch.get("commit")).get("sha") != expected_head_sha:
                 raise Fault("github_candidate_changed", "The pushed branch changed before PR creation.")
-        submitted = _append(body or "", CREATED_FOOTER) if _enabled(settings, repository, metadata) else body or ""
+        submitted = _attribute(settings, body or "", CREATED_FOOTER)
         payload = {"title": title, "body": submitted, "head": head, "base": base, "draft": draft}
         result = _mutate(repository, "POST", root, payload, lambda value: f"{root}/{value['number']}", settings=settings, actor=actor, transport=transport)
         if result["status"] == "verified" and expected_head_sha:
@@ -398,12 +399,12 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
 
 def comment(settings: Settings, action: Literal["create", "update"], repository: str,
             body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *, transport=None) -> dict:
-    actor, metadata = connection.access(settings, repository, write=True, transport=transport)
+    actor, _ = connection.access(settings, repository, write=True, transport=transport)
     if action == "create":
         if number < 1:
             raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number.")
         object_response((transport or connection.request)("GET", f"repos/{repository}/issues/{number}"))
-        submitted = _append(body, POSTED_FOOTER) if _enabled(settings, repository, metadata) else body
+        submitted = _attribute(settings, body, POSTED_FOOTER)
         endpoint = f"repos/{repository}/issues/{number}/comments"
         return _mutate(repository, "POST", endpoint, {"body": submitted},
                        lambda result: f"repos/{repository}/issues/comments/{result['id']}", settings=settings, actor=actor, transport=transport)
@@ -418,7 +419,7 @@ def comment(settings: Settings, action: Literal["create", "update"], repository:
 def review(settings: Settings, action: Literal["create", "update"], repository: str,
            body: str, number: int = 0, review_id: int = 0, expected_head_sha: str = "",
            event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT", *, transport=None) -> dict:
-    actor, metadata = connection.access(settings, repository, write=True, transport=transport)
+    actor, _ = connection.access(settings, repository, write=True, transport=transport)
     if action == "create":
         if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha) or event not in {"COMMENT", "APPROVE", "REQUEST_CHANGES"}:
             raise Fault("invalid_github_request", "Creating a review requires a positive PR number, exact HEAD and supported event.")
@@ -427,7 +428,7 @@ def review(settings: Settings, action: Literal["create", "update"], repository: 
             raise Fault("github_self_review", "GitHub does not permit self-approval or self-requested changes; submit COMMENT without claiming independent approval.")
         # A review may report failed checks. Missing evidence, unlike a known failure, rejects submission.
         evidence.merge_gate(repository, number, expected_head_sha, current["base"]["sha"], transport=transport)
-        submitted = _append(body, POSTED_FOOTER) if _enabled(settings, repository, metadata) else body
+        submitted = _attribute(settings, body, POSTED_FOOTER)
         endpoint = f"repos/{repository}/pulls/{number}/reviews"
         return _mutate(repository, "POST", endpoint, {"commit_id": expected_head_sha, "event": event, "body": submitted},
                        lambda result: f"{endpoint}/{result['id']}", settings=settings, actor=actor, transport=transport)

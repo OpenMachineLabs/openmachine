@@ -320,6 +320,36 @@ survive ordinary restarts; revocation, expired refresh grants or unavailable sto
 remain real reauthorization boundaries. Native OAuth, deployment, installed-client
 acceptance and code merge require their own observed evidence, not mock responses.
 
+## GitHub attribution
+
+Use exactly one attribution policy: `[github].attribution`, default `true` for
+public and private repositories. Read its effective value from
+`get_capabilities.github.attribution`; do not invent a per-client override.
+When enabled, new Issue/PR bodies use exactly:
+
+```markdown
+---
+
+Created via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
+```
+
+New top-level comments and review summaries use exactly:
+
+```markdown
+---
+
+Posted via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
+```
+
+Let OM's typed writers append the footer; do not duplicate it or substitute a
+tool/model explanation, version, badge or slogan. Any separately authorized
+publication route uses the same observed setting and exact wording; this does
+not authorize switching routes to bypass an authentication or permission boundary.
+Verify the destination body, including its footer, before reporting publication.
+False suppresses new automatic attribution, not existing provenance. Preserve
+existing footers and hidden task markers on edits; do not rebrand legacy content,
+alter unrelated historical publications or decorate inline review comments.
+
 ## Codex browser subtasks
 
 Keep Chat in control. Use start_codex_task only for an explicitly authorized
