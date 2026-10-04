@@ -106,6 +106,11 @@ never silently chmodded. Keep socket paths within the host's Unix-socket limit.
 status, exact candidate updates, compatible rollback and recovery. A service stop
 unloads the current job; it is not permanent login disable or workload cancellation.
 
+Current source also supports [offline runtime preparation](docs/runtime-payload.md)
+for Desktop Spec #7 M1: a verified Python/Core/Git payload creates a retained
+environment without selecting or starting a service. This source increment is
+not a v0.2.8 release artifact or a completed Desktop installer.
+
 ## Connect the official tunnel
 
 Manage upstream `tunnel-client` separately. Its inspected local binding is:

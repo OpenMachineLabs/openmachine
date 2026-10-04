@@ -13,13 +13,15 @@ import zipfile
 
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory, save_json
+from openmachine.foundation.state import lease, private_directory, save_json
 
 from . import state as service_state
 from . import checks
+from . import payload
 
 
-def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) -> str:
+def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path, *,
+             offline: tuple[Path, str, dict] | None = None) -> str:
     """Build a venv at its final path: Python environments must not be moved."""
     try:
         wheel = wheel.resolve(strict=True)
@@ -42,12 +44,16 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
             version = package["Version"]
     except (OSError, ValueError, UnicodeError, zipfile.BadZipFile) as error:
         raise Fault("invalid_installation_artifact", "Select a trusted local Open Machine wheel and fully pinned requirements file.") from error
-    digest = hashlib.sha256((wheel_hash + hashlib.sha256(locked).hexdigest() + sys.version).encode()).hexdigest()
+    if offline is not None and version != offline[2]["core"]["version"]:
+        raise Fault("installation_identity_mismatch", "The payload declaration and Core wheel disagree.")
+    runtime_identity = offline[1] if offline else sys.version
+    digest = hashlib.sha256((wheel_hash + hashlib.sha256(locked).hexdigest() + runtime_identity).encode()).hexdigest()
     versions = private_directory(state / "service/versions")
     destination = versions / digest
     if destination.exists():
         original = service_state._installed(state, digest)
-        if original.get("wheel_sha256") != wheel_hash or original.get("version") != version:
+        if (original.get("wheel_sha256") != wheel_hash or original.get("version") != version
+                or offline and original.get("payload_sha256") != offline[1]):
             raise Fault("installation_conflict", "The retained installation does not match the selected artifact.")
         return digest
     destination.mkdir(mode=0o700)
@@ -60,23 +66,56 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path) ->
             raise Fault("installation_artifact_changed", "The wheel changed during preparation; the active installation is untouched.")
     requirements = artifacts / "requirements.lock"
     requirements.write_bytes(locked)
+    # Both paths share the installer. Offline input changes its interpreter and
+    # dependency source, never service selection or the retained-state readers.
+    python = str(offline[0] / "python/bin/python3") if offline else sys.executable
+    options = ["--no-index", "--find-links", str(offline[0] / "wheels"), "--only-binary=:all:"] if offline else []
+    isolated = {"env": payload.environment(offline[0])} if offline else {}
+    pip = [str(destination / "bin/python"), "-I", "-m", "pip"]
+    install = ["install", "--disable-pip-version-check", "--no-input", "--no-deps", *options]
     # Keep failed candidates for diagnosis. Never overwrite or garbage-collect a runtime.
-    for argv in ([sys.executable, "-I", "-m", "venv", str(destination)],
-                 [str(destination / "bin/python"), "-I", "-m", "pip", "install", "--disable-pip-version-check",
-                  "--no-input", "--no-deps", "-r", str(requirements)],
-                 [str(destination / "bin/python"), "-I", "-m", "pip", "install", "--disable-pip-version-check",
-                  "--no-input", "--no-deps", str(wheel)],
-                 [str(destination / "bin/python"), "-I", "-m", "pip", "check"]):
-        if checks._run(argv, timeout=180).returncode:
+    for argv in ([python, "-I", "-m", "venv", str(destination)],
+                 [*pip, *install, "-r", str(requirements)],
+                 [*pip, *install, str(wheel)], [*pip, "check"]):
+        if checks._run(argv, timeout=180, **isolated).returncode:
             raise Fault("installation_failed", "Candidate installation failed; the active runtime is untouched and the candidate is retained.")
-    observed = checks._candidate_state(destination / "bin/python", config_path, state)
+    observed = checks._candidate_state(destination / "bin/python", config_path, state, **isolated)
     if observed["version"] != version or observed["prefix"] != str(destination):
         raise Fault("installation_identity_mismatch", "Wheel metadata, installed runtime and environment identity disagree.")
     save_json(destination / "installation.json", {
         "identity": digest, "version": version, "protocol": observed["protocol"], "state_contract": observed["state_contract"],
         "wheel_sha256": wheel_hash, "requirements_sha256": hashlib.sha256(locked).hexdigest(),
+        **({"payload_sha256": offline[1]} if offline else {}),
     })
     return digest
+
+
+def prepare_payload(config_path: Path, state: Path, source: Path, expected_sha256: str) -> dict:
+    """Prepare only: no LaunchAgent, active selection, background policy or worker changes."""
+    if not all(path.is_absolute() for path in (config_path, state, source)):
+        raise Fault("invalid_service_path", "Payload preparation requires absolute configuration, state and payload paths.")
+    load(config_path)
+    # Validate before creating a state directory or executing any payload entry.
+    payload.verify(source, expected_sha256)
+    state = private_directory(state)
+    root = private_directory(state / "service")
+    with lease(root / "operation.lock"):
+        retained, manifest = payload.retain(state, source, expected_sha256)
+        env = payload.environment(retained)
+        python = retained / "python/bin/python3"
+        observed_python = checks._run([str(python), "-I", "-B", "-c",
+            "import platform; print(platform.python_version())"], env=env)
+        observed_git = checks._run([str(retained / "bin/git"), "--version"], env=env)
+        if (observed_python.returncode or observed_python.stdout.strip() != manifest["python"]["version"]
+                or observed_git.returncode or observed_git.stdout.strip() != "git version " + manifest["git"]["version"]):
+            raise Fault("installation_identity_mismatch", "The retained Python or Git does not match the payload declaration.")
+        identity = _prepare(state, retained / manifest["core"]["wheel"], retained / "requirements.lock",
+                            config_path, offline=(retained, expected_sha256, manifest))
+        installed = service_state._installed(state, identity)
+        return {"status": "prepared", "identity": identity, "version": installed["version"],
+                "payload_sha256": expected_sha256, "runtime": str(service_state._runtime(state, identity)),
+                "launch_python": str(python.resolve()), "path_environment": env["PATH"],
+                "selection": "unchanged", "service": "not_started"}
 
 
 def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote: bool = False) -> None:
