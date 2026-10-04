@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from integrations import github
 from integrations.github import client, connection, evidence, operations
-from openmachine.config import Settings
+from openmachine.config import GitHubConfig, Settings
 from openmachine.foundation.sanitize import Fault
 
 REPO = "Owner/repo"
@@ -23,6 +23,8 @@ HEAD, BASE, MERGE, TREE = (char * 40 for char in "abcd")
 ACTOR = {"id": 1, "login": "Operator"}
 STAMP = "2026-01-01T00:00:00Z"
 REQUEST = connection.request
+CREATED = "---\n\nCreated via [Open Machine](https://github.com/OpenMachineLabs/openmachine)."
+POSTED = "---\n\nPosted via [Open Machine](https://github.com/OpenMachineLabs/openmachine)."
 
 
 def settings(attribution=None, **scopes):
@@ -58,6 +60,8 @@ class GitHubTests(unittest.TestCase):
         def portion(items):
             return copy.deepcopy(items[(page - 1) * limit:page * limit])
         if method == "GET":
+            if parsed.path == f"{ROOT}/pulls/2/reviews/9":
+                return copy.deepcopy(self.reviews[0])
             single = {"user": ACTOR, ROOT: self.metadata, f"{ROOT}/pulls/2": self.pr,
                       f"{ROOT}/issues/1": self.issue_value, f"{ROOT}/issues/2": self.pr,
                       f"{ROOT}/issues/comments/9": {"id": 9, "body": self.issue_value["body"], "updated_at": STAMP},
@@ -185,28 +189,52 @@ class GitHubTests(unittest.TestCase):
         with patch.object(connection, "read_actor", side_effect=[ACTOR, actor]):
             self.assert_fault("github_identity_changed", github.reconcile, settings(), locator)
 
-    def test_public_default_uses_exact_created_and_posted_footers(self):
-        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.issue(settings(), "create", REPO, "title", "body")
-            self.assertEqual(mutate.call_args.args[3]["body"], "body\n\n" + operations.CREATED_FOOTER)
-            github.pull_request(settings(), "create", REPO, "pr", "body", head="topic", base="main")
-            self.assertEqual(mutate.call_args.args[3]["body"], "body\n\n" + operations.CREATED_FOOTER)
-            github.comment(settings(), "create", REPO, "comment", number=1)
-            self.assertEqual(mutate.call_args.args[3]["body"], "comment\n\n" + operations.POSTED_FOOTER)
+    def test_attribution_has_only_the_two_fixed_footer_literals(self):
+        self.assertEqual(operations.ATTRIBUTION_URL, "https://github.com/OpenMachineLabs/openmachine")
+        self.assertEqual(operations.CREATED_FOOTER, CREATED)
+        self.assertEqual(operations.POSTED_FOOTER, POSTED)
+        self.assertEqual(operations.FOOTERS, (CREATED, POSTED))
 
-    def test_private_default_uses_attribution_and_explicit_override_still_works(self):
-        self.assertTrue(settings().github.attribution)
-        self.assertFalse(settings(False).github.attribution)
-        self.metadata["private"] = True
-        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.issue(settings(), "create", REPO, "title", "body")
-            self.assertEqual(mutate.call_args.args[3]["body"], "body\n\n" + operations.CREATED_FOOTER)
-            github.issue(settings(False), "create", REPO, "title", "body")
-            self.assertEqual(mutate.call_args.args[3]["body"], "body")
-        with patch.object(connection, "request") as api:
-            self.assertTrue(operations._enabled(settings(), REPO))
-            self.assertFalse(operations._enabled(settings(False), REPO))
-            api.assert_not_called()
+    def test_all_new_bodies_share_the_default_on_boolean_policy(self):
+        calls = (
+            (github.issue, ("title", "body"), {}, CREATED),
+            (github.pull_request, ("pr", "body"), {"head": "topic", "base": "main"}, CREATED),
+            (github.comment, ("body",), {"number": 1}, POSTED),
+            (github.review, ("body",), {"number": 2, "expected_head_sha": HEAD}, POSTED),
+        )
+        for private in (False, True):
+            self.metadata["private"] = private
+            for enabled in (None, True, False):
+                config = settings(enabled)
+                self.assertIs(config.github.attribution, enabled is not False)
+                for operation, args, kwargs, footer in calls:
+                    with self.subTest(private=private, enabled=enabled, operation=operation.__name__):
+                        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+                            operation(config, "create", REPO, *args, **kwargs)
+                        expected = "body" if enabled is False else "body\n\n" + footer
+                        self.assertEqual(mutate.call_args.args[3]["body"], expected)
+
+    def test_attribution_setting_accepts_only_booleans(self):
+        for value in (None, "true", "false", 0, 1):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                GitHubConfig.model_validate({"attribution": value})
+
+    def test_all_updates_preserve_provenance_without_retroactive_branding(self):
+        calls = (
+            (github.issue, (None, "edited"), {"number": 1}, CREATED, self.issue_value),
+            (github.pull_request, (None, "edited"), {"number": 2}, CREATED, self.pr),
+            (github.comment, ("edited",), {"comment_id": 9}, POSTED, self.issue_value),
+            (github.review, ("edited",), {"number": 2, "review_id": 9}, POSTED, self.reviews[0]),
+        )
+        for enabled in (True, False):
+            for attributed in (False, True):
+                for operation, args, kwargs, footer, current in calls:
+                    current["body"] = "old\n\n" + footer if attributed else "old"
+                    with self.subTest(enabled=enabled, attributed=attributed, operation=operation.__name__):
+                        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+                            operation(settings(enabled), "update", REPO, *args, **kwargs)
+                        expected = "edited\n\n" + footer if attributed else "edited"
+                        self.assertEqual(mutate.call_args.args[3]["body"], expected)
 
     def test_exact_footer_is_idempotent_and_whitespace_is_preserved(self):
         body = "body\n\n" + operations.CREATED_FOOTER

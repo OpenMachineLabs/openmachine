@@ -340,9 +340,7 @@ credentials and binary data. Pages are 16 KiB UTF-8-safe with full hash/cursors,
 sources up to 1 MiB. Provider API/results are bounded to 2 MiB/256 KiB. The PR file
 API's 3,000-file ceiling and partial check/review/thread evidence remain explicit.
 
-Attribution defaults on for new public/private bodies; false disables it.
-Updates preserve existing footers without branding legacy content. Writes verify
-all submitted fields, object identity and acting account. Prefer observed
+Writes verify all submitted fields, object identity and acting account. Prefer observed
 `expected_updated_at` and exact PR HEAD; preflight/write is not atomic CAS, and
 legacy omission retains its weaker contract. Pinned creation uses a same-repo branch.
 
@@ -362,6 +360,46 @@ Never place tokens in URLs/logs or copy controller credentials to another target
 The complete provider remains in `integrations/github/`. The native account owner
 is shared by its existing API operations. A native Git credential helper, Projects
 management and a general plugin SDK are not included in this increment.
+
+### Attribution
+
+`[github].attribution` is the only watermark setting. It is a strict boolean,
+defaults to `true` for both public and private repositories, and is exposed as
+`get_capabilities.github.attribution`. Set it to `false` to stop automatic
+attribution on new bodies; no per-format or per-client switch is needed.
+
+The only generated footer for new Issue and Pull Request bodies is:
+
+```markdown
+---
+
+Created via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
+```
+
+The only generated footer for new top-level Issue/PR comments and review
+summaries is:
+
+```markdown
+---
+
+Posted via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
+```
+
+The writers share one policy and the two constants in
+`integrations/github/operations.py`. Callers supply the substantive body, not
+alternative signatures, tool/model explanations, versions, badges or slogans.
+The same exact footer is not appended twice. Inline review comments are outside
+this writer; hidden task receipt markers are separate from visible attribution.
+
+Updates preserve an existing Created/Posted footer, even when automatic
+attribution is disabled. They do not add a footer to legacy content or rewrite
+historical publications. The switch controls future automatic addition, not
+content deletion or replacement of caller-supplied text.
+
+Apply configuration changes through the existing [service configuration
+lifecycle](service.md); this setting is not hot-reloaded. A future Desktop switch
+should write this same boolean and use that lifecycle, not introduce another
+watermark policy. No GUI or new settings API is implemented here.
 
 ## SSH
 
