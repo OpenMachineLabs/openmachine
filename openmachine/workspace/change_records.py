@@ -497,7 +497,7 @@ def _observed(directory: Path, record: dict | None = None, *, owned: bool = Fals
         return result
 
 
-def check_change_state(state: Path) -> dict:
+def check_change_state(state: Path, *, require_idle: bool = False) -> dict:
     """Public, read-only format validation for candidate/target compatibility checks."""
     store = _store(state)
     count, formats = 0, set()
@@ -510,6 +510,8 @@ def check_change_state(state: Path) -> dict:
                 raise Fault("change_history_unavailable", "A retained allocation has incomplete history.") from error
             if record["owner_sha256"] != owner:
                 raise Fault("change_store_corrupt", "A retained change belongs to a different state owner.")
+            if require_idle and record["status"] not in {"applied", "unchanged", "rejected"}:
+                raise Fault("activation_deferred", "An original workspace change is active or unresolved; no write was replayed.")
             count += 1
             formats.add(record["format"])
     return {"workspace_change_format": CHANGE_FORMAT, "workspace_change_read_formats": list(READ_CHANGE_FORMATS),

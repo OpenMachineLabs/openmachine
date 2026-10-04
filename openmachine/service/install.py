@@ -84,6 +84,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path, *,
         raise Fault("installation_identity_mismatch", "Wheel metadata, installed runtime and environment identity disagree.")
     save_json(destination / "installation.json", {
         "identity": digest, "version": version, "protocol": observed["protocol"], "state_contract": observed["state_contract"],
+        "management_contract": observed.get("management_contract", 0),
         "wheel_sha256": wheel_hash, "requirements_sha256": hashlib.sha256(locked).hexdigest(),
         **({"payload_sha256": offline[1]} if offline else {}),
     })
@@ -100,22 +101,28 @@ def prepare_payload(config_path: Path, state: Path, source: Path, expected_sha25
     state = private_directory(state)
     root = private_directory(state / "service")
     with lease(root / "operation.lock"):
-        retained, manifest = payload.retain(state, source, expected_sha256)
-        env = payload.environment(retained)
-        python = retained / "python/bin/python3"
-        observed_python = checks._run([str(python), "-I", "-B", "-c",
-            "import platform; print(platform.python_version())"], env=env)
-        observed_git = checks._run([str(retained / "bin/git"), "--version"], env=env)
-        if (observed_python.returncode or observed_python.stdout.strip() != manifest["python"]["version"]
-                or observed_git.returncode or observed_git.stdout.strip() != "git version " + manifest["git"]["version"]):
-            raise Fault("installation_identity_mismatch", "The retained Python or Git does not match the payload declaration.")
-        identity = _prepare(state, retained / manifest["core"]["wheel"], retained / "requirements.lock",
-                            config_path, offline=(retained, expected_sha256, manifest))
-        installed = service_state._installed(state, identity)
-        return {"status": "prepared", "identity": identity, "version": installed["version"],
-                "payload_sha256": expected_sha256, "runtime": str(service_state._runtime(state, identity)),
-                "launch_python": str(python.resolve()), "path_environment": env["PATH"],
-                "selection": "unchanged", "service": "not_started"}
+        return _prepare_payload(config_path, state, source, expected_sha256)
+
+
+def _prepare_payload(config_path: Path, state: Path, source: Path, expected_sha256: str) -> dict:
+    """Caller owns operation.lock, including an inherited maintenance lease."""
+    retained, manifest = payload.retain(state, source, expected_sha256)
+    env = payload.environment(retained)
+    python = retained / "python/bin/python3"
+    observed_python = checks._run([str(python), "-I", "-B", "-c",
+        "import platform; print(platform.python_version())"], env=env)
+    observed_git = checks._run([str(retained / "bin/git"), "--version"], env=env)
+    if (observed_python.returncode or observed_python.stdout.strip() != manifest["python"]["version"]
+            or observed_git.returncode or observed_git.stdout.strip() != "git version " + manifest["git"]["version"]):
+        raise Fault("installation_identity_mismatch", "The retained Python or Git does not match the payload declaration.")
+    identity = _prepare(state, retained / manifest["core"]["wheel"], retained / "requirements.lock",
+                        config_path, offline=(retained, expected_sha256, manifest))
+    installed = service_state._installed(state, identity)
+    return {"status": "prepared", "identity": identity, "version": installed["version"],
+            "payload_sha256": expected_sha256, "runtime": str(service_state._runtime(state, identity)),
+            "launch_python": str(python.resolve()), "path_environment": env["PATH"],
+            "selection": "unchanged", "service": "not_started"}
+
 
 
 def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote: bool = False) -> None:

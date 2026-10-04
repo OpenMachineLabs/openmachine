@@ -361,7 +361,7 @@ class ConnectionTests(TaskFixture, unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 13)
+        self.assertEqual(proof["state_contract"], 14)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):
@@ -384,6 +384,7 @@ class ConnectionTests(TaskFixture, unittest.TestCase):
         self.device["interval"] = 60
         identity = uuid.uuid4().hex
         self.app.connect_integration(identity, connection_id=item["id"])
+        self.fault("activation_deferred", connections.check_state, self.state, require_idle=True)
         self.app.disconnect_integration(item["id"], disconnected["authorization_revision"])
         end = time.monotonic() + 1
         while identity in self.app.connections._jobs and time.monotonic() < end:

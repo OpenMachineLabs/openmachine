@@ -1,8 +1,7 @@
 # Packaged runtime
 
-Desktop Spec [#7 M1](https://github.com/OpenMachineLabs/openmachine-desktop/issues/7)
-adds an offline preparation path to Core. It does not install/start a service,
-change its selected version, implement persistent startup policy, or update Desktop.
+Core provides an offline runtime preparation path. Preparation does not register
+or start a service, change its selected version, or alter persistent startup policy.
 The existing wheel/requirements lifecycle commands remain supported.
 
 ## One payload, one installer
@@ -32,7 +31,7 @@ verify its app/updater signature before running the bundled Python, and supply t
 manifest digest from that trusted artifact. Developer use requires an explicitly
 trusted build. Never execute a downloaded interpreter merely to establish whether
 its own unauthenticated manifest is trustworthy. Signing/notarization and public
-product distribution belong to M4, not this preparation API.
+product distribution are outside this preparation API.
 
 ## Produce the payload
 
@@ -56,11 +55,11 @@ must match CPython 3.13 / macOS 13 / arm64; source builds and index fallback dur
 local preparation are prohibited. The same `payload.inventory` / `verify` logic
 seals and consumes the result. A failed build/copy is preserved, not overwritten.
 
-The output is a directory for Desktop to bundle plus a printed manifest SHA256;
+The output is a bundleable directory plus a printed manifest SHA256;
 it is not a signed DMG. Preserve upstream notices and dependency licenses. Product
 publication must also satisfy corresponding-source/redistribution obligations for
 all bundled components; a source URL alone is not a declaration of legal clearance.
-Validate the advertised OS floor and native signing with the final product in M4.
+Validate the advertised OS floor and native signing with the final distributed artifact.
 
 ## Prepare without activating
 
@@ -75,7 +74,7 @@ configuration, invoke its bundled CLI (or an already installed compatible CLI):
 
 All three paths are absolute. A new configuration can be created with the existing
 `init --workspace` command; execution and typed writes remain disabled until
-separately authorized. The normal Desktop flow will hide these commands in M3.
+separately authorized.
 
 Preparation uses the existing service operation lock. It verifies the full payload,
 retains a private read-only copy, checks the retained Python/Git versions, then
@@ -93,7 +92,7 @@ The JSON result reports `status: prepared`, the installation/payload identities,
 actual version, runtime path, retained `launch_python`, and `path_environment` with
 portable Git first. `selection: unchanged` and `service: not_started` are explicit:
 this is not service readiness, activation, transport readiness, or ChatGPT acceptance.
-The existing lifecycle owner will consume these retained paths in M2. Do not point
+The lifecycle owner consumes these retained paths through `manage install/update`. Do not point
 a LaunchAgent or original worker at the replaceable source App.
 
 Retained copies and previous environments are not moved, overwritten, or garbage
@@ -113,6 +112,10 @@ exercise installed CLI/MCP file readiness and portable Git, and verify retained
 interpreter/worker paths after removing the donor App path. Use a disposable
 configuration/state/workspace, never an active service or production job.
 
-M1 evidence does not claim clean-machine GUI onboarding, persistent-stop behavior,
-signed distribution, automatic updates, or public plugin availability. Those
-remain the separate modules in the canonical Issue.
+Preparation evidence does not establish GUI onboarding, persistent-stop behavior,
+signed distribution, automatic updates, or plugin availability.
+
+Managed product installation/update now uses [management contract 1](service.md#product-management),
+which records the original operation before independent preparation and invokes
+the verified incoming implementation from retained paths. `prepare-runtime` remains
+a preparation-only primitive; it neither selects a service nor creates update consent.

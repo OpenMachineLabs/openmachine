@@ -17,7 +17,8 @@ from openmachine.foundation.state import private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 13
+STATE_CONTRACT = 14
+MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30
 RECOVERY_MS = 15 * 60 * 1000
@@ -38,6 +39,67 @@ os.execv(python, [python, "-I", "-m", "openmachine.cli", "--config", record["con
                  "--state-dir", str(root.parent), "serve", "--managed"])
 '''
 
+# Keep LAUNCHER byte-exact for existing installations and first-upgrade rollback.
+# This separately bound entry also serves format-2 native startup. It resolves
+# selection in Core, so a companion never parses private selection files.
+MANAGER = '''"""Bound Core management entry; no shell, discovery or service watchdog."""
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import time
+
+state, config, binding = BINDING
+root = Path(state) / "service"
+def read(path):
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 65536):
+        raise ValueError("unsafe management identity")
+    return json.loads(path.read_text())
+try:
+    record = read(root / "service.json")
+    if record["config"] != config or record["management"] != binding:
+        raise ValueError("management binding changed")
+    identity = record["current"]
+    if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        raise ValueError("invalid selection")
+    selected = root / "versions" / identity
+    installed = read(selected / "installation.json")
+    if installed["identity"] != identity or selected.resolve() != selected:
+        raise ValueError("installation identity changed")
+    launching = sys.argv[1:] == ["--launch"]
+    if launching:
+        if record["format"] != 2 or installed.get("state_contract", 0) < 14:
+            raise ValueError("unsupported persistent policy")
+        if record["policy"]["desired"] == "stopped":
+            raise SystemExit(0)
+        args = ["serve", "--managed"]
+    else:
+        if not installed.get("management_contract"):
+            selected = root / "versions" / binding["identity"]
+            anchor = read(selected / "installation.json")
+            if (anchor["identity"] != binding["identity"] or anchor.get("management_contract") != 1
+                    or selected.resolve() != selected):
+                raise ValueError("retained management implementation unavailable")
+        args = ["manage", *sys.argv[1:]]
+    python = str(selected / "bin/python")
+    os.execv(python, [python, "-I", "-m", "openmachine.cli", "--config", config,
+                     "--state-dir", state, *args])
+except (OSError, ValueError, KeyError, TypeError):
+    print(json.dumps({"management_contract": 1, "status": "incompatible",
+                      "reason": "management_identity_unavailable",
+                      "observed_at_ms": time.time_ns() // 1000000}))
+    raise SystemExit(1)
+'''
+
+
+def management_entry(state: Path, record: dict) -> bytes:
+    binding = repr((str(state), record["config"], record["management"]))
+    return MANAGER.replace("BINDING", binding).encode()
+
 
 def _json(path: Path) -> dict:
     try:
@@ -56,8 +118,21 @@ def _json(path: Path) -> dict:
 def _record(state: Path) -> dict:
     record = _json(state / "service/service.json")
     try:
-        if record["format"] != 1 or not Path(record["config"]).is_absolute():
+        if type(record["format"]) is not int or record["format"] not in (1, 2) or not Path(record["config"]).is_absolute():
             raise ValueError("unsupported selection")
+        if record["format"] == 2:
+            policy = record["policy"]
+            if (set(policy) != {"desired", "start_at_login"} or policy["desired"] not in {"running", "stopped"}
+                    or type(policy["start_at_login"]) is not bool or "management" not in record):
+                raise ValueError("invalid persistent policy")
+        elif "policy" in record:
+            raise ValueError("policy requires a reader-visible format boundary")
+        if "management" in record:
+            binding = record["management"]
+            if (set(binding) != {"identity", "launch_python"}
+                    or not re.fullmatch(r"[0-9a-f]{64}", binding["identity"])
+                    or not Path(binding["launch_python"]).is_absolute()):
+                raise ValueError("invalid management binding")
         for key in ("current", "previous"):
             if not (key == "previous" and record[key] is None) and not re.fullmatch(r"[0-9a-f]{64}", record[key]):
                 raise ValueError("invalid installation identity")
@@ -84,7 +159,46 @@ def _record(state: Path) -> dict:
     return record
 
 
+def _policy_state(state: Path) -> dict:
+    record = _record(state) if os.path.lexists(state / "service/service.json") else {}
+    policy = record.get("policy")
+    return {"service_policy_present": policy is not None, "service_policy_format": 2,
+            "service_policy_sha256": hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest() if policy else None}
+
+
+def stopped(record: dict) -> bool:
+    return record.get("policy", {}).get("desired") == "stopped"
+
+
+def _bind_management(state: Path, record: dict, identity: str) -> dict:
+    installed = _installed(state, identity)
+    if installed.get("management_contract") != MANAGEMENT_CONTRACT or not installed.get("payload_sha256"):
+        raise Fault("incoming_runtime_required", "Bind a verified retained payload implementation with management contract 1.")
+    python = state / "service/payloads" / installed["payload_sha256"] / "python/bin/python3"
+    binding = {"identity": identity, "launch_python": str(python.resolve(strict=True))}
+    if "management" in record:
+        # Never repin an existing stable entry on each upgrade.
+        return record
+    bound = record | {"management": binding}
+    path = state / "service/manage.py"
+    content = management_entry(state, bound)
+    if os.path.lexists(path):
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or info.st_nlink != 1 or path.read_bytes() != content):
+            raise Fault("management_identity_conflict", "An existing management entry differs; no file was replaced.")
+    else:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+    return bound
+
+
 def _runtime(state: Path, identity: str) -> Path:
+    if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        raise Fault("installation_unavailable", "Select an exact retained installation identity.")
     path = state / "service/versions" / identity
     if path.is_symlink() or not path.is_dir() or path.resolve() != path:
         raise Fault("installation_unavailable", "The original immutable installation is unavailable; restore it, not its receipts.")
@@ -97,6 +211,11 @@ def _installed(state: Path, identity: str) -> dict:
             or type(result.get("state_contract")) is not int or result["state_contract"] not in range(1, STATE_CONTRACT + 1) or not isinstance(result.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", result["version"])):
         raise Fault("incompatible_runtime", "This installation has no compatible lifecycle/state contract; no downgrade was attempted.")
+    if "payload_sha256" in result and (not isinstance(result["payload_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", result["payload_sha256"])):
+        raise Fault("installation_identity_mismatch", "The retained payload identity is invalid.")
+    if "management_contract" in result and (type(result["management_contract"]) is not int or result["management_contract"] < 0):
+        raise Fault("incompatible_runtime", "The retained management contract is invalid.")
     return result
 
 
@@ -108,6 +227,8 @@ def guard_writes(state: Path) -> None:
     record = _record(state)
     if record["pending"] is not None:
         raise Fault("activation_pending", "A service transition needs readback or rollback; new writes are paused.")
+    if stopped(record):
+        raise Fault("runtime_stopped", "The runtime is deliberately stopped; only explicit Start clears that intent.")
     if Path(sys.prefix).resolve() != _runtime(state, record["current"]):
         raise Fault("service_identity_mismatch", "This is not the selected managed runtime; reconnect before another write.")
 

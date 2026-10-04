@@ -74,6 +74,10 @@ class RuntimeTests(unittest.TestCase):
                                            "integrations.ssh.recovery", "integrations.connections", "integrations.chatgpt"),
             "openmachine.service.install": ("openmachine.config", "openmachine.service.checks",
                                             "openmachine.service.state", "openmachine.service.payload", "openmachine.foundation.*"),
+            "openmachine.service.maintenance": ("openmachine", "openmachine.config", "openmachine.foundation.*",
+                                                "openmachine.service.checks", "openmachine.service.install",
+                                                "openmachine.service.payload", "openmachine.service.runtime",
+                                                "openmachine.service.state", "openmachine.service.transition"),
             "openmachine.service.payload": ("openmachine.foundation.*",),
             "openmachine.service.runtime": ("openmachine.config", "openmachine.service.checks",
                                             "openmachine.service.state", "openmachine.foundation.*"),
@@ -97,7 +101,7 @@ class RuntimeTests(unittest.TestCase):
                                    "openmachine.service", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
-                                "openmachine.bootstrap", "openmachine.server", "openmachine.service",
+                                "openmachine.bootstrap", "openmachine.server", "openmachine.service", "openmachine.service.maintenance",
                                 "integrations.ssh.bundle"),
             "integrations.chatgpt": ("pydantic", "openmachine.foundation.*"),
             "integrations.codex": ("pydantic", "openmachine.execution", "openmachine.foundation.*"),
@@ -173,6 +177,7 @@ class RuntimeTests(unittest.TestCase):
             ("openmachine.service", "from openmachine.execution.worker import worker", "must not depend"),
             ("openmachine.service.state", "from . import transition", "must not depend"),
             ("openmachine.service.runtime", "from . import install", "must not depend"),
+            ("openmachine.service.maintenance", "from openmachine.bootstrap import create_application", "must not depend"),
             ("openmachine.tasks.index", "from . import store", "must not depend"),
             ("integrations.github.connection", "from . import client", "must not depend"),
             ("openmachine.execution.records", "from openmachine.config import Settings", "must not depend"),
@@ -255,6 +260,18 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         content = path.read_bytes()
         self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
         self.assertEqual(path.read_bytes(), content)
+
+    def test_init_grants_are_explicit_and_independent(self):
+        from openmachine.config import initialize
+        for commands, writes in ((False, False), (True, False), (False, True), (True, True)):
+            path = self.root / f"config-{commands}-{writes}.toml"
+            initialize(path, self.work, commands=commands, workspace_writes=writes)
+            machine = load(path).machines["local"]
+            self.assertEqual((machine.execution_enabled, machine.workspace_write_enabled), (commands, writes))
+            before = path.read_bytes()
+            with self.assertRaises(FileExistsError):
+                initialize(path, self.work, commands=not commands, workspace_writes=not writes)
+            self.assertEqual(path.read_bytes(), before)
 
     def test_doctor_does_not_create_state_or_claim_live_health(self):
         path = self.root / "config.toml"

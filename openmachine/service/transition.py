@@ -1,5 +1,6 @@
 """Serialize service operations, activate candidates and restore prior selections."""
 
+from collections.abc import Callable
 import os
 from pathlib import Path
 import plistlib
@@ -16,7 +17,8 @@ from . import runtime
 from .state import LAUNCHER
 
 
-def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None) -> dict:
+def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None, *,
+              before_change: Callable[[], None] | None = None, require_safe: bool = False) -> dict:
     candidate_path = candidate_config or service_state._configuration_for(state, record, target)
     candidate_digest = service_state._snapshot_configuration(state, candidate_path)
     candidate_path = service_state._saved_configuration(state, candidate_digest)
@@ -46,6 +48,8 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         # records under the admission lock, including completed newer-format records.
         if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
             install._verify_candidate(state, candidate_record, target, check_remote=True)
+        if require_safe:
+            checks.activation_safe(state)
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
@@ -68,11 +72,13 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         record = {**record, "current": target, "configurations": configurations,
                   "pending": {"from": previous, "to": pending["to"] if restoring else target,
                               "previous": previous_previous}}
+        if before_change is not None:
+            before_change()
         save_json(state / "service/service.json", record)
         try:
             service_state._select_configuration(state, config_path, candidate_digest, allowed)
             runtime._stop(state)
-            ready = runtime._start(state, record)
+            ready = _start_selected(state, record)
         except (Fault, OSError) as error:
             restored = {**original, "current": previous, "previous": previous_previous,
                         "configurations": configurations,
@@ -82,7 +88,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
                 service_state._select_configuration(state, config_path, prior_digest, allowed)
                 install._verify_candidate(state, restored, previous, check_remote=True)
                 runtime._stop(state)
-                runtime._start(state, restored)
+                _start_selected(state, restored)
             except (Fault, OSError):
                 raise Fault("recovery_required", "Activation and restoration are unverified; exact configuration/selection intent is retained.") from None
             restored = {**original, "current": previous, "previous": previous_previous, "pending": None}
@@ -96,12 +102,31 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         record.update(previous=previous if previous != target else previous_previous, pending=None)
         retained = {record["current"], record["previous"]} - {None}
         record["configurations"] = {key: value for key, value in configurations.items() if key in retained}
+        if require_safe and installed.get("management_contract") == service_state.MANAGEMENT_CONTRACT and installed.get("payload_sha256"):
+            record = service_state._bind_management(state, record, target)
         _commit_ready(state, record)
         return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
 
 
+def _start_selected(state: Path, record: dict) -> dict:
+    """The original job is unloaded; retain admission until readiness is proven."""
+    pending = record["pending"]
+    if (pending is not None and record["current"] == pending["from"]
+            and service_state._installed(state, record["current"])["state_contract"]
+                < service_state._installed(state, pending["to"])["state_contract"]):
+        # Publish the exact restored profile before an older supervisor reads it.
+        # Its remaining handoff must not name an unreadable newer installation.
+        runtime._sync_definition(state, record)
+        record["pending"] = pending | {"to": record["current"]}
+        save_json(state / "service/service.json", record)
+    if service_state.stopped(record):
+        runtime._sync_definition(state, record)
+        return {"status": "stopped", "readiness": "not_probed"}
+    return runtime._start(state, record)
+
+
 def _commit_ready(state: Path, record: dict) -> None:
-    if service_state._installed(state, record["current"])["state_contract"] >= 8:
+    if not service_state.stopped(record) and service_state._installed(state, record["current"])["state_contract"] >= 8:
         # One atomic record commits selection and readiness together. Before
         # this write, a failed first upgrade still has readable state-7 history.
         record = dict(record, recovery={"format": 1, "episode": None})
@@ -110,9 +135,43 @@ def _commit_ready(state: Path, record: dict) -> None:
         raise Fault("service_state_unverified", "The readiness/selection commit is unverified; read the original transition.")
 
 
+def _register(config_path: Path, state: Path, identity: str, workspace: str, path: str,
+              prepared: dict | None = None, before_change: Callable[[], None] | None = None) -> dict:
+    """Caller owns operation.lock; preserve the existing native registration owner."""
+    root = state / "service"
+    record = {"format": 1, "config": str(config_path), "probe": {"workspace": workspace, "path": path},
+              "current": identity, "previous": None, "pending": None,
+              "launch_python": str(Path(sys._base_executable).resolve()),
+              "path_environment": os.environ.get("PATH", os.defpath)}
+    if prepared is not None:
+        record.update(launch_python=prepared["launch_python"], path_environment=prepared["path_environment"])
+    install._verify_candidate(state, record, identity)
+    with lease(state / "locks/lifecycle.lock"):
+        if runtime.socket_alive(state / "mcp.sock"):
+            raise Fault("service_already_running", "An unmanaged service is using this state; explicitly stop it before installation.")
+        if prepared is not None:
+            checks.activation_safe(state)
+            if before_change is not None:
+                before_change()
+            record = service_state._bind_management(state, record, identity)
+            record.update(format=2, policy={"desired": "stopped", "start_at_login": False})
+        runtime._plist_path(state).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        for destination, content in ((root / "launch.py", LAUNCHER.encode()), (root / "service.log", b""),
+                                     (runtime._plist_path(state), plistlib.dumps(runtime._definition(state, record)))):
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+        save_json(root / "service.json", record)
+    return {"status": "installed", "version": service_state._installed(state, identity)["version"], "current": identity,
+            "service": "stopped", "next_action": "service start", "tunnel": "not_managed"}
+
+
 def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None = None,
             requirements: Path | None = None, workspace: str = "", path: str = "",
-            candidate_config: Path | None = None, reset_recovery: bool = False) -> dict:
+            candidate_config: Path | None = None, reset_recovery: bool = False,
+            require_safe: bool = False) -> dict:
     if sys.platform != "darwin" or os.getuid() == 0:
         raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serve and SSH workers remain separate.")
     if not config_path.is_absolute() or not state.is_absolute():
@@ -135,25 +194,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 raise Fault("invalid_service_request", "Install requires a local wheel, pinned requirements and explicit probe workspace/path.")
             load(config_path)
             identity = install._prepare(state, wheel, requirements, config_path)
-            record = {"format": 1, "config": str(config_path), "probe": {"workspace": workspace, "path": path},
-                      "current": identity, "previous": None, "pending": None,
-                      "launch_python": str(Path(sys._base_executable).resolve()),
-                      "path_environment": os.environ.get("PATH", os.defpath)}
-            install._verify_candidate(state, record, identity)
-            with lease(state / "locks/lifecycle.lock"):
-                if runtime.socket_alive(state / "mcp.sock"):
-                    raise Fault("service_already_running", "An unmanaged service is using this state; explicitly stop it before installation.")
-                runtime._plist_path(state).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-                for destination, content in ((root / "launch.py", LAUNCHER.encode()), (root / "service.log", b""),
-                                             (runtime._plist_path(state), plistlib.dumps(runtime._definition(state, record)))):
-                    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-                    with os.fdopen(fd, "wb") as output:
-                        output.write(content)
-                        output.flush()
-                        os.fsync(output.fileno())
-                save_json(root / "service.json", record)
-            return {"status": "installed", "version": service_state._installed(state, identity)["version"], "current": identity,
-                    "service": "stopped", "next_action": "service start", "tunnel": "not_managed"}
+            return _register(config_path, state, identity, workspace, path)
         record = service_state._record(state)
         if str(config_path) != record["config"]:
             raise Fault("service_configuration_mismatch", "Use the registered configuration with this state directory.")
@@ -164,7 +205,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             target = record["pending"]["from"] if record["pending"] is not None else record["previous"]
             if target is None:
                 raise Fault("rollback_unavailable", "No verified prior managed installation is retained.")
-            return _activate(state, record, target)
+            return _activate(state, record, target, require_safe=require_safe)
         if record["pending"] is not None:
             raise Fault("activation_pending", "An interrupted transition needs status readback and explicit rollback, not another update.")
         if action == "update":
@@ -176,10 +217,14 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 if selected_config.read_bytes() != config_path.read_bytes():
                     raise Fault("same_installation", "Configuration changes require an explicit distinct candidate installation.")
                 return runtime.status(config_path, state)
-            return _activate(state, record, target, selected_config)
+            return _activate(state, record, target, selected_config, require_safe=require_safe)
         with lease(state / "locks/lifecycle.lock"):
+            record = service_state._record(state)
             if action in ("start", "restart"):
                 checks._candidate_state(service_state._runtime(state, record["current"]) / "bin/python", config_path, state)
+            if action == "start" and service_state.stopped(record):
+                record = dict(record, policy=record["policy"] | {"desired": "running"})
+                save_json(root / "service.json", record)
             if action in ("stop", "restart"):
                 runtime._stop(state)
             if reset_recovery:
