@@ -137,17 +137,16 @@ def retain(state: Path, source: Path, expected_sha256: str) -> tuple[Path, dict]
     destination = parent / expected_sha256
     if destination.is_symlink():
         raise Fault("invalid_runtime_payload", "The retained payload path is not an owned directory.")
-    if destination.exists():
-        verify(destination, expected_sha256)
-        return destination, manifest
-    if destination.is_relative_to(source):
-        raise Fault("invalid_runtime_payload", "The retained destination must be outside the source payload.")
-    # Reserve space for both the retained payload and its isolated environment.
-    required = sum(item.get("bytes", 0) for item in manifest["files"].values()) * 2
-    if shutil.disk_usage(parent).free < required:
-        raise Fault("insufficient_disk_space", "There is insufficient space to retain this runtime; no installation was selected.")
-    shutil.copytree(source, destination, symlinks=True)
+    if not destination.exists():
+        if destination.is_relative_to(source):
+            raise Fault("invalid_runtime_payload", "The retained destination must be outside the source payload.")
+        # Reserve space for both the retained payload and its isolated environment.
+        required = sum(item.get("bytes", 0) for item in manifest["files"].values()) * 2
+        if shutil.disk_usage(parent).free < required:
+            raise Fault("insufficient_disk_space", "There is insufficient space to retain this runtime; no installation was selected.")
+        shutil.copytree(source, destination, symlinks=True)
     verify(destination, expected_sha256)
+    # Also finish an interrupted permission pass on a verified existing copy.
     # Prevent ordinary imports from adding caches to the immutable payload. This
     # is a lifetime invariant, not protection against the owning native account.
     for directory, directories, files in os.walk(destination, topdown=False, followlinks=False):

@@ -144,6 +144,23 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(payload.verify(retained, self.digest), manifest)
         self.assertEqual(os.readlink(retained / "python/bin/python3"), "python3.13")
 
+    def test_reuse_completes_interrupted_read_only_permissions(self):
+        with patch.object(Path, "chmod", side_effect=OSError("fixture hardening interruption")), self.assertRaises(OSError):
+            payload.retain(self.state, self.source, self.digest)
+        retained = self.state / "service/payloads" / self.digest
+        self.assertEqual(payload.verify(retained, self.digest), self.manifest)
+        inode = (retained / "python/bin/python3.13").stat().st_ino
+        self.assertTrue(retained.stat().st_mode & 0o200)
+        with patch.object(payload.shutil, "copytree") as copy:
+            again, _ = payload.retain(self.state, self.source, self.digest)
+            copy.assert_not_called()
+        self.assertEqual(again, retained)
+        self.assertEqual((retained / "python/bin/python3.13").stat().st_ino, inode)
+        for path in [retained, *retained.rglob("*")]:
+            if not path.is_symlink():
+                self.assertEqual(path.stat().st_mode & 0o222, 0, path)
+        self.assertEqual(payload.verify(retained, self.digest), self.manifest)
+
     def test_interrupted_copy_and_disk_exhaustion_never_replace_prior_content(self):
         parent = private_directory(self.state / "service/payloads")
         with patch.object(payload.shutil, "disk_usage", return_value=Mock(free=0)):
