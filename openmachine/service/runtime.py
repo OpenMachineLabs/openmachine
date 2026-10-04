@@ -112,11 +112,12 @@ def _startup(state: Path) -> dict:
     result = checks._run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"])
     if result.returncode:
         raise Fault("startup_unknown", "The effective user-service startup registration could not be observed.")
-    match = re.search(r'"' + re.escape(_label(state)) + r'"\s*=>\s*(true|false)', result.stdout)
-    # An omitted override uses this verified RunAtLoad LaunchAgent's default.
-    if "disabled services = {" not in result.stdout:
+    match = re.search(r'^\s*"' + re.escape(_label(state)) + r'"[ \t]*=>[ \t]*(.*)$', result.stdout, re.MULTILINE)
+    # Native versions use booleans or words; an unknown override is not enabled.
+    value = match[1].strip() if match else None
+    if "disabled services = {" not in result.stdout or value not in {None, "true", "false", "enabled", "disabled"}:
         raise Fault("startup_unknown", "The native startup registration reply was not recognized.")
-    return {"enabled": match is None or match[1] == "false", "source": "launchctl",
+    return {"enabled": value in {None, "false", "enabled"}, "source": "launchctl",
             "observed_at_ms": time.time_ns() // 1000000}
 
 

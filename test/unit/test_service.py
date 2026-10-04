@@ -1406,6 +1406,19 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(service_state._record(self.state)["policy"]["start_at_login"])
 
 
+    def test_native_startup_spellings_are_observed_without_guessing(self):
+        label = service_runtime._label(self.state)
+        for spelling, enabled in (("true", False), ("false", True), ("disabled", False), ("enabled", True)):
+            output = 'disabled services = {\n    "' + label + '" => ' + spelling + '\n}\n'
+            with self.subTest(spelling=spelling), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, output, "")):
+                self.assertEqual(service_runtime._startup(self.state)["enabled"], enabled)
+        for spelling in ("unknown", "true extra", "", "enabled unexpected"):
+            output = 'disabled services = {\n    "' + label + '" => ' + spelling + '\n}\n'
+            with self.subTest(spelling=spelling), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, output, "")):
+                self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
+
     def test_old_reader_restoration_keeps_only_the_remaining_native_handoff(self):
         for identity, contract in ((self.a, 13), (self.b, 14)):
             path = self.state / "service/versions" / identity / "installation.json"
