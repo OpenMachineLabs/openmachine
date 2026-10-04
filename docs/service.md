@@ -50,6 +50,12 @@ A rejected candidate does not stop the healthy service. Activation takes lifecyc
 admission, rechecks, persists pending intent, switches and verifies the managed
 instance. Failure either verifies restoration or retains `recovery_required`.
 
+When upgrading the state contract, invoke the reviewed incoming installed
+environment's CLI, not an old CLI that cannot validate that future contract.
+Failed preparations remain immutable diagnostic evidence. Use a corrected reviewed
+artifact for a subsequent attempt; do not invent `installation.json`, delete the
+failed runtime, or weaken reader checks to reuse an incomplete preparation.
+
 An identical update is a no-op, not a restart. Update/rollback activate the selected
 service even when it was stopped. Brief MCP disconnection is possible; read the
 same task/execution/control identities afterward, never repeat input or work merely
@@ -69,6 +75,12 @@ recovery, retired Events archive and connection record, even terminal-only histo
 integrations. Native connection format 2 needs the contract-11 reader; old-only
 format-1 connection state retains its exact hash for supported prior readers.
 Metadata checks do not read or print credential values and do not prove live OAuth.
+Chat recovery format 2 requires the contract-13 reader for retained activity,
+attempt budgets and original delivery identities. Old-only recovery format 1 keeps
+its original reader fingerprint without rewriting history. A prior reader that
+ignores recovery deduplication cannot replace a healthy service, even if recovery
+is disabled. The TaskObserver owns automatic same-Chat checks and applies a fresh
+ten-minute observation grace after restart without renewing delivery budgets.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.

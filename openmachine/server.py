@@ -166,6 +166,11 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if (isinstance(response, dict) and response.get("isError") is True
                 and response.get("structuredContent") is None):
             return invalid
+        if (isinstance(response, dict) and not response.get("isError")
+                and isinstance(response.get("structuredContent"), dict)
+                and application.chat_recovery is not None):
+            await asyncio.to_thread(application.chat_recovery.external_activity,
+                                    params["name"], arguments or {}, response["structuredContent"])
         return response
 
     mcp = MCPServer(

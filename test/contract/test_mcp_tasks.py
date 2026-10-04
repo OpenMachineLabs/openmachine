@@ -13,6 +13,35 @@ from support_mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_recovery_activity_is_attributable_and_does_not_change_task_revisions(self):
+        for mode in ("legacy", "2026-07-28"):
+            identity = "chat-activity-" + mode
+            async with Client(self.client(), mode=mode, cache=None) as client:
+                async def call(name, arguments):
+                    result = await client.call_tool(name, arguments)
+                    self.assertFalse(result.is_error, result.structured_content)
+                    return result.structured_content
+                context = (await call("read_workspace_file", {"machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"}))["context"]
+                request = self.task_request(context, identity)
+                await call("create_task", request)
+                await call("configure_chat_recovery", {"task_id": identity, "update_id": uuid.uuid4().hex,
+                    "expected_revision": 0, "change": {"action": "enable", "machine": "desktop", "workspace": "example",
+                    "chat_url": "https://chatgpt.com/c/" + str(uuid.uuid4()), "authorization_ref": "fixture:consent",
+                    "expires_at_ms": request["contract"]["expires_at_ms"]}})
+                path = self.state / "chat_recovery.json"
+                before = path.read_bytes()
+                task_before = (self.state / "tasks" / identity / "task.json").read_bytes()
+                caps = await call("get_capabilities", {})
+                self.assertTrue(caps["chat_recovery"]["automatic_detection"])
+                invalid = await client.call_tool("read_task", {"task_id": None})
+                self.assertTrue(invalid.is_error)
+                self.assertEqual(path.read_bytes(), before)
+                await asyncio.sleep(0.002)
+                await call("read_task", {"task_id": identity})
+                current = json.loads(path.read_bytes())["bindings"][identity]
+                self.assertGreater(current["activity_at_ms"], json.loads(before)["bindings"][identity]["activity_at_ms"])
+                self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), task_before)
+
     async def test_observer_publishes_original_results_with_all_clients_absent(self):
         for mode in ("legacy", "2026-07-28"):
             for boundary in ("live", "restart-running", "restart-completed", "crash-running", "crash-completed", "activation"):
@@ -315,7 +344,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 12)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 13)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

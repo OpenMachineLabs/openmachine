@@ -106,10 +106,15 @@ class TaskObserver:
             private_directory(self.app.state)
             locks = private_directory(self.app.state / "locks")
             with lease(locks / "task-observer.lock"):
+                recovery = self.app.chat_recovery
                 try:
+                    if recovery is not None:
+                        recovery.start()
                     while not self._stop.is_set() or self._reads:
                         self._harvest()
                         if self._stop.is_set():
+                            if recovery is not None:
+                                recovery.stop()
                             for read in self._reads.values():
                                 read.stop.set()
                             self._status("stopping")
@@ -126,8 +131,10 @@ class TaskObserver:
                     failure = observation.error_code(error)
                 finally:
                     self._stop.set()
+                    if recovery is not None:
+                        recovery.stop()
                     while any(read.thread is not None and read.thread.is_alive()
-                              for read in self._reads.values()):
+                              for read in self._reads.values()) or recovery is not None and recovery.busy:
                         for read in self._reads.values():
                             read.stop.set()
                         self._status("blocked" if failure else "stopping", failure)
@@ -167,6 +174,8 @@ class TaskObserver:
         self._discover_at = now + (50 if page["has_more"] and len(self._active) < observation.MAX_ACTIVE else observation.INTERVAL_MS)
 
     def _tick(self) -> None:
+        if self.app.chat_recovery is not None:
+            self.app.chat_recovery.tick()
         now = observation.now_ms()
         dirty = self._dirty.is_set()
         if dirty:
