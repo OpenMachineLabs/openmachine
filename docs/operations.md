@@ -363,43 +363,21 @@ management and a general plugin SDK are not included in this increment.
 
 ### Attribution
 
-`[github].attribution` is the only watermark setting. It is a strict boolean,
-defaults to `true` for both public and private repositories, and is exposed as
-`get_capabilities.github.attribution`. Set it to `false` to stop automatic
-attribution on new bodies; no per-format or per-client switch is needed.
+`[github].attribution` is the only watermark setting: a strict boolean, default
+`true` for public and private repositories. `false` stops automatic footers on
+new bodies. Read its effective value at `get_capabilities.github.attribution`.
 
-The only generated footer for new Issue and Pull Request bodies is:
+Issue/PR bodies use `Created via`; top-level comments and review summaries use
+`Posted via`. The [packaged Skill](../skills/openmachine/SKILL.md#github-attribution)
+owns the exact text and caller rules; the writers share the two constants in
+`integrations/github/operations.py`.
 
-```markdown
----
+Updates preserve existing footers even when disabled, without branding legacy
+content. The switch neither removes nor rewrites caller-supplied text.
 
-Created via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
-```
-
-The only generated footer for new top-level Issue/PR comments and review
-summaries is:
-
-```markdown
----
-
-Posted via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
-```
-
-The writers share one policy and the two constants in
-`integrations/github/operations.py`. Callers supply the substantive body, not
-alternative signatures, tool/model explanations, versions, badges or slogans.
-The same exact footer is not appended twice. Inline review comments are outside
-this writer; hidden task receipt markers are separate from visible attribution.
-
-Updates preserve an existing Created/Posted footer, even when automatic
-attribution is disabled. They do not add a footer to legacy content or rewrite
-historical publications. The switch controls future automatic addition, not
-content deletion or replacement of caller-supplied text.
-
-Apply configuration changes through the existing [service configuration
-lifecycle](service.md); this setting is not hot-reloaded. A future Desktop switch
-should write this same boolean and use that lifecycle, not introduce another
-watermark policy. No GUI or new settings API is implemented here.
+Apply changes through the [service configuration lifecycle](service.md), not hot
+reload. A future Desktop switch must reuse this boolean and lifecycle; no GUI or
+separate settings API is provided here.
 
 ## SSH
 
