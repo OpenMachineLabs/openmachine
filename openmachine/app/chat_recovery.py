@@ -239,6 +239,11 @@ class ChatRecovery:
         binding = chatgpt.get(self.app.state, record["task_id"])
         if self._disabled(record, binding):
             return
+        self._require_prepared(record, binding)
+        self._controller(binding)
+
+    def _require_prepared(self, record: dict, binding) -> None:
+        # Reuse one snapshot within a check; dispatch obtains a fresh binding.
         self._registered(record, binding)
         if binding.preparation.status != "ready":
             raise Fault("chat_recovery_not_ready", "Receiver preparation must complete before a new business effect.",
@@ -246,7 +251,6 @@ class ChatRecovery:
         if binding.delivery is not None and binding.delivery.status == "blocked":
             raise Fault("chat_recovery_route_blocked", "The prepared route has a known browser blocker.",
                         {"reason": binding.delivery.reason})
-        self._controller(binding)
 
     def _preparation_binding(self, record: dict, preparation_id: str):
         if not isinstance(preparation_id, str) or re.fullmatch(r"[0-9a-f]{32}", preparation_id) is None:
@@ -680,7 +684,8 @@ class ChatRecovery:
                 or (binding.expires_at_ms or 0) <= now):
             raise Fault("chat_recovery_binding_unavailable",
                         "The default recovery policy is active but this task has no current valid Chat binding.")
-        self.require_ready(record)
+        if record["contract"].get("recovery_policy") is not None:
+            self._require_prepared(record, binding)
         self._controller(binding)
         self.app._validate_task_scope({"contract": record["contract"]}, check_head=False)
         return binding, binding.authority_sha256

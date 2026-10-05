@@ -291,19 +291,24 @@ def preparation_goal(binding: Binding, route: dict) -> str:
     )
 
 
+def _verified_browser(result: dict) -> bool:
+    """Shared native evidence; each purpose still owns its destination and outcome."""
+    report, native = result.get("report") or {}, result.get("native") or {}
+    snapshot = native.get("snapshot") or {}
+    return (result.get("execution_status") == "succeeded" and result.get("exit_code") == 0
+        and not result.get("failure") and native.get("calls", 0) > 0
+        and report.get("final_url") == snapshot.get("url") and bool(report.get("tab_id"))
+        and report["tab_id"] == snapshot.get("tab_id")
+        and type(snapshot.get("call_index")) is int and 1 <= snapshot["call_index"] <= native["calls"]
+        and ORIGIN in native.get("origins", []) and not report.get("pending_action"))
+
+
 def preparation_outcome(result: dict, binding: Binding, route: dict) -> tuple[str, str, str | None]:
     report, native = result.get("report") or {}, result.get("native") or {}
     if result.get("failure") == "codex_setup_unverified" and native.get("calls") == 0:
         return "blocked", "browser_setup", None
-    snapshot = native.get("snapshot") or {}
     url = report.get("final_url")
-    verified = (result.get("execution_status") == "succeeded" and result.get("exit_code") == 0
-        and not result.get("failure") and native.get("calls", 0) > 0
-        and url == snapshot.get("url") and bool(report.get("tab_id"))
-        and report["tab_id"] == snapshot.get("tab_id")
-        and type(snapshot.get("call_index")) is int and 1 <= snapshot["call_index"] <= native["calls"]
-        and ORIGIN in native.get("origins", []) and not report.get("pending_action"))
-    if not verified:
+    if not _verified_browser(result):
         return "outcome_unknown", "preparation_unverified", None
     try:
         destination, _ = conversation(url)
@@ -332,14 +337,7 @@ def delivery_outcome(result: dict, binding: Binding) -> tuple[str, str]:
     report, native = result.get("report") or {}, result.get("native") or {}
     if result.get("failure") == "codex_setup_unverified" and native.get("calls") == 0:
         return "blocked", "browser_setup"
-    snapshot = native.get("snapshot") or {}
-    verified = (result.get("execution_status") == "succeeded" and result.get("exit_code") == 0
-        and not result.get("failure") and native.get("calls", 0) > 0
-        and report.get("final_url") == snapshot.get("url") == binding.chat_url
-        and type(snapshot.get("call_index")) is int and 1 <= snapshot["call_index"] <= native["calls"]
-        and ORIGIN in native.get("origins", [])
-        and bool(report.get("tab_id")) and report["tab_id"] == snapshot.get("tab_id")
-        and not report.get("pending_action"))
+    verified = _verified_browser(result) and report.get("final_url") == binding.chat_url
     marker = "[OM auto-resume: " + binding.delivery.recovery_id + "]"
     evidence = report.get("evidence", [])
     complete = any(recovery_message(binding.task_id, binding.delivery.recovery_id,

@@ -2,32 +2,23 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.8
+## v0.2.9
 
-Open Machine v0.2.8 adds bounded same-Chat recovery for eligible structured tasks
-through the existing TaskObserver and Chrome delivery path. Recovery remains
-default-on only after an exact ordinary-Chat binding is established, preserves
-original task/execution receipts, and uses finite retry and no-replay guards. This
-release also standardizes GitHub attribution on the two canonical `Created via`
-and `Posted via` footers behind the existing default-on
-`[github].attribution` boolean.
+This release adds task-owned recovery Chats without an originating-Chat URL,
+verified offline Python/Core/Git preparation, and a stable management CLI with
+persistent Stop and login-startup policy. It also shares recovery evidence checks,
+avoids duplicate reads within a validation step, and trims stale guidance without
+changing module ownership, execution boundaries or historical readers.
 
-Sources/results are bounded to 2 MiB per file; full-content/edit/patch payloads
-remain 128 KiB. Single-file receipts retain format 1, patches use format 2, and
-current readers accept both. State contract 14 and SSH protocol 6 are compatibility
-contracts, not release versions. Execution retains format 5 and opt-in PTY control.
-Inspect installed capabilities; a checkout or version label alone is not evidence
-that the client exposes the current tools.
+Recovery remains bounded by readiness, original receipts, finite retries and
+pre-dispatch revalidation. Offline hosts, missing login, human decisions and
+uncertain or exhausted delivery remain stop conditions. State contract 15, SSH
+protocol 6 and execution format 5 are compatibility contracts, not release versions.
+See [task operations](docs/tasks.md) and [tool contracts](docs/operations.md).
 
-Version `0.2.8` is an initial-development release, not a stable 1.x API promise.
-Spec #32 remains the MCP SDK 2.2.0 migration baseline. Spec #68 adds bounded
-same-Chat recovery without another task system: the observer can wake a bound
-ordinary Chat after verified inactivity so it can reconcile original receipts and
-continue remaining authorized work. Offline hosts, missing login, human decisions
-and exhausted or uncertain delivery remain real stop conditions. GitHub Issue/PR
-bodies use the canonical `Created via` footer; top-level comments and review
-summaries use `Posted via`. Automatic attribution defaults on and can be disabled
-with `[github].attribution = false`; edits preserve existing provenance.
+Version `0.2.9` is an initial-development release, not a stable 1.x API promise.
+Build from its exact tag; later `main` commits may be unreleased. Inspect installed
+capabilities separately: a source checkout or release does not update an installation.
 
 Managed services support logged-in macOS controllers. Linux supports manual
 `serve` and configured SSH workers; managed Linux services and Windows are not
@@ -40,12 +31,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.8 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.9 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.8-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.9-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -55,11 +46,9 @@ no PyPI, Homebrew or npm publication is implied.
 
 The wheel includes the core, direct adapters and bundled Skill, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a
-source-checkout import. Current source pins MCP SDK 2.2.0, HTTPX2 2.13.1,
-JSON Schema 4.26.0, Pydantic 2.13.5, Uvicorn 0.38.0 and Hatchling 1.27.0 for
-building. See [requirements.lock](requirements.lock) for the complete locked set.
-v0.2.8 remains on MCP SDK 2.2.0. v0.2.3 introduced this SDK baseline; the
-v0.2.2 tag remains on SDK 1.30.0 and retains its own matching lock.
+source-checkout import. MCP SDK remains at 2.2.0; dependency pins are unchanged.
+Use [requirements.lock](requirements.lock) as the complete build/runtime dependency
+source rather than mixing packages from different release tags.
 
 ## Configure and run
 
@@ -102,15 +91,14 @@ never silently chmodded. Keep socket paths within the host's Unix-socket limit.
 
 ## Manage the macOS service
 
-[Service operations](docs/service.md) covers immutable installation, start/stop,
-status, exact candidate updates, compatible rollback and recovery. A service stop
-unloads the current job; it is not permanent login disable or workload cancellation.
+[Product management](docs/service.md#product-management) is the primary interface
+for supported installations: explicit start/stop, login policy, immutable updates,
+compatible rollback and original-operation readback. `manage stop` persists Stop;
+legacy `service stop` only unloads the current job. Neither cancels user workloads.
 
-Current source also supports [offline runtime preparation](docs/runtime-payload.md)
-through a verified Python/Core/Git payload that creates a retained environment
-without selecting or starting a service. [Product management](docs/service.md#product-management)
-adds explicit lifecycle controls and original install/update operation readback.
-Source support is not a published release artifact.
+[Offline runtime preparation](docs/runtime-payload.md) retains a verified
+Python/Core/Git environment without starting it. This release provides the source
+support, not a signed product installer or automatic-update feed.
 
 ## Connect the official tunnel
 
@@ -148,14 +136,15 @@ partial/unknown results preserve the original ID and known applied prefix.
 
 ## GitHub collaboration
 
-Current source implements Spec #62's native GitHub account owner: headless Device
-Flow, pinned Keychain/private-file credentials, serialized renewal, cancellation,
-disconnect and stable task bindings. [Connection operations](docs/operations.md#account-connections)
-use the existing private MCP and Runtime; no GUI or new server is required.
-New gh onboarding is removed; only original historical task recovery retains the
-external gh adapter. Routine renewal is automatic, not an unrevokable-login promise.
-This source increment is not a release or proof that an installation was updated
-or that its operator completed the GitHub App prerequisites and consent.
+[Connection operations](docs/operations.md#account-connections) cover native GitHub
+Device Flow, pinned credentials, renewal, cancellation, disconnect and stable task
+bindings. New work uses the official GitHub App; `gh` remains historical-task
+compatibility only. Installation/resource approval and user consent are still required.
+Automatic renewal is not a promise of permanent authorization.
+
+GitHub attribution uses `Created via` for Issue/PR bodies and `Posted via` for
+comments/reviews. `[github].attribution = false` disables new automatic footers;
+edits preserve existing provenance.
 
 [GitHub operations](docs/operations.md#github) use exact scopes and the existing
 account, current-head review gates and destination readback. A self-review is not

@@ -2,14 +2,20 @@
 
 [Overview](../README.md) | [Operations](operations.md) | [Tasks](tasks.md)
 
-## Install and control
+Use [product management](#product-management) for management-capable installations.
+It owns persistent Stop, login preference and original install/update operations.
+The wheel-based commands below remain a compatibility entry point: `service stop`
+only unloads the job, whereas `manage stop` preserves Stop until explicit Start.
+Neither command cancels admitted user work.
+
+## Legacy wheel-based installation and control
 
 Use the existing logged-in macOS user, a trusted built wheel and its exact lock.
 Choose a stable harmless file in a configured local workspace for readiness.
 Do not run manual `serve` on the same state as a managed service.
 
 ```sh
-.venv/bin/openmachine service install --wheel "$PWD/dist/openmachine-0.2.8-py3-none-any.whl" --requirements "$PWD/requirements.lock" --probe-workspace project --probe-path AGENTS.md
+.venv/bin/openmachine service install --wheel "$PWD/dist/openmachine-0.2.9-py3-none-any.whl" --requirements "$PWD/requirements.lock" --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
 .venv/bin/openmachine service status
 .venv/bin/openmachine doctor --service
@@ -72,18 +78,18 @@ on failure, including valid edits since the previous update. An independent raci
 edit is preserved with uncertainty, not overwritten. Cooperative locks do not
 fence external editors or another runtime/state root.
 
-Protocol 1/state contract 11 are not proof of compatibility. Actual readers must
+Protocol or state-contract numbers alone do not prove compatibility. Actual readers must
 cover every retained execution, task, workspace format, SSH budget, managed
 recovery, retired Events archive and connection record, even terminal-only history or disabled
 integrations. Native connection format 2 needs the contract-11 reader; old-only
 format-1 connection state retains its exact hash for supported prior readers.
 Metadata checks do not read or print credential values and do not prove live OAuth.
-Chat recovery format 2 requires the contract-13 reader for retained activity,
-attempt budgets and original delivery identities. Old-only recovery format 1 keeps
-its original reader fingerprint without rewriting history. A prior reader that
-ignores recovery deduplication cannot replace a healthy service, even if recovery
-is disabled. The TaskObserver owns automatic same-Chat checks and applies a fresh
-ten-minute observation grace after restart without renewing delivery budgets.
+Task-owned preparation requires task/Chat recovery format 3 and state-contract-15
+readers. Recovery format 2 needs contract 13; old-only format 1 retains its original
+reader fingerprint. A reader that ignores recovery cannot replace a healthy service,
+even when recovery is disabled. The TaskObserver applies a fresh ten-minute
+continuation grace after restart without renewing preparation or delivery budgets.
+See [task continuity](tasks.md#chat-continuation) for the single recovery route.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
@@ -138,11 +144,6 @@ disk loss or account tampering. A new runtime cannot reconstruct a dead PTY.
 Source merge, installed tests, native transitions and actual ChatGPT/Tunnel
 acceptance remain separate evidence; use disposable fixtures, not production
 workloads, for authorized transition tests.
-
-Connection state is checked by its own actual reader, including retained local
-disconnects and account-bound task records. A candidate that ignores that state
-cannot replace the active runtime. Old-only history retains its applicable reader
-requirements; no automatic credential or task migration is performed.
 
 ## Product management
 
