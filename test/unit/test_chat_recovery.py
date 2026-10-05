@@ -286,6 +286,62 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         self.assertEqual(result["chat_recovery"]["preparation"]["reason"], "browser_cleanup_unverified")
         self.fault("chat_recovery_not_ready", self.app.chat_recovery.require_ready, self.view()["record"])
 
+    def test_native_evidence_guards_apply_to_both_recovery_purposes(self):
+        self.create()
+        self.enable()
+        with patch.object(codex, "start", return_value={"status": "accepted"}):
+            self.app._start_chat_recovery_delivery("structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+        binding = chatgpt.get(self.state, "structured-one")
+        cases = [
+            (("execution_status",), "failed"), (("exit_code",), 1),
+            (("failure",), "fixture_failure"),
+            (("report", "pending_action"), "Confirm access"),
+            (("report", "tab_id"), "another-tab"),
+            (("report", "final_url"), "https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+            (("native", "calls"), 0), (("native", "origins"), []),
+            (("native", "snapshot"), None),
+            (("native", "snapshot", "call_index"), False),
+            (("native", "snapshot", "call_index"), 2),
+            (("native", "snapshot", "tab_id"), "another-tab"),
+        ]
+        for outcome, arguments, sample, accepted in (
+                (chatgpt.preparation_outcome, (binding, self.config.chat_recovery.model_dump()),
+                 self.preparation_result(), "ready"),
+                (chatgpt.delivery_outcome, (binding,), self.delivery_result(), "sent_reported")):
+            self.assertEqual(outcome(sample, *arguments)[0], accepted)
+            for path, value in cases:
+                with self.subTest(purpose=accepted, field=path, value=value):
+                    changed = json.loads(json.dumps(sample))
+                    owner = changed
+                    for key in path[:-1]:
+                        owner = owner[key]
+                    owner[path[-1]] = value
+                    self.assertEqual(outcome(changed, *arguments)[0], "outcome_unknown")
+
+    def test_delivery_rechecks_controller_after_single_snapshot_validation(self):
+        self.create()
+        self.enable()
+        recovery = self.app.chat_recovery
+        record = self.view()["record"]
+        with patch.object(chatgpt, "get", wraps=chatgpt.get) as read, \
+                patch.object(recovery, "_controller", wraps=recovery._controller) as controller:
+            recovery._binding(record)
+            read.assert_called_once_with(self.state, "structured-one")
+            controller.assert_called_once()
+
+        reserve = chatgpt.reserve_delivery
+        def reserve_then_revoke(*args, **kwargs):
+            result = reserve(*args, **kwargs)
+            self.config.machines["desktop"].execution_enabled = False
+            return result
+        with patch.object(chatgpt, "reserve_delivery", side_effect=reserve_then_revoke), \
+                patch.object(codex, "start") as launch:
+            self.fault("execution_disabled", self.app._start_chat_recovery_delivery,
+                       "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+            launch.assert_not_called()
+        delivery = chatgpt.get(self.state, "structured-one").delivery
+        self.assertEqual((delivery.status, delivery.attempts, delivery.executions), ("deferred", 0, []))
+
     def test_late_setup_result_retains_destination_without_undoing_pause(self):
         arguments = self.receiver_fixture()
         self.app.chat_recovery.external_activity("read_task", arguments, self.app.read_task(**arguments))
