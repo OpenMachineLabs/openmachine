@@ -479,16 +479,17 @@ class ServiceTests(unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (14, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (15, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15)
         self.assertEqual(actual, proof)
-        for change in ({"structured_task_records": 0}, {"task_records": True},
+        for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
+                       {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0}, {"task_records": True},
                        {"task_store_present": 1}, {"structured_task_read_formats": [True]},
                        {"structured_task_read_formats": [1, 1]}, {"task_index_coverage": "incomplete"},
                        {"task_index_generation": proof["task_index_generation"] - 1}):
             with self.subTest(change=change), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | change), "")):
-                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14))
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
         self.assertEqual(path.read_bytes(), raw)
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
@@ -516,8 +517,8 @@ class ServiceTests(unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (14, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (15, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -530,16 +531,16 @@ class ServiceTests(unittest.TestCase):
 
     def test_retained_chat_recovery_requires_actual_reader_before_service_stop(self):
         from integrations import chatgpt
-        chatgpt.configure(self.state, task_id="structured-one", update_id="a" * 32,
-            expected_revision=0, action="enable", request_sha256="b" * 64,
-            chat_url="https://chatgpt.com/c/11111111-2222-3333-4444-555555555555",
+        chatgpt.register_preparation(self.state, task_id="structured-one", preparation_id="a" * 32,
+            acknowledged=False, controller_sha256="b" * 64,
             machine="local", workspace="project", workspace_identity="c" * 64,
-            authority_ref="fixture:authority", authority_sha256="d" * 64, expires_at_ms=4600000)
+            authority_ref="fixture:authority", authority_sha256="d" * 64,
+            expires_at_ms=chatgpt.now_ms() + 3600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (14, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 14), proof)
-        for delta in ({"state_contract": 12}, {"chat_recovery_present": False},
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (15, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), proof)
+        for delta in ({"state_contract": 14}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
                       {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):
             with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(
@@ -624,7 +625,7 @@ class ServiceTests(unittest.TestCase):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 14)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 15)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):

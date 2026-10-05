@@ -88,7 +88,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
                    {"task_id": "another"}, {"updated_at_ms": 0})]
         broken = copy.deepcopy(first)
         broken["plan"]["stages"][0]["evidence"] = ["a" * 32]
-        values.extend([records.canonical(broken), original.replace(b'"format":1', b'"format":1,"format":1'),
+        values.extend([records.canonical(broken), original.replace(b'"format":3', b'"format":3,"format":3'),
                        b"\xef\xbb\xbf" + original, original.rstrip(b"\n"), original + b" ", b"x" * 65537])
         for raw in values:
             with self.subTest(size=len(raw)):

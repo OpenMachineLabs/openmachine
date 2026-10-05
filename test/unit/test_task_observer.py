@@ -275,8 +275,11 @@ class TaskObserverTests(ObserverFixture, unittest.TestCase):
         def remote(record, now):
             record["operations"][0]["locator"]["target_identity"] = "a" * 64
         def provider(record, now):
+            binding = {"connection_id": "c" * 32, "account_id": 1, "authorization_revision": 1}
+            record["contract"]["repositories"] = ["Example/repo"]
+            record["contract"]["github_connections"] = {"Example/repo": binding}
             record["operations"][0]["locator"] = {"kind": "github", "repository": "Example/repo", "object_type": "issue",
-                "number": 1, "parent_number": None, "anchor": "fixture-observation"}
+                "number": 1, "parent_number": None, "anchor": "fixture-observation", "connection": binding}
         tasks.update(self.state, identities[0], remote)
         tasks.update(self.state, identities[1], provider)
         del self.config.machines["desktop"]

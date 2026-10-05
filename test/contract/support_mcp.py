@@ -86,7 +86,7 @@ class MCPFixture(object):
                 "acceptance": "Read the same task after restart.", "stop_condition": "Stop after readback.",
                 "authority_refs": ["fixture:consent"], "targets": [{"machine": "desktop", "workspace": "example",
                     "workspace_identity": context["workspace_identity"], "head_sha": context.get("head_sha") or None}],
-                "repositories": [], "tools": ["read_task"], "sources": [],
+                "repositories": [], "tools": ["read_task"], "sources": [], "recovery_policy": "disabled",
                 "expires_at_ms": time.time_ns() // 1000000 + 3600000},
             "stages": [{"id": "verify", "depends_on": [], "result": "Retained task", "verification": "Exact readback",
                         "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}

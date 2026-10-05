@@ -198,8 +198,12 @@ class Application:
                    limit: int = 20, expected_generation: int = -1) -> dict:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
-    def read_task(self, task_id: str) -> dict:
+    def read_task(self, task_id: str, preparation_id: str | None = None) -> dict:
         view = self.task_observer.project(tasks.read(self.state, task_id))
+        if preparation_id is not None:
+            if self.chat_recovery is None:
+                raise Fault("chat_recovery_unavailable", "No receiver preparation is available.")
+            return self.chat_recovery.preparation_read(view, preparation_id)
         return self.chat_recovery.project(view) if self.chat_recovery is not None else view
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
@@ -214,6 +218,9 @@ class Application:
             update_id=update_id, transition=transition))
         with self._admit():
             view = self.task_admission.control(request)
+        if self.chat_recovery is not None:
+            view = (self.chat_recovery.created(view) if transition["action"] == "revise_plan"
+                    else self.chat_recovery.project(view))
         self.task_observer.notify()
         return view
 
@@ -280,6 +287,8 @@ class Application:
         with self._admit():
             view = tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
                                 validate_new=lambda request: self._validate_task_scope(request, bind_new=True))
+        if self.chat_recovery is not None:
+            view = self.chat_recovery.created(view)
         self.task_observer.notify()
         return view
 

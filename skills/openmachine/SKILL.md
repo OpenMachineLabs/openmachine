@@ -42,7 +42,7 @@ request; use evidence to change the approach, or report the blocker when no safe
 progress remains. Never promise background continuation after ending the turn.
 
 These are caller instructions, not a guarantee that an ended ChatGPT turn will
-restart. Eligible bound tasks have the bounded same-Chat recovery path described
+restart. Eligible prepared tasks have the bounded task-owned recovery path described
 below; every continuation still reads and claims the original task safely.
 
 ## Operating steps
@@ -63,7 +63,11 @@ below; every continuation still reads and claims the original task safely.
    consequential operation. Derive the smallest contract and outcome-sized stages
    from the authorized request; a hand-written Spec is optional. Bind the actual
    request/source hashes, inspected targets, scope, exclusions, acceptance, stop
-   condition and finite expiry within current authority. Ask only for missing
+   condition and finite expiry within current authority. Preserve necessary task
+   instructions and readable inputs, not only hashes of unavailable Chat context.
+   New tasks default to task_chat recovery; Runtime owns preparation without an
+   originating Chat URL. Inspect the returned recovery state before new effects;
+   never disable recovery merely to bypass a blocker. Ask only for missing
    boundaries that materially affect the work. A one-step read needs no task.
    Check the exposed tools: absent `create_task`/`control_task` means structured
    supervision is unavailable, not permission to install or claim legacy coverage.
@@ -275,8 +279,8 @@ Receipt hashes cover semantic observations, not copied raw logs or source.
 
 The service's receipt observer reads admitted command/control/cancel/change results.
 Result and handoff publish together, not stage acceptance or new business effects.
-Its separate bounded same-Chat recovery slot may deliver a fixed continuation
-message; it never makes business decisions or claims the task for Chat.
+Its bounded task-owned recovery slot prepares the receiver and delivers fixed
+continuation messages; it never makes business decisions or claims for Chat.
 Quiet reads/heartbeats are not material progress. Stopped/stale observers have no
 live timer. Lifecycle admission remains; legacy history is not converted. GitHub
 grant revalidation cannot publish or replay a mutation.
@@ -369,42 +373,54 @@ follow-up uses a new operation ID under the same parent task and exact tab conte
 The generic Codex adapter does not itself wake Chat, and native browser access is
 not a network sandbox.
 
-For structured same-Chat recovery, inspect `read_task.chat_recovery`. Recovery is
-default-enabled but remains `waiting_for_binding` until one exact authenticated
-ordinary `https://chatgpt.com/c/...` conversation is validated. Use
-`configure_chat_recovery` during normal task setup/continuation to establish that
-bounded binding; do not ask for a separate per-task opt-in. Supply/confirm the URL
-once when it is not reliably known; never guess it from tabs or MCP metadata.
-Use the same operation to refresh a validated binding or to
-explicitly disable recovery for this task; binding does not claim the business task,
-extend its authority or send a message. Preserve the binding revision/update ID
-across uncertainty. Legacy checkpoints are not eligible.
+For structured task-owned recovery, inspect `read_task.chat_recovery`. New tasks
+default to task_chat; Runtime prepares one ordinary Chat through the explicitly
+configured local controller. Do not request, infer or bind the originating Chat
+URL. Read `preparing`, `ready`, `blocked` or `disabled` and the concrete blocker.
+Task creation may advance a registration revision without admitting business work.
+A committed record is not readiness; use the returned current task context.
 
-The existing TaskObserver checks every 30 seconds after a ten-minute external-task
-activity grace and a fresh ten-minute restart grace. No-active-execution handoffs
-and final `finish` obligations are included. Reads/internal probes do not accept
-work; a quiet verified-running command and an unexpired claim suppress dispatch.
-Inspect observer state, original receipts, delivery IDs/timestamps and blockers,
-not an assumed Chat heartbeat. One bounded background slot shares the existing
-global Codex browser lease and remains owned/drained by the TaskObserver.
+The one installation profile names the existing connection, authenticated browser
+account/workspace and selected model. Setup does not authorize login, account or
+workspace switching, permission grants, installation or model fallback. Resolve
+missing authority with the user, not another connector or hidden configuration.
+Necessary originating instructions and readable inputs must be retained in the
+bounded task contract; source hashes alone cannot recover missing attachments.
 
-The private typed Application path reserves one
-fixed-message Chrome delivery before using the existing Codex/execution receipt.
-It does not expose an arbitrary prompt/debug tool, does not make delivery a business
-task operation, and does not claim the task on Chat's behalf. Sent, blocked and
-uncertain outcomes are retained separately; never resend a sent or uncertain marker
-because the Chat stayed quiet. After re-entry, reread the original task/receipts and
-claim its current handoff before business effects. If continuation requires human
-permission or a user decision, pause the task with the existing control instead of
-leaving an ambiguous free-text wait. Never use automatic resume to undo a pause.
-Finish the original task explicitly once accepted stages are complete.
+A fixed preparation message is read-only. Call read_task with its original
+preparation_id, report preparation_read.receipt exactly and end the turn. Do not
+claim, change policy, execute or continue the business task during setup. Runtime
+checks the independently persisted external read witness against native browser
+route/end-of-turn evidence and verified cleanup. A successful read or an echoed
+marker alone cannot establish readiness or guarantee permission for later writes.
 
-Only verified no-send/generating evidence permits another browser attempt: at
-most three per one-hour episode, ten minutes apart, with each execution bounded
-to 180 seconds or earlier authority expiry. Reads, claim expiry, handoff churn,
-restart and re-enable do not renew budgets. Sent episodes wait up to 15 minutes
-for actual continuation and never automatically resend. Unknown effects receive
-reconciliation-only instructions; submission, claim, business advancement and
-manual supersession remain separate observations. Report concrete blockers rather
-than promising recovery through sleep/offline hosts, persistent Thinking, missing
-login, human decisions or exhausted/uncertain delivery.
+New business effects require readiness or an explicitly user-disabled policy,
+as well as a current claim, task_context and ordinary scope guards. Original-ID
+receipt reads and authorized stopping remain available before readiness. Use the
+same action-only configure_chat_recovery operation for an explicit enable/disable;
+never supply a URL or reset original attempts/delivery history. Missing acknowledged
+registration, uncertain setup and known later route blockers are not an invitation
+to recreate the Chat or bypass admission. Preserve original IDs after interruption.
+Historical unbound tasks require explicit guarded plan enrollment, not auto-migration.
+
+Initial setup does not wait for business inactivity. Continuation uses the existing
+30-second observer checks, ten-minute attributable-activity and restart grace,
+original handoff and no-live-claim/no-running-command guards. One bounded slot
+shares the existing global Codex browser lease and remains owned until exit.
+Read original receipts after re-entry, claim the current handoff and continue only
+remaining safe work. Pause for a real human decision; do not leave an ambiguous
+free-text wait or use auto-resume to undo pause. Finish accepted tasks explicitly.
+
+Setup and continuation episodes each retain at most three attempts within one hour
+or earlier authority expiry, with a 600-second browser bound. Only verified no-send
+and generating evidence permits another attempt, at least ten minutes later.
+Proven pre-launch contention does not consume an attempt or reset the deadline.
+Sent or uncertain messages never justify resending or a replacement Chat. Reads,
+claim expiry, restart, handoff churn and equivalent re-enables do not renew budgets.
+Sent episodes wait up to 15 minutes for actual continuation. Submission, claim,
+business advancement and manual supersession remain separate evidence.
+
+Report real route/write and originating-client acceptance separately from local
+SDK or synthetic browser tests. Preserve actual platform refusals and required
+human confirmation; do not claim recovery through unavailable login, offline hosts,
+persistent generation, missing inputs or exhausted/uncertain episodes.

@@ -1,4 +1,4 @@
-"""Observer-owned, bounded same-Chat recovery; business work remains with Chat."""
+"""One observer-owned task Chat route; business work remains with Chat."""
 
 import os
 import re
@@ -40,6 +40,7 @@ class ChatRecovery:
         self._not_before = 0
         self._next_tick = 0
         self._blockers: dict[str, str] = {}
+        self._known: dict[str, str] = {}
         self._failure = None
 
     @property
@@ -51,6 +52,7 @@ class ChatRecovery:
             raise Fault("chat_recovery_busy", "The original recovery reader must exit before replacement.")
         self._not_before = chatgpt.now_ms() + chatgpt.GRACE_MS
         self._next_tick = 0
+        self._known.clear()
         self._stop.clear()
 
     def stop(self) -> None:
@@ -92,6 +94,9 @@ class ChatRecovery:
 
     def external_activity(self, name: str, arguments: dict, payload: dict) -> None:
         """Called only for successful external MCP calls, never internal reads."""
+        if name == "read_task" and arguments.get("preparation_id") is not None:
+            self._observe_preparation(arguments, payload)
+            return  # Setup evidence is not a heartbeat or business advancement.
         if name == "configure_chat_recovery":
             return  # Configuration owns its timestamp and exact retry semantics.
         try:
@@ -115,16 +120,192 @@ class ChatRecovery:
             self._failure = observation.error_code(error)
             self._not_before = chatgpt.now_ms() + chatgpt.GRACE_MS
 
+    @staticmethod
+    def _disabled(record: dict, binding) -> bool:
+        return binding.disabled if binding else (
+            record.get("chat_registration") is None and record["contract"].get("recovery_policy") == "disabled")
+
+    @staticmethod
+    def _active(record: dict) -> None:
+        if (record["terminal"] is not None or record["control"]["stop_intent"] != "none"
+                or chatgpt.now_ms() >= record["contract"]["expires_at_ms"]):
+            raise Fault("task_stopped", "Stopped or expired work cannot prepare or dispatch recovery.")
+
+    def _profile(self):
+        route = self.app.config.chat_recovery
+        if route is None:
+            raise Fault("chat_recovery_controller_unconfigured", "Configure the existing local browser route once.")
+        workspace = self.app.config.workspaces[route.workspace]
+        fingerprint = records.digest({"route": route.model_dump(), "workspace": workspace.model_dump()})
+        return route, workspace, fingerprint
+
+    def _registered(self, record: dict, binding) -> None:
+        if binding is None or binding.preparation is None:
+            code = "chat_recovery_registration_missing" if record.get("chat_registration") else "chat_recovery_preparing"
+            raise Fault(code, "A matching durable recovery registration is required.")
+        preparation = binding.preparation
+        if record.get("chat_registration") != preparation.preparation_id:
+            raise Fault("chat_recovery_registration_conflict", "The task and preparation identities must agree.")
+        _, _, fingerprint = self._profile()
+        if preparation.controller_sha256 != fingerprint:
+            raise Fault("chat_recovery_controller_changed", "Preserve the original destination; the controller configuration changed.")
+        if binding.authority_sha256 != _authority(record):
+            raise Fault("chat_recovery_authority_changed", "Revalidate changed task authority before new work.")
+        if (binding.expires_at_ms or 0) <= chatgpt.now_ms():
+            raise Fault("chat_recovery_expired", "The original recovery authority has expired.")
+
+    def register(self, view: dict) -> dict:
+        record = view["record"]
+        if record["contract"].get("recovery_policy") is None:
+            return view
+        binding = chatgpt.get(self.app.state, record["task_id"])
+        if self._disabled(record, binding):
+            return view
+        self._active(record)
+        if record.get("chat_registration") is not None:
+            self._registered(record, binding)
+            return view
+        route, workspace, fingerprint = self._profile()
+        self.app.config.machine(workspace.machine, write=True)
+        context = self.app.machines.read_workspace_file(
+            workspace.machine, route.workspace, "AGENTS.md", start_line=1, line_count=1)["context"]
+        workspace_identity = context.get("workspace_identity")
+        if not isinstance(workspace_identity, str) or not re.fullmatch(r"[0-9a-f]{64}", workspace_identity):
+            raise Fault("context_unavailable", "The recovery controller identity is unavailable.")
+        identity = records.digest(["task-chat", record["task_id"], record["created_at_ms"], record["origin"]])[:32]
+        authority = _authority(record)
+        with self.app._admit(), tasks.locked_read(self.app.state, record["task_id"]) as current:
+            self._active(current["record"])
+            if _authority(current["record"]) != authority:
+                raise Fault("chat_recovery_conflict", "Task scope changed before registration.")
+            try:
+                binding = chatgpt.register_preparation(self.app.state, task_id=record["task_id"],
+                    preparation_id=identity, acknowledged=current["record"].get("chat_registration") is not None,
+                    machine=workspace.machine, workspace=route.workspace, workspace_identity=workspace_identity,
+                    authority_ref=record["contract"]["authority_refs"][0], authority_sha256=authority,
+                    expires_at_ms=record["contract"]["expires_at_ms"], controller_sha256=fingerprint)
+            except OSError as error:
+                raise Fault("chat_recovery_store_unavailable", "Receiver registration is unverified.") from error
+            revision = current["record"]["revision"]
+        if binding.disabled:
+            return view
+        if binding.authority_sha256 != authority or binding.preparation.controller_sha256 != fingerprint:
+            raise Fault("chat_recovery_registration_conflict", "Retained registration belongs to different scope.")
+        def acknowledge(value, now):
+            self._active(value)
+            if _authority(value) != authority or value.get("chat_registration") not in {None, identity}:
+                raise Fault("chat_recovery_conflict", "Task scope changed before registration acknowledgement.")
+            value["chat_registration"] = identity
+        with self.app._admit():
+            saved = tasks.update(self.app.state, record["task_id"], acknowledge,
+                                 expected_revision=revision, require_current=True)
+        return {**saved, "status": view.get("status", saved["status"])}
+
+    def created(self, view: dict) -> dict:
+        """Creation has already committed; a preparation failure cannot erase it."""
+        try:
+            view = self.register(view)
+            self._blockers.pop(view["task_id"], None)
+        except (Fault, OSError) as error:
+            self._blockers[view["task_id"]] = observation.error_code(error)
+            view = {**tasks.read(self.app.state, view["task_id"]), "status": view.get("status", "saved")}
+        return self.project(view)
+
+    def _discover(self) -> None:
+        page = tasks.observation_page(self.app.state, self._known)
+        self._known = {key: value for key, value in self._known.items() if key in page["identities"]}
+        self._blockers = {key: value for key, value in self._blockers.items() if key in page["identities"]}
+        if not page["complete"]:
+            self._failure = "task_index_incomplete"
+        for entry in page["entries"]:
+            identity, record = entry["task_id"], entry["record"]
+            if entry["error"]:
+                self._blockers[identity] = entry["error"]
+                continue
+            try:
+                if record is not None and record["contract"].get("recovery_policy") is not None and record["terminal"] is None:
+                    self.register(tasks.read(self.app.state, identity))
+                self._known[identity] = entry["metadata_sha256"]
+                self._blockers.pop(identity, None)
+            except (Fault, OSError) as error:
+                code = observation.error_code(error)
+                self._blockers[identity] = code
+                if code not in {"resource_busy", "task_conflict", "chat_recovery_capacity", "chat_recovery_store_unavailable"}:
+                    self._known[identity] = entry["metadata_sha256"]
+
+    def require_ready(self, record: dict) -> None:
+        if record["contract"].get("recovery_policy") is None:
+            return  # Historical tasks retain their original admission contract.
+        binding = chatgpt.get(self.app.state, record["task_id"])
+        if self._disabled(record, binding):
+            return
+        self._registered(record, binding)
+        if binding.preparation.status != "ready":
+            raise Fault("chat_recovery_not_ready", "Receiver preparation must complete before a new business effect.",
+                        {"preparation_state": binding.preparation.status, "reason": binding.preparation.reason})
+        if binding.delivery is not None and binding.delivery.status == "blocked":
+            raise Fault("chat_recovery_route_blocked", "The prepared route has a known browser blocker.",
+                        {"reason": binding.delivery.reason})
+        self._controller(binding)
+
+    def _preparation_binding(self, record: dict, preparation_id: str):
+        if not isinstance(preparation_id, str) or re.fullmatch(r"[0-9a-f]{32}", preparation_id) is None:
+            raise Fault("invalid_preparation_id", "Use the exact original preparation ID.")
+        now = chatgpt.now_ms()
+        if (record["terminal"] is not None or record["control"]["stop_intent"] != "none"
+                or now >= record["contract"]["expires_at_ms"]):
+            raise Fault("task_stopped", "Stopped or expired work cannot prove receiver readiness.")
+        binding = chatgpt.get(self.app.state, record["task_id"])
+        preparation = binding.preparation if binding else None
+        if (binding is None or binding.disabled or binding.authority_sha256 != _authority(record)
+                or preparation is None or preparation.preparation_id != preparation_id
+                or preparation.status != "reserved"
+                or now >= min(preparation.deadline_ms, binding.expires_at_ms or 0)):
+            raise Fault("chat_recovery_preparation_conflict", "The original receiver preparation is not current.")
+        self._registered(record, binding)
+        return binding
+
+    def preparation_read(self, view: dict, preparation_id: str) -> dict:
+        if "record" not in view:
+            raise Fault("task_legacy", "Legacy checkpoints cannot prove receiver readiness.")
+        record = view["record"]
+        binding = self._preparation_binding(record, preparation_id)
+        return {**self.project(view), "preparation_read": chatgpt.preparation_response(binding, record)}
+
+    def _observe_preparation(self, arguments: dict, payload: dict) -> None:
+        identity, preparation_id = arguments.get("task_id"), arguments["preparation_id"]
+        returned, response = payload.get("record"), payload.get("preparation_read")
+        if not isinstance(returned, dict) or returned.get("task_id") != identity or not isinstance(response, dict):
+            raise Fault("chat_recovery_preparation_conflict", "The external read does not match this task.")
+        # Keep stop/scope stable through the short sidecar publication. No network
+        # or browser work is performed while the canonical task read is held.
+        with self.app._admit(), tasks.locked_read(self.app.state, identity) as current:
+            record = current.get("record")
+            if record is None or _authority(record) != _authority(returned):
+                raise Fault("chat_recovery_preparation_conflict", "Task authority changed during the receiver read.")
+            binding = self._preparation_binding(record, preparation_id)
+            if ((payload.get("chat_recovery") or {}).get("binding_revision") != binding.revision
+                    or response != chatgpt.preparation_response(binding, returned)):
+                raise Fault("chat_recovery_preparation_conflict", "The returned receiver evidence differs.")
+            try:
+                chatgpt.observe_preparation_read(self.app.state, identity, preparation_id, binding.revision, response)
+            except OSError as error:
+                # Do not misclassify sidecar IO as corruption of the task reader.
+                raise Fault("chat_recovery_store_unavailable", "Receiver evidence persistence is unverified.") from error
+
     def _scan(self) -> None:
         try:
-            retained = chatgpt.bindings(self.app.state)
-            self._blockers = {key: value for key, value in self._blockers.items()
-                              if any(item.task_id == key for item in retained)}
             self._failure = None
+            self._discover()
+            retained = chatgpt.bindings(self.app.state)
             # Original reservations are observed even after pause/disable/expiry.
             for binding in retained:
                 if self._stop.is_set():
                     return
+                if binding.preparation and binding.preparation.status == "reserved":
+                    result = self.read_preparation(binding.task_id)
+                    if result["chat_recovery"]["preparation"]["status"] == "reserved":
+                        return
                 if binding.delivery and binding.delivery.status == "reserved":
                     result = self.read_delivery(binding.task_id)
                     if result["chat_recovery"]["delivery"]["status"] == "reserved":
@@ -137,7 +318,14 @@ class ChatRecovery:
                     binding = chatgpt.get(self.app.state, identity)
                     record = tasks.read(self.app.state, identity)["record"]
                     self._observe(record, binding)
-                    if binding.disabled or not binding.chat_url or record["terminal"] is not None:
+                    if self._disabled(record, binding) or record["terminal"] is not None:
+                        continue
+                    if binding.preparation and binding.preparation.status in {"pending", "deferred"}:
+                        result = self.start_preparation(identity, uuid.uuid4().hex)
+                        if result["chat_recovery"]["preparation"]["status"] == "reserved":
+                            return
+                        continue
+                    if not binding.chat_url:
                         continue
                     delivery = binding.delivery
                     if delivery and (delivery.status == "outcome_unknown" or
@@ -162,6 +350,9 @@ class ChatRecovery:
             "supported": True,
             "default_enabled": True,
             "automatic_detection": True,
+            "automatic_preparation": True,
+            "origin_chat_url_required": False,
+            "controller_configured": self.app.config.chat_recovery is not None,
             "interval_ms": chatgpt.INTERVAL_MS,
             "activity_grace_ms": chatgpt.GRACE_MS,
             "max_attempts": chatgpt.MAX_ATTEMPTS,
@@ -177,7 +368,11 @@ class ChatRecovery:
                 "eligible": False, "default_enabled": True, "state": "legacy_ineligible",
                 "binding_revision": 0, "disabled": False, "bound": False, "delivery": None}}
         record = view["record"]
-        binding = chatgpt.get(self.app.state, record["task_id"])
+        failure = None
+        try:
+            binding = chatgpt.get(self.app.state, record["task_id"])
+        except (Fault, OSError) as error:
+            binding, failure = None, observation.error_code(error)
         public = chatgpt.public(binding)
         now = chatgpt.now_ms()
         authority = _authority(record)
@@ -208,11 +403,46 @@ class ChatRecovery:
                 progress_state = "continuation_observed" if delivery.continuation == "recovery" else "superseded"
             elif delivery.claim_at_ms is not None:
                 progress_state = "claim_observed"
-            if (delivery.sent_at_ms is not None and delivery.continuation_at_ms is None
-                    and now >= min(delivery.sent_at_ms + chatgpt.CONTINUATION_MS, delivery.deadline_ms)):
-                blocker = "continuation_not_observed"
+        task_state = state if state in {"terminal", "paused", "cancelling", "expired"} else "active"
+        if record["contract"].get("recovery_policy") is not None:
+            public["disabled"] = self._disabled(record, binding)
+            if failure:
+                state, blocker = "blocked", failure
+            elif public["disabled"]:
+                state, blocker = "disabled", None
+            else:
+                try:
+                    self._profile()
+                    self._registered(record, binding)
+                    preparation = binding.preparation
+                    if preparation.status == "ready":
+                        self._controller(binding)
+                    state = "ready" if preparation.status == "ready" else "preparing"
+                    blocker = None
+                    if preparation.status not in {"pending", "reserved", "deferred", "ready"}:
+                        state, blocker = "blocked", preparation.reason or preparation.status
+                    elif state != "ready" and now >= preparation.deadline_ms:
+                        state, blocker = "blocked", "preparation_budget"
+                    elif state == "ready" and delivery is not None and delivery.status == "blocked":
+                        state, blocker = "blocked", "chat_recovery_route_blocked"
+                except (Fault, OSError) as error:
+                    code = observation.error_code(error)
+                    if code == "chat_recovery_preparing":
+                        state = "preparing" if blocker is None else "blocked"
+                        blocker = blocker or code
+                    else:
+                        state, blocker = "blocked", code
+                if not eligible and state != "ready":
+                    state, blocker = "blocked", task_state
+        elif failure:
+            state, blocker = "blocked", failure
+        if (blocker is None and delivery is not None and delivery.sent_at_ms is not None
+                and delivery.continuation_at_ms is None
+                and now >= min(delivery.sent_at_ms + chatgpt.CONTINUATION_MS, delivery.deadline_ms)):
+            blocker = "continuation_not_observed"
         return {**view, "chat_recovery": {
             "eligible": eligible,
+            "task_state": task_state,
             "default_enabled": True,
             "state": state,
             "delivery_state": progress_state,
@@ -223,61 +453,40 @@ class ChatRecovery:
         }}
 
     def configure(self, task_id: str, update_id: str, expected_revision: int, change: dict) -> dict:
+        if not isinstance(change, dict) or set(change) != {"action"} or change["action"] not in {"enable", "disable"}:
+            raise Fault("invalid_chat_recovery_change", "Use only an explicit enable or disable override.")
         view = tasks.read(self.app.state, task_id)
         if "record" not in view:
-            raise Fault("task_legacy", "Legacy checkpoints are not eligible for automatic Chat recovery.")
-        record = view["record"]
-        action = change.get("action")
-        request_sha256 = records.digest({
-            "method": "configure_chat_recovery",
-            "task_id": task_id,
-            "expected_revision": expected_revision,
-            "change": change,
-        })
-        if action == "disable":
-            with self.app._admit():
-                status = chatgpt.configure(self.app.state, task_id=task_id, update_id=update_id,
-                    expected_revision=expected_revision, action=action, request_sha256=request_sha256)
-            return {"task_id": task_id, "default_enabled": True, "state": "disabled", **status}
-        if action != "enable":
-            raise Fault("invalid_chat_recovery_change", "Choose enable or disable.")
-        now = chatgpt.now_ms()
-        if record["terminal"] is not None or now >= record["contract"]["expires_at_ms"]:
-            raise Fault("task_stopped", "Terminal or expired task authority cannot establish a recovery binding.")
-        authority_ref = change.get("authorization_ref")
-        if authority_ref not in record["contract"]["authority_refs"]:
-            raise Fault("chat_recovery_authority_invalid",
-                        "Recovery authorization must reference the original accepted task authority.")
-        expires = change.get("expires_at_ms")
-        if type(expires) is not int or not now < expires <= record["contract"]["expires_at_ms"]:
-            raise Fault("chat_recovery_authority_invalid",
-                        "Recovery expiry must be future and no later than original task authority.")
-        machine, workspace_name = change.get("machine"), change.get("workspace")
-        selected = self.app.config.workspaces.get(workspace_name)
-        if selected is None or selected.machine != machine:
-            raise Fault("chat_recovery_scope_invalid",
-                        "Recovery must use one configured controller workspace on its configured machine.")
-        target = self.app.config.machine(machine, write=True)
-        if target.transport != "local":
-            raise Fault("chat_recovery_scope_invalid", "Same-Chat recovery uses a configured local controller.")
-        try:
-            chat_url, _ = chatgpt.conversation(change.get("chat_url", ""))
-        except (ValueError, TypeError):
-            raise Fault("invalid_chat_recovery_binding",
-                        "Bind one exact authenticated ordinary https://chatgpt.com/c/<conversation> URL.") from None
-        context = self.app.machines.read_workspace_file(
-            machine, workspace_name, "AGENTS.md", start_line=1, line_count=1)["context"]
-        workspace_identity = context.get("workspace_identity")
-        if not isinstance(workspace_identity, str) or not re.fullmatch(r"[0-9a-f]{64}", workspace_identity):
-            raise Fault("context_unavailable", "The controller workspace identity could not be verified.")
-        authority = _authority(record)
-        with self.app._admit():
-            status = chatgpt.configure(self.app.state, task_id=task_id, update_id=update_id,
-                expected_revision=expected_revision, action=action, request_sha256=request_sha256,
-                chat_url=chat_url, machine=machine, workspace=workspace_name,
-                workspace_identity=workspace_identity, authority_ref=authority_ref,
-                authority_sha256=authority, expires_at_ms=expires)
-        return {"task_id": task_id, "default_enabled": True, "state": "bound", **status}
+            raise Fault("task_legacy", "Legacy checkpoints cannot acquire automatic recovery.")
+        record, action = view["record"], change["action"]
+        binding = chatgpt.get(self.app.state, task_id)
+        request_sha256 = records.digest({"method": "configure_chat_recovery", "task_id": task_id,
+                                        "expected_revision": expected_revision, "change": change})
+        if binding is not None and binding.last_update_id == update_id:
+            if binding.last_request_sha256 != request_sha256:
+                raise Fault("chat_recovery_change_conflict", "This update ID belongs to different recovery intent.")
+            return {"task_id": task_id, **self.project(view)["chat_recovery"]}
+        if action == "enable":
+            self._active(record)
+            if record["contract"].get("recovery_policy") is None and not (binding and binding.chat_url):
+                raise Fault("chat_recovery_enrollment_required", "Explicitly revise the historical plan before enrollment.")
+            self.app._validate_task_scope({"contract": record["contract"]}, check_head=False)
+            if binding and binding.preparation and binding.preparation.controller_sha256 != self._profile()[2]:
+                raise Fault("chat_recovery_controller_changed", "Do not replace the original recovery controller.")
+        with self.app._admit(), tasks.locked_read(self.app.state, task_id) as current:
+            if _authority(current["record"]) != _authority(record):
+                raise Fault("chat_recovery_conflict", "Task authority changed before the override.")
+            if action == "enable":
+                self._active(current["record"])
+            try:
+                chatgpt.configure(self.app.state, task_id=task_id, update_id=update_id,
+                    expected_revision=expected_revision, action=action, request_sha256=request_sha256,
+                    authority_sha256=_authority(record), expires_at_ms=record["contract"]["expires_at_ms"])
+            except OSError as error:
+                raise Fault("chat_recovery_store_unavailable", "Recovery override was not acknowledged.") from error
+        view = self.created(view) if action == "enable" else self.project(view)
+        self.app.task_observer.notify()
+        return {"task_id": task_id, **view["chat_recovery"]}
 
     def _task(self, task_id: str, *, automatic: bool = False) -> tuple[dict, bool]:
         view = tasks.read(self.app.state, task_id)
@@ -335,6 +544,133 @@ class ChatRecovery:
             return tasks.update(self.app.state, record["task_id"], publish,
                                 expected_revision=record["revision"])
 
+    def _controller(self, binding) -> None:
+        selected = self.app.config.workspaces.get(binding.workspace)
+        if selected is None or selected.machine != binding.machine:
+            raise Fault("chat_recovery_scope_invalid", "The retained controller workspace is no longer configured.")
+        if self.app.config.machine(binding.machine, write=True).transport != "local":
+            raise Fault("chat_recovery_scope_invalid", "The retained recovery controller is no longer local.")
+        context = self.app.machines.read_workspace_file(
+            binding.machine, binding.workspace, "AGENTS.md", start_line=1, line_count=1)["context"]
+        if context.get("workspace_identity") != binding.workspace_identity:
+            raise Fault("chat_recovery_scope_changed", "The original recovery controller identity changed.")
+
+    def start_preparation(self, task_id: str, execution_id: str) -> dict:
+        if not re.fullmatch(r"[0-9a-f]{32}", execution_id):
+            raise Fault("invalid_execution_id", "Use an original preparation execution ID.")
+        record = tasks.read(self.app.state, task_id)["record"]
+        binding = chatgpt.get(self.app.state, task_id)
+        self._active(record)
+        self._registered(record, binding)
+        self._controller(binding)
+        self.app._validate_task_scope({"contract": record["contract"]}, check_head=False)
+        with self.app._admit(), tasks.locked_read(self.app.state, task_id) as current:
+            self._active(current["record"])
+            self._registered(current["record"], binding)
+            try:
+                reserved, reused = chatgpt.reserve_preparation(self.app.state, task_id,
+                    binding.preparation.preparation_id, binding.revision, execution_id)
+            except OSError as error:
+                raise Fault("chat_recovery_store_unavailable", "Preparation reservation is unverified.") from error
+        if reused:
+            return {"task_id": task_id, "chat_recovery": chatgpt.public(reserved)}
+        def preflight():
+            if self._stop.is_set():
+                raise Fault("chat_recovery_stopped", "The original observer stopped before setup dispatch.")
+            current = tasks.read(self.app.state, task_id)["record"]
+            selected = chatgpt.get(self.app.state, task_id)
+            self._active(current)
+            self._registered(current, selected)
+            self._controller(selected)
+            if (selected.disabled or selected.revision != reserved.revision
+                    or selected.preparation.status != "reserved"
+                    or selected.preparation.execution_id != execution_id):
+                raise Fault("chat_recovery_conflict", "Preparation changed before its browser launch.")
+        route = self._profile()[0].model_dump()
+        started = self._dispatch_browser(reserved, execution_id, chatgpt.preparation_goal(reserved, route),
+            reserved.chat_url or chatgpt.ORIGIN + "/", reserved.preparation.deadline_ms, preflight, preparation=True)
+        return {"task_id": task_id, "chat_recovery": chatgpt.public(reserved),
+                "preparation_execution_id": execution_id, "execution_status": started["status"]}
+
+    def read_preparation(self, task_id: str) -> dict:
+        original = chatgpt.get(self.app.state, task_id)
+        if original is None or original.preparation is None or original.preparation.execution_id is None:
+            raise Fault("chat_recovery_preparation_unavailable", "No original preparation execution is retained.")
+        execution_id = original.preparation.execution_id
+        if original.preparation.status != "reserved":
+            return {"task_id": task_id, "chat_recovery": chatgpt.public(original)}
+        try:
+            result = self.app.codex.read(self.app.config, self.app.state,
+                self.app.machines.read_execution, original.machine, execution_id)
+        except Fault as error:
+            if error.code != "execution_not_found":
+                raise
+            result = {"status": "outcome_unknown"}
+        if result["status"] in {"accepted", "preparing", "running", "stopping", "finishing"}:
+            return {"task_id": task_id, "chat_recovery": chatgpt.public(original)}
+        binding = chatgpt.get(self.app.state, task_id)
+        route = self.app.config.chat_recovery
+        observed, reason, url = chatgpt.preparation_outcome(
+            result, binding, route.model_dump() if route else {"connection": ""})
+        if observed == "ready":
+            receipt = self.app.machines.read_execution(binding.machine, execution_id, max_bytes=1)
+            if receipt.get("status") != "succeeded" or (receipt.get("cleanup") or {}).get("status") != "verified":
+                observed, reason = "outcome_unknown", "browser_cleanup_unverified"
+        with self.app._admit(), tasks.locked_read(self.app.state, task_id) as current:
+            if observed == "ready":
+                try:
+                    record = current["record"]
+                    self._active(record)
+                    self._registered(record, binding)
+                    if any(item["kind"] == "stopped" and item["at_ms"] >= binding.preparation.created_at_ms
+                           for item in record["history"]):
+                        raise Fault("task_stopped", "Setup crossed a task stop; preserve its evidence.")
+                except Fault as error:
+                    observed, reason = "blocked", error.code
+            try:
+                public = chatgpt.mark_preparation(self.app.state, task_id, execution_id, observed, reason,
+                                                 url, expected_revision=original.revision)
+            except OSError as error:
+                raise Fault("chat_recovery_store_unavailable", "Preparation result publication is unverified.") from error
+        return {"task_id": task_id, "chat_recovery": public, "preparation_execution_id": execution_id,
+                "execution_status": result["status"]}
+
+    def _dispatch_browser(self, binding, execution_id: str, goal: str, start_url: str,
+                          deadline: int, preflight, *, preparation: bool = False) -> dict:
+        """One private launch boundary for fixed setup and continuation messages."""
+        launch_attempted = False
+        try:
+            with self.app._admit():
+                preflight()
+                def launch(**arguments):
+                    nonlocal launch_attempted
+                    arguments.pop("task_context", None)
+                    launch_attempted = True
+                    return self.app.machines.start_execution(**arguments)
+                timeout = min(chatgpt.BROWSER_SECONDS, (deadline - chatgpt.now_ms()) // 1000)
+                if timeout < 1:
+                    raise Fault("task_authority_expired", "Recovery authority cannot cover a browser attempt.")
+                return self.app.codex.start(self.app.config, self.app.state, launch, binding.machine,
+                    execution_id, self.app.config.workspaces[binding.workspace].root, goal, start_url,
+                    [chatgpt.ORIGIN], "browser", "chrome", timeout, "", None)
+        except Fault as error:
+            unsent = not launch_attempted or error.code == "execution_disabled"
+            if error.code == "resource_busy" and launch_attempted:
+                try:
+                    with lease(self.app.state / "locks" / f"{execution_id}.lock", create=False):
+                        unsent = not os.path.lexists(self.app.state / "executions" / execution_id)
+                except (Fault, OSError):
+                    pass  # Absence without the original launch lock is not proof.
+            if unsent:
+                with self.app._admit():
+                    if preparation:
+                        chatgpt.mark_preparation(self.app.state, binding.task_id, execution_id,
+                            "deferred" if error.code == "resource_busy" else "blocked",
+                            "prelaunch_rejection" if error.code == "resource_busy" else error.code)
+                    else:
+                        chatgpt.release_reservation(self.app.state, binding.task_id, execution_id)
+            raise
+
     def _binding(self, record: dict):
         binding = chatgpt.get(self.app.state, record["task_id"])
         now = chatgpt.now_ms()
@@ -344,16 +680,8 @@ class ChatRecovery:
                 or (binding.expires_at_ms or 0) <= now):
             raise Fault("chat_recovery_binding_unavailable",
                         "The default recovery policy is active but this task has no current valid Chat binding.")
-        selected = self.app.config.workspaces.get(binding.workspace)
-        if selected is None or selected.machine != binding.machine:
-            raise Fault("chat_recovery_scope_invalid", "The retained controller workspace is no longer configured.")
-        if self.app.config.machine(binding.machine, write=True).transport != "local":
-            raise Fault("chat_recovery_scope_invalid", "The retained recovery controller is no longer local.")
-        context = self.app.machines.read_workspace_file(
-            binding.machine, binding.workspace, "AGENTS.md", start_line=1, line_count=1)["context"]
-        if context.get("workspace_identity") != binding.workspace_identity:
-            raise Fault("chat_recovery_scope_changed",
-                        "The retained controller workspace identity changed; revalidate the recovery binding.")
+        self.require_ready(record)
+        self._controller(binding)
         self.app._validate_task_scope({"contract": record["contract"]}, check_head=False)
         return binding, binding.authority_sha256
 
@@ -382,49 +710,16 @@ class ChatRecovery:
         deadline = min(deadline, reserved["delivery"]["deadline_ms"])
         message = chatgpt.recovery_message(task_id, recovery_id, reconciliation_only=reconciliation_only)
         goal = chatgpt.browser_goal(binding.chat_url, message, recovery_id)
-        launch_attempted = False
-        try:
-            # Revalidate under lifecycle admission immediately before this narrow dispatch.
-            with self.app._admit():
-                current, current_reconciliation = self._task(task_id, automatic=automatic)
-                current_binding, current_authority = self._binding(current["record"])
-                if automatic:
-                    self._quiet(current_binding)
-                if (current["record"]["handoff"] is None
-                        or current["record"]["handoff"]["id"] != handoff["id"]
-                        or current_authority != authority
-                        or current_reconciliation != reconciliation_only
-                        or current_binding.revision != binding.revision):
-                    raise Fault("chat_recovery_conflict",
-                                "Task or recovery authority changed before browser dispatch.")
-                def launch(**arguments):
-                    # Codex's generic seam accepts task_context; this private delivery is
-                    # deliberately outside business-task admission.
-                    nonlocal launch_attempted
-                    arguments.pop("task_context", None)
-                    launch_attempted = True
-                    return self.app.machines.start_execution(**arguments)
-                timeout = min(chatgpt.BROWSER_SECONDS, (deadline - chatgpt.now_ms()) // 1000)
-                if timeout < 1:
-                    raise Fault("task_authority_expired", "Recovery authority cannot cover a browser attempt.")
-                started = self.app.codex.start(self.app.config, self.app.state,
-                    launch, binding.machine, execution_id,
-                    self.app.config.workspaces[binding.workspace].root, goal, binding.chat_url,
-                    [chatgpt.ORIGIN], "browser", "chrome", timeout, "", None)
-        except Fault as error:
-            unsent = not launch_attempted or error.code == "execution_disabled"
-            if error.code == "resource_busy":
-                # A rejected local start is unsent only with its original launch
-                # lock free and no execution directory; absence alone is not proof.
-                try:
-                    with lease(self.app.state / "locks" / f"{execution_id}.lock", create=False):
-                        unsent = not os.path.lexists(self.app.state / "executions" / execution_id)
-                except (Fault, OSError):
-                    pass  # Preserve uncertainty and the original failure.
-            if unsent:
-                with self.app._admit():
-                    chatgpt.release_reservation(self.app.state, task_id, execution_id)
-            raise
+        def preflight():
+            current, current_reconciliation = self._task(task_id, automatic=automatic)
+            current_binding, current_authority = self._binding(current["record"])
+            if automatic:
+                self._quiet(current_binding)
+            if (current["record"]["handoff"] is None or current["record"]["handoff"]["id"] != handoff["id"]
+                    or current_authority != authority or current_reconciliation != reconciliation_only
+                    or current_binding.revision != binding.revision):
+                raise Fault("chat_recovery_conflict", "Task or recovery authority changed before browser dispatch.")
+        started = self._dispatch_browser(binding, execution_id, goal, binding.chat_url, deadline, preflight)
         return {"task_id": task_id, "chat_recovery": reserved,
                 "delivery_execution_id": execution_id, "execution_status": started["status"]}
 

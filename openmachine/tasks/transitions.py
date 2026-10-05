@@ -164,7 +164,8 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             required = {stage["id"] for stage in definitions if stage["id"] in old
                         and stage != {key: old[stage["id"]][key] for key in stage}}
             stable = {"sources", "expires_at_ms", "authority_refs"}
-            if any(record["contract"][key] != change["contract"][key] for key in record["contract"] if key not in stable):
+            if any(record["contract"].get(key) != change["contract"].get(key)
+                   for key in record["contract"].keys() | change["contract"].keys() if key not in stable):
                 required.update(old)
             while True:
                 prior = set(required)
@@ -179,6 +180,9 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                            if stage["id"] in old else "pending", evidence=[] if stage["id"] in affected or stage["id"] not in old
                            else old[stage["id"]]["evidence"]) for stage in definitions]
             record["contract"] = change["contract"]
+            if record["format"] < 3 and change["contract"].get("recovery_policy") is not None:
+                record["format"] = 3
+                record["chat_registration"] = None
             record["plan"] = {"revision": record["plan"]["revision"] + 1, "stages": stages}
             control.update(current_stage_id=next((s["id"] for s in stages if s["state"] != "accepted"), stages[-1]["id"]),
                            owner=None, epoch=control["epoch"] + 1, state="waiting_for_ai", pending_decision=None)

@@ -13,6 +13,63 @@ from support_mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_correlated_receiver_read_is_durable_on_both_wire_protocols(self):
+        from integrations import chatgpt
+        from openmachine.bootstrap import create_application
+        from openmachine.config import load
+        self.stop(self.processes[-1])
+        self.config.write_text(self.config.read_text() + '\n[chat_recovery]\nworkspace = "example"\n'
+            'connection = "Fixture OM"\nbrowser_account = "Fixture Account"\n'
+            'browser_workspace = "Personal"\nmodel = "Fixture Model"\n')
+        app = create_application(load(self.config), self.state)
+        context = app.read_workspace_file("desktop", "example", "AGENTS.md")["context"]
+        identity = "receiver-wire"
+        request = self.task_request(context, identity)
+        request["contract"].pop("recovery_policy")
+        view = app.create_task(**request)
+        self.assertEqual(view["chat_recovery"]["state"], "preparing")
+        preparation_id = view["record"]["chat_registration"]
+        chatgpt.reserve_preparation(self.state, identity, preparation_id,
+                                   view["chat_recovery"]["binding_revision"], uuid.uuid4().hex)
+        # Only the browser scheduler is held; this test uses real external MCP
+        # dispatch, result serialization and durable receiver observation.
+        bootstrap = "from openmachine.app.chat_recovery import ChatRecovery\nChatRecovery.tick = lambda self: None"
+        self.launch(bootstrap=bootstrap)
+        task_path = self.state / "tasks" / identity / "task.json"
+        before = task_path.read_bytes()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                for invalid in ("bad", True, "a" * 31):
+                    response = await self.wire_call(client, "tools/call", {"name": "read_task", "arguments": {
+                        "task_id": identity, "preparation_id": invalid}})
+                    result = response.json()["result"]
+                    self.assert_wire_tool_result(result, version)
+                    self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
+                response = await self.wire_call(client, "tools/call", {"name": "read_task", "arguments": {
+                    "task_id": identity, "preparation_id": preparation_id}})
+                result = response.json()["result"]
+                self.assert_wire_tool_result(result, version)
+                self.assertFalse(result["isError"], result)
+                proof = result["structuredContent"]["preparation_read"]
+                observed = chatgpt.get(self.state, identity).preparation
+                self.assertEqual(observed.receiver_read.task_revision, proof["task_revision"])
+                self.assertEqual(observed.receiver_read.record_sha256, proof["record_sha256"])
+                self.assertIsNone(observed.ready_at_ms)
+                self.assertEqual(task_path.read_bytes(), before)
+        self.stop(self.processes[-1])
+        self.launch(bootstrap=bootstrap + "\nfrom integrations import chatgpt\n"
+            "def unavailable(*args, **kwargs): raise OSError('Injected receiver store failure')\n"
+            "chatgpt.observe_preparation_read = unavailable")
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                response = await self.wire_call(client, "tools/call", {"name": "read_task", "arguments": {
+                    "task_id": identity, "preparation_id": preparation_id}})
+                result = response.json()["result"]
+                self.assert_wire_tool_result(result, version)
+                self.assertTrue(result["isError"], result)
+                self.assertEqual(result["structuredContent"]["error"]["code"], "chat_recovery_store_unavailable")
+                self.assertNotIn("preparation_read", result["structuredContent"])
+
     async def test_recovery_activity_is_attributable_and_does_not_change_task_revisions(self):
         for mode in ("legacy", "2026-07-28"):
             identity = "chat-activity-" + mode
@@ -25,9 +82,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 request = self.task_request(context, identity)
                 await call("create_task", request)
                 await call("configure_chat_recovery", {"task_id": identity, "update_id": uuid.uuid4().hex,
-                    "expected_revision": 0, "change": {"action": "enable", "machine": "desktop", "workspace": "example",
-                    "chat_url": "https://chatgpt.com/c/" + str(uuid.uuid4()), "authorization_ref": "fixture:consent",
-                    "expires_at_ms": request["contract"]["expires_at_ms"]}})
+                    "expected_revision": 0, "change": {"action": "disable"}})
                 path = self.state / "chat_recovery.json"
                 before = path.read_bytes()
                 task_before = (self.state / "tasks" / identity / "task.json").read_bytes()
@@ -344,7 +399,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 14)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 15)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

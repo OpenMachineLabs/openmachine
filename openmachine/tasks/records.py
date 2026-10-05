@@ -11,7 +11,7 @@ from openmachine.foundation.sanitize import Fault, redact
 MAX_RECORD = 65536
 MAX_ACCEPTANCE = 49152
 MAX_INTEGER = 2**53 - 1
-READ_FORMATS = (1, 2)
+READ_FORMATS = (1, 2, 3)
 
 
 def _text(value: str, limit: int) -> str:
@@ -103,12 +103,15 @@ class Contract(Model):
     sources: Annotated[list[Source], Field(max_length=16)]
     expires_at_ms: Integer
     github_connections: dict[Repository, GitHubBinding] = Field(default_factory=dict, max_length=8)
+    recovery_policy: Literal["task_chat", "disabled"] | None = None
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
         if not self.github_connections:
             value.pop("github_connections", None)
+        if self.recovery_policy is None:
+            value.pop("recovery_policy", None)
         return value
 
     @model_validator(mode="after")
@@ -300,7 +303,7 @@ class LastUpdate(Model):
 
 
 class Record(Model):
-    format: Annotated[int, Field(strict=True, ge=1, le=2)]
+    format: Annotated[int, Field(strict=True, ge=1, le=3)]
     task_id: TaskID
     revision: Revision
     title: Title
@@ -317,10 +320,21 @@ class Record(Model):
     recovery: Recovery | None
     terminal: Terminal | None
     last_update: LastUpdate
+    chat_registration: ID | None = None
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.format < 3:
+            value.pop("chat_registration", None)
+        return value
 
     @model_validator(mode="after")
     def references(self):
         _stages(self.contract, self.plan.stages)
+        if (self.format < 3 and (self.contract.recovery_policy is not None or self.chat_registration is not None)
+                or self.format == 3 and self.contract.recovery_policy is None):
+            raise ValueError("task-owned recovery requires explicit format-3 creation semantics")
         if self.format == 1 and (self.contract.github_connections or any(
                 isinstance(op.locator, GitHubLocator) and op.locator.connection is not None for op in self.operations)):
             raise ValueError("legacy records cannot acquire a new account binding")
@@ -335,11 +349,11 @@ class Record(Model):
                     or operation.epoch > self.control.epoch or not self.created_at_ms <= operation.admitted_at_ms <= self.updated_at_ms
                     or operation.observed_at_ms is not None and operation.observed_at_ms > self.updated_at_ms):
                 raise ValueError("invalid operation binding")
-            if self.format == 2 and isinstance(operation.locator, GitHubLocator) and operation.locator.connection is None:
+            if (self.format == 2 or self.format == 3 and operation.plan_revision == self.plan.revision) and isinstance(operation.locator, GitHubLocator) and operation.locator.connection is None:
                 raise ValueError("new GitHub operations require their account binding")
             if operation.plan_revision == self.plan.revision and operation.source_sha256 != stages[operation.stage_id].source_sha256:
                 raise ValueError("operation source binding mismatch")
-            if self.format == 2 and operation.plan_revision == self.plan.revision and isinstance(operation.locator, GitHubLocator):
+            if self.format >= 2 and operation.plan_revision == self.plan.revision and isinstance(operation.locator, GitHubLocator):
                 binding = next((item for repo, item in self.contract.github_connections.items()
                                 if repo.casefold() == operation.locator.repository.casefold()), None)
                 if operation.locator.connection != binding:
@@ -396,12 +410,13 @@ def normalize_create(value: dict) -> dict:
 
 
 def new_record(request: dict, now_ms: int) -> dict:
-    contract = request["contract"]
+    contract = dict(request["contract"])
+    contract.setdefault("recovery_policy", "task_chat")
     if not now_ms < contract["expires_at_ms"]:
         raise Fault("task_authority_expired", "Task creation requires a future explicit authority expiry.")
     stages = [dict(stage, state="pending", evidence=[]) for stage in request["stages"]]
     first = stages[0]
-    value = {"format": 2 if contract.get("github_connections") else 1, "task_id": request["task_id"], "revision": 1, "title": request["title"],
+    value = {"format": 3, "task_id": request["task_id"], "revision": 1, "title": request["title"],
              "anchors": request["anchors"], "created_at_ms": now_ms, "updated_at_ms": now_ms,
              "origin": request["origin"], "contract": contract, "plan": {"revision": 1, "stages": stages},
              "control": {"state": "waiting_for_ai", "current_stage_id": first["id"], "stop_intent": "none",
