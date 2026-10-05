@@ -241,11 +241,12 @@ Overrides preserve destination, attempts, original executions and prior uncertai
 
 Both preparing and bound entries count toward the 32-active/128-retained limit in
 the bounded 512-KiB recovery store. Preparation has at most three browser attempts
-within one hour or earlier authority expiry, each at most 180 seconds. Only verified
+within one hour or earlier authority expiry, each at most 600 seconds. Only verified
 no-send/generating evidence permits a retry, at least ten minutes later. Proven
 pre-launch contention consumes no attempt but retains the original deadline.
 Sent or uncertain setup never authorizes another message or replacement Chat.
-A longer explicitly authorized diagnostic does not change these production limits.
+The 600-second bound accommodates observed slow-browser setup without relaxing
+evidence, no-replay or retry requirements.
 
 The same observer checks continuation every 30 seconds, including tasks with no
 active command and accepted final stages awaiting `finish`. Dispatch waits ten

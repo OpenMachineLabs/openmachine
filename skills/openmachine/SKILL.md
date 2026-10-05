@@ -412,7 +412,7 @@ remaining safe work. Pause for a real human decision; do not leave an ambiguous
 free-text wait or use auto-resume to undo pause. Finish accepted tasks explicitly.
 
 Setup and continuation episodes each retain at most three attempts within one hour
-or earlier authority expiry, with a 180-second browser bound. Only verified no-send
+or earlier authority expiry, with a 600-second browser bound. Only verified no-send
 and generating evidence permits another attempt, at least ten minutes later.
 Proven pre-launch contention does not consume an attempt or reset the deadline.
 Sent or uncertain messages never justify resending or a replacement Chat. Reads,
