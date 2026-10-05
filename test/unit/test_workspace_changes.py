@@ -548,6 +548,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
 
     def test_legacy_omitted_edit_grant_keeps_configuration_fingerprint(self):
         value = self.config.model_dump()
+        self.assertIsNone(value.pop("chat_recovery"))
         for target in value["machines"].values():
             target.pop("workspace_write_enabled")
         expected = hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()

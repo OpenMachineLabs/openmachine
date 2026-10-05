@@ -212,6 +212,15 @@ class TaskAdmission:
                 return self._dispatch(method, arguments, supervised=method == "start_execution")
         raise Fault("task_context_required", "This original effect was supervised; retain task_context before a new consequence.")
 
+    def _recovery_gate(self, record: dict, method: str, arguments: dict) -> None:
+        if (method == "cancel_execution" or method == "control_execution" and arguments["action"] == "interrupt"
+                or record["contract"].get("recovery_policy") is None):
+            return
+        if self.app.chat_recovery is not None:
+            self.app.chat_recovery.require_ready(record)
+        elif record["contract"].get("recovery_policy") != "disabled":
+            raise Fault("chat_recovery_unavailable", "Recovery preparation is required before a new effect.")
+
     def run(self, method: str, arguments: dict, context: dict | None) -> dict:
         if context is None and method == "cancel_execution":
             # Preserve the existing original-ID stop route even while a task
@@ -272,6 +281,7 @@ class TaskAdmission:
                 else:
                     raise Fault("task_operation_conflict", "An existing unbound domain operation cannot be adopted as newly admitted task evidence.")
             self._scope(record, method, arguments, locator)
+            self._recovery_gate(record, method, arguments)
             # Observe only already known identities, without writing through read_task.
             current = self.reconcile(view)
             transitions.guards(current["record"], context["task_revision"], context["plan_revision"], context["continuation_epoch"])
@@ -286,6 +296,15 @@ class TaskAdmission:
             if admitted["index_status"] != "current" and method != "cancel_execution":
                 self._publish(record["task_id"], [(operation["id"], _receipt("failed", summary="Not dispatched: derived task index publication failed."), locator)])
                 raise Fault("task_index_incomplete", "Intent was retained but not dispatched; rebuild derived metadata before new work.")
+            try:
+                # Original IDs were reconciled above. Recheck only new effects
+                # after intent publication, before crossing the domain boundary.
+                self._recovery_gate(admitted["record"], method, arguments)
+            except (Fault, OSError) as error:
+                code = error.code if isinstance(error, Fault) else "chat_recovery_store_unavailable"
+                self._publish(record["task_id"], [(operation["id"],
+                    _receipt("failed", summary=f"Not dispatched: recovery gate {code}."), locator)])
+                raise
             try:
                 observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
@@ -317,7 +336,7 @@ class TaskAdmission:
                 if arguments.get("connection_id") and arguments["connection_id"] != binding["connection_id"]:
                     raise Fault("task_scope_denied", "The task is bound to another GitHub connection.")
                 locator["connection"] = binding
-            elif arguments.get("connection_id") or record["format"] == 2:
+            elif arguments.get("connection_id") or record["format"] >= 2:
                 raise Fault("task_scope_denied", "This task has no accepted binding for the selected account.")
             observed = self.app._github_call("read", dict(action="repository", repository=arguments["repository"]),
                                              binding=binding, legacy=binding is None)

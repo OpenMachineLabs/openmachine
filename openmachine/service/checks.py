@@ -184,8 +184,9 @@ def activation_safe(state: Path) -> None:
     from integrations.chatgpt import bindings
     workspace.check_change_state(state, require_idle=True)
     connections_state(state, require_idle=True)
-    if any(item.delivery is not None and item.delivery.status in {"reserved", "outcome_unknown"}
-           and item.delivery.continuation_at_ms is None for item in bindings(state)):
+    if any((item.preparation is not None and item.preparation.status in {"reserved", "outcome_unknown"})
+           or (item.delivery is not None and item.delivery.status in {"reserved", "outcome_unknown"}
+               and item.delivery.continuation_at_ms is None) for item in bindings(state)):
         raise Fault("activation_deferred", "An original Chat recovery delivery is active or unresolved; preserve its delivery and budget.")
 
 
@@ -217,7 +218,8 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")
         chat_recovery = _chat_recovery_state(state)
-        required_recovery_contract = 13 if chat_recovery["chat_recovery_format"] >= 2 else 12
+        required_recovery_contract = (15 if chat_recovery["chat_recovery_format"] >= 3 else
+                                      13 if chat_recovery["chat_recovery_format"] == 2 else 12)
         if chat_recovery["chat_recovery_present"] and (value["state_contract"] < required_recovery_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in chat_recovery.items())):
             raise ValueError("candidate ignores retained Chat recovery authority or delivery identity")
@@ -238,6 +240,10 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in policy.items())):
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
+        if 3 in retained_tasks["structured_task_formats_present"] and (
+                value["state_contract"] < 15 or 3 not in value.get("structured_task_read_formats", [])
+                or value.get("structured_task_formats_present") != retained_tasks["structured_task_formats_present"]):
+            raise ValueError("candidate ignores retained task-owned recovery admission semantics")
         if retained_tasks["task_index_format"] == 2:
             formats = value.get("structured_task_read_formats")
             if (value["state_contract"] < 6 or not isinstance(formats, list) or not formats

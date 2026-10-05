@@ -156,7 +156,14 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             value["last_update"] = last_update
         if value == original:
             return {**_view(root, original, before), "status": "unchanged"}
-        for key in ("format", "task_id", "title", "anchors", "created_at_ms", "origin"):
+        if value["format"] != original["format"] and not (
+                original["format"] < 3 and value["format"] == 3
+                and value["contract"].get("recovery_policy") in {"task_chat", "disabled"}
+                and value["plan"]["revision"] == original["plan"]["revision"] + 1):
+            raise Fault("task_identity_conflict", "Only an explicit plan revision may enroll historical task recovery.")
+        if original.get("chat_registration") is not None and value.get("chat_registration") != original["chat_registration"]:
+            raise Fault("task_identity_conflict", "Retain the original recovery registration and its evidence.")
+        for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
             if value[key] != original[key]:
                 raise Fault("task_identity_conflict", "A transition cannot replace the original task identity or initiating request.")
         value.update(revision=original["revision"] + 1, updated_at_ms=now_ms)
@@ -388,7 +395,10 @@ def _original_create(root: Path | None, request: dict) -> dict | None:
         raise Fault("task_conflict", "This ID belongs to legacy history; conversion requires separate approval.")
     record, raw = read_structured(root, identity)
     update = {"id": request["update_id"], "request_sha256": records.digest({"method": "create_task", **request})}
-    if record["last_update"] != update or record["revision"] != 1:
+    # Registration alone may publish revision 2 without replacing the original
+    # creation receipt. Later business/control revisions still require read_task.
+    creation_revision = 2 if record.get("chat_registration") is not None else 1
+    if record["last_update"] != update or record["revision"] != creation_revision:
         raise Fault("task_conflict", "The original task/update ID has different intent or a later revision; read it without replay.")
     return {**_view(root, record, raw), "status": "unchanged"}
 
@@ -486,6 +496,7 @@ def rebuild_index(state: Path, expected_generation: int = -1) -> dict:
 def check_state(state: Path) -> dict:
     """Actual reader proof, including terminal-only stores; never repairs an index."""
     count, structured, generation, offset, version, present = 0, 0, None, 0, None, False
+    formats_present = set()
     while True:
         with _reading(state) as root:
             if root is None:
@@ -503,12 +514,16 @@ def check_state(state: Path) -> dict:
                 if item != {"owner": "legacy", **index["tasks"][key]}:
                     raise Fault("task_index_incomplete", "Canonical records and lookup metadata differ; rebuild before a service transition.")
                 structured += item["owner"] == "structured"
+                if item["owner"] == "structured":
+                    record, _ = read_structured(root, key)
+                    formats_present.add(record["format"])
             count += len(page)
             offset += len(page)
             if offset == len(identities):
                 break
     return {"task_store_present": present, "task_records": count, "structured_task_records": structured,
-            "structured_task_read_formats": list(records.READ_FORMATS), "task_index_format": version,
+            "structured_task_read_formats": list(records.READ_FORMATS),
+            "structured_task_formats_present": sorted(formats_present), "task_index_format": version,
             "task_index_generation": generation, "task_index_coverage": "complete"}
 
 

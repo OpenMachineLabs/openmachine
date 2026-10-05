@@ -24,7 +24,8 @@ def task_contract(context=None, identity="structured-one"):
         "contract": {"objective": "Verify retained work.", "scope": "Disposable fixture only.", "exclusions": "No production effects.",
             "acceptance": "Read the same canonical record.", "stop_condition": "Stop after verification.",
             "authority_refs": ["fixture:consent"], "targets": targets, "repositories": [], "tools": ["read_task"],
-            "sources": [], "expires_at_ms": time.time_ns() // 1000000 + 3600000},
+            "sources": [], "recovery_policy": "disabled",
+            "expires_at_ms": time.time_ns() // 1000000 + 3600000},
         "stages": [{"id": "verify", "depends_on": [], "result": "Retained record", "verification": "Exact readback",
                     "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}
 

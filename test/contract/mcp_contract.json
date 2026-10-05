@@ -71,6 +71,12 @@
       "base_commit": "e26c636122caceb19e8b91677663c3d0dbf40d3d",
       "change": "PR 1 adds only configure_chat_recovery as the public default-on same-Chat binding/disable operation. Automatic scheduling and a public delivery/debug tool remain absent; unrelated schemas and annotations stay unchanged. Expectations are authored from the approved contract and checked against installed discovery.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/68"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/76#issuecomment-5983667384",
+      "base_commit": "3b0039b48d6151d7e2e21db6b2fca6bdb9c1a6be",
+      "change": "Spec 76 adds optional task recovery_policy and correlated read_task preparation_id, replaces the URL-binding recovery input with an action-only override and marks its preparation scheduling as open-world. Expectations are authored from the approved contract; tool names and all unrelated schemas/annotations stay exact.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/76"
     }
   ],
   "baseline": {
@@ -389,16 +395,19 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "inputSchema": {
         "$defs": {
-          "RecoveryDisable": {
+          "RecoveryChange": {
             "additionalProperties": false,
             "properties": {
               "action": {
-                "const": "disable",
+                "enum": [
+                  "enable",
+                  "disable"
+                ],
                 "title": "Action",
                 "type": "string"
               }
@@ -406,78 +415,13 @@
             "required": [
               "action"
             ],
-            "title": "RecoveryDisable",
-            "type": "object"
-          },
-          "RecoveryEnable": {
-            "additionalProperties": false,
-            "properties": {
-              "action": {
-                "const": "enable",
-                "title": "Action",
-                "type": "string"
-              },
-              "authorization_ref": {
-                "maxLength": 512,
-                "minLength": 1,
-                "title": "Authorization Ref",
-                "type": "string"
-              },
-              "chat_url": {
-                "maxLength": 2048,
-                "minLength": 1,
-                "title": "Chat Url",
-                "type": "string"
-              },
-              "expires_at_ms": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "title": "Expires At Ms",
-                "type": "integer"
-              },
-              "machine": {
-                "maxLength": 128,
-                "minLength": 1,
-                "title": "Machine",
-                "type": "string"
-              },
-              "workspace": {
-                "maxLength": 128,
-                "minLength": 1,
-                "title": "Workspace",
-                "type": "string"
-              }
-            },
-            "required": [
-              "action",
-              "chat_url",
-              "machine",
-              "workspace",
-              "authorization_ref",
-              "expires_at_ms"
-            ],
-            "title": "RecoveryEnable",
+            "title": "RecoveryChange",
             "type": "object"
           }
         },
         "properties": {
           "change": {
-            "discriminator": {
-              "mapping": {
-                "disable": "#/$defs/RecoveryDisable",
-                "enable": "#/$defs/RecoveryEnable"
-              },
-              "propertyName": "action"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/RecoveryEnable"
-              },
-              {
-                "$ref": "#/$defs/RecoveryDisable"
-              }
-            ],
-            "title": "Change"
+            "$ref": "#/$defs/RecoveryChange"
           },
           "expected_revision": {
             "maximum": 9007199254740991,
@@ -770,6 +714,22 @@
                 "maxLength": 1024,
                 "title": "Objective",
                 "type": "string"
+              },
+              "recovery_policy": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "task_chat",
+                      "disabled"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Recovery Policy"
               },
               "repositories": {
                 "items": {
@@ -1300,6 +1260,22 @@
                 "maxLength": 1024,
                 "title": "Objective",
                 "type": "string"
+              },
+              "recovery_policy": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "task_chat",
+                      "disabled"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Recovery Policy"
               },
               "repositories": {
                 "items": {
@@ -2957,6 +2933,19 @@
       },
       "inputSchema": {
         "properties": {
+          "preparation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preparation Id"
+          },
           "task_id": {
             "title": "Task Id",
             "type": "string"

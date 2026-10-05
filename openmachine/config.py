@@ -91,6 +91,23 @@ class SkillSources(BaseModel):
         return list(dict.fromkeys(values))
 
 
+class ChatRecoveryConfig(BaseModel):
+    """One operator-selected existing browser route, not provider credentials."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    workspace: Name
+    connection: str = Field(min_length=1, max_length=200)
+    browser_account: str = Field(min_length=1, max_length=200)
+    browser_workspace: str = Field(min_length=1, max_length=200)
+    model: str = Field(min_length=1, max_length=200)
+
+    @field_validator("connection", "browser_account", "browser_workspace", "model")
+    @classmethod
+    def visible_label(cls, value: str) -> str:
+        if not value.strip() or any(ord(char) < 32 for char in value):
+            raise ValueError("recovery labels must be explicit single-line selections")
+        return value
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
@@ -98,11 +115,16 @@ class Settings(BaseModel):
     workspaces: dict[Name, Workspace] = Field(default_factory=dict)
     github: GitHubConfig | None = None
     skills: SkillSources = Field(default_factory=SkillSources)
+    chat_recovery: ChatRecoveryConfig | None = None
 
     @model_validator(mode="after")
     def configured_machines(self):
         if not self.machines or any(w.machine not in self.machines for w in self.workspaces.values()):
             raise ValueError("workspaces must refer to configured machines")
+        if self.chat_recovery is not None:
+            controller = self.workspaces.get(self.chat_recovery.workspace)
+            if controller is None or self.machines[controller.machine].transport != "local":
+                raise ValueError("recovery requires one configured local controller workspace")
         return self
 
     def machine(self, name: str, *, write: bool = False) -> Machine:
@@ -116,6 +138,8 @@ class Settings(BaseModel):
     def configuration_sha256(self) -> str:
         # Null is the inherited legacy grant, not a change to old config identity.
         value = self.model_dump()
+        if value["chat_recovery"] is None:
+            del value["chat_recovery"]  # Keep existing configuration identities stable.
         for machine in value["machines"].values():
             if machine["workspace_write_enabled"] is None:
                 del machine["workspace_write_enabled"]

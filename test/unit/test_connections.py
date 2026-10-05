@@ -346,6 +346,12 @@ class ConnectionTests(TaskFixture, unittest.TestCase):
     def test_legacy_task_identity_and_serialization_are_not_migrated(self):
         self.request["contract"].update(repositories=["Example/repo"], tools=["github_comment"])
         old = tasks.create(self.state, self.request["task_id"], **{k: v for k, v in self.request.items() if k != "task_id"})["record"]
+        # Seed an actual historical shape; the current constructor creates format 3.
+        old["format"] = 1
+        old.pop("chat_registration")
+        old["contract"].pop("recovery_policy")
+        self.path.write_bytes(records.canonical(old))
+        self.app.rebuild_task_index()
         raw = self.path.read_bytes()
         self.assertEqual(old["format"], 1)
         self.assertEqual(records.canonical(records.Record.model_validate(old).model_dump()), raw)
@@ -361,7 +367,7 @@ class ConnectionTests(TaskFixture, unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 14)
+        self.assertEqual(proof["state_contract"], 15)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

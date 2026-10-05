@@ -55,22 +55,9 @@ class TerminalSize(BaseModel):
     cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
 
 
-class RecoveryEnable(BaseModel):
+class RecoveryChange(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    action: Literal["enable"]
-    chat_url: Annotated[str, Field(min_length=1, max_length=2048)]
-    machine: Annotated[str, Field(min_length=1, max_length=128)]
-    workspace: Annotated[str, Field(min_length=1, max_length=128)]
-    authorization_ref: Annotated[str, Field(min_length=1, max_length=512)]
-    expires_at_ms: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)]
-
-
-class RecoveryDisable(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    action: Literal["disable"]
-
-
-RecoveryChange = Annotated[RecoveryEnable | RecoveryDisable, Field(discriminator="action")]
+    action: Literal["enable", "disable"]
 
 
 def _task_context(value: tasks.TaskContext | None) -> dict | None:
@@ -152,7 +139,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+        guarded = {"read_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -169,8 +156,19 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if (isinstance(response, dict) and not response.get("isError")
                 and isinstance(response.get("structuredContent"), dict)
                 and application.chat_recovery is not None):
-            await asyncio.to_thread(application.chat_recovery.external_activity,
-                                    params["name"], arguments or {}, response["structuredContent"])
+            try:
+                await asyncio.to_thread(application.chat_recovery.external_activity,
+                                        params["name"], arguments or {}, response["structuredContent"])
+            except (Fault, OSError) as error:
+                # A correlated read is not acknowledged until its evidence is
+                # durable. Ordinary business effects retain their existing hook.
+                code = error.code if isinstance(error, Fault) else "chat_recovery_store_unavailable"
+                response = _result({"error": {"code": code,
+                    "message": "Receiver evidence was not acknowledged; retain the original preparation."}}, True).model_dump(
+                        mode="json", by_alias=True, exclude_none=True, exclude={"result_type"})
+                if ctx.protocol_version == "2026-07-28":
+                    response.update(resultType="complete", _meta={
+                        "io.modelcontextprotocol/serverInfo": {"name": mcp.name, "version": mcp.version}})
         return response
 
     mcp = MCPServer(
@@ -308,7 +306,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                     title: Annotated[str, Field(min_length=1, max_length=200)],
                     anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
                     stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
-        """Create the default structured record for new multi-stage work needing continuity. Derive a bounded contract and outcome-sized stages from the authorized request; a Spec is optional and one-step reads need no task. Stage source_sha256 hashes the selected full source objects sorted by locator: UTF-8 JSON with sorted keys, unescaped Unicode, no spaces and a final newline. See the bundled Skill for the exact encoding. After rejection, correct the contract or report the blocker before effects; never substitute ordinary receipts or omit task_context to continue. Current targets/grants are checked only for a new creation; original update-ID retries return retained state. A stale index does not erase a committed record. Explicit control_task claim and current task_context are required before supervised effects; creation does not execute, recover or wake an AI. Authority references are traceability, not new grants. Never convert legacy history or supply runtime facts."""
+        """Create a bounded structured task for authorized multi-stage work. New tasks default to task_chat recovery: Runtime prepares one task-owned ordinary Chat through the configured controller before new business effects. No originating Chat URL is required. Use disabled only on the user's explicit instruction. Read the returned preparation state and blocker; committed creation is not receiver readiness. Preserve necessary instructions and readable inputs, not just source hashes. Stage source_sha256 hashes the selected full source objects sorted by locator using UTF-8 canonical JSON and a final newline; see the operating Skill. A committed record or stale index is never permission to recreate it. Explicit claim and current task_context remain required; preparation grants no business authority. One-step reads need no task. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
                       contract.model_dump(), [stage.model_dump() for stage in stages]))
 
@@ -319,17 +317,17 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                            expected_epoch: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
                            update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                            transition: tasks.Transition) -> CallToolResult:
-        """Explicitly claim/release, pause/resume/cancel, revise a plan, record a verified stage decision or finish the original task. Reattach by reading original evidence and current task/plan/epoch; preserve update_id after a lost reply. Release an owned claim for handover; reclaim an eligible handoff after release/expiry without repeating accepted stages. All stages accepted still requires explicit finish. A finish transition has action, outcome, acceptance and limitations; acceptance is a list of {stage_id, operation_id} objects referencing accepted original evidence, not a list of IDs or summaries. Claims are native-account cooperative ownership, not ChatGPT identity or permission. Pause blocks new admission, not admitted effects; cancellation retains unknown outcomes. Reads never claim. Background results can advance the revision; no Events or automatic AI continuation."""
+        """Explicitly claim/release, pause/resume/cancel, revise a plan, accept verified stages or finish the original task. Read original evidence and current task/plan/epoch first; retain update_id after uncertainty. Claims provide cooperative ownership, not ChatGPT identity or new permission. A ready recovery route does not replace a current claim or task_context. Pause blocks new admission, not admitted effects; cancellation retains unknown outcomes. Explicit historical recovery enrollment uses revise_plan and preserves original receipts. Finish requires action, outcome, acceptance and limitations; acceptance contains {stage_id, operation_id} references to accepted original evidence. Reads never claim. Background receipt observation and recovery preparation may advance state; always inspect the returned revision and recovery projection."""
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
             expected_plan_revision, expected_epoch, update_id, transition.model_dump()))
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
-    @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
+    @mcp.tool(annotations=WRITE, structured_output=False)
     def configure_chat_recovery(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
                                 update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                                 expected_revision: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
                                 change: RecoveryChange) -> CallToolResult:
-        """Configure the default-on same-Chat recovery binding or explicitly disable it for one structured task. Enable binds one exact ordinary Chat URL, configured local controller workspace, original authority reference and bounded expiry. Binding does not claim the task, extend business authority or send a message. Disable suppresses future recovery dispatch while retaining prior delivery evidence. Automatic unattended detection is not delivered in this slice."""
+        """Explicitly enable or disable task-owned recovery under the original task authority. Runtime owns the single destination and controller; callers cannot supply a URL or another account. Enable may schedule preparation but never claims business work, extends task authority, resets budgets or retries sent/uncertain messages. Disable suppresses future setup/delivery and retains original evidence; it does not cancel admitted commands. Preserve update_id and observed recovery revision after uncertainty. Historical unbound tasks need explicit guarded plan enrollment, not a legacy URL-binding fallback."""
         return _reply(lambda: application.configure_chat_recovery(
             task_id, update_id, expected_revision, change.model_dump()))
 
@@ -342,9 +340,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation))
 
     @mcp.tool(annotations=READ, structured_output=False)
-    def read_task(task_id: str) -> CallToolResult:
-        """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. Caller state remains unknown; native task control, runtime recovery and Events support are reported separately. Reading grants no authority and never reactivates terminal history."""
-        return _reply(lambda: application.read_task(task_id))
+    def read_task(task_id: str, preparation_id: Annotated[str | None,
+                  Field(pattern=r"^[0-9a-f]{32}$")] = None) -> CallToolResult:
+        """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. An optional original preparation_id correlates a read-only receiver check; only the successful external MCP call records that evidence. It does not claim, enable recovery, prove a Chat identity or advance work. Omitted means a passive ordinary read. Reading grants no authority and never reactivates terminal history."""
+        return _reply(lambda: application.read_task(task_id, preparation_id))
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
     def save_task(task_id: str, expected_revision: Annotated[int, Field(ge=0)],
