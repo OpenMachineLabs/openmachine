@@ -131,7 +131,6 @@ def main() -> int:
         if event_name == "pull_request":
             pr = event["pull_request"]
             errors += metadata_errors(pr, "pr")
-            errors += commit_errors(ROOT, pr["base"]["sha"], pr["head"]["sha"])
         elif event_name == "issues":
             errors += metadata_errors(event["issue"], "issue")
         elif event_name == "push" and not event.get("deleted"):

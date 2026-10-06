@@ -71,22 +71,10 @@ class PremergeChecks(unittest.TestCase):
                 self.assertEqual(result["status"], "cached")
                 checks.assert_not_called()
             with patch.object(premerge, "fingerprint", return_value=environment), \
-                    patch.object(premerge, "commit_range_errors", return_value=[]), \
                     patch.object(premerge, "execute_checks") as checks:
                 result = premerge.run_premerge(root, base, force=True)
                 self.assertEqual(result["status"], "passed")
                 checks.assert_called_once_with(root)
-
-    def test_commit_range_failure_stops_before_expensive_checks(self):
-        directory, root, base, _ = self.repository()
-        with directory:
-            environment = {"python": "fixture"}
-            with patch.object(premerge, "fingerprint", return_value=environment), \
-                    patch.object(premerge, "commit_range_errors", return_value=["bad subject"]), \
-                    patch.object(premerge, "execute_checks") as checks:
-                with self.assertRaisesRegex(ValueError, "before expensive checks"):
-                    premerge.run_premerge(root, base, force=True)
-                checks.assert_not_called()
 
 
 if __name__ == "__main__":

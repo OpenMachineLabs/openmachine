@@ -100,10 +100,13 @@ or performing merge:
 python3 scripts/premerge.py --base origin/main
 ```
 
-It rejects invalid commit subjects before the expensive installed-candidate suite
-and reuses a successful result only for the same HEAD, resolved base and local
-verification fingerprint. Use `--force` when an intentional full rerun is needed.
-The cache lives only inside Git metadata and never replaces hosted CI evidence.
+It validates the exact local HEAD/base relationship and reuses a successful result
+only for the same HEAD, resolved base and local verification fingerprint. Use
+`--force` when an intentional full rerun is needed. Pull-request-internal commit
+subjects are not a merge gate because published history should not be rewritten to
+satisfy presentation policy; the final commit landing on `main` is still validated
+by the push event. The cache lives only inside Git metadata and never replaces
+hosted CI evidence.
 
 The underlying repository-only checks remain:
 

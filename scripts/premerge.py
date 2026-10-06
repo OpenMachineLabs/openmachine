@@ -3,7 +3,6 @@
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import platform
@@ -106,20 +105,6 @@ def write_cache(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def _repository_rules(root: Path):
-    path = root / "scripts/check_repository.py"
-    spec = importlib.util.spec_from_file_location("openmachine_premerge_repository_rules", path)
-    if spec is None or spec.loader is None:
-        raise ValueError("repository checker could not be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def commit_range_errors(root: Path, base_sha: str, head_sha: str) -> list[str]:
-    return _repository_rules(root).commit_errors(root, base_sha, head_sha)
-
-
 def execute_checks(root: Path) -> None:
     _run([sys.executable, "-m", "unittest", "discover", "-s", "test/system", "-p", "test_*.py"], cwd=root)
     _run([sys.executable, "scripts/check_repository.py"], cwd=root)
@@ -157,9 +142,6 @@ def run_premerge(root: Path, base_ref: str, *, force: bool = False) -> dict:
         print(f"PASS: cached premerge for {head_sha} against {base_sha}")
         return {"status": "cached", "head_sha": head_sha, "base_sha": base_sha, "cache": str(path)}
 
-    errors = commit_range_errors(root, base_sha, head_sha)
-    if errors:
-        raise ValueError("commit range failed before expensive checks: " + "; ".join(errors))
     execute_checks(root)
     require_clean(root)
     record = cache_record(head_sha, base_sha, environment)
@@ -171,7 +153,7 @@ def run_premerge(root: Path, base_ref: str, *, force: bool = False) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default=DEFAULT_BASE,
-                        help="local base ref or full SHA for commit-range validation (default: origin/main)")
+                        help="local base ref or full SHA for candidate identity validation (default: origin/main)")
     parser.add_argument("--force", action="store_true", help="rerun checks even when this exact candidate is cached")
     args = parser.parse_args()
     try:

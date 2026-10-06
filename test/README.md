@@ -15,6 +15,10 @@ wheel, then runs all unit and contract tests outside the checkout. It also runs
 `git diff --check` and requires the tracked/untracked worktree to remain clean. It
 never fetches a missing base ref; fetch the intended base explicitly first.
 
+Pull-request-internal commit subjects are not a merge gate: rewriting published PR
+history loses useful provenance. PR metadata is checked on pull-request events, and
+the final commit that lands on `main` remains subject to the push-event commit rule.
+
 A successful result is cached only under Git metadata for the exact HEAD, resolved
 base and local Python/workflow fingerprint. Re-running the same candidate reuses
 that PASS; use `--force` to execute every check again. Failed or dirty candidates
