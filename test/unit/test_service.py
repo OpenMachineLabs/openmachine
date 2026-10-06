@@ -150,6 +150,9 @@ class ServiceTests(unittest.TestCase):
         config = maintenance.load(self.config)
         digest = maintenance._digest(self.config)
         self.assert_fault("local_machine_required", lambda: maintenance.change_machine(self.config, self.state, "machine-remove", "1" * 32, "local", digest))
+        unpinned = config.model_copy(update={"machines": {**config.machines,
+            "remote": config.machines["remote"].model_copy(update={"ssh_identity": ""})}})
+        self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(unpinned, self.state, "remote"))
         record = {"contract": {"targets": [{"machine": "remote"}]}, "operations": []}
         with patch.object(service_checks.tasks, "observation_page", return_value={"complete": True, "entries": [{"record": record}], "has_more": False}):
             self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(config, self.state, "remote"))

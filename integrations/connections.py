@@ -307,7 +307,8 @@ class Connections:
         if not re.fullmatch(r"[0-9a-f]{32}", request_id) or connection_id and not re.fullmatch(r"[0-9a-f]{32}", connection_id):
             raise Fault("invalid_integration_request", "Use the original bounded request and connection IDs.")
         intent = dict(provider=provider, method=method, connection_id=connection_id)
-        original = _read(self.state)
+        with self._mutex:
+            original = _read(self.state)
         if original is not None and request_id in original.attempts:
             if original.attempts[request_id].intent != intent:
                 raise Fault("integration_request_conflict", "The request ID belongs to different intent.")

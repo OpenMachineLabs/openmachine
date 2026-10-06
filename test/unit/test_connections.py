@@ -1,6 +1,7 @@
 """Native connection behavior using existing task fixtures and a small provider fake."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -131,8 +132,31 @@ class ConnectionTests(TaskFixture, unittest.TestCase):
     def test_original_id_deduplicates_and_rejects_changed_intent(self):
         self.run_owner()
         identity = uuid.uuid4().hex
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda _: self.app.connect_integration(identity), range(2)))
+        created, release, second_started = threading.Event(), threading.Event(), threading.Event()
+        original_guard = connections._guard
+        @contextmanager
+        def initializing(path, **kwargs):
+            if not kwargs.get("shared") and not path.exists():
+                # Expose the real file-creation -> flock window before first publish.
+                path.touch(mode=0o600)
+                created.set()
+                self.assertTrue(release.wait(3))
+            with original_guard(path, **kwargs):
+                yield
+        def second_request():
+            second_started.set()
+            return self.app.connect_integration(identity)
+        with patch.object(connections, "_guard", initializing), ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(self.app.connect_integration, identity)
+            try:
+                self.assertTrue(created.wait(3))
+                second = pool.submit(second_request)
+                self.assertTrue(second_started.wait(3))
+                time.sleep(0.05)
+                self.assertFalse(second.done(), "A concurrent request must wait for first publication")
+            finally:
+                release.set()
+            results = [first.result(timeout=3), second.result(timeout=3)]
         self.assertEqual({r["login_id"] for r in results}, {identity})
         self.start.assert_called_once()
         self.assertEqual(self.result(identity)["status"], "succeeded")

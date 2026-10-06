@@ -180,7 +180,9 @@ def machine_unused(config, state: Path, name: str, *, check_remote: bool = True)
             break
     if target.ssh_identity in recovery.read(state)["targets"]:
         raise Fault("machine_in_use", "Retained SSH observation history still references this identity.")
-    if check_remote and target.ssh_identity:
+    if not target.ssh_identity:
+        raise Fault("machine_in_use", "An unpinned target cannot prove that remote history is absent; preserve its connection.")
+    if check_remote:
         # Turning grants off does not erase earlier work outside controller tasks.
         probe = client.call(config, name, "probe")
         records = client.call(config, name, "list_executions", limit=1)
