@@ -789,6 +789,60 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), original)
         self.assertEqual(service_state._record(self.state)["current"], self.a)
 
+    def test_same_wheel_configuration_update_is_reversible_and_idempotent(self):
+        _, stop, start = self.activation_mocks()
+        (self.state / "service/versions").chmod(0o700)
+        wheel = self.root / "openmachine-0.1.0a7-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("openmachine-0.1.0a7.dist-info/METADATA", "Name: openmachine\nVersion: 0.1.0a7\n")
+        requirements = self.root / "requirements.lock"
+        requirements.write_text("example==1.0\n")
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(original + b"# explicitly selected configuration\n")
+        selected_bytes = candidate.read_bytes()
+        def observed(python, config, *_args, **_kwargs):
+            return {"version": "0.1.0a7", "prefix": str(python.parent.parent), "protocol": 1, "state_contract": 1}
+        with patch.object(sys, "platform", "darwin"), patch.object(service_runtime, "_verify_files"), \
+                patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(service_runtime, "status", return_value={"status": "ready"}), \
+                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, \
+                patch.object(service_checks, "_candidate_state", side_effect=observed):
+            first = service_install._prepare(self.state, wheel, requirements, self.config)
+            self.save(self.record | {"current": first})
+            result = service_transition.operate(self.config, self.state, "update", wheel=wheel,
+                                                requirements=requirements, candidate_config=candidate)
+            second = result["current"]
+            self.assertNotEqual(first, second)
+            self.assertEqual(result["previous"], first)
+            self.assertEqual(self.config.read_bytes(), selected_bytes)
+            self.assertEqual(stop.call_count, 1)
+            run.reset_mock()
+            # Equal bytes at another path are the same candidate, not another restart.
+            service_transition.operate(self.config, self.state, "update", wheel=wheel, requirements=requirements)
+            run.assert_not_called()
+            self.assertEqual(stop.call_count, 1)
+            service_transition.operate(self.config, self.state, "rollback")
+            self.assertEqual(self.config.read_bytes(), original)
+            before = service_state._record(self.state)
+            self.assertEqual((before["current"], before["previous"]), (first, second))
+            start.side_effect = [Fault("service_unready", "fixture"), {"status": "ready"}]
+            self.assert_fault("activation_failed_restored", lambda: service_transition.operate(
+                self.config, self.state, "update", wheel=wheel, requirements=requirements, candidate_config=candidate))
+            self.assertEqual(self.config.read_bytes(), original)
+            self.assertEqual(service_state._record(self.state), before)
+            run.assert_not_called()
+            # Mutating the source during preflight cannot change the retained candidate.
+            start.side_effect = None
+            def change_source(*args, **kwargs):
+                candidate.write_bytes(original + b"# later unrelated source edit\n")
+                return observed(*args, **kwargs)
+            with patch.object(service_checks, "_candidate_state", side_effect=change_source):
+                service_transition.operate(self.config, self.state, "update", wheel=wheel,
+                                           requirements=requirements, candidate_config=candidate)
+            self.assertEqual(self.config.read_bytes(), selected_bytes)
+            self.assertEqual(service_state._record(self.state)["current"], second)
+
     def test_failed_activation_restores_exact_configuration_bytes(self):
         _, stop, start = self.activation_mocks()
         start.side_effect = [Fault("service_unready", "fixture"), {"status": "ready"}]

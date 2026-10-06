@@ -73,7 +73,9 @@ session, receipts and immutable files; software rollback does not undo effects.
 
 For explicitly changed configuration or SSH routes, leave the active file unchanged
 and pass `update --candidate-config /absolute/new.toml`. The owner snapshots exact
-bytes, validates local/target readers, and restores actual pre-transition content
+bytes and includes them in the prepared installation identity, so the same wheel
+or payload can activate a different configuration with a distinct rollback target.
+It validates local/target readers and restores actual pre-transition content
 on failure, including valid edits since the previous update. An independent racing
 edit is preserved with uncertainty, not overwritten. Cooperative locks do not
 fence external editors or another runtime/state root.
