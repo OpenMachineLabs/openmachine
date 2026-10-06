@@ -46,8 +46,10 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path, *,
         raise Fault("invalid_installation_artifact", "Select a trusted local Open Machine wheel and fully pinned requirements file.") from error
     if offline is not None and version != offline[2]["core"]["version"]:
         raise Fault("installation_identity_mismatch", "The payload declaration and Core wheel disagree.")
+    configuration = service_state._snapshot_configuration(state, config_path)
+    config_path = service_state._saved_configuration(state, configuration)
     runtime_identity = offline[1] if offline else sys.version
-    digest = hashlib.sha256((wheel_hash + hashlib.sha256(locked).hexdigest() + runtime_identity).encode()).hexdigest()
+    digest = hashlib.sha256((wheel_hash + hashlib.sha256(locked).hexdigest() + runtime_identity + configuration).encode()).hexdigest()
     versions = private_directory(state / "service/versions")
     destination = versions / digest
     if destination.exists():

@@ -212,6 +212,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             if wheel is None or requirements is None:
                 raise Fault("invalid_service_request", "Update requires a trusted local wheel and pinned requirements.")
             selected_config = candidate_config.resolve(strict=True) if candidate_config is not None else config_path
+            selected_config = service_state._saved_configuration(state, service_state._snapshot_configuration(state, selected_config))
             target = install._prepare(state, wheel, requirements, selected_config)
             if target == record["current"]:
                 if selected_config.read_bytes() != config_path.read_bytes():

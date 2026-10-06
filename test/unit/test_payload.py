@@ -209,6 +209,14 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(venv[0][-1], result["runtime"])
         record = json.loads((Path(result["runtime"]) / "installation.json").read_text())
         self.assertEqual(record["payload_sha256"], self.digest)
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes() + b"# configuration-only update\n")
+        with patch.object(checks, "_run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
+            changed = install.prepare_payload(candidate, self.state, self.source, self.digest)
+            self.assertEqual(install.prepare_payload(candidate, self.state, self.source, self.digest), changed)
+        self.assertEqual(changed["payload_sha256"], result["payload_sha256"])
+        self.assertNotEqual(changed["identity"], result["identity"])
+        self.assertFalse((self.state / "service/service.json").exists())
 
     def test_failed_installation_is_retained_without_an_online_fallback(self):
         with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 1, "", "")):
