@@ -238,9 +238,10 @@ single `configure_chat_recovery` operation accepts only an explicit enable/disab
 override, never a caller-selected URL or replacement controller. Accepted update
 IDs consume revisions; exact retries, including after pause, remain observations.
 Overrides preserve destination, attempts, original executions and prior uncertainty.
-After repairing a proven setup failure before any browser action, an explicit enable
-can reschedule preparation if no destination or receiver read was recorded. It retains
-the original attempt and time limits; sent or uncertain effects cannot be retried this way.
+After repairing a proven setup failure or a verified pre-send blocker, an explicit
+enable can reschedule preparation if no destination or receiver read was recorded.
+It retains the original attempts and deadline, and a pre-send blocker retains the
+ten-minute delay from its observation. Sent or uncertain effects cannot be retried this way.
 
 Both preparing and bound entries count toward the 32-active/128-retained limit in
 the bounded 512-KiB recovery store. Preparation has at most three browser attempts

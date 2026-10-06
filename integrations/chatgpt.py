@@ -530,8 +530,10 @@ def configure(state: Path, *, task_id: str, update_id: str, expected_revision: i
                 binding.expires_at_ms = expires_at_ms
             preparation = binding.preparation
             if (action == "enable" and preparation is not None
-                    and preparation.status == "blocked" and preparation.reason == "browser_setup"
+                    and preparation.status == "blocked" and preparation.reason in {"browser_setup", "browser_preflight"}
                     and binding.chat_url is None and preparation.receiver_read is None):
+                if preparation.reason == "browser_preflight":
+                    preparation.next_attempt_ms = max(preparation.next_attempt_ms, preparation.updated_at_ms + GRACE_MS)
                 preparation.status, preparation.reason = "pending", ""
                 preparation.updated_at_ms = timestamp
         value.bindings[task_id] = binding
