@@ -120,7 +120,7 @@ def discover() -> tuple[str, Path, dict]:
     config = tomllib.loads(_bytes(home / "config.toml", 131072).decode())
     bridge = config.get("mcp_servers", {}).get("node_repl")
     keys = {"command", "args", "env", "startup_timeout_sec", "tool_timeout_sec", "enabled", "required"}
-    if (not binary or not isinstance(bridge, dict) or bridge.get("enabled") is False
+    if (not isinstance(bridge, dict) or bridge.get("enabled") is False
             or set(bridge) - keys or not isinstance(bridge.get("command"), str)
             or not isinstance(bridge.get("env", {}), dict) or set(bridge.get("env", {})) - BRIDGE_ENV):
         raise ValueError("native bridge unavailable or unsupported")
@@ -128,7 +128,13 @@ def discover() -> tuple[str, Path, dict]:
     if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
         raise ValueError("native bridge executable unavailable")
     # The installed desktop app owns this Skill/API. Do not copy or vendor it.
-    root = executable.parents[2] / "plugins/openai-bundled/plugins/browser"
+    resources = executable.parents[2]
+    if binary is None:
+        native_cli = resources / "codex-cli"
+        if not native_cli.is_file() or not os.access(native_cli, os.X_OK):
+            raise ValueError("native Codex CLI unavailable")
+        binary = str(native_cli)
+    root = resources / "plugins/openai-bundled/plugins/browser"
     skill = root / "skills/control-in-app-browser/SKILL.md"
     if not skill.is_file() or not (root / "scripts/browser-client.mjs").is_file():
         raise ValueError("native browser Skill unavailable")

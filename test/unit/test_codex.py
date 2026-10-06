@@ -81,6 +81,21 @@ sys.exit(7 if packet["goal"]=="exit-failed" else 0)
         self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home),
             "PATH": str(binary.parent) + os.pathsep + os.environ.get("PATH", "")}))
 
+    def test_packaged_runtime_can_use_the_configured_native_app_without_shell_path(self):
+        native = self.root / "App/Resources/codex-cli"
+        with patch.object(codex.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "native Codex CLI unavailable"):
+                codex.discover()
+            native.write_text("#!/bin/sh\nexit 0\n")
+            native.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "native Codex CLI unavailable"):
+                codex.discover()
+            native.chmod(0o700)
+            binary, _, options = codex.discover()
+        self.assertEqual(binary, str(native))
+        self.assertEqual(options["model"], "fixture-model")
+        self.assertFalse((self.state / "executions").exists())
+
     def arguments(self, goal="inspect", **updates):
         return dict(machine="desktop", execution_id=uuid.uuid4().hex, cwd=str(self.work),
             goal=goal, start_url="https://example.com/path?q=fixture#end",

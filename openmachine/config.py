@@ -166,7 +166,7 @@ def load(path: Path) -> Settings:
 
 
 def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
-               workspace_writes: bool = False) -> dict:
+               workspace_writes: bool = False, chat_recovery: dict | None = None) -> dict:
     """One first-run writer shared by init and management; never adopt or overwrite."""
     if type(commands) is not bool or type(workspace_writes) is not bool:
         raise Fault("invalid_config", "First-run grants must be explicit booleans.")
@@ -176,8 +176,18 @@ def initialize(path: Path, workspace: Path | None = None, *, commands: bool = Fa
     if workspace is not None:
         if not workspace.is_absolute() or not workspace.is_dir():
             raise Fault("invalid_workspace", "The workspace must be an existing absolute directory.")
-        text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(workspace.resolve())) + '\n'
-    Settings.model_validate(tomllib.loads(text))
+        text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(workspace.resolve()), ensure_ascii=False) + '\n'
+    if chat_recovery is not None:
+        try:
+            profile = ChatRecoveryConfig.model_validate(chat_recovery)
+        except ValidationError as error:
+            raise Fault("invalid_config", "Select every recovery profile field explicitly.") from error
+        text += '\n[chat_recovery]\n' + ''.join(
+            f'{key} = {json.dumps(value, ensure_ascii=False)}\n' for key, value in profile.model_dump().items())
+    try:
+        Settings.model_validate(tomllib.loads(text))
+    except ValidationError as error:
+        raise Fault("invalid_config", "Recovery must use the selected local workspace.") from error
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as output:

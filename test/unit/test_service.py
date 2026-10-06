@@ -1,6 +1,7 @@
 """Focused lifecycle failures; mocked launchctl is not native-service acceptance."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -1133,6 +1134,27 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(maintenance.dispatch(self.config, self.state, "status", contract=99)["status"], "incompatible")
         with patch.object(maintenance, "observe", side_effect=Fault("resource_busy", "fixture")):
             self.assertEqual(maintenance.dispatch(self.config, self.state, "status")["status"], "busy")
+
+    def test_manage_configure_accepts_complete_recovery_selections_and_rejects_partial_input(self):
+        from openmachine.cli import main
+        from openmachine.config import load
+        path, state = self.root / "first.toml", self.root / "first-state"
+        argv = ["openmachine", "--config", str(path), "--state-dir", str(state), "manage",
+                "--contract", "1", "configure", "--workspace", str(self.root),
+                "--recovery-connection", "OM", "--browser-account", "operator",
+                "--browser-workspace", "Personal", "--recovery-model", "selected-model"]
+        self.enterContext(patch.object(maintenance.sys, "platform", "darwin"))
+        with patch.object(sys, "argv", argv[:-2]), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(), 1)
+        self.assertEqual(json.loads(output.getvalue())["reason"], "invalid_config")
+        self.assertFalse(path.exists())
+        with patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertIn("configure:chat_recovery", result["capabilities"])
+        self.assertEqual(load(path).chat_recovery.workspace, "project")
+        self.assertEqual(load(path).chat_recovery.connection, "OM")
+        self.assertFalse(state.exists())
 
     def test_operation_same_id_reads_original_and_conflicting_ids_are_busy(self):
         record = self.operation_fixture()
