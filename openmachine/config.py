@@ -97,13 +97,15 @@ class ChatRecoveryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     workspace: Name
     connection: str = Field(min_length=1, max_length=200)
-    browser_account: str = Field(min_length=1, max_length=200)
+    browser_account: str | None = Field(default=None, min_length=1, max_length=200)
     browser_workspace: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1, max_length=200)
 
     @field_validator("connection", "browser_account", "browser_workspace", "model")
     @classmethod
-    def visible_label(cls, value: str) -> str:
+    def visible_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError("recovery labels must be explicit single-line selections")
         return value
@@ -185,7 +187,8 @@ def initialize(path: Path, workspace: Path | None = None, *, commands: bool = Fa
         except ValidationError as error:
             raise Fault("invalid_config", "Select every recovery profile field explicitly.") from error
         text += '\n[chat_recovery]\n' + ''.join(
-            f'{key} = {json.dumps(value, ensure_ascii=False)}\n' for key, value in profile.model_dump().items())
+            f'{key} = {json.dumps(value, ensure_ascii=False)}\n'
+            for key, value in profile.model_dump(exclude_none=True).items())
     try:
         expected = Settings.model_validate(tomllib.loads(text))
     except (ValidationError, tomllib.TOMLDecodeError) as error:

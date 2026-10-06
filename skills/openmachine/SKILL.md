@@ -374,14 +374,17 @@ The generic Codex adapter does not itself wake Chat, and native browser access i
 not a network sandbox.
 
 For structured task-owned recovery, inspect `read_task.chat_recovery`. New tasks
-default to task_chat; Runtime prepares one ordinary Chat through the explicitly
-configured local controller. Do not request, infer or bind the originating Chat
-URL. Read `preparing`, `ready`, `blocked` or `disabled` and the concrete blocker.
-Task creation may advance a registration revision without admitting business work.
-A committed record is not readiness; use the returned current task context.
+default to task_chat; Runtime registers recovery without opening a browser while
+the caller is active. Preparation starts only after the normal inactivity grace
+and no-live-claim/no-running-work checks. Do not request, infer or bind the
+originating Chat URL. Read `preparing`, `ready`, `blocked` or `disabled` and the
+concrete blocker. Task creation may advance a registration revision without
+admitting business work.
 
-The one installation profile names the existing connection, authenticated browser
-account/workspace and selected model. Setup does not authorize login, account or
+The one installation profile names the existing connection, browser workspace and
+selected model. The current authenticated account is used as-is and is never
+switched or logged in automatically; a legacy browser_account label is not a
+recovery identity or routing guard. Setup does not authorize login, account or
 workspace switching, permission grants, installation or model fallback. Resolve
 missing authority with the user, not another connector or hidden configuration.
 Necessary originating instructions and readable inputs must be retained in the
@@ -394,18 +397,18 @@ checks the independently persisted external read witness against native browser
 route/end-of-turn evidence and verified cleanup. A successful read or an echoed
 marker alone cannot establish readiness or guarantee permission for later writes.
 
-New business effects require readiness or an explicitly user-disabled policy,
-as well as a current claim, task_context and ordinary scope guards. Original-ID
-receipt reads and authorized stopping remain available before readiness. Use the
-same action-only configure_chat_recovery operation for an explicit enable/disable;
+Foreground business effects use the current claim, task_context and ordinary
+scope/provider guards; they do not wait for recovery preparation. Automatic
+recovery delivery still requires a verified prepared route. Use the same
+action-only configure_chat_recovery operation for an explicit enable/disable;
 never supply a URL or reset original attempts/delivery history. Missing acknowledged
 registration, uncertain setup and known later route blockers are not an invitation
 to recreate the Chat or bypass admission. Preserve original IDs after interruption.
 Historical unbound tasks require explicit guarded plan enrollment, not auto-migration.
 
-Initial setup does not wait for business inactivity. Continuation uses the existing
-30-second observer checks, ten-minute attributable-activity and restart grace,
-original handoff and no-live-claim/no-running-command guards. One bounded slot
+Initial setup uses the same existing 30-second observer checks, ten-minute
+attributable-activity and restart grace, original handoff and
+no-live-claim/no-running-command guards as continuation. One bounded slot
 shares the existing global Codex browser lease and remains owned until exit.
 Read original receipts after re-entry, claim the current handoff and continue only
 remaining safe work. Pause for a real human decision; do not leave an ambiguous

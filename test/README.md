@@ -123,8 +123,8 @@ restrictions must be reported as blockers, not converted to native acceptance.
 ## Task-owned Chat recovery
 
 Spec 76 tests exercise durable registration/acknowledgement gaps, missing retained
-entries, preparation capacity/budgets, readiness-gated command/file effects and
-original-ID no-replay behavior. Installed local MCP tests verify the correlated
+entries, preparation capacity/budgets, foreground effects independent of recovery
+readiness and original-ID no-replay behavior. Installed local MCP tests verify the correlated
 receiver read and fail-closed persistence on both supported wire protocols.
 Native browser facts in unit fixtures are synthetic; they are not live ChatGPT
 acceptance. The Spec Issue separately records the actual receiver route, a bounded

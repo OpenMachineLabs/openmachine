@@ -285,11 +285,11 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
     def test_first_run_recovery_uses_existing_validation_without_granting_execution(self):
         from openmachine.config import initialize
         profile = dict(workspace="project", connection='Existing "OM" \\ route',
-                       browser_account="operator", browser_workspace="Personal", model="selected-model")
+                       browser_workspace="Personal", model="selected-model")
         path = self.root / "first-run.toml"
         initialize(path, self.work, chat_recovery=profile)
         config = load(path)
-        self.assertEqual(config.chat_recovery.model_dump(), profile)
+        self.assertEqual(config.chat_recovery.model_dump(exclude_none=True), profile)
         self.assertFalse(config.machines["local"].execution_enabled)
         self.assertIs(config.machines["local"].workspace_write_enabled, False)
         before = path.read_bytes()
