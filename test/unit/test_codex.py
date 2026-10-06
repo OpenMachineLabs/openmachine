@@ -195,9 +195,12 @@ sys.exit(7 if packet["goal"]=="exit-failed" else 0)
         self.accept_plan(tools=["start_codex_task", "read_codex_task", "start_execution", "control_task"])
         args = self.arguments()
         args["task_context"] = self.context_for(args["execution_id"])
+        started = self.app.start_codex_task(**args)
+        # This test observes admitted work; lock contention during admission is a separate contract.
         self.app.task_observer.start()
         self.addCleanup(self.app.task_observer.stop)
-        report = self.finished(args)
+        self.wait(started)
+        report = self.app.read_codex_task("desktop", args["execution_id"])
         self.assertEqual(report["status"], "completed")
         deadline = time.monotonic() + 5
         view = self.view()

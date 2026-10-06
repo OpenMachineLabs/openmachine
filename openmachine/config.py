@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import tomllib
 from typing import Annotated, Literal
 
@@ -166,9 +167,10 @@ def load(path: Path) -> Settings:
 
 
 def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
-               workspace_writes: bool = False, chat_recovery: dict | None = None) -> dict:
+               workspace_writes: bool = False, chat_recovery: dict | None = None,
+               verify_existing: bool = False) -> dict:
     """One first-run writer shared by init and management; never adopt or overwrite."""
-    if type(commands) is not bool or type(workspace_writes) is not bool:
+    if any(type(value) is not bool for value in (commands, workspace_writes, verify_existing)):
         raise Fault("invalid_config", "First-run grants must be explicit booleans.")
     text = ('schema_version = 1\n\n[machines.local]\ntransport = "local"\n'
             f'execution_enabled = {str(commands).lower()}\n'
@@ -185,9 +187,15 @@ def initialize(path: Path, workspace: Path | None = None, *, commands: bool = Fa
         text += '\n[chat_recovery]\n' + ''.join(
             f'{key} = {json.dumps(value, ensure_ascii=False)}\n' for key, value in profile.model_dump().items())
     try:
-        Settings.model_validate(tomllib.loads(text))
+        expected = Settings.model_validate(tomllib.loads(text))
     except ValidationError as error:
         raise Fault("invalid_config", "Recovery must use the selected local workspace.") from error
+    if verify_existing:
+        metadata = path.lstat()
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_uid != os.getuid()
+                or metadata.st_nlink != 1 or load(path).configuration_sha256() != expected.configuration_sha256()):
+            raise Fault("configuration_mismatch", "The existing private configuration does not match the accepted first-run inputs.")
+        return {"verified": str(path), "configuration_sha256": expected.configuration_sha256()}
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as output:

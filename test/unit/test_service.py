@@ -1144,6 +1144,7 @@ class ServiceTests(unittest.TestCase):
                 "--recovery-connection", "OM", "--browser-account", "operator",
                 "--browser-workspace", "Personal", "--recovery-model", "selected-model"]
         self.enterContext(patch.object(maintenance.sys, "platform", "darwin"))
+        self.enterContext(patch.object(service_runtime, "_native", return_value={"loaded": False}))
         with patch.object(sys, "argv", argv[:-2]), redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(), 1)
         self.assertEqual(json.loads(output.getvalue())["reason"], "invalid_config")

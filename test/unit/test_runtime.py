@@ -298,6 +298,16 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertFalse(self.state.exists())
+        verified = initialize(path, self.work, chat_recovery=profile, verify_existing=True)
+        self.assertEqual(verified["configuration_sha256"], config.configuration_sha256())
+        self.assertNotIn("created", verified)
+        with self.assertRaises(Fault):
+            initialize(path, self.work, chat_recovery=profile, commands=True, verify_existing=True)
+        self.assertEqual(path.read_bytes(), before)
+        missing = self.root / "missing.toml"
+        with self.assertRaises(FileNotFoundError):
+            initialize(missing, self.work, chat_recovery=profile, verify_existing=True)
+        self.assertFalse(missing.exists())
         for patch in ({"model": None}, {"connection": ""}, {"browser_account": "two\nlines"},
                       {"workspace": "missing"}, {"extra": "forbidden"}):
             candidate = self.root / "invalid.toml"

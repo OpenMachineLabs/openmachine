@@ -70,6 +70,7 @@ def main() -> int:
     configure.add_argument("--browser-account", help="Explicit signed-in browser account label")
     configure.add_argument("--browser-workspace", help="Explicit ChatGPT workspace label")
     configure.add_argument("--recovery-model", help="Explicit existing model label")
+    configure.add_argument("--verify-existing", action="store_true", help="Read back the exact first-run inputs after a lost reply; never create or overwrite")
     for action in ("install", "update"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
@@ -107,7 +108,7 @@ def main() -> int:
                 inputs["enabled"] = args.enabled == "true"
             if action == "configure":
                 inputs.update(workspace=args.workspace, commands=args.enable_commands,
-                              workspace_writes=args.enable_workspace_writes)
+                              workspace_writes=args.enable_workspace_writes, verify_existing=args.verify_existing)
                 profile = dict(connection=args.recovery_connection, browser_account=args.browser_account,
                                browser_workspace=args.browser_workspace, model=args.recovery_model)
                 if any(value is not None for value in profile.values()):

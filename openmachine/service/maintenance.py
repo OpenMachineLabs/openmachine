@@ -407,7 +407,7 @@ def observe(config_path: Path, state: Path) -> dict:
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
-                "capabilities": [*CAPABILITIES, "configure:chat_recovery"],
+                "capabilities": [*CAPABILITIES, "configure:chat_recovery", "configure:verify_existing"],
                 "implementation_version": __version__, "implementation_state_contract": service_state.STATE_CONTRACT}
     try:
         if contract != service_state.MANAGEMENT_CONTRACT:
