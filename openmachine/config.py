@@ -104,7 +104,7 @@ class ChatRecoveryConfig(BaseModel):
     @field_validator("connection", "browser_account", "browser_workspace", "model")
     @classmethod
     def visible_label(cls, value: str) -> str:
-        if not value.strip() or any(ord(char) < 32 for char in value):
+        if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError("recovery labels must be explicit single-line selections")
         return value
 
@@ -188,8 +188,8 @@ def initialize(path: Path, workspace: Path | None = None, *, commands: bool = Fa
             f'{key} = {json.dumps(value, ensure_ascii=False)}\n' for key, value in profile.model_dump().items())
     try:
         expected = Settings.model_validate(tomllib.loads(text))
-    except ValidationError as error:
-        raise Fault("invalid_config", "Recovery must use the selected local workspace.") from error
+    except (ValidationError, tomllib.TOMLDecodeError) as error:
+        raise Fault("invalid_config", "First-run settings must contain a valid local workspace and recovery profile.") from error
     if verify_existing:
         metadata = path.lstat()
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_uid != os.getuid()

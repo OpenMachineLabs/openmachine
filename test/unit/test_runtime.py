@@ -308,7 +308,7 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         with self.assertRaises(FileNotFoundError):
             initialize(missing, self.work, chat_recovery=profile, verify_existing=True)
         self.assertFalse(missing.exists())
-        for patch in ({"model": None}, {"connection": ""}, {"browser_account": "two\nlines"},
+        for patch in ({"model": None}, {"connection": ""}, {"browser_account": "two\nlines"}, {"model": "bad\x7flabel"},
                       {"workspace": "missing"}, {"extra": "forbidden"}):
             candidate = self.root / "invalid.toml"
             with self.assertRaises(Fault) as caught:
