@@ -93,6 +93,20 @@ workflow is assumed. Add planning integration only when it has an actual owner.
 
 ## Checks and evidence
 
+For a clean committed candidate, run the local premerge entry point before requesting
+or performing merge:
+
+```sh
+python3 scripts/premerge.py --base origin/main
+```
+
+It rejects invalid commit subjects before the expensive installed-candidate suite
+and reuses a successful result only for the same HEAD, resolved base and local
+verification fingerprint. Use `--force` when an intentional full rerun is needed.
+The cache lives only inside Git metadata and never replaces hosted CI evidence.
+
+The underlying repository-only checks remain:
+
 ```sh
 python3 -m unittest discover -s test/system -p 'test_*.py'
 python3 scripts/check_repository.py

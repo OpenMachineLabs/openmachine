@@ -2,28 +2,28 @@
 
 ## Run the installed candidate
 
-Use the repository's locked dependencies and build/install an independent wheel.
-Run outside the checkout so source imports cannot hide missing package files:
+For a clean committed candidate, use the single premerge entry point:
 
 ```sh
-REPO="$PWD"
-python3 -m venv .venv
-PYTHON="$REPO/.venv/bin/python"
-"$PYTHON" -m pip install -r requirements.lock
-"$PYTHON" -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-"$PYTHON" -m pip install --no-deps --force-reinstall dist/openmachine-*.whl
-python3 -m unittest discover -s test/system -p 'test_*.py'
-python3 scripts/check_repository.py
-cd /tmp
-"$PYTHON" -m unittest discover -s "$REPO/test/unit" -p 'test_*.py'
-"$PYTHON" -m unittest discover -s "$REPO/test/contract" -p 'test_*.py'
+python3 scripts/premerge.py --base origin/main
 ```
 
-Use a fresh build directory or select the exact wheel when multiple versions exist.
-For focused work, select one existing capability file with `-p`. All tests remain
-under root `test/`; no additional framework, network account or GPU is required.
-Private disposable directories, short owned processes and local Unix sockets are
-fixtures, not production projects or live SSH/ChatGPT acceptance.
+The command validates that the requested local base exists and is an ancestor of
+HEAD before expensive work, runs the repository/system checks, creates an isolated
+temporary environment with locked dependencies, builds and installs one independent
+wheel, then runs all unit and contract tests outside the checkout. It also runs
+`git diff --check` and requires the tracked/untracked worktree to remain clean. It
+never fetches a missing base ref; fetch the intended base explicitly first.
+
+A successful result is cached only under Git metadata for the exact HEAD, resolved
+base and local Python/workflow fingerprint. Re-running the same candidate reuses
+that PASS; use `--force` to execute every check again. Failed or dirty candidates
+are never cached. For focused work before committing, run the owning test file
+directly; the cache is deliberately only for an exact committed candidate.
+
+All tests remain under root `test/`; no additional framework, network account or
+GPU is required. Private disposable directories, short owned processes and local
+Unix sockets are fixtures, not production projects or live SSH/ChatGPT acceptance.
 
 ## Coverage by responsibility
 
@@ -41,7 +41,7 @@ fixtures, not production projects or live SSH/ChatGPT acceptance.
 | `unit/test_service.py` | Selection, reader compatibility, before-stop rejection, configuration restoration, first-upgrade failures, bounded supervision, persistent Stop/login policy, exact legacy definitions, stable management CLI, original maintenance phases and unchanged recovery budgets. |
 | `unit/test_ssh.py`, `test_github.py` | Pinned target transport/archive isolation; exact provider scope/account, complete paged evidence, merge gates and original-destination reconciliation. |
 | `contract/test_mcp*.py` | Installed private-socket SDK/wire contracts, workflow/restart continuity and independent admission; split by execution, workspace, patches and tasks; retired Events methods are rejected. |
-| `system/test_repository.py` | Standard-library repository hygiene, templates, metadata and commit checking. |
+| `system/test_repository.py`, `test_premerge.py` | Repository hygiene, metadata and commit checking; clean-candidate base validation, cache identity and early premerge failure. |
 
 `support_tasks.py`, `support_execution.py`, `support_workspace.py` and
 `support_mcp.py` contain shared fixture helpers, not TestCase subclasses or tests.
