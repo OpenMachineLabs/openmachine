@@ -282,6 +282,40 @@ assert not any(name in sys.modules for name in ("integrations.github", "integrat
         self.assertFalse(self.state.exists())
         self.assertEqual(json.loads(result.stdout)["chatgpt"], "not_probed")
 
+    def test_first_run_recovery_uses_existing_validation_without_granting_execution(self):
+        from openmachine.config import initialize
+        profile = dict(workspace="project", connection='Existing "OM" \\ route',
+                       browser_account="operator", browser_workspace="Personal", model="selected-model")
+        path = self.root / "first-run.toml"
+        initialize(path, self.work, chat_recovery=profile)
+        config = load(path)
+        self.assertEqual(config.chat_recovery.model_dump(), profile)
+        self.assertFalse(config.machines["local"].execution_enabled)
+        self.assertIs(config.machines["local"].workspace_write_enabled, False)
+        before = path.read_bytes()
+        with self.assertRaises(FileExistsError):
+            initialize(path, self.work, chat_recovery=profile | {"model": "another-model"})
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(self.state.exists())
+        verified = initialize(path, self.work, chat_recovery=profile, verify_existing=True)
+        self.assertEqual(verified["configuration_sha256"], config.configuration_sha256())
+        self.assertNotIn("created", verified)
+        with self.assertRaises(Fault):
+            initialize(path, self.work, chat_recovery=profile, commands=True, verify_existing=True)
+        self.assertEqual(path.read_bytes(), before)
+        missing = self.root / "missing.toml"
+        with self.assertRaises(FileNotFoundError):
+            initialize(missing, self.work, chat_recovery=profile, verify_existing=True)
+        self.assertFalse(missing.exists())
+        for patch in ({"model": None}, {"connection": ""}, {"browser_account": "two\nlines"}, {"model": "bad\x7flabel"},
+                      {"workspace": "missing"}, {"extra": "forbidden"}):
+            candidate = self.root / "invalid.toml"
+            with self.assertRaises(Fault) as caught:
+                initialize(candidate, self.work, chat_recovery=profile | patch)
+            self.assertEqual(caught.exception.code, "invalid_config")
+            self.assertFalse(candidate.exists())
+
     def test_disabled_machine_cannot_execute(self):
         self.config.machines["my-laptop"].execution_enabled = False
         with self.assertRaises(Fault) as caught:

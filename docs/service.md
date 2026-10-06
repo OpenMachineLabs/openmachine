@@ -204,6 +204,24 @@ Core registers only retained Python/entry/environment paths, never donor App
 paths. First-run configuration is local-only; later grant changes use the existing
 explicit configuration workflow and candidate snapshots.
 
+Desktop first use consumes the additive `configure:chat_recovery` capability.
+`manage configure` accepts `--recovery-connection`, `--browser-account`,
+`--browser-workspace` and `--recovery-model` together. They populate the existing
+recovery profile for the selected `project` workspace. These are explicit visible
+labels, never credentials or the originating Chat URL. Partial/invalid selections
+fail before creating the file. Command and file-write grants stay independent and
+default off; supplying a recovery profile grants neither. Configuration remains
+create-only: this cannot change an installed profile, bypass activation admission,
+install a connection, log in, or establish task-recovery readiness. Compatible
+signed-in Codex/browser setup and real receiver evidence remain separate.
+
+After a lost first-run configuration reply, `configure --verify-existing` with
+the original inputs only reads and verifies an exact private owned configuration.
+It never creates, overwrites or repairs a file, and rejects changed grants or
+profiles. The additive `configure:verify_existing` capability lets Desktop
+reconcile this step before submitting its original install operation. Installed
+state still rejects first-run configuration; this is not a configuration editor.
+
 ### Policy and old-Core limits
 
 Persistent Stop uses service selection format 2 and state contract 14. The policy

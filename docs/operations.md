@@ -467,9 +467,11 @@ The existing local execution grant, lifecycle gate, task claim and native worksp
 scope apply. Structured contracts include `start_execution` (the underlying
 operation) and use the same operation/execution ID; no second task record exists.
 
-The adapter discovers `codex` on PATH and the enabled native `node_repl` bridge in
-CODEX_HOME/config.toml, then reads the browser Skill from that bridge's installed
-desktop-app resources. It does not install anything, copy browser libraries,
+The adapter discovers the enabled native `node_repl` bridge in CODEX_HOME/config.toml
+and reads the browser Skill from that bridge's installed desktop-app resources.
+It uses `codex` on PATH when present; a packaged service without the developer's
+shell PATH uses the executable `codex-cli` beside that same configured native
+bridge. It does not scan other apps, install anything, copy browser libraries,
 read authentication files, or change configuration. A compatible native desktop
 bridge and a signed-in Codex installation are prerequisites, not supplied by CLI
 installation alone. The child uses an empty temporary instruction home and
