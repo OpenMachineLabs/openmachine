@@ -593,9 +593,9 @@ class ServiceTests(unittest.TestCase):
             "machines": {"local": {"transport": "local", "execution_enabled": True}},
             "github": {"repositories": ["example/project"]}})
         app = create_application(config, self.state)
-        issue = ("update", "example/project", "Title", "Body", 1, "closed", "observed-time")
+        issue = ("update", "example/project", "Title", "Body", 1, "closed", "observed-time", None, None)
         pull = ("update", "example/project", "Title", "Body", 1, "topic", "main", False,
-                "closed", "observed-time", "f" * 40)
+                "closed", "observed-time", "f" * 40, None, None)
         cases = [
             ("apply_workspace_patch", ("local", "project", "patch", "a" * 64, "", [], False, "c" * 32, False, ""),
              app.machines, "apply_workspace_patch"),
