@@ -2028,6 +2028,24 @@
             "title": "Action",
             "type": "string"
           },
+          "assignees": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assignees"
+          },
           "body": {
             "anyOf": [
               {
@@ -2051,6 +2069,24 @@
             "default": "",
             "title": "Expected Updated At",
             "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
           },
           "number": {
             "default": 0,
@@ -2301,6 +2337,24 @@
             "title": "Action",
             "type": "string"
           },
+          "assignees": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assignees"
+          },
           "base": {
             "default": "",
             "title": "Base",
@@ -2344,6 +2398,24 @@
             "default": "",
             "title": "Head",
             "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Labels"
           },
           "number": {
             "default": 0,

@@ -40,8 +40,9 @@ class GitHubTests(unittest.TestCase):
         self.pr = {"id": 202, "number": 2, "state": "open", "draft": False, "title": "old", "body": "legacy",
                    "head": {"sha": HEAD, "ref": "topic", "label": "Owner:topic"},
                    "base": {"sha": BASE, "ref": "main", "label": "Owner:main"},
-                   "user": ACTOR, "updated_at": STAMP, "changed_files": 2}
-        self.issue_value = {"id": 101, "number": 1, "title": "old", "body": "legacy", "state": "open", "updated_at": STAMP}
+                   "user": ACTOR, "assignees": [], "labels": [], "updated_at": STAMP, "changed_files": 2}
+        self.issue_value = {"id": 101, "number": 1, "title": "old", "body": "legacy", "state": "open",
+                            "assignees": [], "labels": [], "updated_at": STAMP}
         self.comments = []
         self.reviews = [{"id": 9, "body": "review", "state": "COMMENTED", "commit_id": HEAD,
                          "submitted_at": STAMP, "user": ACTOR, "html_url": "https://example.invalid/review/9"}]
@@ -316,6 +317,61 @@ class GitHubTests(unittest.TestCase):
             self.assert_fault("github_wrong_object_type", github.issue, settings(), "update", REPO,
                               None, None, number=1, state="closed", expected_updated_at=STAMP)
             mutate.assert_not_called()
+
+    def test_issue_and_pr_metadata_use_bounded_verified_issue_fields(self):
+        def mutating(method, endpoint, payload=None):
+            if method == "PATCH" and endpoint == f"{ROOT}/issues/1":
+                self.assertEqual(payload, {"labels": [], "assignees": ["Operator"]})
+                self.issue_value.update(labels=[], assignees=[ACTOR])
+                return copy.deepcopy(self.issue_value)
+            if method == "PATCH" and endpoint == f"{ROOT}/issues/2":
+                self.assertEqual(payload, {"labels": ["maintenance"], "assignees": ["Operator"]})
+                self.pr.update(labels=[{"id": 7, "name": "maintenance"}], assignees=[ACTOR])
+                return copy.deepcopy(self.pr)
+            return self.response(method, endpoint, payload)
+        with patch.object(connection, "request", side_effect=mutating) as api:
+            issue = github.issue(settings(), "update", REPO, None, None, number=1,
+                                 expected_updated_at=STAMP, labels=[], assignees=["Operator"])
+            pr = github.pull_request(settings(), "update", REPO, None, None, number=2,
+                                     expected_updated_at=STAMP, expected_head_sha=HEAD,
+                                     labels=["maintenance"], assignees=["Operator"])
+            observed = github.read(settings(), "pull_request", REPO, number=2)
+        self.assertEqual((issue["status"], pr["status"]), ("verified", "verified"))
+        writes = [call for call in api.call_args_list if call.args[0] == "PATCH"]
+        self.assertEqual([call.args[1] for call in writes], [f"{ROOT}/issues/1", f"{ROOT}/issues/2"])
+        self.assertEqual(observed["data"]["labels"], ["maintenance"])
+        self.assertEqual(observed["data"]["assignees"], [ACTOR])
+
+    def test_pr_metadata_stays_one_effect_and_validates_names(self):
+        with patch.object(operations, "_mutate") as mutate:
+            self.assert_fault("invalid_github_request", github.pull_request, settings(), "create", REPO,
+                              "new", "body", head="topic", base="main", labels=["maintenance"])
+            self.assert_fault("invalid_github_request", github.pull_request, settings(), "update", REPO,
+                              "new", None, number=2, expected_head_sha=HEAD, labels=["maintenance"])
+            self.assert_fault("invalid_github_request", github.issue, settings(), "create", REPO,
+                              "new", "body", labels=["duplicate", "DUPLICATE"])
+            mutate.assert_not_called()
+
+    def test_metadata_readback_and_reconciliation_compare_named_sets(self):
+        observed = {"id": 9, "number": 2, "labels": [{"name": "Maintenance"}],
+                    "assignees": [{"login": "operator"}]}
+        with patch.object(connection, "request", side_effect=[observed, observed]):
+            result = operations._mutate(REPO, "PATCH", "endpoint",
+                {"labels": ["maintenance"], "assignees": ["Operator"]}, lambda _: "readback")
+        self.assertEqual(result["status"], "verified")
+        observed["labels"] = [{"name": "bug"}]
+        with patch.object(connection, "request", side_effect=[observed, observed]):
+            result = operations._mutate(REPO, "PATCH", "endpoint",
+                {"labels": ["maintenance"]}, lambda _: "readback")
+        self.assertEqual(result["status"], "write_unverified")
+
+        locator = self.task_locator("pull_request", 2)
+        self.pr.update(labels=[{"name": "maintenance"}], assignees=[ACTOR])
+        request = dict(action="update", labels=["maintenance"], assignees=["operator"],
+                       expected_head_sha=HEAD)
+        reconciled = github.reconcile(settings(), locator, request)
+        self.assertEqual(reconciled["status"], "verified")
+        self.assertTrue(reconciled["fields_verified"])
 
     def test_readback_verifies_all_fields_review_commit_and_actor(self):
         cases = [({"title": "new", "body": "same"}, {"title": "old", "body": "same"}),

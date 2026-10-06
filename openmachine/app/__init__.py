@@ -351,20 +351,24 @@ class Application:
 
     def github_issue(self, action: Literal["create", "update"], repository: str, title: str | None = None,
                      body: str | None = None, number: int = 0, state: Literal["open", "closed"] | None = None,
-                     expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:
+                     expected_updated_at: str = "", labels: list[str] | None = None,
+                     assignees: list[str] | None = None, task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_issue", dict(action=action, repository=repository, title=title,
-                body=body, number=number, state=state, expected_updated_at=expected_updated_at, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                body=body, number=number, state=state, expected_updated_at=expected_updated_at,
+                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_pull_request(self, action: Literal["create", "update"], repository: str,
                             title: str | None = None, body: str | None = None, number: int = 0, head: str = "",
                             base: str = "", draft: bool = False, state: Literal["open", "closed"] | None = None,
                             expected_updated_at: str = "", expected_head_sha: str = "",
+                            labels: list[str] | None = None, assignees: list[str] | None = None,
                             task_context: dict | None = None, connection_id: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("github_pull_request", dict(action=action, repository=repository,
                 title=title, body=body, number=number, head=head, base=base, draft=draft, state=state,
-                expected_updated_at=expected_updated_at, expected_head_sha=expected_head_sha, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                expected_updated_at=expected_updated_at, expected_head_sha=expected_head_sha,
+                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_comment(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
                        comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:

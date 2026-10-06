@@ -60,6 +60,9 @@ class RecoveryChange(BaseModel):
     action: Literal["enable", "disable"]
 
 
+GitHubNames = Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=100)]
+
+
 def _task_context(value: tasks.TaskContext | None) -> dict | None:
     return value.model_dump() if value is not None else None
 
@@ -306,7 +309,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                     title: Annotated[str, Field(min_length=1, max_length=200)],
                     anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
                     stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
-        """Create a bounded structured task for authorized multi-stage work. New tasks default to task_chat recovery: Runtime prepares one task-owned ordinary Chat through the configured controller before new business effects. No originating Chat URL is required. Use disabled only on the user's explicit instruction. Read the returned preparation state and blocker; committed creation is not receiver readiness. Preserve necessary instructions and readable inputs, not just source hashes. Stage source_sha256 hashes the selected full source objects sorted by locator using UTF-8 canonical JSON and a final newline; see the operating Skill. A committed record or stale index is never permission to recreate it. Explicit claim and current task_context remain required; preparation grants no business authority. One-step reads need no task. Never convert legacy history or supply runtime facts."""
+        """Create a bounded structured task for authorized multi-stage work. New tasks default to recovery disabled and create no Chat receiver. Set recovery_policy=task_chat only when the user explicitly requests recovery for that task; an explicit later enable may enroll the same task under its original authority. No originating Chat URL is required. Read any returned recovery state and blocker; committed creation is not receiver readiness. Preserve necessary instructions and readable inputs, not just source hashes. Stage source_sha256 hashes the selected full source objects sorted by locator using UTF-8 canonical JSON and a final newline; see the operating Skill. A committed record or stale index is never permission to recreate it. Explicit claim and current task_context remain required; recovery grants no business authority. One-step reads need no task. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
                       contract.model_dump(), [stage.model_dump() for stage in stages]))
 
@@ -443,7 +446,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                         limit: Annotated[int, Field(ge=1, le=100)] = 30, cursor: Annotated[str, Field(max_length=1024)] = "",
                         expected_head_sha: str = "", expected_base_sha: str = "",
                         offset: Annotated[int, Field(ge=0, le=1048576)] = 0, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Read scoped GitHub identity, repositories, Issues and version-bound PR evidence. Read pull_request before candidate pages; echo both HEAD/base on continuation. Follow next_page/next_cursor and evidence gaps. checks uses an exact commit ref. file uses a fixed commit and 16 KiB UTF-8 byte pages; no symlink/credential reads. API patches are not proof of complete diffs. status probes the existing gh identity without credentials or login changes. merge_context observes gates and never merges. No arbitrary endpoint or mutation dispatch."""
+            """Read scoped GitHub identity, repositories, Issues and version-bound PR evidence. Read pull_request before candidate pages; echo both HEAD/base on continuation. Follow next_page/next_cursor and evidence gaps. checks uses an exact commit ref. file uses a fixed commit and 16 KiB UTF-8 byte pages; no symlink/credential reads. API patches are not proof of complete diffs. status probes the selected native GitHub identity without credentials or login changes. merge_context observes gates and never merges. No arbitrary endpoint or mutation dispatch."""
             return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
@@ -452,9 +455,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                          body: Annotated[str | None, Field(max_length=60000)] = None,
                          number: Annotated[int, Field(ge=0)] = 0,
                          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
+                         labels: GitHubNames | None = None, assignees: GitHubNames | None = None,
                          task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Create or update an authorized Issue with field/identity readback and preserved provenance. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
-            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, _task_context(task_context), connection_id=connection_id))
+            """Create or update an authorized Issue with field/identity readback and preserved provenance. labels/assignees replace the complete supplied set; omit them to preserve current metadata and pass [] to clear. state is update-only. Supply observed updated_at to detect stale edits; this is not atomic CAS. Creation is not idempotent: reconcile an uncertain destination before retrying."""
+            return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, labels, assignees, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_pull_request(action: Literal["create", "update"], repository: str,
@@ -463,9 +467,11 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 number: Annotated[int, Field(ge=0)] = 0,
                                 head: str = "", base: str = "", draft: bool = False,
                                 state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-                                expected_head_sha: str = "", task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Create/update a scoped PR using the same gh connection. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
-            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, _task_context(task_context), connection_id=connection_id))
+                                expected_head_sha: str = "", labels: GitHubNames | None = None,
+                                assignees: GitHubNames | None = None, task_context: tasks.TaskContext | None = None,
+                                connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+            """Create/update a scoped PR using the selected native GitHub connection. On update, labels/assignees replace the complete supplied set through GitHub's shared Issue metadata endpoint; omit them to preserve metadata and pass [] to clear. Keep metadata updates separate from title/body/state so one provider endpoint owns each effect. PR creation does not accept labels/assignees. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
+            return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, labels, assignees, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_comment(action: Literal["create", "update"], repository: str,

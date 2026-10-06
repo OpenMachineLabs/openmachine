@@ -762,13 +762,17 @@ class ServiceTests(unittest.TestCase):
                     admission.assert_called_once_with(self.state / "locks/lifecycle.lock", shared=True)
                 prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
                 self.assertEqual(dispatch.call_count, 1)
-                actual = signature.bind(*dispatch.call_args.args, **dispatch.call_args.kwargs).arguments
+                actual = signature.bind(*dispatch.call_args.args, **dispatch.call_args.kwargs)
+                expected = signature.bind(*prefix, *arguments)
+                actual.apply_defaults()
+                expected.apply_defaults()
                 if name.startswith("github_"):
-                    self.assertIs(actual.pop("transport"), request.return_value)
+                    self.assertIs(actual.arguments.pop("transport"), request.return_value)
+                    expected.arguments.pop("transport")
                     request.assert_called_once_with("example/project", connection_id="", binding=None, write=True, legacy=False)
                 else:
                     request.assert_not_called()
-                self.assertEqual(actual, signature.bind(*prefix, *arguments).arguments)
+                self.assertEqual(actual.arguments, expected.arguments)
                 with lease(self.state / "locks/lifecycle.lock"):
                     pass
 

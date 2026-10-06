@@ -411,7 +411,7 @@ def normalize_create(value: dict) -> dict:
 
 def new_record(request: dict, now_ms: int) -> dict:
     contract = dict(request["contract"])
-    contract.setdefault("recovery_policy", "task_chat")
+    contract.setdefault("recovery_policy", "disabled")
     if not now_ms < contract["expires_at_ms"]:
         raise Fault("task_authority_expired", "Task creation requires a future explicit authority expiry.")
     stages = [dict(stage, state="pending", evidence=[]) for stage in request["stages"]]

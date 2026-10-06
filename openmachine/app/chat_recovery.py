@@ -136,8 +136,11 @@ class ChatRecovery:
         if route is None:
             raise Fault("chat_recovery_controller_unconfigured", "Configure the existing local browser route once.")
         workspace = self.app.config.workspaces[route.workspace]
-        fingerprint = records.digest({"route": route.model_dump(), "workspace": workspace.model_dump()})
-        return route, workspace, fingerprint
+        route_values = route.model_dump()
+        current = {key: value for key, value in route_values.items() if key != "browser_account"}
+        fingerprint = records.digest({"route": current, "workspace": workspace.model_dump()})
+        legacy = records.digest({"route": route_values, "workspace": workspace.model_dump()})
+        return route, workspace, fingerprint, {fingerprint, legacy}
 
     def _registered(self, record: dict, binding) -> None:
         if binding is None or binding.preparation is None:
@@ -146,8 +149,8 @@ class ChatRecovery:
         preparation = binding.preparation
         if record.get("chat_registration") != preparation.preparation_id:
             raise Fault("chat_recovery_registration_conflict", "The task and preparation identities must agree.")
-        _, _, fingerprint = self._profile()
-        if preparation.controller_sha256 != fingerprint:
+        _, _, _, fingerprints = self._profile()
+        if preparation.controller_sha256 not in fingerprints:
             raise Fault("chat_recovery_controller_changed", "Preserve the original destination; the controller configuration changed.")
         if binding.authority_sha256 != _authority(record):
             raise Fault("chat_recovery_authority_changed", "Revalidate changed task authority before new work.")
@@ -165,7 +168,7 @@ class ChatRecovery:
         if record.get("chat_registration") is not None:
             self._registered(record, binding)
             return view
-        route, workspace, fingerprint = self._profile()
+        route, workspace, fingerprint, fingerprints = self._profile()
         self.app.config.machine(workspace.machine, write=True)
         context = self.app.machines.read_workspace_file(
             workspace.machine, route.workspace, "AGENTS.md", start_line=1, line_count=1)["context"]
@@ -189,7 +192,7 @@ class ChatRecovery:
             revision = current["record"]["revision"]
         if binding.disabled:
             return view
-        if binding.authority_sha256 != authority or binding.preparation.controller_sha256 != fingerprint:
+        if binding.authority_sha256 != authority or binding.preparation.controller_sha256 not in fingerprints:
             raise Fault("chat_recovery_registration_conflict", "Retained registration belongs to different scope.")
         def acknowledge(value, now):
             self._active(value)
@@ -324,6 +327,8 @@ class ChatRecovery:
                     self._observe(record, binding)
                     if self._disabled(record, binding) or record["terminal"] is not None:
                         continue
+                    self._task(identity, automatic=True)
+                    self._quiet(binding)
                     if binding.preparation and binding.preparation.status in {"pending", "deferred"}:
                         result = self.start_preparation(identity, uuid.uuid4().hex)
                         if result["chat_recovery"]["preparation"]["status"] == "reserved":
@@ -336,7 +341,6 @@ class ChatRecovery:
                             _progress(record) <= (delivery.progress_at_ms if delivery.progress_at_ms is not None else delivery.created_at_ms)
                             and delivery.status != "deferred"):
                         continue
-                    self._quiet(binding)
                     result = self.start_delivery(identity, uuid.uuid4().hex, uuid.uuid4().hex, automatic=True)
                     self._blockers.pop(identity, None)
                     if result["chat_recovery"]["delivery"]["status"] == "reserved":
@@ -352,7 +356,7 @@ class ChatRecovery:
     def capabilities(self) -> dict:
         return {
             "supported": True,
-            "default_enabled": True,
+            "default_enabled": False,
             "automatic_detection": True,
             "automatic_preparation": True,
             "origin_chat_url_required": False,
@@ -369,7 +373,7 @@ class ChatRecovery:
     def project(self, view: dict) -> dict:
         if "record" not in view:
             return {**view, "chat_recovery": {
-                "eligible": False, "default_enabled": True, "state": "legacy_ineligible",
+                "eligible": False, "default_enabled": False, "state": "legacy_ineligible",
                 "binding_revision": 0, "disabled": False, "bound": False, "delivery": None}}
         record = view["record"]
         failure = None
@@ -447,7 +451,7 @@ class ChatRecovery:
         return {**view, "chat_recovery": {
             "eligible": eligible,
             "task_state": task_state,
-            "default_enabled": True,
+            "default_enabled": False,
             "state": state,
             "delivery_state": progress_state,
             "observer_running": not self._stop.is_set(),
@@ -475,7 +479,7 @@ class ChatRecovery:
             if record["contract"].get("recovery_policy") is None and not (binding and binding.chat_url):
                 raise Fault("chat_recovery_enrollment_required", "Explicitly revise the historical plan before enrollment.")
             self.app._validate_task_scope({"contract": record["contract"]}, check_head=False)
-            if binding and binding.preparation and binding.preparation.controller_sha256 != self._profile()[2]:
+            if binding and binding.preparation and binding.preparation.controller_sha256 not in self._profile()[3]:
                 raise Fault("chat_recovery_controller_changed", "Do not replace the original recovery controller.")
         with self.app._admit(), tasks.locked_read(self.app.state, task_id) as current:
             if _authority(current["record"]) != _authority(record):
@@ -590,7 +594,7 @@ class ChatRecovery:
                     or selected.preparation.status != "reserved"
                     or selected.preparation.execution_id != execution_id):
                 raise Fault("chat_recovery_conflict", "Preparation changed before its browser launch.")
-        route = self._profile()[0].model_dump()
+        route = self._profile()[0].model_dump(exclude={"browser_account"})
         started = self._dispatch_browser(reserved, execution_id, chatgpt.preparation_goal(reserved, route),
             reserved.chat_url or chatgpt.ORIGIN + "/", reserved.preparation.deadline_ms, preflight, preparation=True)
         return {"task_id": task_id, "chat_recovery": chatgpt.public(reserved),

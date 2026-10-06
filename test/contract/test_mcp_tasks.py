@@ -25,7 +25,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         context = app.read_workspace_file("desktop", "example", "AGENTS.md")["context"]
         identity = "receiver-wire"
         request = self.task_request(context, identity)
-        request["contract"].pop("recovery_policy")
+        request["contract"]["recovery_policy"] = "task_chat"
         view = app.create_task(**request)
         self.assertEqual(view["chat_recovery"]["state"], "preparing")
         preparation_id = view["record"]["chat_registration"]
