@@ -24,7 +24,7 @@ ReadAction = Literal["status", "repository", "branch", "commit", "file", "issue"
 FIELDS = {
     "repository": "id full_name private default_branch archived permissions html_url",
     "issue": "id number title body state state_reason html_url created_at updated_at closed_at user assignees labels comments pull_request",
-    "pull_request": "id number title body state draft html_url created_at updated_at user head base merged merge_commit_sha mergeable mergeable_state commits changed_files comments review_comments",
+    "pull_request": "id number title body state draft html_url created_at updated_at user assignees labels head base merged merge_commit_sha mergeable mergeable_state commits changed_files comments review_comments",
     "files": "filename previous_filename status sha additions deletions changes patch blob_url",
     "comments": "id body html_url issue_url user created_at updated_at",
     "reviews": "id body html_url user state commit_id submitted_at",
@@ -62,6 +62,39 @@ def _public(value: dict) -> dict:
     if len(json.dumps(result).encode()) > MAX_RESULT_BYTES:
         raise Fault("github_output_too_large", "The observation exceeds 256 KiB after JSON escaping. Reduce the list limit, or use fixed-SHA file pages; this is incomplete evidence.")
     return result
+
+
+def _metadata_fields(labels: list[str] | None, assignees: list[str] | None) -> dict:
+    result = {}
+    for key, values in (("labels", labels), ("assignees", assignees)):
+        if values is None:
+            continue
+        if (type(values) is not list or len(values) > 100
+                or any(not isinstance(value, str) or not 1 <= len(value) <= 100
+                       or value != value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value)
+                       for value in values)
+                or len({value.casefold() for value in values}) != len(values)):
+            raise Fault("invalid_github_request", "Labels and assignees must be unique bounded single-line names.")
+        result[key] = list(values)
+    return result
+
+
+def _named_values(value: dict, key: str) -> list[str] | None:
+    items = value.get(key)
+    field = "name" if key == "labels" else "login"
+    if not isinstance(items, list):
+        return None
+    result = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get(field), str):
+            return None
+        result.append(item[field])
+    return result
+
+
+def _named_match(value: dict, key: str, expected: list[str]) -> bool:
+    actual = _named_values(value, key)
+    return actual is not None and sorted(item.casefold() for item in actual) == sorted(item.casefold() for item in expected)
 
 
 def _project(kind: str, value: dict) -> dict:
@@ -264,7 +297,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         raise Fault("github_wrong_object_type", "The original locator did not resolve to the expected publication.")
     if kind == "comment" and parent is not None and not str(value.get("issue_url", "")).endswith(f"/issues/{parent}"):
         raise Fault("github_wrong_object_type", "The original comment belongs to another parent.")
-    matches = request is not None and marker in (value.get("body") or "")
+    matches = request is not None and (request.get("action") == "update" or marker in (value.get("body") or ""))
     if request is not None:
         if request.get("action") == "create":
             matches &= (value.get("user") or {}).get("id") == actor["id"]
@@ -274,6 +307,9 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         if request.get("body") is not None:
             body = request["body"]
             matches &= value.get("body") in {body, *(_append(body, footer) for footer in FOOTERS)}
+        for key in ("labels", "assignees"):
+            if request.get(key) is not None:
+                matches &= _named_match(value, key, request[key])
         if kind == "pull_request":
             if request.get("action") == "create":
                 matches &= value.get("draft") == request.get("draft", False)
@@ -318,6 +354,8 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
                 matches &= expected in {branch.get("ref"), branch.get("label")}
             elif key == "event":
                 matches &= observed.get("state") == {"COMMENT": "COMMENTED", "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}[expected]
+            elif key in {"labels", "assignees"}:
+                matches &= _named_match(observed, key, expected)
             else:
                 matches &= observed.get(key) == expected
         if settings is not None:
@@ -332,7 +370,8 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
             "verified_fields": list(payload), "fields_verified": True, "body_verified": "body" not in payload or observed.get("body") == payload["body"]}
 
 
-def _update_fields(current: dict, title: str | None, body: str | None, state: str | None, expected_updated_at: str) -> dict:
+def _update_fields(current: dict, title: str | None, body: str | None, state: str | None,
+                   expected_updated_at: str, metadata: dict | None = None) -> dict:
     if expected_updated_at and current.get("updated_at") != expected_updated_at:
         raise Fault("github_object_changed", "The object changed since the supplied observation; read before replacing its fields.")
     if state is not None and state not in {"open", "closed"}:
@@ -340,6 +379,7 @@ def _update_fields(current: dict, title: str | None, body: str | None, state: st
     payload = {key: value for key, value in (("title", title), ("state", state)) if value is not None}
     if body is not None:
         payload["body"] = _preserve(current.get("body") or "", body)
+    payload.update(metadata or {})
     if not payload:
         raise Fault("invalid_github_request", "An update requires at least one field.")
     return payload
@@ -347,21 +387,23 @@ def _update_fields(current: dict, title: str | None, body: str | None, state: st
 
 def issue(settings: Settings, action: Literal["create", "update"], repository: str,
           title: str | None, body: str | None, number: int = 0,
-          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "", *, transport=None) -> dict:
+          state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
+          labels: list[str] | None = None, assignees: list[str] | None = None, *, transport=None) -> dict:
+    metadata = _metadata_fields(labels, assignees)
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/issues"
     if action == "create":
         if not title or state is not None:
             raise Fault("invalid_github_request", "Creating an Issue requires a title; state is update-only.")
         submitted = _attribute(settings, body or "", CREATED_FOOTER)
-        return _mutate(repository, "POST", root, {"title": title, "body": submitted},
+        return _mutate(repository, "POST", root, {"title": title, "body": submitted, **metadata},
                        lambda result: f"{root}/{result['number']}", settings=settings, actor=actor, transport=transport)
     if action != "update" or number < 1:
         raise Fault("invalid_github_request", "Updating an Issue requires its positive number.")
     current = object_response((transport or connection.request)("GET", f"{root}/{number}"))
     if "pull_request" in current:
         raise Fault("github_wrong_object_type", "This number is a Pull Request; use github_pull_request with its candidate checks.")
-    payload = _update_fields(current, title, body, state, expected_updated_at)
+    payload = _update_fields(current, title, body, state, expected_updated_at, metadata)
     return _mutate(repository, "PATCH", f"{root}/{number}", payload, lambda _: f"{root}/{number}", settings=settings, actor=actor, transport=transport)
 
 
@@ -369,10 +411,15 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
                  title: str | None, body: str | None, number: int = 0,
                  head: str = "", base: str = "", draft: bool = False,
                  state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-                 expected_head_sha: str = "", *, transport=None) -> dict:
+                 expected_head_sha: str = "", labels: list[str] | None = None,
+                 assignees: list[str] | None = None, *, transport=None) -> dict:
+    metadata = _metadata_fields(labels, assignees)
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/pulls"
     if action == "create":
+        if metadata:
+            raise Fault("invalid_github_request",
+                        "Creating a PR cannot set labels or assignees in the same verified write; create it first, then update shared metadata.")
         if not title or not head or not base or head == base or state is not None:
             raise Fault("invalid_github_request", "Creating a PR requires title and distinct head/base; state is update-only.")
         if expected_head_sha:
@@ -393,8 +440,13 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
     if action != "update" or number < 1:
         raise Fault("invalid_github_request", "Updating a PR requires its positive number.")
     current = evidence.pull_request(repository, number, expected_head_sha, transport=transport)
-    payload = _update_fields(current, title, body, state, expected_updated_at)
-    return _mutate(repository, "PATCH", f"{root}/{number}", payload, lambda _: f"{root}/{number}", settings=settings, actor=actor, transport=transport)
+    if metadata and any(value is not None for value in (title, body, state)):
+        raise Fault("invalid_github_request",
+                    "Update PR labels/assignees separately from title/body/state so one provider endpoint owns the effect.")
+    payload = _update_fields(current, title, body, state, expected_updated_at, metadata)
+    endpoint = f"repos/{repository}/issues/{number}" if metadata else f"{root}/{number}"
+    return _mutate(repository, "PATCH", endpoint, payload, lambda _: endpoint,
+                   settings=settings, actor=actor, transport=transport)
 
 
 def comment(settings: Settings, action: Literal["create", "update"], repository: str,

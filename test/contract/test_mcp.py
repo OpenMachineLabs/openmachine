@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -108,43 +107,6 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     result = await session.call_tool(name, arguments)
                     self.assertTrue(result.is_error)
                     self.assertEqual(result.structured_content["error"]["code"], "github_not_allowed")
-
-    async def test_missing_gh_and_auth_do_not_break_local_execution(self):
-        self.stop(self.processes[-1])
-        binaries = self.root / "without-gh"
-        binaries.mkdir()
-        for name in ("git", "ps"):
-            source = shutil.which(name)
-            if source:
-                (binaries / name).symlink_to(source)
-        environment = dict(os.environ, PATH=str(binaries))
-        for code in ("github_unavailable", "github_authentication_required"):
-            if code == "github_authentication_required":
-                command = binaries / "gh"
-                command.write_text("#!/bin/sh\nprintf 'gh: Bad credentials (HTTP 401)\\n' >&2\nexit 1\n")
-                command.chmod(0o700)
-            process = self.launch(environment)
-            async with self.client() as (reader, writer):
-                async with ClientSession(reader, writer) as session:
-                    await session.initialize()
-                    unavailable = await session.call_tool("github_read", {"action": "status"})
-                    self.assertTrue(unavailable.is_error)
-                    self.assertEqual(unavailable.structured_content["error"]["code"], "integration_authentication_required")
-                    identity = uuid.uuid4().hex
-                    started = await session.call_tool("start_execution", {
-                        "machine": "desktop", "execution_id": identity, "cwd": str(self.work),
-                        "argv": [sys.executable, "-c", "print('local-still-usable')"],
-                    })
-                    self.assertFalse(started.is_error, started)
-                    for _ in range(100):
-                        observed = await session.call_tool("read_execution", {"machine": "desktop", "execution_id": identity})
-                        self.assertFalse(observed.is_error, observed)
-                        if observed.structured_content["status"] == "succeeded":
-                            break
-                        await asyncio.sleep(0.03)
-                    self.assertEqual(observed.structured_content["exit_code"], 0)
-                    self.assertIn("local-still-usable", observed.structured_content["output"])
-            self.stop(process)
 
     async def test_github_typed_boundaries_before_dispatch(self):
         self.stop(self.processes[-1])

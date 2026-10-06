@@ -86,7 +86,9 @@ limits, source integrity and lifecycle semantics not captured by schema snapshot
 An authorized contract change requires exact baseline/candidate provenance and
 review of its deliberate fixture delta. Internal file moves require no fixture
 change. Deleting a duplicate test requires an explicit retained-coverage map;
-keep unique fault, corruption, permission, control and restart scenarios.
+keep unique fault, corruption, permission, control and restart scenarios. The
+retired `gh`-CLI outage fixture is covered by native GitHub typed-boundary tests,
+`test_tool_contract_without_github`, and installed-candidate catalog discovery.
 
 ## Evidence boundaries
 
