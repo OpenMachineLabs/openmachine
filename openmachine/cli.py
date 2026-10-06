@@ -56,7 +56,7 @@ def main() -> int:
     manage = commands.add_parser("manage", help="Typed product management; explicit config/state binding and original operation readback")
     manage.add_argument("--contract", type=int, default=1)
     management = manage.add_subparsers(dest="management_action", required=True)
-    for action in ("status", "start", "stop", "rollback"):
+    for action in ("status", "start", "stop", "rollback", "machines"):
         management.add_parser(action)
     bind = management.add_parser("bind", help="Bind the stable entry to an exact retained payload implementation")
     bind.add_argument("--identity", required=True)
@@ -84,6 +84,17 @@ def main() -> int:
     for action in ("operation", "continue"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
+    for action in ("machine-probe", "machine-test", "machine-add", "machine-remove"):
+        operation = management.add_parser(action)
+        operation.add_argument("--name", required=True)
+        if action in {"machine-test", "machine-add"}:
+            operation.add_argument("--ssh-alias", required=True)
+            operation.add_argument("--ssh-worker", required=True)
+        if action == "machine-add":
+            operation.add_argument("--ssh-identity", required=True)
+        if action in {"machine-add", "machine-remove"}:
+            operation.add_argument("--operation-id", required=True)
+            operation.add_argument("--config-sha256", required=True)
     args = parser.parse_args()
     if args.command == "manage" and (args.config is None or args.state_dir is None):
         parser.error("manage requires explicit --config and --state-dir before the subcommand")
@@ -102,6 +113,14 @@ def main() -> int:
                     inputs.update(workspace=args.probe_workspace, path=args.probe_path)
                 else:
                     inputs["candidate_config"] = args.candidate_config
+            if action.startswith("machine-"):
+                inputs["name"] = args.name
+                if action in {"machine-test", "machine-add"}:
+                    inputs.update(alias=args.ssh_alias, worker=args.ssh_worker)
+                if action == "machine-add":
+                    inputs["pinned"] = args.ssh_identity
+                if action in {"machine-add", "machine-remove"}:
+                    inputs.update(identity=args.operation_id, expected_config_sha256=args.config_sha256)
             if action == "bind":
                 inputs["identity"] = args.identity
             if action == "startup":

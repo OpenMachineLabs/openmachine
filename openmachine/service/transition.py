@@ -48,6 +48,10 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         # records under the admission lock, including completed newer-format records.
         if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
             install._verify_candidate(state, candidate_record, target, check_remote=True)
+        original_settings, candidate_settings = load(Path(record["config"])), load(candidate_path)
+        for name, machine in original_settings.machines.items():
+            if machine.transport == "ssh" and name not in candidate_settings.machines:
+                checks.machine_unused(original_settings, state, name)
         if require_safe:
             checks.activation_safe(state)
         original = dict(record)
