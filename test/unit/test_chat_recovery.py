@@ -23,7 +23,7 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         self.config.chat_recovery = ChatRecoveryConfig(workspace="project", connection="Fixture OM",
             browser_account="Fixture Account", browser_workspace="Personal", model="Fixture Model")
         self.app = create_application(self.config, self.state)
-        self.request["contract"].pop("recovery_policy", None)  # Exercise the new default.
+        self.request["contract"]["recovery_policy"] = "task_chat"  # Recovery-specific suite opts in explicitly.
 
     def receiver_fixture(self):
         """Actual registration/reservation with no native browser effects."""
@@ -181,7 +181,7 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
             self.create()
             for identity in ("capacity-two", "capacity-three"):
                 request = task_contract(self.context, identity)
-                request["contract"].pop("recovery_policy")
+                request["contract"]["recovery_policy"] = "task_chat"
                 result = self.app.create_task(**request)
             self.assertEqual(result["status"], "created")
             self.assertEqual(result["chat_recovery"]["blocker"], "chat_recovery_capacity")
@@ -506,14 +506,34 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
         self.assertEqual((recovery["state"], recovery["blocker"]), ("blocked", "execution_disabled"))
         self.assertEqual((self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
 
-    def test_default_policy_binding_disable_and_restart(self):
+    def test_new_task_default_is_disabled_until_explicit_enable(self):
+        request = task_contract(self.context)
+        request["contract"].pop("recovery_policy")
+        created = self.create(request)
+        recovery = created["chat_recovery"]
+        self.assertEqual(created["record"]["contract"]["recovery_policy"], "disabled")
+        self.assertIsNone(created["record"]["chat_registration"])
+        self.assertEqual((recovery["state"], recovery["disabled"], recovery["binding_revision"]),
+                         ("disabled", True, 0))
+        self.assertFalse(recovery["default_enabled"])
+        self.assertFalse((self.state / "chat_recovery.json").exists())
+        self.assertFalse(self.app.chat_recovery.capabilities()["default_enabled"])
+
+        enabled = self.app.configure_chat_recovery(
+            "structured-one", uuid.uuid4().hex, 0, {"action": "enable"})
+        self.assertEqual(enabled["state"], "preparing")
+        current = self.app.read_task("structured-one")
+        self.assertEqual(current["record"]["contract"]["recovery_policy"], "disabled")
+        self.assertIsNotNone(current["record"]["chat_registration"])
+
+    def test_explicit_task_chat_binding_disable_and_restart(self):
         self.create()
         before = self.app.read_task("structured-one")
         recovery = before["chat_recovery"]
         self.assertEqual(recovery["state"], "preparing")
         self.assertEqual(before["record"]["format"], 3)
         self.assertEqual(before["record"]["chat_registration"], recovery["preparation"]["preparation_id"])
-        self.assertTrue(recovery["default_enabled"])
+        self.assertFalse(recovery["default_enabled"])
         self.assertFalse(recovery["bound"])
         self.assertTrue((self.state / "chat_recovery.json").exists())
 
@@ -549,7 +569,7 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
                 "structured-one", uuid.uuid4().hex, 1, {"action": "enable", field: "not-accepted"})
         self.enable()
         other = task_contract(self.context, "structured-two")
-        other["contract"].pop("recovery_policy")
+        other["contract"]["recovery_policy"] = "task_chat"
         self.app.create_task(**other)
         result = self.enable(task_id="structured-two")
         self.assertEqual((result["state"], result["blocker"]), ("blocked", "conversation_conflict"))

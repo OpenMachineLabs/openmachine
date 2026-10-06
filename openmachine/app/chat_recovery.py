@@ -356,7 +356,7 @@ class ChatRecovery:
     def capabilities(self) -> dict:
         return {
             "supported": True,
-            "default_enabled": True,
+            "default_enabled": False,
             "automatic_detection": True,
             "automatic_preparation": True,
             "origin_chat_url_required": False,
@@ -373,7 +373,7 @@ class ChatRecovery:
     def project(self, view: dict) -> dict:
         if "record" not in view:
             return {**view, "chat_recovery": {
-                "eligible": False, "default_enabled": True, "state": "legacy_ineligible",
+                "eligible": False, "default_enabled": False, "state": "legacy_ineligible",
                 "binding_revision": 0, "disabled": False, "bound": False, "delivery": None}}
         record = view["record"]
         failure = None
@@ -451,7 +451,7 @@ class ChatRecovery:
         return {**view, "chat_recovery": {
             "eligible": eligible,
             "task_state": task_state,
-            "default_enabled": True,
+            "default_enabled": False,
             "state": state,
             "delivery_state": progress_state,
             "observer_running": not self._stop.is_set(),

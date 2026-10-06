@@ -65,9 +65,11 @@ below; every continuation still reads and claims the original task safely.
    request/source hashes, inspected targets, scope, exclusions, acceptance, stop
    condition and finite expiry within current authority. Preserve necessary task
    instructions and readable inputs, not only hashes of unavailable Chat context.
-   New tasks default to task_chat recovery; Runtime owns preparation without an
-   originating Chat URL. Inspect the returned recovery state before new effects;
-   never disable recovery merely to bypass a blocker. Ask only for missing
+   New tasks default to recovery disabled. Set `recovery_policy=task_chat` only
+   when the user explicitly asks to enable recovery for that task; an explicit
+   later `configure_chat_recovery(enable)` may enroll the same task under its
+   original authority. Do not infer recovery from task length or use disable to
+   bypass a blocker. Ask only for missing
    boundaries that materially affect the work. A one-step read needs no task.
    Check the exposed tools: absent `create_task`/`control_task` means structured
    supervision is unavailable, not permission to install or claim legacy coverage.
@@ -374,12 +376,13 @@ The generic Codex adapter does not itself wake Chat, and native browser access i
 not a network sandbox.
 
 For structured task-owned recovery, inspect `read_task.chat_recovery`. New tasks
-default to task_chat; Runtime registers recovery without opening a browser while
-the caller is active. Preparation starts only after the normal inactivity grace
-and no-live-claim/no-running-work checks. Do not request, infer or bind the
-originating Chat URL. Read `preparing`, `ready`, `blocked` or `disabled` and the
-concrete blocker. Task creation may advance a registration revision without
-admitting business work.
+default to recovery disabled and do not register a Chat receiver. Only explicit
+user intent may select `recovery_policy=task_chat` at creation or enable recovery
+later for that task. Once enabled, Runtime registers recovery without opening a
+browser while the caller is active. Preparation starts only after the normal
+inactivity grace and no-live-claim/no-running-work checks. Do not request, infer
+or bind the originating Chat URL. Read `preparing`, `ready`, `blocked` or
+`disabled` and the concrete blocker.
 
 The one installation profile names the existing connection, browser workspace and
 selected model. The current authenticated account is used as-is and is never
