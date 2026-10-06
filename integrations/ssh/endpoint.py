@@ -101,6 +101,7 @@ def _dispatch(request: dict, archive: Path) -> dict:
             legacy_compatible = False
         result = {**change_state, "legacy_workspace_compatible": legacy_compatible, "identity_verified": bool(expected), "python": platform.python_version(), "systemd": _scope_ready() if config.execution_enabled else None,
                   "state_directory": str(state), "version": __version__,
+                  "os": platform.system(), "architecture": platform.machine(),
                   "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"],
                                 "controls": sorted(execution.CONTROL_ACTIONS), "control_protocol": execution.CONTROL_PROTOCOL},
                   "unavailable_workspaces": [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]}

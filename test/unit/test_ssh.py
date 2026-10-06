@@ -60,6 +60,18 @@ class SSHTests(unittest.TestCase):
         self.assertEqual(disabled.ssh_identity, "")
         self.assertEqual(target.ssh_alias, "existing-host")
 
+    def test_monitoring_probe_reports_platform_without_grants_or_scope_setup(self):
+        request = self.request | {"operation": "probe", "arguments": {}, "execution_enabled": False,
+                                  "workspace_write_enabled": False, "workspaces": {}}
+        with patch.object(endpoint, "_identity", return_value=(self.identity, self.root)), \
+                patch.object(endpoint, "_scope_ready", side_effect=AssertionError("No execution prerequisite")):
+            result = endpoint._dispatch(request, self.archive)["result"]
+        self.assertTrue(result["identity_verified"])
+        self.assertEqual(result["os"], endpoint.platform.system())
+        self.assertEqual(result["architecture"], endpoint.platform.machine())
+        self.assertIsNone(result["systemd"])
+        self.assertFalse((self.root / ".local/state/openmachine").exists())
+
     def test_doctor_does_not_probe_ssh_or_resolve_remote_paths_by_default(self):
         config = self.root / "config.toml"
         config.write_text(f'schema_version=1\n[machines.build]\ntransport="ssh"\nssh_alias="existing-host"\n'

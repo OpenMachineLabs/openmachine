@@ -155,6 +155,43 @@ def _run(argv: list[str], timeout: float = 30, *, env: dict[str, str] | None = N
         raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
 
 
+def machine_unused(config, state: Path, name: str, *, check_remote: bool = True) -> None:
+    """Never strand a configured workspace, task reference or remote receipt."""
+    from integrations.ssh import client, recovery
+    target = config.machine(name)
+    if any(item.machine == name for item in config.workspaces.values()):
+        raise Fault("machine_in_use", "A configured workspace still references this machine.")
+    history = tasks.check_state(state)
+    if history["task_records"] != history["structured_task_records"]:
+        raise Fault("machine_in_use", "Legacy task history cannot prove that this target is unused; preserve the connection.")
+    known = {}
+    while True:
+        page = tasks.observation_page(state, known)
+        if not page["complete"]:
+            raise Fault("machine_in_use", "Task history could not be verified; preserve the connection.")
+        for entry in page["entries"]:
+            record = entry["record"]
+            references = [*record["contract"]["targets"], *(item["locator"] for item in record["operations"])]
+            if any(item.get("machine") == name or target.ssh_identity and item.get("target_identity") == target.ssh_identity
+                   for item in references):
+                raise Fault("machine_in_use", "A retained task still references this machine.")
+            known[entry["task_id"]] = entry["metadata_sha256"]
+        if not page["has_more"]:
+            break
+    if target.ssh_identity in recovery.read(state)["targets"]:
+        raise Fault("machine_in_use", "Retained SSH observation history still references this identity.")
+    if not target.ssh_identity:
+        raise Fault("machine_in_use", "An unpinned target cannot prove that remote history is absent; preserve its connection.")
+    if check_remote:
+        # Turning grants off does not erase earlier work outside controller tasks.
+        probe = client.call(config, name, "probe")
+        records = client.call(config, name, "list_executions", limit=1)
+        if (type(probe.get("workspace_change_records")) is not int or probe["workspace_change_records"] != 0
+                or records.get("executions") != [] or records.get("unreadable") != []
+                or records.get("next_cursor", "unknown") is not None):
+            raise Fault("machine_in_use", "The remote target retains original work; preserve its connection.")
+
+
 def activation_safe(state: Path) -> None:
     """Conservative product admission under lifecycle.lock; no receipt repair."""
     root = state / "executions"

@@ -3,16 +3,22 @@
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+import tempfile
+import tomllib
 import time
 from typing import Literal
 
 from openmachine import __version__
-from openmachine.config import initialize, load
+from pydantic import ValidationError
+
+from integrations.ssh import client as ssh_client
+from openmachine.config import Settings, initialize, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
@@ -23,7 +29,8 @@ PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activat
           "deferred", "completed", "rejected", "restored", "recovery_required"}
 TERMINAL = {"completed", "rejected", "restored"}
 CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
-CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "install", "update", "operation", "continue", "rollback"]
+CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "install", "update", "operation", "continue", "rollback",
+                "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
 
 
 def _digest(path: Path) -> str:
@@ -156,7 +163,7 @@ def _spawn(state: Path, identity: str, lock, python: str) -> None:
 
 def submit(config_path: Path, state: Path, action: Literal["install", "update"], identity: str,
            source: Path, sha256: str, *, candidate_config: Path | None = None,
-           workspace: str = "", path: str = "") -> dict:
+           workspace: str = "", path: str = "", expected_config_sha256: str | None = None) -> dict:
     destination = _operation_path(state, identity)
     if os.path.lexists(destination):
         return read_operation(config_path, state, identity)
@@ -174,6 +181,11 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
         if os.path.lexists(destination):
             return {"status": "busy", "operation": _read(state, identity)}
         _available(state)
+        if expected_config_sha256 is not None:
+            if _digest(config_path) != expected_config_sha256 or config_hash != expected_config_sha256:
+                raise Fault("configuration_changed", "Configuration changed; test the exact connection again before saving.")
+            digest = service_state._snapshot_configuration(state, selected_config)
+            selected_config = service_state._saved_configuration(state, digest)
         if action == "install":
             if candidate_config is not None or not workspace or not path:
                 raise Fault("invalid_service_request", "Installation requires the configured probe workspace/path, without a replacement configuration.")
@@ -405,6 +417,98 @@ def observe(config_path: Path, state: Path) -> dict:
     return result
 
 
+def machines(config_path: Path, state: Path) -> dict:
+    """Read configuration through its owner, independently of service readiness."""
+    digest = _digest(config_path)
+    config = load(config_path)
+    if _digest(config_path) != digest:
+        raise Fault("configuration_changed", "Configuration changed during observation; refresh again.")
+    return {"status": "observed", "config_sha256": digest, "machines": [
+        {"name": name, "transport": target.transport, "ssh_alias": target.ssh_alias,
+         "ssh_worker": target.ssh_worker, "ssh_identity": target.ssh_identity,
+         "os": platform.system() if target.transport == "local" else None,
+         "architecture": platform.machine() if target.transport == "local" else None}
+        for name, target in config.machines.items()]}
+
+
+def _machine_candidate(config, name: str, alias: str, worker: str, pinned: str = ""):
+    if name in config.machines or any(target.ssh_alias == alias or pinned and target.ssh_identity == pinned
+                                       for target in config.machines.values()):
+        raise Fault("duplicate_machine", "That machine name or SSH alias is already configured.")
+    try:
+        return Settings.model_validate(config.model_dump() | {"machines": {
+            **{key: value.model_dump() for key, value in config.machines.items()},
+            name: {"transport": "ssh", "ssh_alias": alias, "ssh_worker": worker,
+                   "ssh_identity": pinned, "execution_enabled": False, "workspace_write_enabled": False}}})
+    except ValidationError as error:
+        raise Fault("invalid_machine", "Use a machine name, existing SSH alias and absolute content-addressed worker path.") from error
+
+
+def probe_machine(config_path: Path, name: str, *, alias: str | None = None, worker: str = "", pinned: str = "") -> dict:
+    digest = _digest(config_path)
+    config = load(config_path)
+    if alias is not None:
+        config = _machine_candidate(config, name, alias, worker, pinned)
+    target = config.machine(name)
+    result = ssh_client.call(config, name, "probe")
+    if _digest(config_path) != digest:
+        raise Fault("configuration_changed", "Configuration changed during the probe; refresh and test again.")
+    if alias is not None and any(item.ssh_identity == result["target_identity"] for item in load(config_path).machines.values()):
+        raise Fault("duplicate_machine", "That machine identity is already configured under another name.")
+    # The transport verifies protocol, controller version, archive digest and the
+    # pinned account/host identity. Older compatible workers may omit OS fields.
+    return {"status": "observed", "name": name, "config_sha256": digest,
+            "identity": result["target_identity"], "identity_verified": bool(target.ssh_identity),
+            "worker_sha256": result["worker_sha256"], "version": result.get("version"),
+            "os": result.get("os"), "architecture": result.get("architecture")}
+
+
+def change_machine(config_path: Path, state: Path, action: str, identity: str, name: str,
+                   expected_config_sha256: str, *, alias: str = "", worker: str = "", pinned: str = "") -> dict:
+    # Repeating an original operation is readback, never another probe or mutation.
+    if os.path.lexists(_operation_path(state, identity)):
+        return read_operation(config_path, state, identity)
+    digest = _digest(config_path)
+    if digest != expected_config_sha256:
+        raise Fault("configuration_changed", "Configuration changed; refresh and test again.")
+    selected = service_state._record(state)
+    _bound(config_path, state, selected)
+    installed = service_state._installed(state, selected["current"])
+    payload_hash = installed.get("payload_sha256")
+    if not payload_hash or installed["version"] != __version__:
+        raise Fault("incompatible_management", "Connection changes require the selected compatible packaged Core.")
+    config = load(config_path)
+    raw = tomllib.loads(config_path.read_text())
+    if action == "machine-add":
+        if not re.fullmatch(r"[0-9a-f]{64}", pinned):
+            raise Fault("identity_required", "Test the connection and explicitly confirm its reported identity first.")
+        candidate = _machine_candidate(config, name, alias, worker, pinned)
+        # The retained candidate verifies SSH before activation. Admit its original
+        # operation first so a slow/failed exchange has durable readback.
+        raw["machines"][name] = candidate.machines[name].model_dump(exclude_none=True)
+    else:
+        target = config.machine(name)
+        if target.transport != "ssh":
+            raise Fault("local_machine_required", "This Mac cannot be removed.")
+        checks.machine_unused(config, state, name, check_remote=False)
+        del raw["machines"][name]
+    # Serialize only validated TOML values, preserving all unrelated semantics.
+    def literal(value):
+        if isinstance(value, dict):
+            return "{ " + ", ".join(json.dumps(key) + " = " + literal(item) for key, item in value.items()) + " }"
+        if isinstance(value, list):
+            return "[" + ", ".join(map(literal, value)) + "]"
+        return json.dumps(value, ensure_ascii=False)
+    text = "\n".join(json.dumps(key) + " = " + literal(value) for key, value in raw.items()) + "\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml") as candidate_file:
+        candidate_file.write(text)
+        candidate_file.flush()
+        candidate_path = Path(candidate_file.name)
+        load(candidate_path)
+        return submit(config_path, state, "update", identity, state / "service/payloads" / payload_hash,
+                      payload_hash, candidate_config=candidate_path, expected_config_sha256=digest)
+
+
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
                 "capabilities": [*CAPABILITIES, "configure:chat_recovery", "configure:verify_existing"],
@@ -421,6 +525,12 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
             raise Fault("invalid_service_path", "Use a shorter state path for the macOS private socket.")
         if action == "status":
             result = observe(config_path, state)
+        elif action == "machines":
+            result = machines(config_path, state)
+        elif action in {"machine-probe", "machine-test"}:
+            result = probe_machine(config_path, **inputs)
+        elif action in {"machine-add", "machine-remove"}:
+            result = change_machine(config_path, state, action, **inputs)
         elif action == "configure":
             _uninstalled(state)
             result = {"status": "configured", **initialize(config_path, **inputs)}
@@ -442,6 +552,13 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                   "incompatible" if code.startswith("incompatible") else "activation_pending" if code == "activation_pending" else
                   "blocked" if code == "runtime_recovery_blocked" else "unready" if code == "service_unready" else "unknown",
                   "reason": code}
+        if (action in {"machine-add", "machine-remove"} and code in {
+                "configuration_changed", "duplicate_machine", "invalid_machine", "identity_required", "identity_mismatch",
+                "ssh_host_key_mismatch", "ssh_authentication_required", "ssh_unavailable", "remote_runtime_unavailable",
+                "ssh_protocol_error", "protocol_mismatch", "local_machine_required", "machine_in_use",
+                "resource_busy", "maintenance_busy", "activation_pending", "incompatible_management"}
+                and not os.path.lexists(_operation_path(state, inputs["identity"]))):
+            result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
     return envelope | result | {"observed_at_ms": time.time_ns() // 1000000}
 
 
