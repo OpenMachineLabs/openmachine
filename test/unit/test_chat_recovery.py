@@ -404,6 +404,50 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
             self.assertEqual(retained.executions[:len(before.preparation.executions)], before.preparation.executions)
             self.assertEqual(retained.deadline_ms, original.deadline_ms)
 
+    def test_explicit_enable_retries_no_send_preflight_without_resetting_backoff(self):
+        self.receiver_fixture()
+        self.app.chat_recovery.start()
+        self.addCleanup(self.app.chat_recovery.stop)
+        result = self.preparation_result(url=chatgpt.ORIGIN + "/")
+        result["status"] = "blocked"
+        result["report"].update(summary="OM_PREPARATION_NO_SEND:blocked",
+                                evidence=["No send action was taken."])
+        with patch.object(codex, "read", return_value=result):
+            self.app.chat_recovery.read_preparation("structured-one")
+        original = chatgpt.get(self.state, "structured-one").preparation
+        self.assertEqual(original.reason, "browser_preflight")
+        self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, 1, {"action": "enable"})
+        retained = chatgpt.get(self.state, "structured-one").preparation
+        self.assertEqual((retained.status, retained.next_attempt_ms),
+                         ("pending", original.updated_at_ms + chatgpt.GRACE_MS))
+        self.assertEqual((retained.preparation_id, retained.deadline_ms, retained.attempts, retained.executions),
+                         (original.preparation_id, original.deadline_ms, original.attempts, original.executions))
+        with patch.object(codex, "start", return_value={"status": "accepted"}) as launch:
+            self.app.chat_recovery.start_preparation("structured-one", uuid.uuid4().hex)
+            launch.assert_not_called()
+            with patch.object(chatgpt, "now_ms", return_value=retained.next_attempt_ms):
+                self.app.chat_recovery.start_preparation("structured-one", uuid.uuid4().hex)
+            launch.assert_called_once()
+        current = chatgpt.get(self.state, "structured-one").preparation
+        self.assertEqual(current.attempts, original.attempts + 1)
+        self.assertEqual(current.executions[:-1], original.executions)
+        self.assertEqual(current.deadline_ms, original.deadline_ms)
+
+    def test_explicit_enable_preserves_preflight_destination(self):
+        self.receiver_fixture()
+        result = self.preparation_result()
+        result["status"] = "blocked"
+        result["report"].update(summary="OM_PREPARATION_NO_SEND:blocked",
+                                evidence=["No send action was taken."])
+        with patch.object(codex, "read", return_value=result):
+            self.app.chat_recovery.read_preparation("structured-one")
+        original = chatgpt.get(self.state, "structured-one")
+        self.app.configure_chat_recovery("structured-one", uuid.uuid4().hex, 1, {"action": "enable"})
+        retained = chatgpt.get(self.state, "structured-one")
+        self.assertEqual(retained.preparation, original.preparation)
+        self.assertEqual(retained.chat_url, original.chat_url)
+        self.assertEqual(retained.preparation.status, "blocked")
+
     def test_exact_enable_retry_after_pause_is_observation_not_new_authority(self):
         self.create()
         self.enable()

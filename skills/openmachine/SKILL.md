@@ -415,8 +415,9 @@ Setup and continuation episodes each retain at most three attempts within one ho
 or earlier authority expiry, with a 600-second browser bound. Only verified no-send
 and generating evidence permits another attempt, at least ten minutes later.
 Proven pre-launch contention does not consume an attempt or reset the deadline.
-After repairing a proven pre-browser setup failure with no destination or receiver
-read, explicitly enable recovery to retry within the same attempt and time limits.
+After repairing a proven pre-browser setup failure or verified pre-send blocker
+with no destination or receiver read, explicitly enable recovery within the same
+attempt and time limits. Pre-send blockers retain the ten-minute retry delay.
 Sent or uncertain messages never justify resending or a replacement Chat. Reads,
 claim expiry, restart, handoff churn and equivalent re-enables do not renew budgets.
 Sent episodes wait up to 15 minutes for actual continuation. Submission, claim,
