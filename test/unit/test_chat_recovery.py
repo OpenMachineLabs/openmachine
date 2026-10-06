@@ -373,6 +373,37 @@ class ChatRecoveryTests(TaskFixture, unittest.TestCase):
                          ("outcome_unknown", original.execution_id, original.deadline_ms, original.attempts))
         self.assertEqual(retained.preparation_id, arguments["preparation_id"])
 
+    def test_explicit_enable_retries_pre_browser_setup_failure_with_original_budget(self):
+        self.receiver_fixture()
+        self.app.chat_recovery.start()
+        self.addCleanup(self.app.chat_recovery.stop)
+        original = chatgpt.get(self.state, "structured-one").preparation
+        failed = {"status": "blocked", "failure": "codex_setup_unverified", "native": {"calls": 0}}
+        for attempt in range(1, chatgpt.MAX_ATTEMPTS + 1):
+            with patch.object(codex, "read", return_value=failed):
+                result = self.app.chat_recovery.read_preparation("structured-one")
+            self.assertEqual(result["chat_recovery"]["preparation"]["reason"], "browser_setup")
+            before = chatgpt.get(self.state, "structured-one")
+            arguments = ("structured-one", uuid.uuid4().hex, before.revision, {"action": "enable"})
+            enabled = self.app.configure_chat_recovery(*arguments)
+            self.assertEqual(enabled["preparation"]["status"], "pending")
+            retained = chatgpt.get(self.state, "structured-one").preparation
+            self.assertEqual((retained.preparation_id, retained.deadline_ms, retained.attempts, retained.executions),
+                             (original.preparation_id, original.deadline_ms, attempt, before.preparation.executions))
+            self.assertEqual(self.app.configure_chat_recovery(*arguments), enabled)
+            with patch.object(codex, "start", return_value={"status": "accepted"}) as launch:
+                result = self.app.chat_recovery.start_preparation("structured-one", uuid.uuid4().hex)
+            retained = chatgpt.get(self.state, "structured-one").preparation
+            if attempt < chatgpt.MAX_ATTEMPTS:
+                launch.assert_called_once()
+                self.assertEqual((retained.status, retained.attempts), ("reserved", attempt + 1))
+            else:
+                launch.assert_not_called()
+                self.assertEqual((retained.status, retained.reason, retained.attempts),
+                                 ("exhausted", "preparation_budget", attempt))
+            self.assertEqual(retained.executions[:len(before.preparation.executions)], before.preparation.executions)
+            self.assertEqual(retained.deadline_ms, original.deadline_ms)
+
     def test_exact_enable_retry_after_pause_is_observation_not_new_authority(self):
         self.create()
         self.enable()

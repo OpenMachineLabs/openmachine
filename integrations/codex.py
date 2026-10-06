@@ -131,6 +131,8 @@ def discover() -> tuple[str, Path, dict]:
     resources = executable.parents[2]
     if binary is None:
         native_cli = resources / "codex-cli"
+        if native_cli.is_dir():
+            native_cli = native_cli / "CodexCLI.app/Contents/MacOS/codex"
         if not native_cli.is_file() or not os.access(native_cli, os.X_OK):
             raise ValueError("native Codex CLI unavailable")
         binary = str(native_cli)

@@ -528,6 +528,12 @@ def configure(state: Path, *, task_id: str, update_id: str, expected_revision: i
             if action == "enable" and binding.authority_sha256 is not None:
                 binding.authority_sha256 = authority_sha256
                 binding.expires_at_ms = expires_at_ms
+            preparation = binding.preparation
+            if (action == "enable" and preparation is not None
+                    and preparation.status == "blocked" and preparation.reason == "browser_setup"
+                    and binding.chat_url is None and preparation.receiver_read is None):
+                preparation.status, preparation.reason = "pending", ""
+                preparation.updated_at_ms = timestamp
         value.bindings[task_id] = binding
         _save(state, value)
         return public(binding)

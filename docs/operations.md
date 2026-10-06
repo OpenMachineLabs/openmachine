@@ -470,8 +470,9 @@ operation) and use the same operation/execution ID; no second task record exists
 The adapter discovers the enabled native `node_repl` bridge in CODEX_HOME/config.toml
 and reads the browser Skill from that bridge's installed desktop-app resources.
 It uses `codex` on PATH when present; a packaged service without the developer's
-shell PATH uses the executable `codex-cli` beside that same configured native
-bridge. It does not scan other apps, install anything, copy browser libraries,
+shell PATH uses `codex-cli` beside that same configured native bridge, either as
+an executable or the directory containing `CodexCLI.app/Contents/MacOS/codex`.
+It does not scan other apps, install anything, copy browser libraries,
 read authentication files, or change configuration. A compatible native desktop
 bridge and a signed-in Codex installation are prerequisites, not supplied by CLI
 installation alone. The child uses an empty temporary instruction home and
