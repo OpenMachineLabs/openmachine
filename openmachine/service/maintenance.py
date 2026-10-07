@@ -29,7 +29,7 @@ PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activat
           "deferred", "completed", "rejected", "restored", "recovery_required"}
 TERMINAL = {"completed", "rejected", "restored"}
 CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
-CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "install", "update", "operation", "continue", "rollback",
+CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback",
                 "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
 
 
@@ -228,6 +228,43 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
             python = str(retained / "python/bin/python3")
         _spawn(state, identity, lock, python)
         return {"status": "accepted", "operation": record}
+
+
+def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
+    """Terminally reject only a deferred update proven not to have activated."""
+    with lease(state / "service/operation.lock", create=False):
+        record = _read(state, identity)
+        if record["request"]["config"] != str(config_path):
+            raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
+        if record["phase"] == "rejected" and record["reason"] == "retired_before_activation":
+            return {"status": "retired", "operation": record}
+        if record["phase"] != "deferred" or record["request"]["action"] != "update":
+            raise Fault("maintenance_not_retirable",
+                        "Only a deferred update with completed preparation can be retired before activation.")
+        request, prepared = record["request"], record["prepared"]
+        with lease(state / "locks/lifecycle.lock"):
+            selected = service_state._record(state)
+            _bound(config_path, state, selected)
+            if selected["pending"] is not None:
+                raise Fault("activation_pending", "Read the original pending transition before retiring maintenance.")
+            if (_selection(state) != request["selection_sha256"]
+                    or _digest(Path(request["config"])) != request["config_sha256"]):
+                raise Fault("maintenance_input_changed",
+                            "Original selection, policy or configuration changed; preserve the operation.")
+            if selected["current"] == prepared["identity"]:
+                raise Fault("maintenance_not_retirable",
+                            "The prepared update is selected; preserve the original operation and inspect current state.")
+            observed = observe(config_path, state)
+            if observed.get("status") not in {"ready", "stopped"} or observed.get("current") != selected["current"]:
+                raise Fault("maintenance_retirement_unverified",
+                            "The selected service is not stably ready or stopped; preserve the deferred operation.")
+            if (_selection(state) != request["selection_sha256"]
+                    or _digest(Path(request["config"])) != request["config_sha256"]
+                    or _read(state, identity) != record):
+                raise Fault("maintenance_retirement_unverified",
+                            "Maintenance inputs changed during retirement verification; preserve the original operation.")
+            retired = _save(state, record, "rejected", reason="retired_before_activation")
+        return {"status": "retired", "operation": retired}
 
 
 def _uninstalled(state: Path) -> None:
@@ -540,6 +577,8 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
             result = read_operation(config_path, state, **inputs)
         elif action == "continue":
             result = continue_operation(config_path, state, **inputs)
+        elif action == "retire":
+            result = retire_operation(config_path, state, **inputs)
         elif action == "rollback":
             result = transition.operate(config_path, state, "rollback", require_safe=True)
         elif action in {"start", "stop", "startup", "bind"}:

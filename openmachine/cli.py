@@ -81,7 +81,7 @@ def main() -> int:
             operation.add_argument("--probe-path", required=True)
         else:
             operation.add_argument("--candidate-config", type=Path)
-    for action in ("operation", "continue"):
+    for action in ("operation", "continue", "retire"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
     for action in ("machine-probe", "machine-test", "machine-add", "machine-remove"):
@@ -105,7 +105,7 @@ def main() -> int:
             from openmachine.service.maintenance import dispatch
             inputs = {}
             action = args.management_action
-            if action in {"install", "update", "operation", "continue"}:
+            if action in {"install", "update", "operation", "continue", "retire"}:
                 inputs["identity"] = args.operation_id
             if action in {"install", "update"}:
                 inputs.update(source=args.payload, sha256=args.sha256)

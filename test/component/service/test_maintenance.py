@@ -84,6 +84,54 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(result["operation"]["operation_id"], record["operation_id"])
             spawn.assert_called_once()
 
+    def test_deferred_update_retirement_is_terminal_idempotent_and_preserves_selection(self):
+        record = self.operation_fixture("deferred")
+        before = service_state._record(self.state)
+        with patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "observe", return_value={"status": "ready", "current": self.a}):
+            result = maintenance.retire_operation(self.config, self.state, record["operation_id"])
+            repeated = maintenance.retire_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual((result["status"], result["operation"]["phase"], result["operation"]["reason"]),
+                         ("retired", "rejected", "retired_before_activation"))
+        self.assertEqual(repeated, result)
+        self.assertEqual(service_state._record(self.state), before)
+        original = maintenance.read_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual(original["status"], "rejected")
+        maintenance._available(self.state)
+
+    def test_deferred_update_retirement_rejects_changed_active_or_uncertain_state(self):
+        record = self.operation_fixture("prepared")
+        self.assert_fault("maintenance_not_retirable",
+                          lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+
+        record = self.operation_fixture("deferred")
+        with patch.object(maintenance, "_bound"), patch.object(maintenance, "_selection", return_value="0" * 64):
+            self.assert_fault("maintenance_input_changed",
+                              lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+
+        record = self.operation_fixture("deferred")
+        selected = service_state._record(self.state)
+        with patch.object(service_state, "_record", return_value=selected | {"pending": {"fixture": True}}), \
+                patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "_selection", return_value=record["request"]["selection_sha256"]):
+            self.assert_fault("activation_pending",
+                              lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+
+        record = self.operation_fixture("deferred")
+        with patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "observe", return_value={"status": "unready", "current": self.a}):
+            self.assert_fault("maintenance_retirement_unverified",
+                              lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+
+        record = self.operation_fixture("deferred")
+        path = maintenance._operation_path(self.state, record["operation_id"])
+        corrupted = record | {"prepared": record["prepared"] | {"service": "started"}}
+        save_json(path, corrupted)
+        before = path.read_bytes()
+        self.assert_fault("maintenance_state_invalid",
+                          lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+        self.assertEqual(path.read_bytes(), before)
+
     def test_prepared_operation_defers_without_repreparing_then_explicitly_activates(self):
         record = self.operation_fixture()
         with patch.object(service_install, "_prepare_payload") as prepare, \
