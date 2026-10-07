@@ -98,13 +98,14 @@ class ApplicationAdmissionFixture(object):
                 prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
                 self.assertEqual(dispatch.call_count, 1)
                 actual = signature.bind(*dispatch.call_args.args, **dispatch.call_args.kwargs)
-                expected = signature.bind(*prefix, *arguments)
+                injected = {"transport": request.return_value} if name.startswith("github_") else {}
+                expected = signature.bind(*prefix, *arguments, **injected)
                 actual.apply_defaults()
                 expected.apply_defaults()
                 if name.startswith("github_"):
                     self.assertIs(actual.arguments.pop("transport"), request.return_value)
                     expected.arguments.pop("transport")
-                    request.assert_called_once_with("example/project", connection_id="", binding=None, write=True, legacy=False)
+                    request.assert_called_once_with("example/project", connection_id="", binding=None, write=True, historical_unbound=False)
                 else:
                     request.assert_not_called()
                 self.assertEqual(actual.arguments, expected.arguments)

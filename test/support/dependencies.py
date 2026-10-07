@@ -64,7 +64,7 @@ class DependencyFixture(object):
                                 "integrations.ssh.bundle"),
             "integrations.chatgpt": ("pydantic", "openmachine.foundation.*"),
             "integrations.codex": ("pydantic", "openmachine.execution", "openmachine.foundation.*"),
-            "integrations.connections": ("pydantic", "integrations.credentials", "openmachine.config", "openmachine.foundation.*"),
+            "integrations.connections": ("pydantic", "integrations.credentials", "integrations.github.connection", "openmachine.config", "openmachine.foundation.*"),
             "integrations.credentials": ("pydantic", "openmachine.foundation.*"),
             "integrations.github.auth": ("httpx2", "integrations.credentials", "openmachine.foundation.*"),
             "integrations.github": ("integrations.github.operations",),

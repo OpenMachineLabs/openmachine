@@ -73,13 +73,13 @@ class Application:
         with self._admit():
             return self.connections.disconnect(connection_id, expected_revision)
 
-    def _github_call(self, operation: str, arguments: dict, *, binding=None, legacy: bool = False) -> dict:
+    def _github_call(self, operation: str, arguments: dict, *, binding=None, historical_unbound: bool = False) -> dict:
         provider = self._provider()
         arguments = dict(arguments)
         selected = arguments.pop("connection_id", "")
         repository = arguments.get("repository", (arguments.get("locator") or {}).get("repository", ""))
         transport = self.connections.request(repository, connection_id=selected, binding=binding,
-            write=operation not in {"read", "reconcile"}, legacy=legacy)
+            write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound)
         return getattr(provider, operation)(self.config, **arguments, transport=transport)
 
     def probe_machine(self, machine: str) -> dict:
@@ -100,7 +100,7 @@ class Application:
                       "ssh_result_observation": self.machines.ssh_recovery is not None},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(),
-                                                           "backend": "native", "legacy_gh": "historical_only",
+                                                           "backend": "native", "legacy_gh": "retired",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "connections": {"protocol": 2,
                             "methods": ["device_code"] if self.config.github and self.connections.native.CLIENT_ID else [],
@@ -269,10 +269,10 @@ class Application:
         for repository in contract["repositories"]:
             binding = bindings.get(repository)
             if bind_new:
-                binding = self.connections.select(repository, binding=binding, write=github_write, persist=True).binding()
+                binding = self.connections.select(repository, binding=binding, write=github_write).binding()
                 bindings[repository] = binding
             observed = self._github_call("read", dict(action="repository", repository=repository),
-                                         binding=binding, legacy=not bind_new and binding is None)
+                                         binding=binding, historical_unbound=not bind_new and binding is None)
             if github_write and (observed.get("configured_write") is not True
                     or observed["data"].get("permissions", {}).get("push") is not True):
                 raise Fault("github_not_allowed", "The task repository has no verified current write grant.")

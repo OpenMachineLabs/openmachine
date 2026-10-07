@@ -36,7 +36,8 @@ live below `<state-dir>/service/`. Preserve the selected base Python too: never
 move a venv or delete an old worker's installation. Tasks, executions, changes,
 Skills and their stable locks retain their existing owners and paths.
 
-The captured installation `PATH`, not shell startup files, supplies Git/gh/SSH.
+The captured installation `PATH`, not shell startup files, supplies Git/SSH and
+explicitly requested command-line tools.
 Packaged runtime installations derive their native `PATH` from the selected retained
 payload, so activation/restoration selects that candidate's Git without changing
 the legacy definition or the prior installation's captured environment.

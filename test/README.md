@@ -159,8 +159,11 @@ An authorized contract change requires exact baseline/candidate provenance and
 review of its deliberate fixture delta. Internal file moves require no fixture
 change. Deleting a duplicate test requires an explicit retained-coverage map;
 keep unique fault, corruption, permission, control and restart scenarios. The
-retired `gh`-CLI outage fixture is covered by native GitHub typed-boundary tests,
-`test_tool_contract_without_github`, and installed-candidate catalog discovery.
+retired `gh`-CLI outage fixture is covered by native HTTP fault/size/diagnostic
+checks in `test/component/github/test_transport.py`, native GitHub typed-boundary
+tests, `test_tool_contract_without_github`, and installed-candidate catalog discovery.
+`test/component/connections/test_connections.py` covers passive historical gh
+records, explicit retirement errors and rejection of native account substitution.
 
 ## Evidence boundaries
 

@@ -75,7 +75,7 @@ Local and explicitly configured SSH transports are supported. Optional `[github]
 configuration enables the scoped collaboration tools described in the operation reference. Omit it to
 keep GitHub disabled. New accounts use the official Open Machine GitHub App Device
 Flow and automatically pinned local credential storage; historical gh task bindings
-remain readable without importing their credentials.
+remain readable, but their retired backend cannot execute requests.
 Unknown fields are rejected, not ignored. Plain `doctor` checks configuration and
 directory existence, not effective file access or network readiness. Managed
 `doctor --service` verifies the selected runtime, MCP identity and an actual
@@ -138,8 +138,9 @@ partial/unknown results preserve the original ID and known applied prefix.
 
 [Connection operations](docs/operations.md#account-connections) cover native GitHub
 Device Flow, pinned credentials, renewal, cancellation, disconnect and stable task
-bindings. New work uses the official GitHub App; `gh` remains historical-task
-compatibility only. Installation/resource approval and user consent are still required.
+bindings. All runtime GitHub requests use the official GitHub App; retained `gh`
+history cannot authorize requests or move to a native account. Installation/resource
+approval and user consent are still required.
 Automatic renewal is not a promise of permanent authorization.
 
 GitHub attribution uses `Created via` for Issue/PR bodies and `Posted via` for

@@ -26,6 +26,7 @@ from test.support.connections_cases import ConnectionCaseFixture
 class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def test_catalog_is_passive_and_disabled_provider_stays_disabled(self):
         self.assertEqual(self.app.list_integrations()["connections"], [])
+        self.assertEqual(self.app.get_capabilities()["github"]["legacy_gh"], "retired")
         self.assertFalse(self.state.exists())
         disabled = create_application(self.config.model_copy(update={"github": None}), self.state)
         self.fault("github_not_allowed", disabled.connect_integration, "1" * 32)
@@ -295,12 +296,96 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         raw = self.path.read_bytes()
         self.assertEqual(old["format"], 1)
         self.assertEqual(records.canonical(records.Record.model_validate(old).model_dump()), raw)
-        self.control("claim", handoff_id=old["handoff"]["id"])
+        self.fault("integration_legacy_connection", self.control, "claim", handoff_id=old["handoff"]["id"])
+        self.assertEqual(self.calls, [])
         self.actor = {"id": 2, "login": "other"}
         native = self.connect()
         self.fault("task_scope_denied", self.app.github_comment, "create", "Example/repo", "Fixture.", 1,
                    connection_id=native["id"], task_context=self.context_for("c" * 32))
         self.assertNotIn("github_connections", self.view()["record"]["contract"])
+        self.calls.clear()
+        self.fault("integration_legacy_connection", self.app._github_call, "read",
+                   dict(action="repository", repository="Example/repo", connection_id=native["id"]),
+                   historical_unbound=True)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.path.read_bytes(), raw)
+
+    def test_retired_bound_history_is_readable_without_dispatch_or_native_fallback(self):
+        self.connect()
+        self.request["contract"].update(repositories=["Example/repo"], tools=["github_comment"])
+        record = self.create()["record"]
+        self.control("claim", handoff_id=record["handoff"]["id"])
+        args = dict(action="create", repository="Example/repo", number=1, body="Fixture.",
+                    task_context=self.context_for("a" * 32))
+        self.assertEqual(self.app.github_comment(**args)["status"], "verified")
+        self.stop()
+        old = self.view()["record"]
+        old["format"] = 2
+        old.pop("chat_registration")
+        old["contract"].pop("recovery_policy")
+        # Seed retained pre-native authority, including its original receipt.
+        binding = dict(connection_id="e" * 32, account_id=1, authorization_revision=1)
+        old["contract"]["github_connections"]["Example/repo"] = binding
+        old["operations"][0]["locator"]["connection"] = binding
+        self.path.write_bytes(records.canonical(old))
+        self.app.rebuild_task_index()
+        retained = connections.Connection(id=binding["connection_id"], provider="github", backend="gh",
+            account_id=1, account_login="operator", authorization_revision=1, status="connected",
+            policy=self.config.github, verified_at_ms=connections.now_ms())
+        attempt_id = "d" * 32
+        attempt = connections.Attempt(intent=dict(provider="github", method="existing_gh", connection_id=""),
+            status="succeeded", created_at_ms=1, expires_at_ms=1000, connection_id=retained.id)
+        save_json(self.state / "connections.json", connections.Store(format=1,
+            connections={retained.id: retained}, attempts={attempt_id: attempt}).model_dump())
+        raw_task, raw_connections = self.path.read_bytes(), (self.state / "connections.json").read_bytes()
+        self.calls.clear()
+        self.assertTrue(self.app.list_integrations()["connections"][0]["historical_only"])
+        self.assertEqual(self.app.read_integration_login(attempt_id)["status"], "succeeded")
+        self.assertEqual(self.view()["record"]["operations"], old["operations"])
+        self.fault("integration_legacy_connection", self.app.github_read, "status", connection_id=retained.id)
+        self.fault("integration_legacy_connection", self.app.github_comment, **args)
+        self.assertEqual(self.calls, [])
+        self.assertEqual((self.state / "connections.json").read_bytes(), raw_connections)
+        self.actor = {"id": 2, "login": "other"}
+        native = self.connect()
+        self.calls.clear()
+        self.fault("integration_legacy_connection", self.control, "claim", handoff_id="f" * 32)
+        self.fault("integration_legacy_connection", self.app.github_comment, **args)
+        self.fault("task_scope_denied", self.app.github_comment, "create", "Example/repo", "Fixture.", 1,
+                   connection_id=native["id"], task_context=self.context_for("c" * 32))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.path.read_bytes(), raw_task)
+
+    def test_retired_unbound_pending_effect_stays_unknown_without_reconciliation(self):
+        self.connect()
+        self.request["contract"].update(repositories=["Example/repo"], tools=["github_comment"])
+        record = self.create()["record"]
+        self.control("claim", handoff_id=record["handoff"]["id"])
+        args = dict(action="create", repository="Example/repo", number=1, body="Fixture.",
+                    task_context=self.context_for("a" * 32))
+        def lost(token, method, endpoint, payload=None):
+            value = self.api(token, method, endpoint, payload)
+            if method == "POST":
+                raise Fault("github_response_unknown", "Fixture lost reply after publication.")
+            return value
+        with patch.object(auth, "request", side_effect=lost):
+            self.assertEqual(self.app.github_comment(**args)["status"], "write_outcome_unknown")
+        self.stop()
+        old = self.view()["record"]
+        old["format"] = 1
+        old.pop("chat_registration")
+        old["contract"].pop("recovery_policy")
+        old["contract"].pop("github_connections")
+        old["operations"][0]["locator"].pop("connection")
+        self.path.write_bytes(records.canonical(old))
+        self.app.rebuild_task_index()
+        raw = self.path.read_bytes()
+        self.calls.clear()
+        observed = self.app.task_admission.reconcile(self.view())
+        self.assertEqual(observed["record"]["operations"][0]["result"]["status"], "unknown")
+        self.fault("integration_legacy_connection", self.app.github_comment, **args)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.path.read_bytes(), raw)
 
     def test_real_state_readers_must_understand_native_authority(self):
         self.connect()

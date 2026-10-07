@@ -9,17 +9,17 @@ import re
 from openmachine.foundation.files import excluded
 from openmachine.foundation.sanitize import Fault
 
-from . import client, connection
+from . import client
 from .connection import object_response
 
 
 SHA = r"[0-9a-f]{40}"
 
 
-def pull_request(repository: str, number: int, head: str = "", base: str = "", *, open_only: bool = False, transport=None) -> dict:
+def pull_request(repository: str, number: int, head: str = "", base: str = "", *, open_only: bool = False, transport) -> dict:
     if number < 1 or (head and not re.fullmatch(SHA, head)) or (base and not re.fullmatch(SHA, base)):
         raise Fault("invalid_github_request", "Use a positive PR number and full observed commit SHAs.")
-    value = object_response((transport or connection.request)("GET", f"repos/{repository}/pulls/{number}"))
+    value = object_response(transport("GET", f"repos/{repository}/pulls/{number}"))
     if value.get("number") != number:
         raise Fault("github_invalid_response", "GitHub returned a different PR identity.")
     actual_head = object_response(value.get("head")).get("sha", "")
@@ -32,7 +32,7 @@ def pull_request(repository: str, number: int, head: str = "", base: str = "", *
     return value
 
 
-def thread_page(repository: str, number: int, head: str, base: str, cursor: str, limit: int, *, transport=None) -> tuple[list, str | None]:
+def thread_page(repository: str, number: int, head: str, base: str, cursor: str, limit: int, *, transport) -> tuple[list, str | None]:
     value = client.graphql_pr(repository, number,
                         "reviewThreads(first:$limit,after:$cursor){nodes{id isResolved isOutdated path line "
                         "comments(first:1){nodes{databaseId url}}} pageInfo{endCursor hasNextPage}}", cursor, limit, transport=transport)
@@ -53,7 +53,7 @@ def thread_page(repository: str, number: int, head: str, base: str, cursor: str,
     return nodes, next_cursor
 
 
-def _checks(repository: str, head: str, *, transport=None) -> dict:
+def _checks(repository: str, head: str, *, transport) -> dict:
     runs = client.all_pages(f"repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs", transport=transport)
     statuses = client.all_pages(f"repos/{repository}/commits/{head}/status", "statuses", transport=transport)
     latest_runs, latest_statuses = {}, {}
@@ -81,7 +81,7 @@ def _checks(repository: str, head: str, *, transport=None) -> dict:
             "selection": "latest run ID per app/name; latest status ID per context; native policy is checked separately"}
 
 
-def merge_gate(repository: str, number: int, head: str, base: str = "", *, transport=None) -> dict:
+def merge_gate(repository: str, number: int, head: str, base: str = "", *, transport) -> dict:
     if not re.fullmatch(SHA, head):
         raise Fault("invalid_github_request", "Read the PR first and supply its exact HEAD SHA.")
     pr = pull_request(repository, number, head, base, open_only=True, transport=transport)
@@ -136,11 +136,11 @@ def merge_gate(repository: str, number: int, head: str, base: str = "", *, trans
             "boundary": "Sequential observations, not an atomic snapshot. GitHub enforces live protections at submission."}
 
 
-def read_file(repository: str, ref: str, path: str, offset: int, *, transport=None) -> dict:
+def read_file(repository: str, ref: str, path: str, offset: int, *, transport) -> dict:
     if (not re.fullmatch(SHA, ref) or not path or path.startswith("/") or "\\" in path or "\0" in path
             or any(part in {"", ".", ".."} for part in path.split("/")) or excluded(Path(path.casefold()))):
         raise Fault("invalid_github_request", "File reads require an exact commit SHA and relative non-credential text path.")
-    commit = object_response((transport or connection.request)("GET", f"repos/{repository}/commits/{ref}"))
+    commit = object_response(transport("GET", f"repos/{repository}/commits/{ref}"))
     if commit.get("sha") != ref:
         raise Fault("github_invalid_response", "The file's commit identity changed.")
     tree_sha = object_response(object_response(commit.get("commit")).get("tree")).get("sha", "")
@@ -148,7 +148,7 @@ def read_file(repository: str, ref: str, path: str, offset: int, *, transport=No
     for index, part in enumerate(parts):
         if not re.fullmatch(SHA, tree_sha):
             raise Fault("github_invalid_response", "The file's tree identity is missing.")
-        tree = object_response((transport or connection.request)("GET", f"repos/{repository}/git/trees/{tree_sha}"))
+        tree = object_response(transport("GET", f"repos/{repository}/git/trees/{tree_sha}"))
         if tree.get("sha") != tree_sha or tree.get("truncated") is not False or not isinstance(tree.get("tree"), list):
             raise Fault("github_evidence_unavailable", "The file's tree listing is incomplete.")
         matches = [item for item in tree["tree"] if isinstance(item, dict) and item.get("path") == part]
@@ -161,7 +161,7 @@ def read_file(repository: str, ref: str, path: str, offset: int, *, transport=No
         tree_sha = entry.get("sha", "")
     if not re.fullmatch(SHA, tree_sha):
         raise Fault("github_invalid_response", "The file's blob identity is missing.")
-    value = object_response((transport or connection.request)("GET", f"repos/{repository}/git/blobs/{tree_sha}"))
+    value = object_response(transport("GET", f"repos/{repository}/git/blobs/{tree_sha}"))
     if value.get("encoding") != "base64" or value.get("sha") != tree_sha:
         raise Fault("github_unsupported_file", "Only complete base64-encoded GitHub blobs are supported.")
     try:
