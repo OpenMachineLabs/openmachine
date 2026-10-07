@@ -16,6 +16,21 @@ from test.support.tasks import TaskFixture, task_contract
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_workspace_request_rejection_is_no_effect_and_corrected_work_continues(self):
+        self.accept_plan()
+        identity = uuid.uuid4().hex
+        args = dict(machine="desktop", workspace_name="project", path="result.txt", edits=[],
+                    expected_workspace_identity=self.context["workspace_identity"], expected_head_sha="",
+                    expected_sha256="0" * 64, change_id=identity, task_context=self.context_for(identity))
+        self.fault("invalid_edits", self.app.edit_workspace_file, **args)
+        operation = self.view()["record"]["operations"][0]
+        self.assertEqual((operation["state"], operation["result"]["status"], operation["result"]["summary"]),
+                         ("observed", "failed", "Domain failure: invalid_edits."))
+        self.assertFalse((self.state / "workspace-changes" / identity).exists())
+        corrected = self.write_arguments(path="result.txt")
+        self.assertEqual(self.app.write_workspace_file(**corrected)["status"], "applied")
+        self.assertEqual(self.view()["record"]["operations"][-1]["result"]["status"], "succeeded")
+
     def test_pre_dispatch_busy_is_failed_and_old_unknown_reconciles(self):
         self.accept_plan()
         args = self.start_arguments()

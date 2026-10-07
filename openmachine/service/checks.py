@@ -15,7 +15,7 @@ import time
 
 from openmachine import __version__, execution, tasks, workspace
 from openmachine.config import load
-from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 
 from . import state as service_state
@@ -192,6 +192,27 @@ def machine_unused(config, state: Path, name: str, *, check_remote: bool = True)
             raise Fault("machine_in_use", "The remote target retains original work; preserve its connection.")
 
 
+_HISTORICAL_CHANGE_NO_EFFECT = frozenset(
+    f"Domain failure: {code}." for code in PRE_EFFECT_REQUEST_FAILURES)
+
+
+def _task_operation_blocks_activation(operation: dict) -> bool:
+    result = operation.get("result")
+    pending = (operation.get("state") != "observed" or result is None
+               or result.get("status") in {"running", "unknown"})
+    if not pending or result is None or result.get("status") != "unknown":
+        return pending
+    if operation.get("state") != "unknown":
+        return True
+    locator = operation.get("locator") or {}
+    if locator.get("kind") == "github":
+        # Provider uncertainty remains retained; switching a compatible local
+        # runtime neither replays nor cancels that external operation.
+        return False
+    return not (locator.get("kind") == "change" and result.get("receipt_sha256") is None
+                and result.get("summary") in _HISTORICAL_CHANGE_NO_EFFECT)
+
+
 def activation_safe(state: Path) -> None:
     """Conservative product admission under lifecycle.lock; no receipt repair."""
     root = state / "executions"
@@ -209,8 +230,7 @@ def activation_safe(state: Path) -> None:
             raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.")
         for item in page["entries"]:
             record = item["record"]
-            if any(operation["state"] != "observed" or operation["result"] is None
-                   or operation["result"]["status"] in {"running", "unknown"} for operation in record["operations"]):
+            if any(_task_operation_blocks_activation(operation) for operation in record["operations"]):
                 raise Fault("activation_deferred", "An original task operation is active or unresolved; no worker was stopped.")
             known[item["task_id"]] = item["metadata_sha256"]
         if not page["has_more"]:
