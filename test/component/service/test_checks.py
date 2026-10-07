@@ -118,6 +118,53 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
 
+    def test_candidate_resamples_a_concurrent_task_generation_once(self):
+        from test.support.tasks import task_contract
+        request = task_contract()
+        tasks.create(self.state, request.pop("task_id"), **request)
+        before = service.check_state(self.config, self.state)
+        generations = []
+
+        def candidate(*args, **kwargs):
+            if not generations:
+                tasks.save(self.state, "new-task", 0, "New task", "A concurrent legitimate publication.\n", [])
+            value = before if not generations else service.check_state(self.config, self.state)
+            generations.append(value["task_index_generation"])
+            return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+
+        selection = service_state._record(self.state)
+        with patch.object(service_checks, "_run", side_effect=candidate) as run, \
+                patch.object(service_checks.time, "sleep") as sleep:
+            observed = service_checks._candidate_state(Path(sys.executable), self.config, self.state)
+        self.assertEqual(observed, service.check_state(self.config, self.state))
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once()
+        self.assertNotEqual(*generations)
+        self.assertEqual(service_state._record(self.state), selection)
+
+    def test_candidate_generation_churn_is_bounded_and_fails_closed(self):
+        from test.support.tasks import task_contract
+        request = task_contract()
+        tasks.create(self.state, request.pop("task_id"), **request)
+        attempts = []
+
+        def moving_candidate(*args, **kwargs):
+            old = service.check_state(self.config, self.state)
+            attempts.append(old["task_index_generation"])
+            tasks.save(self.state, "moving-" + str(len(attempts)), 0,
+                       "Moving task", "Concurrent task publication.\n", [])
+            return subprocess.CompletedProcess([], 0, json.dumps(old), "")
+
+        selection = service_state._record(self.state)
+        with patch.object(service_checks, "_run", side_effect=moving_candidate) as run, \
+                patch.object(service_checks.time, "sleep") as sleep:
+            self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                Path(sys.executable), self.config, self.state))
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(len(set(attempts)), 3)
+        self.assertEqual(service_state._record(self.state), selection)
+
     def test_scoped_task_history_requires_contract_16_and_complete_actual_reader(self):
         from test.support.tasks import task_contract
         from openmachine.tasks import records

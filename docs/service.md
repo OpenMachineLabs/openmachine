@@ -97,6 +97,12 @@ An old reader that ignores a directory cannot pass. Formats 1/2 and large retain
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
 
+A task-index generation may legitimately advance between the candidate process
+snapshot and the local compatibility read. Only that observed pre-effect generation
+mismatch permits up to three full reader checks with short pauses. Other reader,
+format, integrity or authorization failures remain fail-closed; continuing changes
+exhaust the finite budget without stopping or replacing the selected service.
+
 The removed Work adapter leaves any private `events.json` and its original lock
 untouched. Lifecycle checks validate the bounded archive envelope and canonical
 fingerprint without interpreting or scheduling its nested delivery records.
