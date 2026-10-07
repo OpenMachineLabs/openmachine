@@ -1,98 +1,61 @@
 #!/usr/bin/env python3
-"""Run and cache the repository's local pre-merge verification."""
+"""Verify and cache a clean candidate using the shared module-aware test runner."""
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
-import platform
 from pathlib import Path
+import platform
 import subprocess
 import sys
-import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE_FORMAT = 1
+SPEC = importlib.util.spec_from_file_location("openmachine_test_runner", ROOT / "scripts/run_tests.py")
+runner = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(runner)
+CACHE_FORMAT = 2
 DEFAULT_BASE = "origin/main"
+resolve_commit = runner.resolve_commit
+require_ancestor = runner.require_ancestor
+require_clean = runner.require_clean
 
 
-def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], check=check,
-                          capture_output=True, text=True, timeout=30)
-
-
-def _run(argv: list[str], *, cwd: Path) -> None:
-    print("+", " ".join(argv), flush=True)
-    subprocess.run(argv, cwd=cwd, check=True, timeout=600)
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def resolve_commit(root: Path, ref: str) -> str:
-    if not ref or ref.startswith("-") or any(ord(char) < 32 for char in ref):
-        raise ValueError("base must be an explicit local Git ref or full SHA")
-    result = _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}", check=False)
-    sha = result.stdout.strip()
-    if result.returncode or len(sha) != 40 or any(char not in "0123456789abcdef" for char in sha):
-        raise ValueError(f"base {ref!r} is not available locally; fetch it before premerge")
-    return sha
-
-
-def require_ancestor(root: Path, base_sha: str, head_sha: str) -> None:
-    result = _git(root, "merge-base", "--is-ancestor", base_sha, head_sha, check=False)
-    if result.returncode == 1:
-        raise ValueError("base is not an ancestor of HEAD; select the exact candidate base")
-    if result.returncode:
-        raise ValueError("Git could not verify the requested candidate range")
-
-
-def require_clean(root: Path) -> None:
-    status = _git(root, "status", "--porcelain", "--untracked-files=all").stdout
-    if status:
-        raise ValueError("premerge requires a clean committed worktree")
-
-
-def cache_path(root: Path, head_sha: str) -> Path:
-    common = Path(_git(root, "rev-parse", "--git-common-dir").stdout.strip())
+def cache_path(root: Path, head_sha: str, scope: str = "affected") -> Path:
+    common = Path(runner.git(root, "rev-parse", "--git-common-dir").strip())
     if not common.is_absolute():
         common = (root / common).resolve()
-    return common / "openmachine" / "premerge" / f"{head_sha}.json"
+    return common / "openmachine" / "premerge" / f"{head_sha}-{scope}.json"
 
 
 def fingerprint(root: Path) -> dict:
+    files = ("requirements.lock", ".github/workflows/quality.yml", "scripts/premerge.py",
+             "scripts/run_tests.py", "scripts/check_repository.py", runner.MANIFEST)
     return {
-        "python": platform.python_version(),
-        "implementation": platform.python_implementation(),
-        "platform": sys.platform,
-        "machine": platform.machine(),
-        "requirements_sha256": _sha256(root / "requirements.lock"),
-        "workflow_sha256": _sha256(root / ".github/workflows/quality.yml"),
-        "script_sha256": _sha256(root / "scripts/premerge.py"),
+        "python": platform.python_version(), "implementation": platform.python_implementation(),
+        "platform": sys.platform, "machine": platform.machine(),
+        "files": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
     }
 
 
-def cache_record(head_sha: str, base_sha: str, environment: dict) -> dict:
+def cache_record(plan: dict, environment: dict) -> dict:
     return {
-        "format": CACHE_FORMAT,
-        "status": "passed",
-        "head_sha": head_sha,
-        "base_sha": base_sha,
+        "format": CACHE_FORMAT, "status": "passed",
+        "head_sha": plan["head_sha"], "base_sha": plan["base_sha"],
+        "scope": plan["scope"], "selection_sha256": plan["selection_sha256"],
         "environment": environment,
     }
 
 
-def cache_matches(value: object, head_sha: str, base_sha: str, environment: dict) -> bool:
-    return value == cache_record(head_sha, base_sha, environment)
+def cache_matches(value: object, plan: dict, environment: dict) -> bool:
+    return value == cache_record(plan, environment)
 
 
 def read_cache(path: Path) -> object | None:
     try:
         return json.loads(path.read_text())
-    except FileNotFoundError:
-        return None
     except (OSError, ValueError):
         return None
 
@@ -105,60 +68,76 @@ def write_cache(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def execute_checks(root: Path) -> None:
-    _run([sys.executable, "-m", "unittest", "discover", "-s", "test/system", "-p", "test_*.py"], cwd=root)
-    _run([sys.executable, "scripts/check_repository.py"], cwd=root)
-    with tempfile.TemporaryDirectory(prefix="openmachine-premerge-") as directory:
-        temporary = Path(directory)
-        environment = temporary / "venv"
-        _run([sys.executable, "-m", "venv", str(environment)], cwd=root)
-        python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        _run([str(python), "-m", "pip", "install", "-r", str(root / "requirements.lock")], cwd=root)
-        wheel_dir = temporary / "wheel"
-        wheel_dir.mkdir()
-        _run([str(python), "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", ".",
-              "--wheel-dir", str(wheel_dir)], cwd=root)
-        wheels = list(wheel_dir.glob("openmachine-*.whl"))
-        if len(wheels) != 1:
-            raise ValueError("premerge expected exactly one Open Machine wheel")
-        _run([str(python), "-m", "pip", "install", "--no-deps", "--force-reinstall", str(wheels[0])], cwd=root)
-        outside = temporary / "outside"
-        outside.mkdir()
-        _run([str(python), "-m", "unittest", "discover", "-s", str(root / "test/unit"), "-p", "test_*.py"],
-             cwd=outside)
-        _run([str(python), "-m", "unittest", "discover", "-s", str(root / "test/contract"), "-p", "test_*.py"],
-             cwd=outside)
-    _run(["git", "diff", "--check"], cwd=root)
+def execute_checks(root: Path, plan: dict) -> dict:
+    return runner.execute_plan(root, plan)
 
 
-def run_premerge(root: Path, base_ref: str, *, force: bool = False) -> dict:
-    require_clean(root)
-    head_sha = resolve_commit(root, "HEAD")
-    base_sha = resolve_commit(root, base_ref)
-    require_ancestor(root, base_sha, head_sha)
+def run_premerge(root: Path, base_ref: str, *, force: bool = False, full: bool = False,
+                 ci: bool = False) -> dict:
+    plan = runner.make_plan(root, base_ref, full=full, committed=True)
     environment = fingerprint(root)
-    path = cache_path(root, head_sha)
-    if not force and cache_matches(read_cache(path), head_sha, base_sha, environment):
-        print(f"PASS: cached premerge for {head_sha} against {base_sha}")
-        return {"status": "cached", "head_sha": head_sha, "base_sha": base_sha, "cache": str(path)}
-
-    execute_checks(root)
+    path = cache_path(root, plan["head_sha"], plan["scope"])
+    # Hosted CI always obtains new hosted evidence and never trusts a developer's PASS cache.
+    if not ci and not force and cache_matches(read_cache(path), plan, environment):
+        runner.print_plan(plan)
+        print(f"PASS: cached {plan['scope']} premerge for {plan['head_sha']} against {plan['base_sha']}")
+        return {"status": "cached", "plan": plan, "cache": str(path)}
+    if not ci:
+        # A fresh failed/interrupted attempt must not leave an earlier PASS eligible.
+        path.unlink(missing_ok=True)
+    result = execute_checks(root, plan)
+    if result.get("status") != "passed":
+        raise ValueError("the selected checks did not complete successfully")
     require_clean(root)
-    record = cache_record(head_sha, base_sha, environment)
-    write_cache(path, record)
-    print(f"PASS: premerge for {head_sha} against {base_sha}")
-    return {"status": "passed", "head_sha": head_sha, "base_sha": base_sha, "cache": str(path)}
+    if resolve_commit(root, "HEAD") != plan["head_sha"] or resolve_commit(root, base_ref) != plan["base_sha"]:
+        raise ValueError("HEAD or the requested base changed during verification")
+    final = runner.make_plan(root, base_ref, full=full, committed=True)
+    if final["selection_sha256"] != plan["selection_sha256"] or fingerprint(root) != environment:
+        raise ValueError("candidate selection or verification inputs changed during verification")
+    if not ci:
+        write_cache(path, cache_record(plan, environment))
+    print(f"PASS: {plan['scope']} premerge for {plan['head_sha']} against {plan['base_sha']}")
+    return {**result, "status": "passed", "plan": plan, "cache": None if ci else str(path)}
+
+
+def ci_candidate(root: Path, event_name: str, event: dict, github_sha: str) -> tuple[str, bool]:
+    head = resolve_commit(root, "HEAD")
+    if head != github_sha:
+        raise ValueError("checkout HEAD does not match the event candidate SHA")
+    if event_name == "pull_request":
+        pr = event["pull_request"]
+        base = resolve_commit(root, pr["base"]["sha"])
+        branch_head = resolve_commit(root, pr["head"]["sha"])
+        require_ancestor(root, base, head)
+        require_ancestor(root, branch_head, head)
+        return base, False
+    if event_name == "push":
+        if event.get("deleted") or event["after"] != head or event["before"] == "0" * 40:
+            raise ValueError("push needs an existing exact before/after candidate range")
+        base = resolve_commit(root, event["before"])
+        require_ancestor(root, base, head)
+        return base, False
+    if event_name == "workflow_dispatch":
+        # A manual full run does not need a fabricated previous commit.
+        return head, True
+    raise ValueError(f"unsupported code-verification event: {event_name}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", default=DEFAULT_BASE,
-                        help="local base ref or full SHA for candidate identity validation (default: origin/main)")
-    parser.add_argument("--force", action="store_true", help="rerun checks even when this exact candidate is cached")
+    parser.add_argument("--base", default=DEFAULT_BASE, help="local ancestor ref or full SHA (default: origin/main)")
+    parser.add_argument("--full", action="store_true", help="request the complete layered suite")
+    parser.add_argument("--force", action="store_true", help="rerun the selected scope even when it is cached")
+    parser.add_argument("--ci", action="store_true", help="use the exact GitHub event candidate, without local PASS cache")
     args = parser.parse_args()
     try:
-        run_premerge(ROOT, args.base, force=args.force)
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        base, full = args.base, args.full
+        if args.ci:
+            event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+            base, event_full = ci_candidate(ROOT, os.environ["GITHUB_EVENT_NAME"], event, os.environ["GITHUB_SHA"])
+            full = full or event_full
+        run_premerge(ROOT, base, force=args.force, full=full, ci=args.ci)
+    except (OSError, ValueError, KeyError, SyntaxError, subprocess.SubprocessError) as error:
         print(f"FAIL: premerge: {error}", file=sys.stderr)
         return 1
     return 0

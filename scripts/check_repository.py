@@ -119,9 +119,11 @@ def commit_errors(root: Path, base: str, head: str) -> list[str]:
 
 def main() -> int:
     errors = []
-    paths = git(ROOT, "ls-files", "-z").split("\0")
+    paths = git(ROOT, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split("\0")
     for name in filter(None, paths):
         path = ROOT / name
+        if not path.exists():
+            continue  # A tracked deletion is part of the current candidate.
         if path.suffix in TEXT_SUFFIXES or path.name in {"LICENSE", ".gitignore"}:
             errors.extend(f"{name}: {error}" for error in file_errors(path, ROOT))
     errors += label_errors(json.loads((ROOT / ".github/labels.json").read_text()))

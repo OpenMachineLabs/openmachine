@@ -93,46 +93,70 @@ workflow is assumed. Add planning integration only when it has an actual owner.
 
 ## Checks and evidence
 
-For a clean committed candidate, run the local premerge entry point before requesting
-or performing merge:
+Use a module's focused tests while editing, then the shared premerge entry point
+for the clean committed candidate:
 
 ```sh
+python3 scripts/run_tests.py --module github --layer unit
+python3 scripts/run_tests.py --base origin/main --plan
 python3 scripts/premerge.py --base origin/main
 ```
 
-It validates the exact local HEAD/base relationship and reuses a successful result
-only for the same HEAD, resolved base and local verification fingerprint. Use
-`--force` when an intentional full rerun is needed. Pull-request-internal commit
-subjects are not a merge gate because published history should not be rewritten to
-satisfy presentation policy; the final commit landing on `main` is still validated
-by the push event. The cache lives only inside Git metadata and never replaces
-hosted CI evidence.
+The focused unit command verifies current checkout source. The default module
+and premerge paths select the affected module's layers and explicit boundaries,
+build one independent wheel, and test that candidate outside its checkout.
+Repository and whitespace checks run before environment preparation. See
+[test/README.md](test/README.md) for ownership, fixture, deletion and layer rules.
 
-The underlying repository-only checks remain:
+The base must exist locally and be an ancestor of the candidate. Development
+selection includes staged, unstaged and ordinary untracked changes; premerge
+requires a clean committed worktree. Unknown source ownership, invalid mappings,
+missing retained coverage and zero required tests fail before expensive work.
+A documentation-only plan runs repository checks without product installation.
+
+Use `--full` for complete verification. Dependency, packaging and global runner
+changes also require the full suite. Ordinary module/test additions and ownership
+edits use the affected entries, including old and new boundaries. `--force`
+invalidates cache reuse for the selected scope; it does not expand that scope.
+
+A local PASS is reusable only for the exact HEAD, resolved base, test selection,
+scope and verification fingerprint. Source-only and dirty-worktree results are
+not cached. Full and affected evidence cannot be confused, and hosted CI obtains
+its own result. Pull-request-internal commit subjects are not a merge gate;
+published history should not be rewritten to satisfy presentation policy. The
+final commit landing on main is still validated by the push event.
+
+The dependency-free repository-only checks remain:
 
 ```sh
-python3 -m unittest discover -s test/system -p 'test_*.py'
+python3 -m unittest discover -s test/repository -p 'test_*.py'
 python3 scripts/check_repository.py
 ```
 
-The system suite tests the repository checker itself; product checks and their
-installed-wheel entry points are documented in `test/README.md`. The checker validates tracked
-text hygiene, relative Markdown file links, the label manifest, and the naming
-and English-language backstop for supported GitHub events and new commits.
-It rejects CJK text as a common accidental language switch; it does not detect
-all non-English prose or prove English grammar. Review remains responsible for
-English content, meaningful acceptance, authorization, and the live primary label.
-Local link checks validate file targets, not URL availability or heading anchors.
+The repository suite tests the checker, selector and runner and verifies source
+dependency direction. The checker validates candidate text hygiene, relative
+Markdown file links, the label manifest, and naming and English-language rules
+for supported GitHub events. It rejects CJK text as a common accidental language
+switch; it does not detect all non-English prose or prove English grammar.
+Review remains responsible for English content, meaningful acceptance,
+authorization and the live primary label. Local link checks validate file
+targets, not URL availability or heading anchors.
 
 Quality CI uses GitHub-hosted runners, pinned action revisions, read-only
 permissions, no credentials supplied to candidate code, and a five-minute
-budget. Only separate default-branch metadata workflows have write access:
-label sync and post-merge Spec Development linking use `issues: write`.
-Never use `pull_request_target` to execute candidate code, interpolate Issue or
-PR text into shell commands, or introduce self-hosted machines for these checks.
-Branch protection is a separate maintainer setting, not enabled by this PR.
+budget. Its code checks use the same premerge pipeline and exact GitHub event
+candidate. Metadata has a separate workflow and concurrency identity; a
+metadata-only edit cannot replace a failed code check with a same-named skipped
+result or cancel code verification. Changing a PR's base still requires code
+verification against the new candidate.
 
-Add focused product tests with actual product behavior; do not create empty
-suites for nonexistent components. Record important unexecuted checks as
-`NOT RUN`. A local pass is not a hosted-CI pass, and neither proves runtime,
-provider, security, performance, or production acceptance.
+Only separate default-branch metadata workflows have write access: label sync
+and post-merge Spec Development linking use `issues: write`. Never use
+`pull_request_target` to execute candidate code, interpolate Issue or PR text
+into shell commands, or introduce self-hosted machines for these checks.
+Branch protection remains a separate maintainer setting.
+
+Add focused tests for actual product behavior; do not create empty suites or
+directories. Record measured timings and actual PASS, FAIL, SKIP and NOT RUN
+results. A local pass is not a hosted-CI pass, and neither proves runtime,
+provider, security, performance or production acceptance.
