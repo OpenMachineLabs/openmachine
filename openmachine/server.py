@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import uvicorn
 
 from openmachine import __version__, service, tasks
-from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
+from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT, MAX_TASK_WAIT
 from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, bound_workspace_result
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
@@ -142,7 +142,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"read_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+        guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -347,6 +347,32 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                   Field(pattern=r"^[0-9a-f]{32}$")] = None) -> CallToolResult:
         """Read original task history without initializing, repairing, claiming or executing. Canonical records validate independently of derived index metadata and report current/stale/incomplete lookup status; legacy Markdown retains its original index-hash contract. An optional original preparation_id correlates a read-only receiver check; only the successful external MCP call records that evidence. It does not claim, enable recovery, prove a Chat identity or advance work. Omitted means a passive ordinary read. Reading grants no authority and never reactivates terminal history."""
         return _reply(lambda: application.read_task(task_id, preparation_id))
+
+    @mcp.tool(annotations=READ, structured_output=False)
+    async def wait_task(task_id: Annotated[str, Field(min_length=1, max_length=64,
+                        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
+                        expected_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
+                        wait_seconds: Annotated[float, Field(strict=True, ge=0, le=MAX_TASK_WAIT,
+                        allow_inf_nan=False)] = MAX_TASK_WAIT) -> CallToolResult:
+        """Wait once for bounded structured-task progress. Attention or wait expiry sets foreground.stop_foreground and supplies a safe resume prompt; callers must end the current Chat turn. This read never claims, retries, cancels, or extends original work."""
+        if wait_seconds and not waiting.acquire(blocking=False):
+            return _result({"error": {"code": "reader_busy",
+                "message": "At most 16 bounded waits are admitted; immediate task reads and cancellation remain available."}}, True)
+        cancelled = threading.Event()
+        operation = partial(_reply, lambda: application.wait_task(
+            task_id, expected_revision, wait_seconds, cancelled=cancelled))
+        try:
+            if wait_seconds:
+                try:
+                    future = _submit_owned(operation)
+                except BaseException:
+                    waiting.release()
+                    raise
+                future.add_done_callback(lambda _: waiting.release())
+                return await asyncio.wrap_future(future)
+            return await asyncio.to_thread(operation)
+        finally:
+            cancelled.set()
 
     @mcp.tool(annotations=LOCAL_WRITE, structured_output=False)
     def save_task(task_id: str, expected_revision: Annotated[int, Field(ge=0)],
