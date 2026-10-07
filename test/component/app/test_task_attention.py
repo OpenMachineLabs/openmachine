@@ -2,6 +2,7 @@
 
 import threading
 import unittest
+from unittest.mock import patch
 import uuid
 
 from openmachine import tasks
@@ -65,6 +66,26 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
                                            timestamp=timestamp)["foreground"]
         self.assertEqual((attention["status"], attention["reason"], attention["original_work_running"]),
                          ("attention_required", "execution_unverified", None))
+
+    def test_unverified_unresolved_execution_blocks_disjoint_effect(self):
+        self.accept_plan()
+        record = self.seed_running()
+        timestamp = record["updated_at_ms"] + 1000
+        runtime = {"kind": "runtime", "state": "blocked", "source": "fixture",
+            "observed_at_ms": timestamp, "last_progress_at_ms": record["updated_at_ms"],
+            "next_attempt_at_ms": None, "blocker": "observer_heartbeat_stale"}
+
+        def blocked(view):
+            return {**view, "observations": [runtime]}
+
+        arguments = self.write_arguments(path="disjoint.txt")
+        with patch.object(self.app.task_observer, "project", side_effect=blocked):
+            with self.assertRaises(Fault) as raised:
+                self.app.write_workspace_file(**arguments)
+        self.assertEqual(raised.exception.code, "task_attention_required")
+        self.assertEqual(raised.exception.evidence["foreground"]["reason"], "execution_unverified")
+        self.assertFalse((self.work / "disjoint.txt").exists())
+        self.assertEqual(len(self.view()["record"]["operations"]), 1)
 
     def test_wait_task_expires_once_and_wakes_on_revision_change(self):
         self.accept_plan()

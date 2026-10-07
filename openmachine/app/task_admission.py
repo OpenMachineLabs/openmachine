@@ -64,8 +64,6 @@ class TaskAdmission:
         return f"native-uid:{os.getuid()}"
 
     def _require_foreground_clear(self, view: dict) -> None:
-        if any(effects.unresolved(item) for item in view["record"]["operations"]):
-            return
         projected = task_attention.project(self.app.task_observer.project(view))
         foreground = projected.get("foreground", {})
         if foreground.get("status") == "attention_required":
