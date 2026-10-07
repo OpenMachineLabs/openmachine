@@ -75,6 +75,43 @@ class GitHubTests(unittest.TestCase):
                 self.assertEqual(len(calls), 1)
                 self.assertNotIn("synthetic-private-detail", str(result))
 
+    def test_http_mutation_rejections_are_explicitly_no_effect(self):
+        for status in (401, 403, 404, 405, 409, 422, 429):
+            calls = []
+
+            def rejected(request):
+                calls.append(request)
+                return httpx.Response(status, json={"message": "synthetic-private-detail"})
+
+            with self.subTest(status=status), self.assertRaises(Fault) as caught:
+                operations._mutate(REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback",
+                                   transport=self.transport(rejected))
+            self.assertEqual(caught.exception.effect, "known_no_effect")
+            self.assertEqual([request.method for request in calls], ["POST"])
+
+    def test_acknowledged_http_write_keeps_readback_failure_unverified(self):
+        for failure in ("connect", "rate_limit", "lost_response"):
+            calls = []
+
+            def response(request):
+                calls.append(request)
+                if request.method == "POST":
+                    return httpx.Response(201, json={"id": 9, "body": "x"})
+                if failure == "connect":
+                    raise httpx.ConnectError("synthetic-private-detail")
+                if failure == "rate_limit":
+                    return httpx.Response(429)
+                raise httpx.ReadError("synthetic-private-detail")
+
+            with self.subTest(failure=failure):
+                result = operations._mutate(REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback",
+                                            transport=self.transport(response))
+            self.assertEqual(result["status"], "write_unverified")
+            self.assertEqual(result["error_code"], {"connect": "github_network_unavailable", "rate_limit": "github_rate_limited",
+                                                     "lost_response": "github_response_unknown"}[failure])
+            self.assertEqual(result["receipt"]["id"], 9)
+            self.assertEqual([request.method for request in calls], ["POST", "GET"])
+
     def test_connect_failure_and_response_limits_are_explicit(self):
         for error in (httpx.ConnectError, httpx.ConnectTimeout):
             calls = []
@@ -85,6 +122,7 @@ class GitHubTests(unittest.TestCase):
                 operations._mutate(REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback",
                                    transport=self.transport(offline))
             self.assertEqual(caught.exception.code, "github_network_unavailable")
+            self.assertEqual(caught.exception.effect, "known_no_effect")
             self.assertEqual(len(calls), 1)
         for body in (b"x" * (2 * 1024 * 1024 + 1), b"not JSON", b"null"):
             with self.subTest(size=len(body)), self.assertRaises(Fault) as caught:

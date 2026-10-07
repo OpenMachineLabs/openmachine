@@ -77,6 +77,11 @@
       "base_commit": "3b0039b48d6151d7e2e21db6b2fca6bdb9c1a6be",
       "change": "Spec 76 adds optional task recovery_policy and correlated read_task preparation_id, replaces the URL-binding recovery input with an action-only override and marks its preparation scheduling as open-world. Expectations are authored from the approved contract; tool names and all unrelated schemas/annotations stay exact.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/76"
+    },
+    {
+      "approval": "Current maintainer explicitly authorizes the 2026-10-07 supervision friction audit, scoped fixes, reviewed candidate bootstrap if necessary, and normal protected merges.",
+      "base_commit": "340fecf63fa678a12ad3bc6b566fd03f8a1fcb3b",
+      "change": "Add optional expected_fields to four GitHub writers and explicit renew/bind_effect_scope task controls. Expectations are independently authored from the reviewed interface; all existing tools, arguments, annotations and baseline provenance remain exact."
     }
   ],
   "baseline": {
@@ -351,46 +356,6 @@
         "type": "object"
       }
     },
-    "connect_integration": {
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "inputSchema": {
-        "properties": {
-          "connection_id": {
-            "default": "",
-            "pattern": "^(?:[0-9a-f]{32})?$",
-            "title": "Connection Id",
-            "type": "string"
-          },
-          "method": {
-            "default": "device_code",
-            "maxLength": 64,
-            "title": "Method",
-            "type": "string"
-          },
-          "provider": {
-            "default": "github",
-            "maxLength": 64,
-            "title": "Provider",
-            "type": "string"
-          },
-          "request_id": {
-            "pattern": "^[0-9a-f]{32}$",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id"
-        ],
-        "title": "connect_integrationArguments",
-        "type": "object"
-      }
-    },
     "configure_chat_recovery": {
       "annotations": {
         "destructiveHint": true,
@@ -451,6 +416,46 @@
           "change"
         ],
         "title": "configure_chat_recoveryArguments",
+        "type": "object"
+      }
+    },
+    "connect_integration": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "method": {
+            "default": "device_code",
+            "maxLength": 64,
+            "title": "Method",
+            "type": "string"
+          },
+          "provider": {
+            "default": "github",
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "connect_integrationArguments",
         "type": "object"
       }
     },
@@ -642,6 +647,54 @@
               "operation_id"
             ],
             "title": "Acceptance",
+            "type": "object"
+          },
+          "BindEffectScope": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "bind_effect_scope",
+                "title": "Action",
+                "type": "string"
+              },
+              "arguments": {
+                "additionalProperties": true,
+                "title": "Arguments",
+                "type": "object"
+              },
+              "method": {
+                "enum": [
+                  "github_issue",
+                  "github_pull_request",
+                  "github_comment",
+                  "github_review",
+                  "github_merge"
+                ],
+                "title": "Method",
+                "type": "string"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "reason": {
+                "maxLength": 512,
+                "minLength": 1,
+                "title": "Reason",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "operation_id",
+              "method",
+              "arguments",
+              "reason"
+            ],
+            "title": "BindEffectScope",
             "type": "object"
           },
           "Claim": {
@@ -943,6 +996,29 @@
             "title": "RecordDecision",
             "type": "object"
           },
+          "Renew": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "const": "renew",
+                "title": "Action",
+                "type": "string"
+              },
+              "claim_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Claim Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "claim_id"
+            ],
+            "title": "Renew",
+            "type": "object"
+          },
           "RevisePlan": {
             "additionalProperties": false,
             "properties": {
@@ -1154,12 +1230,14 @@
           "transition": {
             "discriminator": {
               "mapping": {
+                "bind_effect_scope": "#/$defs/BindEffectScope",
                 "cancel": "#/$defs/ReasonedControl",
                 "claim": "#/$defs/Claim",
                 "finish": "#/$defs/Finish",
                 "pause": "#/$defs/ReasonedControl",
                 "record_decision": "#/$defs/RecordDecision",
                 "release": "#/$defs/ReasonedControl",
+                "renew": "#/$defs/Renew",
                 "resume": "#/$defs/ReasonedControl",
                 "revise_plan": "#/$defs/RevisePlan"
               },
@@ -1168,6 +1246,12 @@
             "oneOf": [
               {
                 "$ref": "#/$defs/Claim"
+              },
+              {
+                "$ref": "#/$defs/Renew"
+              },
+              {
+                "$ref": "#/$defs/BindEffectScope"
               },
               {
                 "$ref": "#/$defs/ReasonedControl"
@@ -1927,6 +2011,19 @@
             "title": "Connection Id",
             "type": "string"
           },
+          "expected_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Fields"
+          },
           "expected_updated_at": {
             "default": "",
             "title": "Expected Updated At",
@@ -2064,6 +2161,19 @@
             "pattern": "^(?:[0-9a-f]{32})?$",
             "title": "Connection Id",
             "type": "string"
+          },
+          "expected_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Fields"
           },
           "expected_updated_at": {
             "default": "",
@@ -2385,6 +2495,19 @@
             "title": "Draft",
             "type": "boolean"
           },
+          "expected_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Fields"
+          },
           "expected_head_sha": {
             "default": "",
             "title": "Expected Head Sha",
@@ -2665,6 +2788,19 @@
             ],
             "title": "Event",
             "type": "string"
+          },
+          "expected_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Fields"
           },
           "expected_head_sha": {
             "default": "",

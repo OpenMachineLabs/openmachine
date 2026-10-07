@@ -17,7 +17,7 @@ from openmachine.foundation.state import private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 15
+STATE_CONTRACT = 16
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

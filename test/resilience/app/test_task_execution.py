@@ -44,10 +44,20 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                           return_value={"context": dict(current, workspace_identity="f" * 64)}):
             self.fault("context_mismatch", self.control, "resume", reason="Wrong workspace must remain blocked.")
         resumed = self.control("resume", reason="Continue in the original workspace.")["record"]
+        # Keep HEAD unchanged in this mock so the write rejects only the wrong workspace identity.
         with patch.object(self.app.machines, "read_workspace_file",
-                          return_value={"context": dict(current, workspace_identity="f" * 64)}):
-            self.fault("context_mismatch", self.control, "claim", handoff_id=resumed["handoff"]["id"])
-        self.control("claim", handoff_id=resumed["handoff"]["id"])
+                          return_value={"context": dict(current, workspace_identity="f" * 64,
+                                                        head_sha=self.context["head_sha"])}):
+            reattached = self.control("claim", handoff_id=resumed["handoff"]["id"])["record"]
+            self.assertEqual(reattached["operations"], original["operations"])
+            self.assertEqual(reattached["contract"], original["contract"])
+            write = self.write_arguments()
+            write["expected_head_sha"] = self.context["head_sha"]
+            self.fault("context_mismatch", self.app.write_workspace_file, **write)
+        write = self.write_arguments()
+        write["expected_head_sha"] = current["head_sha"]
+        self.fault("context_mismatch", self.app.write_workspace_file, **write)
+        self.assertEqual(self.view()["record"]["operations"], original["operations"])
         contract = json.loads(json.dumps(original["contract"]))
         contract["targets"][0]["head_sha"] = current["head_sha"]
         revised = self.control("revise_plan", contract=contract, stages=self.request["stages"],

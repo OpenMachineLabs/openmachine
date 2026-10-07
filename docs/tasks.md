@@ -49,8 +49,8 @@ observe them, rather than allocating replacement work. No arbitrary overwrite AP
 ## GitHub account binding
 
 New GitHub task contracts resolve native `github_connections` per repository and retain
-`connection_id`, numeric `account_id` and `authorization_revision`. Format-2 and
-format-3 operation locators retain that binding for dispatch and destination recovery.
+`connection_id`, numeric `account_id` and `authorization_revision`. Format-2 through
+format-4 operation locators retain that binding for dispatch and destination recovery.
 Changing the default, disconnecting or reconnecting cannot silently change a task's
 account. Explicit connection selectors must match the accepted binding.
 
@@ -80,20 +80,40 @@ task_id, task_revision, plan_revision, continuation_epoch, operation_id
 Start and file operation IDs equal the original execution/change IDs. Input and
 cancellation have distinct operation IDs while retaining original execution/sequence.
 A bare `task_id` is only a legacy association, not a structured execution grant.
-Claims last at most 300 seconds or earlier handoff/authority expiry. Identical
-last-update retries do not extend ownership. Native-account ownership is not a
-ChatGPT conversation identity, caller-presence proof or untrusted-chat isolation.
+Claims last at most 300 seconds or earlier handoff/authority expiry. Native-account
+ownership is not a ChatGPT conversation identity, caller-presence proof or
+untrusted-chat isolation.
 
 On reattachment, inspect original outstanding receipts and current task/plan/epoch.
-Reuse a valid owned claim or claim after release/expiry; do not displace a live
-owner. Release a claim when deliberately handing work over. Claim expiry does
-not stop admitted work or erase its results. The final accepted stage still has
-a handoff until explicit completion; reclaim and finish without repeating it.
+Reuse a valid owned claim or claim an eligible handoff after release/expiry; do not
+displace a live owner. Release a claim when deliberately handing work over. Claim
+expiry does not stop admitted work or erase its results. The final accepted stage
+still has a handoff until explicit completion; reclaim and finish without repeating it.
 
-Claim and resume revalidate workspace identity and current grants, but tolerate a
-historical HEAD so a task can reattach after its own commit. They neither change
-the accepted HEAD nor authorize new work against it. Reconcile the original commit
-and explicitly revise the plan before new effects or acceptance on a changed HEAD.
+When continuing the same retained claim, use `control_task` with the exact current
+task/plan revisions, continuation epoch, a new update ID and this transition:
+
+```json
+{"action":"renew","claim_id":"0123456789abcdef0123456789abcdef"}
+```
+
+Replace the example ID with the retained `control.owner.claim_id`. Renewal
+requires the same native principal and claim ID, no stop intent, a
+nonterminal task and unexpired task authority. An expired original claim can be
+renewed while it is still retained and unreplaced, including when an admitted
+operation cleared the handoff. Renewal keeps the claim ID, epoch, plan and original
+operations. Its new expiry is no later than 300 seconds from the control update or
+the task authority expiry. Reading, observing and retrying the identical last
+update never extend a claim. Explicit renewals retain material history and remain
+subject to the record's finite capacity; they are not an unlimited keepalive.
+
+Claim and renewal check the configured machine/workspace, current readable context,
+mutation grants and repository account authority, while allowing the accepted
+branch identity or HEAD to be historical. They acquire continuation ownership
+without changing the accepted workspace or admitting an effect. Resume still
+checks workspace identity while allowing a historical HEAD. Reconcile original
+work and explicitly revise the plan against the current exact workspace identity
+and HEAD before new effects or acceptance after either has changed.
 
 Application persists normalized intent before dispatch, then releases the task
 lock before domain IO. Each domain retains source, sequence, permission and lease
@@ -108,6 +128,21 @@ Late results do not clear pause or reopen terminal history. Resume does not clai
 ownership, extend expired authority or prove a worker is alive. `revise_plan`
 invalidates changed stages and dependents while preserving unrelated acceptance,
 stage identities and original operation evidence.
+
+An expired, nonterminal contract can be explicitly reauthorized with `revise_plan`.
+Supply the complete revised contract and stage definitions, a future expiry and
+at least one new `authority_refs` entry. A reference records the supplied authority;
+it does not verify a ChatGPT user's identity or create a native grant. Current
+targets, exact workspace identity/HEAD and repository account grants are checked.
+A live foreign owner must release first. Cancellation and terminal history cannot
+be reopened; an expired paused task stays paused, with no new owner or handoff,
+until a separate explicit resume. Reauthorization preserves the recovery policy.
+
+Outstanding local and SSH effects, including partial results, block plan replacement. Unresolved
+GitHub effects may survive a revision only with unchanged repositories and original
+native account bindings. Their operation IDs, request/source hashes, original plan
+revisions, receipts and uncertainty remain intact. Revision does not reconcile an
+unknown outcome, accept evidence or dispatch replacement work.
 
 Use `record_decision` only with applicable verified evidence, then explicitly finish:
 
@@ -129,6 +164,56 @@ lookup pages; duplicate/partial evidence remains unknown. Bodyless uncertain wri
 may remain unresolved. Receipt hashes represent bounded semantic observations,
 not full raw logs, source files or provider responses. There is no exactly-once
 promise for arbitrary shell/API effects.
+
+## Scoped uncertainty and historical evidence
+
+Format 4 separates original operation identity from the resources an effect can
+change. The native GitHub writer routes share a repository lease during admission,
+dispatch and publication. Retained uncertainty then excludes only conflicting
+resources across tasks, anchors and account selectors. Issue/PR metadata shares
+the same repository-and-number namespace. The original operation ID still never
+dispatches again.
+
+| Unresolved effect | Exclusion retained |
+| --- | --- |
+| Labels or assignees replacement | The same field; disjoint body/title, reviews and merge can continue |
+| PR state or draft transition | Overlapping state/draft changes, submitted reviews and merge |
+| Submitted review | The same review collection and dependent merge/state transitions |
+| Review body replacement | The same review body; it does not resubmit the review decision |
+| Merge | Another merge or dependent state change; omitted commit messages also depend on PR title/body |
+| Comment mutation | The same comment or unresolved parent collection; an unchecked parent argument cannot narrow a comment ID |
+| Missing GitHub creation destination | A conservative repository exclusion until original evidence identifies the destination |
+| Uncertain execution or partial workspace effect | Conflicting work on its original target; existing worker and workspace leases remain authoritative |
+
+An old operation without a scope stays conservative. The explicit
+`bind_effect_scope` control takes its original operation ID, GitHub method, complete
+normalized arguments and a reason. It recomputes the original request hash with
+the original plan and source hash, derives scope from the actual owner arguments,
+and appends an immutable witness. The original operation, locator, outcome and
+receipt stay unchanged. A matching request proves scope, not non-execution. No
+current destination snapshot can prove a historical request was never dispatched.
+The witness input is bounded at 128 KiB; only its fingerprint, compact scope,
+principal and timestamp are retained, not raw bodies or parameters.
+
+New owner failures retain a failure code and effect classification. An explicit
+business preflight rejection is failed/known-no-effect without a reconciling read
+that could replace the result. A dispatched or acknowledged write with insufficient
+evidence remains unknown. Passive unproven observations preserve the original
+failure evidence. Same-ID verified reconciliation never resubmits the request.
+
+Verified historical GitHub results are frozen. They establish the original effect;
+subsequent bot comments, timestamps and metadata do not replace their digest.
+Current acceptance remains separate: each merge reads the current HEAD/base,
+protections, checks, review decisions and discussions. A stage can accept nonempty,
+successful evidence independent of all unresolved scopes, while the unresolved
+IDs remain visible. Finish still blocks every original unresolved effect.
+
+Every persisted observation advances `revision` only when its content changes.
+Format 4 also records the last material `control_revision`. Business admission can
+use an observed revision within that interval if plan, epoch, live ownership and
+all domain guards still match. Control transitions keep exact revision CAS;
+ownership, plan/scope, stop intent and new business admission invalidate earlier
+contexts. This does not make a stale plan or released claim usable.
 
 ## Lookup and explicit maintenance
 
@@ -182,12 +267,13 @@ connection failure without replay or stage acceptance.
 
 ## Chat continuation
 
-New structured tasks default to `recovery_policy: task_chat`. Runtime prepares one
-task-owned ordinary Chat before new business effects; the originating Phone, Web
-or Desktop Chat need not know its own URL. `create_task` and `read_task` expose
+New structured tasks default to `recovery_policy: disabled`. Explicitly selecting
+`task_chat` prepares one task-owned ordinary Chat; the originating Phone, Web or
+Desktop Chat need not know its own URL. `create_task` and `read_task` expose
 `preparing`, `ready`, `blocked` or `disabled`, with business state and delivery
-observations separate. Use `disabled` only on the user's explicit instruction.
-A committed task, selected connection or visible Chat URL alone is not readiness.
+observations separate. Foreground work under current task authority does not wait
+for recovery readiness. A committed task, selected connection or visible Chat URL
+alone is not readiness for unattended continuation.
 
 Configure the existing local browser route once, with explicit visible selections:
 
@@ -211,8 +297,8 @@ inputs within its existing bounds. Source hashes identify inputs; they do not
 restore unavailable attachments or originating Chat context. Missing input remains
 a blocker, not permission to guess or copy unrelated private history.
 
-Creation commits its recovery policy, registers a stable preparation in the private
-sidecar, then acknowledges that registration in the canonical task. Only matching
+For `task_chat`, creation commits its recovery policy, registers a stable preparation
+in the private sidecar, then acknowledges that registration in the canonical task. Only matching
 records permit browser dispatch. Startup discovers committed, unacknowledged local
 registration gaps through bounded changed-metadata pages. An acknowledged entry
 that is missing or corrupt blocks rather than creates a replacement Chat. Exact
@@ -235,11 +321,10 @@ may retain a discovered destination but cannot undo pause, disable, expiry or a
 scope conflict. A successful setup read does not prove that future writes will
 never prompt; the representative authorized write remains a separate live gate.
 
-New command, file, GitHub and input effects check readiness after original-ID
-reconciliation, before intent admission and again before dispatch. Existing receipt
-reads and authorized stopping remain possible. A claim is not a readiness bypass.
-Known later route blockers invalidate readiness for new business effects. The
-single `configure_chat_recovery` operation accepts only an explicit enable/disable
+Foreground command, file, GitHub and input effects retain their normal authority,
+scope, ownership and original-result gates without waiting for Chat setup. Recovery
+preparation or delivery blockers remain visible for unattended continuation.
+The single `configure_chat_recovery` operation accepts only an explicit enable/disable
 override, never a caller-selected URL or replacement controller. Accepted update
 IDs consume revisions; exact retries, including after pause, remain observations.
 Overrides preserve destination, attempts, original executions and prior uncertainty.
@@ -282,9 +367,9 @@ original task after all applicable stages are accepted.
 Historical format-1/format-2 task bytes and original bindings remain readable;
 reads do not enroll unbound history or reinterpret an old binding as prepared.
 Explicit guarded `revise_plan` can enroll the original nonterminal task while
-retaining its operation receipts. New task and sidecar format 3 require actual
-state-contract-15 readers before managed activation; pending or uncertain setup
-also defers activation. Existing old routes feed the same continuation path, not
+retaining its operation receipts. Format-4 task records require state-contract-16 readers
+before managed activation; pending or uncertain setup also defers activation.
+Existing old routes feed the same continuation path, not
 a second resume mechanism. Retired Events archives remain inert.
 
 The [Spec 76 Issue](https://github.com/OpenMachineLabs/openmachine/issues/76) records

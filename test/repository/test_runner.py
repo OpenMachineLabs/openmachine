@@ -3,6 +3,7 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -58,6 +59,25 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+
+    def test_repository_execution_is_independent_of_ambient_pr_metadata(self):
+        for path in ("scripts/run_tests.py", "scripts/check_repository.py"):
+            self.write(path, (ROOT / path).read_text())
+        self.write(".github/labels.json", json.dumps([
+            {"name": "maintenance", "color": "ffffff", "description": "Repository maintenance."}]) + "\n")
+        self.write(".gitignore", "__pycache__/\n")
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD")
+        self.write("README.md", "# Updated documentation\n")
+        plan = runner.make_plan(self.root, self.base)
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "pr.json"
+            event.write_text(json.dumps({"pull_request": {"title": "Invalid title", "body": ""}}))
+            with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event)}):
+                result = runner.execute_plan(self.root, plan)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["layers"][0]["tests"], 1)
+        self.assertFalse(any("environment" in stage for stage in result["stages"]))
 
     def test_bundled_skill_change_selects_installed_resource_coverage(self):
         for full in (False, True):

@@ -12,6 +12,38 @@ from test.support.tasks_cases import StructuredTaskCaseFixture
 
 
 class StructuredTaskTests(StructuredTaskCaseFixture, unittest.TestCase):
+    def test_first_format_three_admission_reserves_format_four_result_before_publication(self):
+        from openmachine.tasks import records, transitions
+        repository = "O" * 39 + "/" + "r" * 100
+        self.request["stages"][0]["id"] = "s" * 64
+        binding = {"connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}
+        self.request["contract"].update(repositories=[repository], github_connections={repository: binding})
+        value = tasks.create(self.state, self.request["task_id"],
+            **{key: item for key, item in self.request.items() if key != "task_id"})["record"]
+        value["format"] = 3
+        value.pop("control_revision")
+        value.pop("effect_scopes")
+        self.path.write_bytes(records.canonical(value))
+        self.app.rebuild_task_index()
+        before = self.path.read_bytes()
+        def admit(record, now):
+            self.assertEqual(record["format"], 4)
+            operation = {"id": "a" * 32, "stage_id": record["plan"]["stages"][0]["id"],
+                "plan_revision": 1, "epoch": 0, "request_sha256": "b" * 64,
+                "source_sha256": record["plan"]["stages"][0]["source_sha256"],
+                "locator": {"kind": "github", "repository": repository, "object_type": "pull_request",
+                    "number": 7, "parent_number": None, "anchor": "a" * 128, "connection": binding},
+                "admitted_at_ms": now, "state": "admitted", "observed_at_ms": None, "result": None,
+                "effect_scope": {"resource": "object", "number": 7, "parent_number": None,
+                    "fields": ["assignees", "body", "labels", "state", "title"]}}
+            records.Operation.model_validate(operation)
+            record["operations"].append(operation)
+            transitions.reserve(record, new_operation=operation)
+        self.fault("task_capacity", tasks.update, self.state, self.request["task_id"], admit,
+                   expected_revision=value["revision"], upgrade=True)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.view()["record"]["format"], 3)
+
     def test_identical_creation_observes_without_new_grant_checks_or_handoff(self):
         first = self.create()
         raw, inode = self.path.read_bytes(), self.path.stat().st_ino
@@ -59,7 +91,8 @@ class StructuredTaskTests(StructuredTaskCaseFixture, unittest.TestCase):
                    {"task_id": "another"}, {"updated_at_ms": 0})]
         broken = copy.deepcopy(first)
         broken["plan"]["stages"][0]["evidence"] = ["a" * 32]
-        values.extend([records.canonical(broken), original.replace(b'"format":3', b'"format":3,"format":3'),
+        format_field = ('"format":' + str(first["format"])).encode()
+        values.extend([records.canonical(broken), original.replace(format_field, format_field + b"," + format_field),
                        b"\xef\xbb\xbf" + original, original.rstrip(b"\n"), original + b" ", b"x" * 65537])
         for raw in values:
             with self.subTest(size=len(raw)):

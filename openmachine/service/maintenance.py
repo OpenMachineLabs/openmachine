@@ -255,7 +255,10 @@ def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
                 raise Fault("maintenance_not_retirable",
                             "The prepared update is selected; preserve the original operation and inspect current state.")
             observed = observe(config_path, state)
-            if observed.get("status") not in {"ready", "stopped"} or observed.get("current") != selected["current"]:
+            stable = observed.get("status") == "ready" or (
+                observed.get("status") == "stopped" and service_state.stopped(selected)
+                and observed.get("reason") == "deliberate_stop")
+            if not stable or observed.get("current") != selected["current"]:
                 raise Fault("maintenance_retirement_unverified",
                             "The selected service is not stably ready or stopped; preserve the deferred operation.")
             if (_selection(state) != request["selection_sha256"]

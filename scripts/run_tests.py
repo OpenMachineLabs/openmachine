@@ -484,7 +484,7 @@ def execute_plan(root: Path, plan: dict) -> dict:
         results = []
         if repository:
             results.extend(execute(sys.executable, repository, "repository")["layers"])
-        stages["repository checks"] = run_command([sys.executable, str(root / "scripts/check_repository.py")],
+        stages["repository checks"] = run_command([sys.executable, str(root / "scripts/check_repository.py"), "--mode", "source"],
                                                   cwd=root, stage="repository checks")
         if product and plan["environment"] == "source":
             results.extend(execute(sys.executable, product, "source")["layers"])

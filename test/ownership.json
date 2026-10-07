@@ -430,6 +430,7 @@
       ],
       "tests": [
         "test/component/app/test_github_admission.py",
+        "test/component/app/test_scoped_supervision.py",
         "test/component/app/test_task_admission.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/resilience/app/test_mcp_admission.py",
@@ -454,6 +455,7 @@
     },
     "tasks": {
       "boundary_tests": [
+        "test/component/app/test_scoped_supervision.py",
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_dispatch.py",
         "test/component/app/test_task_observer.py",
@@ -465,6 +467,7 @@
       ],
       "sources": [
         "openmachine/tasks/__init__.py",
+        "openmachine/tasks/effects.py",
         "openmachine/tasks/index.py",
         "openmachine/tasks/records.py",
         "openmachine/tasks/store.py",
@@ -476,7 +479,9 @@
         "test/contract/mcp/tasks/test_schema.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/resilience/tasks/test_mcp_restart.py",
-        "test/resilience/tasks/test_persistence.py"
+        "test/resilience/tasks/test_persistence.py",
+        "test/unit/tasks/test_effects.py",
+        "test/unit/tasks/test_transitions.py"
       ]
     },
     "workspace": {
@@ -643,6 +648,7 @@
       "test/component/app/test_github_admission.py",
       "test/component/app/test_initialization.py",
       "test/component/app/test_lifecycle.py",
+      "test/component/app/test_scoped_supervision.py",
       "test/component/app/test_ssh_observation.py",
       "test/component/app/test_ssh_routes.py",
       "test/component/app/test_task_admission.py",

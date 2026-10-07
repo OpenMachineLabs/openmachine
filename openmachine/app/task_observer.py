@@ -263,7 +263,7 @@ class TaskObserver:
                         current["next_attempt_ms"] = min(timestamp + int((observation.SSH_READ_SECONDS if ssh else observation.READ_SECONDS) * 1000)
                             + observation.delay(current["attempts"], ssh), current["deadline_ms"])
                     with self.app._admit():
-                        view = tasks.update(self.app.state, identity, reserve, expected_revision=record["revision"])
+                        view = tasks.update(self.app.state, identity, reserve, expected_revision=record["revision"], observation=True)
                     record = view["record"]
                 if ssh:
                     if connection is not None:
@@ -345,7 +345,7 @@ class TaskObserver:
         with self.app._admit():
             if self._stop.is_set():
                 return
-            view = tasks.update(self.app.state, identity, apply, expected_revision=read.expected_revision)
+            view = tasks.update(self.app.state, identity, apply, expected_revision=read.expected_revision, observation=True)
         # Updating this CAS guard only follows our own verified publication. A
         # pause/decision/foreground result produces a conflict instead of overwrite.
         read.expected_revision = view["record"]["revision"]
