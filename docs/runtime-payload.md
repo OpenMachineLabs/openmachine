@@ -40,7 +40,7 @@ the repository's isolated build environment, then run:
 
 ```sh
 .venv/bin/python scripts/build_runtime_payload.py \
-  --wheel /absolute/build/openmachine-0.2.9-py3-none-any.whl \
+  --wheel /absolute/build/openmachine-0.2.11-py3-none-any.whl \
   --requirements /absolute/source/requirements.lock \
   --commit "$(git rev-parse HEAD)" \
   --cache /absolute/build/runtime-inputs \
