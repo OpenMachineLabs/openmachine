@@ -297,9 +297,10 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         raise Fault("github_wrong_object_type", "The original locator did not resolve to the expected publication.")
     if kind == "comment" and parent is not None and not str(value.get("issue_url", "")).endswith(f"/issues/{parent}"):
         raise Fault("github_wrong_object_type", "The original comment belongs to another parent.")
-    matches = request is not None and (request.get("action") == "update" or marker in (value.get("body") or ""))
+    action = request.get("action") if request is not None else None
+    matches = request is not None and (action in {"update", "ready_for_review"} or marker in (value.get("body") or ""))
     if request is not None:
-        if request.get("action") == "create":
+        if action == "create":
             matches &= (value.get("user") or {}).get("id") == actor["id"]
         for key in ("title", "state"):
             if request.get(key) is not None:
@@ -311,11 +312,13 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
             if request.get(key) is not None:
                 matches &= _named_match(value, key, request[key])
         if kind == "pull_request":
-            if request.get("action") == "create":
+            if action == "create":
                 matches &= value.get("draft") == request.get("draft", False)
                 for key in ("head", "base"):
                     branch = object_response(value.get(key))
                     matches &= request[key] in {branch.get("ref"), branch.get("label")}
+            elif action == "ready_for_review":
+                matches &= value.get("draft") is False
             if request.get("expected_head_sha"):
                 matches &= object_response(value.get("head")).get("sha") == request["expected_head_sha"]
         if kind == "review" and request.get("action") == "create":
@@ -407,13 +410,78 @@ def issue(settings: Settings, action: Literal["create", "update"], repository: s
     return _mutate(repository, "PATCH", f"{root}/{number}", payload, lambda _: f"{root}/{number}", settings=settings, actor=actor, transport=transport)
 
 
-def pull_request(settings: Settings, action: Literal["create", "update"], repository: str,
+def _ready_for_review(settings: Settings, repository: str, number: int, expected_updated_at: str,
+                      expected_head_sha: str, *, transport=None) -> dict:
+    if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha):
+        raise Fault("invalid_github_request",
+                    "Ready for review requires a positive PR number and its exact observed HEAD SHA.")
+    actor, _ = connection.access(settings, repository, write=True, transport=transport)
+    current = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
+    if expected_updated_at and current.get("updated_at") != expected_updated_at:
+        raise Fault("github_object_changed",
+                    "The PR changed since the supplied observation; read it before marking it ready.")
+    if current.get("draft") is not True:
+        raise Fault("github_conflict", "The PR is already ready for review; no mutation was submitted.")
+    node_id = current.get("node_id")
+    if not isinstance(node_id, str) or not node_id:
+        raise Fault("github_invalid_response", "GitHub did not return the PR node identity required for Ready for review.")
+    if connection.read_actor(settings, transport=transport) != actor:
+        raise Fault("github_identity_changed", "The active GitHub account changed before the Ready for review mutation.")
+
+    query = ("mutation($pullRequestId:ID!){markPullRequestReadyForReview("
+             "input:{pullRequestId:$pullRequestId}){pullRequest{id number isDraft}}}")
+    response = None
+    error_code = ""
+    try:
+        response = object_response((transport or connection.request)(
+            "POST", "graphql", {"query": query, "variables": {"pullRequestId": node_id}}))
+        if response.get("errors"):
+            error_code = "github_graphql_error"
+    except Fault as error:
+        if error.code in connection.DEFINITE_FAILURES:
+            raise
+        error_code = error.code
+
+    try:
+        observed = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
+        identity_matches = observed.get("node_id") == node_id
+        ready = observed.get("draft") is False
+        actor_matches = connection.read_actor(settings, transport=transport) == actor
+    except Fault:
+        observed, identity_matches, ready, actor_matches = None, False, False, False
+
+    if observed is not None and identity_matches and ready and actor_matches:
+        data = response.get("data") if isinstance(response, dict) else None
+        mutation = data.get("markPullRequestReadyForReview") if isinstance(data, dict) else None
+        returned = mutation.get("pullRequest") if isinstance(mutation, dict) else None
+        provider_verified = (isinstance(returned, dict) and returned.get("id") == node_id
+                             and returned.get("number") == number and returned.get("isDraft") is False
+                             and not error_code)
+        return {"status": "verified", "repository": repository, "actor": actor,
+                "receipt": _receipt(observed), "verified_fields": ["draft"],
+                "fields_verified": True, "provider_response_verified": provider_verified}
+    if error_code:
+        return {"status": "write_outcome_unknown", "repository": repository, "number": number,
+                "expected_head_sha": expected_head_sha, "error_code": error_code,
+                "detail": "Ready for review may have been submitted, but the exact PR state was not verified. Read the original PR before any retry."}
+    return {"status": "write_unverified", "repository": repository,
+            "receipt": _receipt(observed) if observed is not None else {},
+            "detail": "GitHub acknowledged Ready for review, but exact PR readback did not verify the effect. Read before retrying."}
+
+
+def pull_request(settings: Settings, action: Literal["create", "update", "ready_for_review"], repository: str,
                  title: str | None, body: str | None, number: int = 0,
                  head: str = "", base: str = "", draft: bool = False,
                  state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                  expected_head_sha: str = "", labels: list[str] | None = None,
                  assignees: list[str] | None = None, *, transport=None) -> dict:
     metadata = _metadata_fields(labels, assignees)
+    if action == "ready_for_review":
+        if any(value is not None for value in (title, body, state)) or head or base or draft or metadata:
+            raise Fault("invalid_github_request",
+                        "Ready for review accepts only number, expected_head_sha, optional expected_updated_at and connection identity.")
+        return _ready_for_review(settings, repository, number, expected_updated_at,
+                                 expected_head_sha, transport=transport)
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/pulls"
     if action == "create":
@@ -439,6 +507,9 @@ def pull_request(settings: Settings, action: Literal["create", "update"], reposi
         return result
     if action != "update" or number < 1:
         raise Fault("invalid_github_request", "Updating a PR requires its positive number.")
+    if draft:
+        raise Fault("invalid_github_request",
+                    "Draft is creation-only; use action='ready_for_review' to publish a Draft PR for review.")
     current = evidence.pull_request(repository, number, expected_head_sha, transport=transport)
     if metadata and any(value is not None for value in (title, body, state)):
         raise Fault("invalid_github_request",
