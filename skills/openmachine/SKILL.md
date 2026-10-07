@@ -128,7 +128,8 @@ below; every continuation still reads and claims the original task safely.
    authority and native protections; only merged_verified proves its destination.
    Save original external locators in the existing checkpoint. Unknown/unverified
    writes are reconciled by destination reads, never automatic repeats or another
-   account. Missing gh or grants do not authorize login/configuration changes.
+   account. Missing native authorization or grants do not authorize login or
+   configuration changes.
    Keep completion, source merge, deployment, client refresh and real integration
    acceptance separate. Local SDK sessions are not real ChatGPT conversations.
 
@@ -319,10 +320,13 @@ invalidates future use and reports local cleanup separately from remote revocati
 The existing Runtime owns polling and refresh; ending a Chat turn does not cancel
 an admitted login. These controls use their own IDs/revisions, not task_context.
 
-New GitHub work uses native connections only. Retain historical format-1/format-2
-gh task authority without creating new gh attachments, changing external accounts
-or moving original tasks to native defaults. Renewable tokens and pinned stores
-survive ordinary restarts; revocation, expired refresh grants or unavailable stores
+All runtime GitHub requests use native connections only. Historical format-1/format-2
+gh task records and receipts remain readable, but the backend is retired. On
+`integration_legacy_connection`, retain the original history and unresolved outcomes;
+do not claim, continue or remotely reconcile through gh, move tasks to native defaults,
+or replay their mutations under new IDs. Separately authorized new work needs a native
+connection. Repository CI and operator Git credential helpers are separate uses of gh.
+Renewable tokens and pinned stores survive ordinary restarts; revocation, expired refresh grants or unavailable stores
 remain real reauthorization boundaries. Native OAuth, deployment, installed-client
 acceptance and code merge require their own observed evidence, not mock responses.
 

@@ -124,12 +124,12 @@ def _attribute(settings: Settings, body: str, footer: str) -> str:
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
          ref: str = "", path: str = "", page: int = 1, limit: int = 30, cursor: str = "",
-         expected_head_sha: str = "", expected_base_sha: str = "", offset: int = 0, *, transport=None) -> dict:
+         expected_head_sha: str = "", expected_base_sha: str = "", offset: int = 0, *, transport) -> dict:
     if action not in get_args(ReadAction) or not 1 <= page <= 1000 or not 1 <= limit <= 100 or len(cursor) > 1024:
         raise Fault("invalid_github_request", "Select a supported read action and bounded pagination.")
     if action == "status" and not repository:
         return _public({"status": "authenticated", "actor": connection.read_actor(settings, transport=transport),
-                        "backend": getattr(transport, "backend", "gh"),
+                        "backend": "native",
                         "scopes": settings.github.model_dump(),
                         "repository_access": "not_probed"})
     actor, metadata = connection.access(settings, repository, transport=transport)
@@ -159,12 +159,12 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     elif action == "branch":
         if not ref or len(ref) > 255 or any(ord(char) < 32 for char in ref):
             raise Fault("invalid_github_request", "Select an explicit branch name.")
-        value = object_response((transport or connection.request)("GET", f"{root}/branches/{quote(ref, safe='')}"))
+        value = object_response(transport("GET", f"{root}/branches/{quote(ref, safe='')}"))
         result["data"] = {"name": value.get("name"), "sha": object_response(value.get("commit")).get("sha"), "protected": value.get("protected")}
     elif action == "commit":
         if not re.fullmatch(evidence.SHA, ref):
             raise Fault("invalid_github_request", "Commit metadata reads require a full SHA.")
-        value = object_response((transport or connection.request)("GET", f"{root}/commits/{ref}"))
+        value = object_response(transport("GET", f"{root}/commits/{ref}"))
         if value.get("sha") != ref:
             raise Fault("github_invalid_response", "The commit response does not match the requested SHA.")
         commit = object_response(value.get("commit"))
@@ -174,7 +174,7 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
         if number < 1:
             raise Fault("invalid_github_request", "Select a positive Issue or PR number.")
         value = (evidence.pull_request(repository, number, expected_head_sha, expected_base_sha, transport=transport) if action == "pull_request"
-                 else object_response((transport or connection.request)("GET", f"{root}/issues/{number}")))
+                 else object_response(transport("GET", f"{root}/issues/{number}")))
         result["data"] = _project(action, value)
     elif action == "merge_context":
         result["data"] = evidence.merge_gate(repository, number, expected_head_sha, expected_base_sha, transport=transport)
@@ -218,21 +218,21 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     return _public(result)
 
 
-def _merge_destination(root: str, sha: str, base_ref: str, *, transport=None) -> tuple[dict, str] | None:
+def _merge_destination(root: str, sha: str, base_ref: str, *, transport) -> tuple[dict, str] | None:
     """Verify the original commit in the destination without any mutation."""
-    commit = object_response((transport or connection.request)("GET", f"{root}/commits/{sha}"))
-    branch = object_response((transport or connection.request)("GET", f"{root}/branches/{quote(base_ref, safe='')}"))
+    commit = object_response(transport("GET", f"{root}/commits/{sha}"))
+    branch = object_response(transport("GET", f"{root}/branches/{quote(base_ref, safe='')}"))
     tip = object_response(branch.get("commit")).get("sha", "")
     if not re.fullmatch(evidence.SHA, tip):
         return None
-    comparison = object_response((transport or connection.request)("GET", f"{root}/compare/{sha}...{tip}"))
+    comparison = object_response(transport("GET", f"{root}/compare/{sha}...{tip}"))
     if (commit.get("sha") != sha or comparison.get("status") not in {"ahead", "identical"}
             or (comparison.get("merge_base_commit") or {}).get("sha") != sha):
         return None
     return commit, tip
 
 
-def reconcile(settings: Settings, locator: dict, request: dict | None = None, *, transport=None) -> dict:
+def reconcile(settings: Settings, locator: dict, request: dict | None = None, *, transport) -> dict:
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
@@ -291,7 +291,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
             return unknown
     endpoint = {"issue": f"{root}/issues/{number}", "pull_request": f"{root}/pulls/{number}",
                 "comment": f"{root}/issues/comments/{number}", "review": f"{root}/pulls/{parent}/reviews/{number}"}[kind]
-    value = object_response((transport or connection.request)("GET", endpoint))
+    value = object_response(transport("GET", endpoint))
     identity = "number" if kind in {"issue", "pull_request"} else "id"
     if value.get(identity) != number or kind == "issue" and "pull_request" in value:
         raise Fault("github_wrong_object_type", "The original locator did not resolve to the expected publication.")
@@ -336,9 +336,9 @@ def _receipt(result: dict) -> dict:
 
 
 def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback,
-            *, settings: Settings | None = None, actor: dict | None = None, transport=None) -> dict:
+            *, settings: Settings | None = None, actor: dict | None = None, transport) -> dict:
     try:
-        result = object_response((transport or connection.request)(method, endpoint, payload))
+        result = object_response(transport(method, endpoint, payload))
     except Fault as error:
         if error.code in connection.DEFINITE_FAILURES:
             raise
@@ -349,7 +349,7 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
         return {"status": "write_unverified", "repository": repository, "receipt": receipt,
                 "detail": "The write response has no usable object identity; reconcile its destination before retrying."}
     try:
-        observed = object_response((transport or connection.request)("GET", readback(result)))
+        observed = object_response(transport("GET", readback(result)))
         matches = all(observed.get(key) == result[key] for key in ("id", "number") if key in result)
         for key, expected in payload.items():
             if key in {"head", "base"}:
@@ -391,7 +391,7 @@ def _update_fields(current: dict, title: str | None, body: str | None, state: st
 def issue(settings: Settings, action: Literal["create", "update"], repository: str,
           title: str | None, body: str | None, number: int = 0,
           state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-          labels: list[str] | None = None, assignees: list[str] | None = None, *, transport=None) -> dict:
+          labels: list[str] | None = None, assignees: list[str] | None = None, *, transport) -> dict:
     metadata = _metadata_fields(labels, assignees)
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     root = f"repos/{repository}/issues"
@@ -403,7 +403,7 @@ def issue(settings: Settings, action: Literal["create", "update"], repository: s
                        lambda result: f"{root}/{result['number']}", settings=settings, actor=actor, transport=transport)
     if action != "update" or number < 1:
         raise Fault("invalid_github_request", "Updating an Issue requires its positive number.")
-    current = object_response((transport or connection.request)("GET", f"{root}/{number}"))
+    current = object_response(transport("GET", f"{root}/{number}"))
     if "pull_request" in current:
         raise Fault("github_wrong_object_type", "This number is a Pull Request; use github_pull_request with its candidate checks.")
     payload = _update_fields(current, title, body, state, expected_updated_at, metadata)
@@ -411,7 +411,7 @@ def issue(settings: Settings, action: Literal["create", "update"], repository: s
 
 
 def _ready_for_review(settings: Settings, repository: str, number: int, expected_updated_at: str,
-                      expected_head_sha: str, *, transport=None) -> dict:
+                      expected_head_sha: str, *, transport) -> dict:
     if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha):
         raise Fault("invalid_github_request",
                     "Ready for review requires a positive PR number and its exact observed HEAD SHA.")
@@ -433,7 +433,7 @@ def _ready_for_review(settings: Settings, repository: str, number: int, expected
     response = None
     error_code = ""
     try:
-        response = object_response((transport or connection.request)(
+        response = object_response(transport(
             "POST", "graphql", {"query": query, "variables": {"pullRequestId": node_id}}))
         if response.get("errors"):
             error_code = "github_graphql_error"
@@ -474,7 +474,7 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
                  head: str = "", base: str = "", draft: bool = False,
                  state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                  expected_head_sha: str = "", labels: list[str] | None = None,
-                 assignees: list[str] | None = None, *, transport=None) -> dict:
+                 assignees: list[str] | None = None, *, transport) -> dict:
     metadata = _metadata_fields(labels, assignees)
     if action == "ready_for_review":
         if any(value is not None for value in (title, body, state)) or head or base or draft or metadata:
@@ -493,7 +493,7 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
         if expected_head_sha:
             if not re.fullmatch(evidence.SHA, expected_head_sha) or ":" in head:
                 raise Fault("invalid_github_request", "HEAD-pinned creation requires a same-repository branch and full SHA.")
-            branch = object_response((transport or connection.request)("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
+            branch = object_response(transport("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
             if object_response(branch.get("commit")).get("sha") != expected_head_sha:
                 raise Fault("github_candidate_changed", "The pushed branch changed before PR creation.")
         submitted = _attribute(settings, body or "", CREATED_FOOTER)
@@ -521,12 +521,12 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
 
 
 def comment(settings: Settings, action: Literal["create", "update"], repository: str,
-            body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *, transport=None) -> dict:
+            body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *, transport) -> dict:
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     if action == "create":
         if number < 1:
             raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number.")
-        object_response((transport or connection.request)("GET", f"repos/{repository}/issues/{number}"))
+        object_response(transport("GET", f"repos/{repository}/issues/{number}"))
         submitted = _attribute(settings, body, POSTED_FOOTER)
         endpoint = f"repos/{repository}/issues/{number}/comments"
         return _mutate(repository, "POST", endpoint, {"body": submitted},
@@ -534,14 +534,14 @@ def comment(settings: Settings, action: Literal["create", "update"], repository:
     if action != "update" or comment_id < 1:
         raise Fault("invalid_github_request", "Updating a comment requires its positive ID.")
     endpoint = f"repos/{repository}/issues/comments/{comment_id}"
-    current = object_response((transport or connection.request)("GET", endpoint))
+    current = object_response(transport("GET", endpoint))
     payload = _update_fields(current, None, body, None, expected_updated_at)
     return _mutate(repository, "PATCH", endpoint, payload, lambda _: endpoint, settings=settings, actor=actor, transport=transport)
 
 
 def review(settings: Settings, action: Literal["create", "update"], repository: str,
            body: str, number: int = 0, review_id: int = 0, expected_head_sha: str = "",
-           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT", *, transport=None) -> dict:
+           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT", *, transport) -> dict:
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     if action == "create":
         if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha) or event not in {"COMMENT", "APPROVE", "REQUEST_CHANGES"}:
@@ -558,14 +558,14 @@ def review(settings: Settings, action: Literal["create", "update"], repository: 
     if action != "update" or number < 1 or review_id < 1:
         raise Fault("invalid_github_request", "Updating a review requires positive PR and review IDs.")
     endpoint = f"repos/{repository}/pulls/{number}/reviews/{review_id}"
-    current = object_response((transport or connection.request)("GET", endpoint))
+    current = object_response(transport("GET", endpoint))
     return _mutate(repository, "PUT", endpoint, {"body": _preserve(current.get("body") or "", body)},
                    lambda _: endpoint, settings=settings, actor=actor, transport=transport)
 
 
 def merge(settings: Settings, repository: str, number: int, expected_head_sha: str,
           expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
-          commit_title: str = "", commit_message: str = "", *, transport=None) -> dict:
+          commit_title: str = "", commit_message: str = "", *, transport) -> dict:
     actor, _ = connection.access(settings, repository, write=True, transport=transport)
     if method not in {"squash", "merge", "rebase"}:
         raise Fault("invalid_github_request", "Select squash, merge or rebase; queues and auto-merge are not implemented.")
@@ -573,7 +573,7 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
     if gate["blockers"]:
         return _public({"status": "merge_blocked", "repository": repository, "actor": actor, "gate": gate})
     if connection.read_actor(settings, transport=transport) != actor:
-        raise Fault("github_identity_changed", "The active gh account changed before merge; no merge was submitted.")
+        raise Fault("github_identity_changed", "The selected GitHub account changed before merge; no merge was submitted.")
     payload = {"sha": expected_head_sha, "merge_method": method}
     if commit_title:
         payload["commit_title"] = commit_title
@@ -581,7 +581,7 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
         payload["commit_message"] = commit_message
     endpoint = f"repos/{repository}/pulls/{number}/merge"
     try:
-        result = object_response((transport or connection.request)("PUT", endpoint, payload))
+        result = object_response(transport("PUT", endpoint, payload))
     except Fault as error:
         if error.code in connection.DEFINITE_FAILURES:
             raise

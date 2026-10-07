@@ -1,18 +1,9 @@
 """Shared disposable fixtures; no test cases or test discovery."""
 
-import base64
 import copy
-import hashlib
-import json
-import subprocess
-from types import SimpleNamespace
-import unittest
-from unittest.mock import patch
+from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
-from pydantic import ValidationError
-from integrations import github
-from integrations.github import client, connection, evidence, operations
-from openmachine.config import GitHubConfig, Settings
+from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 
 REPO = "Owner/repo"
@@ -24,8 +15,6 @@ HEAD, BASE, MERGE, TREE = (char * 40 for char in "abcd")
 ACTOR = {"id": 1, "login": "Operator"}
 
 STAMP = "2026-01-01T00:00:00Z"
-
-REQUEST = connection.request
 
 CREATED = "---\n\nCreated via [Open Machine](https://github.com/OpenMachineLabs/openmachine)."
 
@@ -54,8 +43,7 @@ class GitHubCaseFixture(object):
                        "reviewDecision": None, "mergeQueueEntry": None}
         self.files = [{"filename": "a.py", "status": "modified", "sha": TREE, "changes": 1, "patch": "@@ -1 +1 @@\n-a\n+b"},
                       {"filename": "b.py", "status": "modified", "sha": TREE, "changes": 1}]
-        self.transport = patch.object(connection, "request", side_effect=self.response).start()
-        self.addCleanup(patch.stopall)
+        self.transport = Mock(side_effect=self.response)
 
     def response(self, method, endpoint, payload=None):
         parsed = urlsplit(endpoint)

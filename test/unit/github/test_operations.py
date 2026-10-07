@@ -18,23 +18,23 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         body = "Retained fixture request.\n\n<!-- " + locator["anchor"] + " -->"
         self.issue_value.update(title="Fixture", body=body + "\n\n" + operations.CREATED_FOOTER, user=ACTOR)
         request = dict(action="create", title="Fixture", body=body, state=None)
-        result = github.reconcile(settings(), locator, request)
+        result = github.reconcile(settings(), locator, request, transport=self.transport)
         self.assertEqual(result["status"], "verified")
         self.assertEqual(result["receipt"]["number"], 1)
         self.assertTrue(result["fields_verified"])
         self.assertTrue(all(call.args[0] == "GET" for call in self.transport.call_args_list))
-        self.assertEqual(github.reconcile(settings(), locator, dict(request, title="Changed"))["status"], "observed")
-        self.assertEqual(github.reconcile(settings(), dict(locator, number=1))["status"], "observed")
+        self.assertEqual(github.reconcile(settings(), locator, dict(request, title="Changed"), transport=self.transport)["status"], "observed")
+        self.assertEqual(github.reconcile(settings(), dict(locator, number=1), transport=self.transport)["status"], "observed")
 
     def test_task_publication_search_is_bounded_and_duplicate_or_partial_coverage_is_unknown(self):
         locator = self.task_locator("issue")
         found = dict(self.issue_value, body="<!-- " + locator["anchor"] + " -->", user=ACTOR)
         with patch.object(client, "list_page", return_value=([found, dict(found, number=3)], None)):
-            result = github.reconcile(settings(), locator)
+            result = github.reconcile(settings(), locator, transport=self.transport)
             self.assertEqual(result["status"], "write_outcome_unknown")
             self.assertEqual(result["matching_destinations"], 2)
         with patch.object(client, "list_page", side_effect=[([found], 2), ([], 3), ([], 4)]) as pages:
-            result = github.reconcile(settings(), locator)
+            result = github.reconcile(settings(), locator, transport=self.transport)
             self.assertEqual(pages.call_count, 3)
             self.assertEqual(result["coverage"], "incomplete")
             self.assertEqual(result["status"], "write_outcome_unknown")
@@ -48,7 +48,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             if kind == "pull_request":
                 self.pr.update(body=body, title="Fixture")
                 request.update(title="Fixture", head="topic", base="main", draft=False, expected_head_sha=HEAD)
-                result = github.reconcile(settings(), locator, request)
+                result = github.reconcile(settings(), locator, request, transport=self.transport)
             else:
                 value = dict(self.reviews[0], body=body, issue_url=f"https://api.github.com/{ROOT}/issues/1")
                 endpoint = f"{ROOT}/issues/comments/9" if kind == "comment" else f"{ROOT}/pulls/2/reviews/9"
@@ -58,18 +58,18 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                     if method == "GET" and target == endpoint:
                         return copy.deepcopy(value)
                     return self.response(method, target, payload)
-                with patch.object(connection, "request", side_effect=response) as transport:
-                    result = github.reconcile(settings(), locator, request)
+                with patch.object(self, "transport", side_effect=response) as transport:
+                    result = github.reconcile(settings(), locator, request, transport=self.transport)
                     self.assertTrue(all(call.args[0] == "GET" for call in transport.call_args_list))
                     if kind == "comment":
                         value["issue_url"] = f"https://api.github.com/{ROOT}/issues/99"
-                        self.assert_fault("github_wrong_object_type", github.reconcile, settings(), locator, request)
+                        self.assert_fault("github_wrong_object_type", github.reconcile, settings(), locator, request, transport=self.transport)
             self.assertEqual(result["status"], "verified", kind)
-        unknown = github.reconcile(settings(), self.task_locator("review", 9))
+        unknown = github.reconcile(settings(), self.task_locator("review", 9), transport=self.transport)
         self.assertEqual(unknown["status"], "write_outcome_unknown")
         self.assertFalse(any("/None/" in call.args[1] for call in self.transport.call_args_list))
         self.assertEqual(github.reconcile(settings(), self.task_locator("pull_request", 2),
-            dict(request, expected_head_sha=BASE))["status"], "observed")
+            dict(request, expected_head_sha=BASE), transport=self.transport)["status"], "observed")
 
     def test_task_merge_reconciliation_proves_original_head_and_destination_without_put(self):
         self.pr.update(merged=True, merge_commit_sha=MERGE)
@@ -84,24 +84,24 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 if target in values:
                     return copy.deepcopy(values[target])
             return self.response(method, target, payload)
-        with patch.object(connection, "request", side_effect=response) as transport:
-            result = github.reconcile(settings(), locator, request)
+        with patch.object(self, "transport", side_effect=response) as transport:
+            result = github.reconcile(settings(), locator, request, transport=self.transport)
             self.assertEqual(result["status"], "merged_verified")
             self.assertEqual(result["receipt"], {"number": 2, "head_sha": HEAD, "merge_commit_sha": MERGE})
-            self.assertEqual(github.reconcile(settings(), locator)["status"], "observed")
+            self.assertEqual(github.reconcile(settings(), locator, transport=self.transport)["status"], "observed")
             comparison["merge_base_commit"]["sha"] = BASE
-            self.assertEqual(github.reconcile(settings(), locator, request)["status"], "write_outcome_unknown")
+            self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "write_outcome_unknown")
             self.assertTrue(all(call.args[0] == "GET" for call in transport.call_args_list))
-        self.assert_fault("github_candidate_changed", github.reconcile, settings(), locator, dict(request, expected_head_sha=BASE))
+        self.assert_fault("github_candidate_changed", github.reconcile, settings(), locator, dict(request, expected_head_sha=BASE), transport=self.transport)
 
     def test_task_reconciliation_rejects_forged_locator_and_changed_account(self):
         for invalid in (self.task_locator("issue", True), dict(self.task_locator("issue", 1), anchor="../../unsafe")):
-            self.assert_fault("invalid_github_request", github.reconcile, settings(), invalid)
+            self.assert_fault("invalid_github_request", github.reconcile, settings(), invalid, transport=self.transport)
         self.assertEqual(self.transport.call_count, 0)
         locator = self.task_locator("issue", 1)
         actor = dict(ACTOR, id=999)
         with patch.object(connection, "read_actor", side_effect=[ACTOR, actor]):
-            self.assert_fault("github_identity_changed", github.reconcile, settings(), locator)
+            self.assert_fault("github_identity_changed", github.reconcile, settings(), locator, transport=self.transport)
 
     def test_attribution_has_only_the_two_fixed_footer_literals(self):
         self.assertEqual(operations.ATTRIBUTION_URL, "https://github.com/OpenMachineLabs/openmachine")
@@ -124,7 +124,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 for operation, args, kwargs, footer in calls:
                     with self.subTest(private=private, enabled=enabled, operation=operation.__name__):
                         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-                            operation(config, "create", REPO, *args, **kwargs)
+                            operation(config, "create", REPO, *args, **kwargs, transport=self.transport)
                         expected = "body" if enabled is False else "body\n\n" + footer
                         self.assertEqual(mutate.call_args.args[3]["body"], expected)
 
@@ -141,7 +141,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                     current["body"] = "old\n\n" + footer if attributed else "old"
                     with self.subTest(enabled=enabled, attributed=attributed, operation=operation.__name__):
                         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-                            operation(settings(enabled), "update", REPO, *args, **kwargs)
+                            operation(settings(enabled), "update", REPO, *args, **kwargs, transport=self.transport)
                         expected = "edited\n\n" + footer if attributed else "edited"
                         self.assertEqual(mutate.call_args.args[3]["body"], expected)
 
@@ -154,28 +154,28 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
     def test_update_preserves_existing_footer_when_replacement_has_another(self):
         self.issue_value["body"] = "old\n\n" + CREATED
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.comment(settings(True), "update", REPO, POSTED, comment_id=9)
+            github.comment(settings(True), "update", REPO, POSTED, comment_id=9, transport=self.transport)
         self.assertEqual(mutate.call_args.args[3]["body"], POSTED + "\n\n" + CREATED)
 
     def test_review_summary_is_bound_to_exact_head_without_inline_comments(self):
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.review(settings(), "create", REPO, "review", number=2, expected_head_sha=HEAD)
+            github.review(settings(), "create", REPO, "review", number=2, expected_head_sha=HEAD, transport=self.transport)
         payload = mutate.call_args.args[3]
         self.assertEqual(payload["commit_id"], HEAD)
         self.assertNotIn("comments", payload)
 
     def test_mutation_requires_matching_destination_readback(self):
         expected = "body\n\n" + operations.CREATED_FOOTER
-        with patch.object(connection, "request", side_effect=[{"number": 3}, {"number": 3, "body": expected}]):
-            result = operations._mutate(REPO, "POST", f"{ROOT}/issues", {"body": expected}, lambda value: f"{ROOT}/issues/{value['number']}")
+        with patch.object(self, "transport", side_effect=[{"number": 3}, {"number": 3, "body": expected}]):
+            result = operations._mutate(REPO, "POST", f"{ROOT}/issues", {"body": expected}, lambda value: f"{ROOT}/issues/{value['number']}", transport=self.transport)
         self.assertEqual(result["status"], "verified")
         self.assertTrue(result["body_verified"])
-        with patch.object(connection, "request", side_effect=[{"number": 3}, {"number": 3, "body": "different"}]):
-            result = operations._mutate(REPO, "POST", f"{ROOT}/issues", {"body": expected}, lambda value: f"{ROOT}/issues/{value['number']}")
+        with patch.object(self, "transport", side_effect=[{"number": 3}, {"number": 3, "body": "different"}]):
+            result = operations._mutate(REPO, "POST", f"{ROOT}/issues", {"body": expected}, lambda value: f"{ROOT}/issues/{value['number']}", transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
 
     def test_unconfigured_repository_fails_closed(self):
-        self.assert_fault("github_not_allowed", github.issue, settings(True), "create", "Other/repo", "title", "body")
+        self.assert_fault("github_not_allowed", github.issue, settings(True), "create", "Other/repo", "title", "body", transport=self.transport)
         self.transport.assert_not_called()
 
     def test_read_scope_never_mutates_or_widens_write_scope(self):
@@ -202,28 +202,28 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
 
     def test_account_and_repository_identity_do_not_fall_back(self):
         config = settings(repositories=[REPO], account="SomeoneElse")
-        self.assert_fault("github_identity_changed", github.read, config, "status")
+        self.assert_fault("github_identity_changed", github.read, config, "status", transport=self.transport)
         self.assertEqual(self.transport.call_count, 1)
         self.metadata["full_name"] = "Other/transferred"
-        self.assert_fault("github_repository_changed", github.read, settings(), "repository", REPO)
+        self.assert_fault("github_repository_changed", github.read, settings(), "repository", REPO, transport=self.transport)
 
     def test_stale_update_and_pushed_head_reject_before_write(self):
         with patch.object(operations, "_mutate") as mutate:
             self.assert_fault("github_object_changed", github.issue, settings(), "update", REPO, "new", None,
-                              number=1, expected_updated_at="old")
+                              number=1, expected_updated_at="old", transport=self.transport)
             self.assert_fault("github_candidate_changed", github.pull_request, settings(), "create", REPO,
-                              "new", "body", head="topic", base="main", expected_head_sha=BASE)
+                              "new", "body", head="topic", base="main", expected_head_sha=BASE, transport=self.transport)
             self.assert_fault("invalid_github_request", github.pull_request, settings(), "create", REPO,
-                              "new", "body", head="topic", base="main", expected_head_sha="invalid")
+                              "new", "body", head="topic", base="main", expected_head_sha="invalid", transport=self.transport)
             mutate.assert_not_called()
-            github.issue(settings(), "update", REPO, None, None, number=1, state="closed", expected_updated_at=STAMP)
+            github.issue(settings(), "update", REPO, None, None, number=1, state="closed", expected_updated_at=STAMP, transport=self.transport)
             self.assertEqual(mutate.call_args.args[3], {"state": "closed"})
 
     def test_ready_for_review_uses_fixed_mutation_and_verified_readback(self):
         self.pr["draft"] = True
-        with patch.object(connection, "request", side_effect=self.response) as api:
+        with patch.object(self, "transport", side_effect=self.response) as api:
             result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
-                                         expected_updated_at=STAMP, expected_head_sha=HEAD)
+                                         expected_updated_at=STAMP, expected_head_sha=HEAD, transport=self.transport)
         self.assertEqual(result["status"], "verified")
         self.assertEqual(result["verified_fields"], ["draft"])
         self.assertTrue(result["provider_response_verified"])
@@ -233,25 +233,25 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual(len(mutations), 1)
         self.assertIn("markPullRequestReadyForReview", mutations[0].args[2]["query"])
         reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
-                                      {"action": "ready_for_review", "expected_head_sha": HEAD})
+                                      {"action": "ready_for_review", "expected_head_sha": HEAD}, transport=self.transport)
         self.assertEqual(reconciled["status"], "verified")
         self.assertTrue(reconciled["fields_verified"])
 
     def test_ready_for_review_rejects_stale_wrong_or_non_draft_candidates_before_mutation(self):
-        with patch.object(connection, "request", side_effect=self.response) as api:
+        with patch.object(self, "transport", side_effect=self.response) as api:
             self.assert_fault("github_conflict", github.pull_request, settings(), "ready_for_review",
                               REPO, None, None, number=2, expected_updated_at=STAMP,
-                              expected_head_sha=HEAD)
+                              expected_head_sha=HEAD, transport=self.transport)
             self.pr["draft"] = True
             self.assert_fault("github_object_changed", github.pull_request, settings(), "ready_for_review",
                               REPO, None, None, number=2, expected_updated_at="stale",
-                              expected_head_sha=HEAD)
+                              expected_head_sha=HEAD, transport=self.transport)
             self.assert_fault("github_candidate_changed", github.pull_request, settings(), "ready_for_review",
-                              REPO, None, None, number=2, expected_head_sha=BASE)
+                              REPO, None, None, number=2, expected_head_sha=BASE, transport=self.transport)
             self.assert_fault("invalid_github_request", github.pull_request, settings(), "ready_for_review",
-                              REPO, None, None, number=2, expected_head_sha="")
+                              REPO, None, None, number=2, expected_head_sha="", transport=self.transport)
             self.assert_fault("invalid_github_request", github.pull_request, settings(), "ready_for_review",
-                              REPO, "changed", None, number=2, expected_head_sha=HEAD)
+                              REPO, "changed", None, number=2, expected_head_sha=HEAD, transport=self.transport)
         self.assertFalse(any(call.args[0] == "POST" and call.args[1] == "graphql"
                              for call in api.call_args_list))
 
@@ -261,15 +261,15 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         def timeout(method, endpoint, payload=None):
             if method == "POST" and endpoint == "graphql":
                 mutations.append(payload)
-                raise Fault("github_timeout", "fixture lost acknowledgement")
+                raise Fault("github_response_unknown", "fixture lost acknowledgement")
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=timeout):
+        with patch.object(self, "transport", side_effect=timeout):
             result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
-                                         expected_head_sha=HEAD)
+                                         expected_head_sha=HEAD, transport=self.transport)
             self.assertEqual(result["status"], "write_outcome_unknown")
             self.pr["draft"] = False
             reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
-                                          {"action": "ready_for_review", "expected_head_sha": HEAD})
+                                          {"action": "ready_for_review", "expected_head_sha": HEAD}, transport=self.transport)
             self.assertEqual(reconciled["status"], "verified")
         self.assertEqual(len(mutations), 1)
 
@@ -279,9 +279,9 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 return {"data": {"markPullRequestReadyForReview": {"pullRequest": {
                     "id": self.pr["node_id"], "number": self.pr["number"], "isDraft": False}}}}
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=unverified):
+        with patch.object(self, "transport", side_effect=unverified):
             result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
-                                         expected_head_sha=HEAD)
+                                         expected_head_sha=HEAD, transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
         self.assertTrue(self.pr["draft"])
 
@@ -295,13 +295,13 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 self.pr["head"]["sha"] = BASE
             return self.response(method, endpoint, payload)
 
-        with patch.object(connection, "request", side_effect=concurrent_push):
+        with patch.object(self, "transport", side_effect=concurrent_push):
             result = github.pull_request(settings(), "ready_for_review", REPO, None, None,
-                                         number=2, expected_head_sha=HEAD)
+                                         number=2, expected_head_sha=HEAD, transport=self.transport)
             self.assertEqual(result["status"], "write_unverified")
             self.assertFalse(self.pr["draft"])
             reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
-                                          {"action": "ready_for_review", "expected_head_sha": HEAD})
+                                          {"action": "ready_for_review", "expected_head_sha": HEAD}, transport=self.transport)
             self.assertEqual(reconciled["status"], "observed")
             self.assertFalse(reconciled["fields_verified"])
         self.assertEqual(len(mutations), 1)
@@ -310,7 +310,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.issue_value["pull_request"] = {"url": "https://api.github.com/repos/Owner/repo/pulls/1"}
         with patch.object(operations, "_mutate") as mutate:
             self.assert_fault("github_wrong_object_type", github.issue, settings(), "update", REPO,
-                              None, None, number=1, state="closed", expected_updated_at=STAMP)
+                              None, None, number=1, state="closed", expected_updated_at=STAMP, transport=self.transport)
             mutate.assert_not_called()
 
     def test_issue_and_pr_metadata_use_bounded_verified_issue_fields(self):
@@ -324,13 +324,13 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 self.pr.update(labels=[{"id": 7, "name": "maintenance"}], assignees=[ACTOR])
                 return copy.deepcopy(self.pr)
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=mutating) as api:
+        with patch.object(self, "transport", side_effect=mutating) as api:
             issue = github.issue(settings(), "update", REPO, None, None, number=1,
-                                 expected_updated_at=STAMP, labels=[], assignees=["Operator"])
+                                 expected_updated_at=STAMP, labels=[], assignees=["Operator"], transport=self.transport)
             pr = github.pull_request(settings(), "update", REPO, None, None, number=2,
                                      expected_updated_at=STAMP, expected_head_sha=HEAD,
-                                     labels=["maintenance"], assignees=["Operator"])
-            observed = github.read(settings(), "pull_request", REPO, number=2)
+                                     labels=["maintenance"], assignees=["Operator"], transport=self.transport)
+            observed = github.read(settings(), "pull_request", REPO, number=2, transport=self.transport)
         self.assertEqual((issue["status"], pr["status"]), ("verified", "verified"))
         writes = [call for call in api.call_args_list if call.args[0] == "PATCH"]
         self.assertEqual([call.args[1] for call in writes], [f"{ROOT}/issues/1", f"{ROOT}/issues/2"])
@@ -340,31 +340,31 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
     def test_pr_metadata_stays_one_effect_and_validates_names(self):
         with patch.object(operations, "_mutate") as mutate:
             self.assert_fault("invalid_github_request", github.pull_request, settings(), "create", REPO,
-                              "new", "body", head="topic", base="main", labels=["maintenance"])
+                              "new", "body", head="topic", base="main", labels=["maintenance"], transport=self.transport)
             self.assert_fault("invalid_github_request", github.pull_request, settings(), "update", REPO,
-                              "new", None, number=2, expected_head_sha=HEAD, labels=["maintenance"])
+                              "new", None, number=2, expected_head_sha=HEAD, labels=["maintenance"], transport=self.transport)
             self.assert_fault("invalid_github_request", github.issue, settings(), "create", REPO,
-                              "new", "body", labels=["duplicate", "DUPLICATE"])
+                              "new", "body", labels=["duplicate", "DUPLICATE"], transport=self.transport)
             mutate.assert_not_called()
 
     def test_metadata_readback_and_reconciliation_compare_named_sets(self):
         observed = {"id": 9, "number": 2, "labels": [{"name": "Maintenance"}],
                     "assignees": [{"login": "operator"}]}
-        with patch.object(connection, "request", side_effect=[observed, observed]):
+        with patch.object(self, "transport", side_effect=[observed, observed]):
             result = operations._mutate(REPO, "PATCH", "endpoint",
-                {"labels": ["maintenance"], "assignees": ["Operator"]}, lambda _: "readback")
+                {"labels": ["maintenance"], "assignees": ["Operator"]}, lambda _: "readback", transport=self.transport)
         self.assertEqual(result["status"], "verified")
         observed["labels"] = [{"name": "bug"}]
-        with patch.object(connection, "request", side_effect=[observed, observed]):
+        with patch.object(self, "transport", side_effect=[observed, observed]):
             result = operations._mutate(REPO, "PATCH", "endpoint",
-                {"labels": ["maintenance"]}, lambda _: "readback")
+                {"labels": ["maintenance"]}, lambda _: "readback", transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
 
         locator = self.task_locator("pull_request", 2)
         self.pr.update(labels=[{"name": "maintenance"}], assignees=[ACTOR])
         request = dict(action="update", labels=["maintenance"], assignees=["operator"],
                        expected_head_sha=HEAD)
-        reconciled = github.reconcile(settings(), locator, request)
+        reconciled = github.reconcile(settings(), locator, request, transport=self.transport)
         self.assertEqual(reconciled["status"], "verified")
         self.assertTrue(reconciled["fields_verified"])
 
@@ -373,11 +373,11 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                  ({"state": "closed"}, {"state": "open"}),
                  ({"commit_id": HEAD, "event": "COMMENT"}, {"commit_id": BASE, "state": "COMMENTED"})]
         for payload, observed in cases:
-            with self.subTest(payload=payload), patch.object(connection, "request", side_effect=[{"id": 9}, {"id": 9, **observed}]):
-                result = operations._mutate(REPO, "POST", "endpoint", payload, lambda _: "readback")
+            with self.subTest(payload=payload), patch.object(self, "transport", side_effect=[{"id": 9}, {"id": 9, **observed}]):
+                result = operations._mutate(REPO, "POST", "endpoint", payload, lambda _: "readback", transport=self.transport)
                 self.assertEqual(result["status"], "write_unverified")
-        with patch.object(connection, "request", side_effect=[{"id": 9}, {"id": 9, "body": "same"}, {"id": 2, "login": "Other"}]):
-            result = operations._mutate(REPO, "POST", "endpoint", {"body": "same"}, lambda _: "readback", settings=settings(), actor=ACTOR)
+        with patch.object(self, "transport", side_effect=[{"id": 9}, {"id": 9, "body": "same"}, {"id": 2, "login": "Other"}]):
+            result = operations._mutate(REPO, "POST", "endpoint", {"body": "same"}, lambda _: "readback", settings=settings(), actor=ACTOR, transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
 
     def test_lost_comment_acknowledgement_is_read_not_replayed(self):
@@ -386,41 +386,41 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             if method == "POST" and endpoint == f"{ROOT}/issues/1/comments":
                 writes.append(endpoint)
                 self.comments.append({"id": 9, "body": payload["body"], "user": ACTOR})
-                raise Fault("github_timeout", "synthetic lost acknowledgement")
+                raise Fault("github_response_unknown", "synthetic lost acknowledgement")
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=lossy):
-            result = github.comment(settings(False), "create", REPO, "unique-test-comment", number=1)
+        with patch.object(self, "transport", side_effect=lossy):
+            result = github.comment(settings(False), "create", REPO, "unique-test-comment", number=1, transport=self.transport)
             self.assertEqual(result["status"], "write_outcome_unknown")
-            observed = github.read(settings(), "comments", REPO, number=1)
+            observed = github.read(settings(), "comments", REPO, number=1, transport=self.transport)
         self.assertEqual(len(writes), 1)
         self.assertEqual([item["body"] for item in observed["data"]], ["unique-test-comment"])
 
     def test_known_rejection_is_not_an_unknown_write_or_retry(self):
-        with patch.object(connection, "request", side_effect=Fault("github_access_denied", "denied")) as api:
-            self.assert_fault("github_access_denied", operations._mutate, REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback")
+        with patch.object(self, "transport", side_effect=Fault("github_access_denied", "denied")) as api:
+            self.assert_fault("github_access_denied", operations._mutate, REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback", transport=self.transport)
         self.assertEqual(api.call_count, 1)
 
     def test_candidate_pages_require_both_revisions_and_report_missing_patch(self):
-        first = github.read(settings(), "files", REPO, number=2, expected_head_sha=HEAD, limit=1)
+        first = github.read(settings(), "files", REPO, number=2, expected_head_sha=HEAD, limit=1, transport=self.transport)
         self.assertEqual(first["next_page"], 2)
         self.assertFalse(first["data"][0]["patch_is_complete_evidence"])
         self.assert_fault("invalid_github_request", github.read, settings(), "files", REPO, number=2,
-                          expected_head_sha=HEAD, page=2, limit=1)
-        second = github.read(settings(), "files", REPO, number=2, expected_head_sha=HEAD, expected_base_sha=BASE, page=2, limit=1)
+                          expected_head_sha=HEAD, page=2, limit=1, transport=self.transport)
+        second = github.read(settings(), "files", REPO, number=2, expected_head_sha=HEAD, expected_base_sha=BASE, page=2, limit=1, transport=self.transport)
         self.assertFalse(second["has_more"])
         self.assertFalse(second["data"][0]["patch_available"])
         self.pr["head"]["sha"] = MERGE
         self.assert_fault("github_candidate_changed", github.read, settings(), "files", REPO, number=2,
-                          expected_head_sha=HEAD, expected_base_sha=BASE, page=2, limit=1)
+                          expected_head_sha=HEAD, expected_base_sha=BASE, page=2, limit=1, transport=self.transport)
 
     def test_missing_file_page_and_gate_capacity_are_explicit(self):
         self.files = self.files[:1]
-        self.assert_fault("github_evidence_unavailable", github.read, settings(), "files", REPO, number=2, expected_head_sha=HEAD)
+        self.assert_fault("github_evidence_unavailable", github.read, settings(), "files", REPO, number=2, expected_head_sha=HEAD, transport=self.transport)
         self.reviews = [dict(self.reviews[0], id=i + 1) for i in range(1001)]
-        self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD)
+        self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD, transport=self.transport)
 
     def test_zero_statuses_are_no_checks_not_pending(self):
-        observed = evidence.merge_gate(REPO, 2, HEAD)
+        observed = evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)
         self.assertEqual(observed["checks"]["state"], "no_checks")
         self.assertEqual(observed["blockers"], [])
         self.assertFalse(observed["self_review_is_independent_approval"])
@@ -428,52 +428,52 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
     def test_superseded_cancelled_check_does_not_block_current_success(self):
         run = {"id": 1, "name": "test", "app": {"id": 42}, "head_sha": HEAD, "status": "completed", "conclusion": "cancelled"}
         self.runs = [run, dict(run, id=2, conclusion="success")]
-        observed = evidence.merge_gate(REPO, 2, HEAD)
+        observed = evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)
         self.assertEqual(observed["checks"]["state"], "passed")
         self.assertEqual([item["id"] for item in observed["checks"]["check_runs"]], [2])
         self.runs[1]["conclusion"] = "cancelled"
-        self.assertIn("current_checks_not_passed", evidence.merge_gate(REPO, 2, HEAD)["blockers"])
+        self.assertIn("current_checks_not_passed", evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)["blockers"])
 
     def test_review_pagination_and_unresolved_outdated_thread_block_merge(self):
         self.reviews = [dict(self.reviews[0], id=i + 1) for i in range(101)]
         self.threads = [{"id": "thread", "isResolved": False, "isOutdated": True, "path": "a.py", "line": 1}]
-        observed = evidence.merge_gate(REPO, 2, HEAD)
+        observed = evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)
         self.assertEqual(observed["review_count"], 101)
         self.assertIn("unresolved_review_threads", observed["blockers"])
-        result = github.merge(settings(), REPO, 2, HEAD, BASE)
+        result = github.merge(settings(), REPO, 2, HEAD, BASE, transport=self.transport)
         self.assertEqual(result["status"], "merge_blocked")
         self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
 
     def test_comment_does_not_clear_prior_change_request(self):
         self.reviews = [dict(self.reviews[0], id=8, state="CHANGES_REQUESTED"), self.reviews[0]]
-        self.assertIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD)["blockers"])
+        self.assertIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)["blockers"])
         self.reviews.append(dict(self.reviews[0], id=10, state="DISMISSED"))
-        self.assertNotIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD)["blockers"])
+        self.assertNotIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)["blockers"])
         self.policy["reviewDecision"] = "REVIEW_REQUIRED"
-        self.assertIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD)["blockers"])
+        self.assertIn("review_requirements_not_met", evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)["blockers"])
 
     def test_missing_graphql_evidence_rejects_review_without_submission(self):
         def partial(method, endpoint, payload=None):
             if endpoint == "graphql":
                 return {"data": {}, "errors": [{"message": "not available"}]}
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=partial), patch.object(operations, "_mutate") as mutate:
+        with patch.object(self, "transport", side_effect=partial), patch.object(operations, "_mutate") as mutate:
             self.assert_fault("github_evidence_unavailable", github.review, settings(), "create", REPO, "review",
-                              number=2, expected_head_sha=HEAD)
+                              number=2, expected_head_sha=HEAD, transport=self.transport)
             mutate.assert_not_called()
 
     def test_changed_candidate_self_approval_and_absent_review_cannot_merge(self):
         with patch.object(operations, "_mutate") as mutate:
             self.assert_fault("github_candidate_changed", github.review, settings(), "create", REPO, "review",
-                              number=2, expected_head_sha=BASE)
+                              number=2, expected_head_sha=BASE, transport=self.transport)
             self.assert_fault("github_self_review", github.review, settings(), "create", REPO, "review",
-                              number=2, expected_head_sha=HEAD, event="APPROVE")
+                              number=2, expected_head_sha=HEAD, event="APPROVE", transport=self.transport)
             mutate.assert_not_called()
         self.reviews = []
-        self.assertIn("no_submitted_current_head_review", github.merge(settings(), REPO, 2, HEAD)["gate"]["blockers"])
+        self.assertIn("no_submitted_current_head_review", github.merge(settings(), REPO, 2, HEAD, transport=self.transport)["gate"]["blockers"])
         self.reviews = [{"id": 9, "user": ACTOR, "state": "COMMENTED", "commit_id": HEAD, "submitted_at": STAMP}]
         self.policy["mergeQueueEntry"] = {"id": "queue"}
-        self.assertIn("native_policy_not_clean_or_queue_unsupported", github.merge(settings(), REPO, 2, HEAD)["gate"]["blockers"])
+        self.assertIn("native_policy_not_clean_or_queue_unsupported", github.merge(settings(), REPO, 2, HEAD, transport=self.transport)["gate"]["blockers"])
 
     def test_merge_verifies_actual_destination_and_never_bypasses(self):
         writes = []
@@ -491,8 +491,8 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             if endpoint == f"{ROOT}/compare/{MERGE}...{MERGE}":
                 return {"status": "identical", "merge_base_commit": {"sha": MERGE}}
             return self.response(method, endpoint, payload)
-        with patch.object(connection, "request", side_effect=merging):
-            result = github.merge(settings(), REPO, 2, HEAD, BASE)
+        with patch.object(self, "transport", side_effect=merging):
+            result = github.merge(settings(), REPO, 2, HEAD, BASE, transport=self.transport)
         self.assertEqual(result["status"], "merged_verified")
         self.assertEqual(result["merge_commit_sha"], MERGE)
         self.assertEqual(len(writes), 1)
@@ -505,12 +505,12 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 if method == "PUT":
                     writes.append(payload)
                     if behavior == "timeout":
-                        raise Fault("github_timeout", "lost acknowledgement")
+                        raise Fault("github_response_unknown", "lost acknowledgement")
                     self.pr.update(merged=True, merge_commit_sha=BASE, state="closed")
                     return {"merged": True, "sha": MERGE}
                 return self.response(method, endpoint, payload)
-            with self.subTest(behavior=behavior), patch.object(connection, "request", side_effect=uncertain):
-                result = github.merge(settings(), REPO, 2, HEAD)
+            with self.subTest(behavior=behavior), patch.object(self, "transport", side_effect=uncertain):
+                result = github.merge(settings(), REPO, 2, HEAD, transport=self.transport)
                 self.assertEqual(result["status"], expected)
                 self.assertEqual(len(writes), 1)
 
@@ -520,33 +520,33 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         values = [{"sha": HEAD, "commit": {"tree": {"sha": TREE}}},
                   {"sha": TREE, "truncated": False, "tree": [{"path": "code.py", "mode": "100644", "sha": blob}]},
                   {"sha": blob, "encoding": "base64", "size": len(raw), "content": base64.b64encode(raw).decode()}]
-        with patch.object(connection, "request", side_effect=copy.deepcopy(values) * 2):
-            first = evidence.read_file(REPO, HEAD, "code.py", 0)
-            second = evidence.read_file(REPO, HEAD, "code.py", first["next_offset"])
+        with patch.object(self, "transport", side_effect=copy.deepcopy(values) * 2):
+            first = evidence.read_file(REPO, HEAD, "code.py", 0, transport=self.transport)
+            second = evidence.read_file(REPO, HEAD, "code.py", first["next_offset"], transport=self.transport)
         self.assertEqual((first["text"] + second["text"]).encode(), raw)
         self.assertEqual(first["sha256"], hashlib.sha256(raw).hexdigest())
         values[1]["tree"][0]["mode"] = "120000"
-        with patch.object(connection, "request", side_effect=values) as api:
-            self.assert_fault("github_unsupported_file", evidence.read_file, REPO, HEAD, "code.py", 0)
+        with patch.object(self, "transport", side_effect=values) as api:
+            self.assert_fault("github_unsupported_file", evidence.read_file, REPO, HEAD, "code.py", 0, transport=self.transport)
             self.assertEqual(api.call_count, 2)
-        with patch.object(connection, "request") as api:
-            self.assert_fault("invalid_github_request", evidence.read_file, REPO, HEAD, "../code.py", 0)
+        with patch.object(self, "transport") as api:
+            self.assert_fault("invalid_github_request", evidence.read_file, REPO, HEAD, "../code.py", 0, transport=self.transport)
             for path in (".env", ".ENV", "Secrets.toml", "ID_RSA", "config/.EnV.local"):
-                self.assert_fault("invalid_github_request", evidence.read_file, REPO, HEAD, path, 0)
+                self.assert_fault("invalid_github_request", evidence.read_file, REPO, HEAD, path, 0, transport=self.transport)
             api.assert_not_called()
 
     def test_short_counted_page_and_unknown_review_evidence_fail_closed(self):
         for response in ({"total_count": 2, "check_runs": [{"id": 1}]}, {"check_runs": []}):
-            with self.subTest(response=response), patch.object(connection, "request", return_value=response):
+            with self.subTest(response=response), patch.object(self, "transport", return_value=response):
                 with self.assertRaises(Fault):
-                    client.list_page("endpoint", 1, 100, "check_runs")
+                    client.list_page("endpoint", 1, 100, "check_runs", transport=self.transport)
         for malformed in ({"id": None}, {"state": "UNRECOGNIZED"}, {"user": "unavailable"}):
             original = self.reviews
             self.reviews = original + [dict(original[0], **malformed)]
-            self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD)
+            self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD, transport=self.transport)
             self.reviews = original
         self.policy["reviewDecision"] = "UNRECOGNIZED"
-        self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD)
+        self.assert_fault("github_evidence_unavailable", evidence.merge_gate, REPO, 2, HEAD, transport=self.transport)
 
     def test_public_redaction_and_response_limit_do_not_claim_complete_evidence(self):
         value = operations._public({"body": "ghp_" + "x" * 32})

@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 from integrations import connections, credentials
-from integrations.github import auth, connection
+from integrations.github import auth
 from openmachine import tasks
 from openmachine.bootstrap import create_application
 from openmachine.config import GitHubConfig
@@ -41,7 +41,6 @@ class ConnectionCaseFixture(TaskFixture):
         self.poll = self.enterContext(patch.object(auth, "poll_device", side_effect=lambda *a: (self.pair(), a[-1])))
         self.refresh = self.enterContext(patch.object(auth, "refresh", side_effect=lambda *a: self.pair()))
         self.enterContext(patch.object(auth, "request", side_effect=self.api))
-        self.enterContext(patch.object(connection, "request", side_effect=lambda m, e, p=None: self.api("legacy", m, e, p)))
         self.addCleanup(self.stop)
 
     def pair(self):
@@ -54,7 +53,7 @@ class ConnectionCaseFixture(TaskFixture):
 
     def api(self, token, method, endpoint, payload=None):
         self.calls.append((method, endpoint))
-        actor = {"id": 1, "login": "operator"} if token == "legacy" else self.tokens[token]
+        actor = self.tokens[token]
         if endpoint == "user":
             return dict(actor)
         if endpoint == "repos/Example/repo":

@@ -253,8 +253,16 @@ terminal UI, control takeover or restoration of dead-process memory is promised.
 
 Connection protocol **2** provides one runtime-owned native account lifecycle on
 existing private MCP. New accounts use GitHub App Device Flow; `existing_gh`
-onboarding and implicit new-work fallback are retired. The minimal historical gh
-request adapter remains only for original task bindings, not another login system.
+onboarding and the gh request backend are retired. Runtime requests require a
+selected native connection and an explicit transport; there is no CLI fallback.
+Saved gh connections, login attempts, task bindings and receipts remain readable.
+Their stored status describes history, not current execution support; capabilities
+report `legacy_gh: retired`. Requests through an old binding or an unbound historical
+GitHub task fail with `integration_legacy_connection` before provider dispatch.
+No account migration, automatic reconnection or mutation replay occurs.
+
+Repository CI may still use GitHub CLI with its own Actions credentials. This is
+independent of runtime account connections, as is an operator's Git credential helper.
 
 | Operation | Contract |
 | --- | --- |

@@ -196,8 +196,8 @@ def check_state(state: Path, *, require_idle: bool = False) -> dict:
 
 
 class Connections:
-    def __init__(self, config: Settings, state: Path, backend=None, native=None):
-        self.config, self.state, self.legacy, self.native = config, state, backend, native
+    def __init__(self, config: Settings, state: Path, native=None):
+        self.config, self.state, self.native = config, state, native
         self.admit = nullcontext
         self._jobs: dict[str, tuple[threading.Event, threading.Thread | None]] = {}
         self._mutex = threading.RLock()
@@ -260,15 +260,16 @@ class Connections:
             raise Fault("integration_store_unavailable", "Connection persistence is unverified; read the original request.") from None
 
     def _enabled(self):
-        if self.config.github is None or self.legacy is None:
+        if self.config.github is None or self.native is None:
             raise Fault("github_not_allowed", "GitHub is not enabled by the operator.")
         return self.config.github
 
     def _policy(self, item: Connection, repository: str, write=False):
         config = self._enabled()
+        from integrations.github import connection
         if repository:
-            self.legacy.authorize(self.config, repository, write=write)
-            self.legacy.authorize(self.config.model_copy(update={"github": item.policy}), repository, write=write)
+            connection.authorize(self.config, repository, write=write)
+            connection.authorize(self.config.model_copy(update={"github": item.policy}), repository, write=write)
         if config.account and item.account_login.casefold() != config.account.casefold():
             raise Fault("github_identity_changed", "The account no longer matches configured policy.")
         if item.status != "connected":
@@ -580,10 +581,14 @@ class Connections:
                 self._errors["store"] = error.code if isinstance(error, Fault) else "integration_store_unavailable"
             self._stop.wait(MAINTENANCE_SECONDS)
 
-    def select(self, repository="", *, connection_id="", binding=None, write=False, legacy=False, persist=False):
+    def select(self, repository="", *, connection_id="", binding=None, write=False, historical_unbound=False):
         config = self._enabled()
+        from integrations.github import connection
+        if historical_unbound:
+            raise Fault("integration_legacy_connection", "The gh backend for unbound historical GitHub tasks is retired. "
+                        "Retain original outcomes; use native connections for separately authorized work.")
         if repository:
-            self.legacy.authorize(self.config, repository, write=write)
+            connection.authorize(self.config, repository, write=write)
         value = _read(self.state) or Store(format=FORMAT)
         if binding and connection_id and connection_id != binding["connection_id"]:
             raise Fault("integration_connection_changed", "The task is bound to another connection.")
@@ -592,14 +597,9 @@ class Connections:
             item = value.connections.get(selected)
             if item is None:
                 raise Fault("integration_not_found", "The original connection is unavailable; no fallback was selected.")
-            if item.backend == "gh" and not binding:
-                raise Fault("integration_legacy_connection", "Historical gh bindings cannot authorize new work.")
-        elif legacy:
-            actor = self.legacy.read_actor(self.config)
-            identity = hashlib.sha256(f"github.com:gh:{actor['id']}".encode()).hexdigest()[:32]
-            item = value.connections.get(identity) or Connection(id=identity, provider="github", backend="gh",
-                account_id=actor["id"], account_login=actor["login"], authorization_revision=1, status="connected",
-                policy=config.model_copy(deep=True), verified_at_ms=now_ms())
+            if item.backend == "gh":
+                raise Fault("integration_legacy_connection", "The gh backend is retired; its connection and task history remain readable. "
+                            "Use native connections for separately authorized work; do not replay original effects.")
         else:
             candidates = [c for c in value.connections.values() if c.backend == "native" and c.status == "connected"
                           and (not config.account or c.account_login.casefold() == config.account.casefold())]
@@ -611,29 +611,11 @@ class Connections:
         self._policy(item, repository, write)
         if binding and item.binding() != binding:
             raise Fault("integration_connection_changed", "The original authorization revision changed.")
-        if persist and item.backend != "native":
-            raise Fault("integration_authentication_required", "New task authority requires a native connection.")
         return item
 
-    def request(self, repository="", *, connection_id="", binding=None, write=False, legacy=False):
-        item = self.select(repository, connection_id=connection_id, binding=binding, write=write, legacy=legacy)
+    def request(self, repository="", *, connection_id="", binding=None, write=False, historical_unbound=False):
+        item = self.select(repository, connection_id=connection_id, binding=binding, write=write, historical_unbound=historical_unbound)
         selected = item.binding()
-        if item.backend == "gh":
-            def send(method, endpoint, payload=None):
-                value = _read(self.state)
-                retained = value.connections.get(item.id) if value else None
-                if retained:
-                    self._policy(retained, repository, write)
-                    if retained.binding() != selected:
-                        raise Fault("integration_connection_changed", "The historical binding changed.")
-                elif binding:
-                    raise Fault("integration_not_found", "The historical connection is missing.")
-                actor = self.legacy.read_actor(self.config)
-                if actor["id"] != item.account_id:
-                    raise Fault("github_identity_changed", "The historical gh account changed; no fallback was used.")
-                return actor if method == "GET" and endpoint == "user" else self.legacy.request(method, endpoint, payload)
-            send.backend = "gh"
-            return send
 
         def send(method, endpoint, payload=None):
             with self.admit(), _guard(self.state / "locks" / f"credential-{item.id}.lock"):
@@ -646,5 +628,4 @@ class Connections:
                         raise
                 replacement = self._token(retained, force=True)
                 return self.native.request(replacement.access_token, method, endpoint, payload)
-        send.backend = "native"
         return send

@@ -54,14 +54,19 @@ format-3 operation locators retain that binding for dispatch and destination rec
 Changing the default, disconnecting or reconnecting cannot silently change a task's
 account. Explicit connection selectors must match the accepted binding.
 
-Format-1 records retain their original serialization, request hashes and external
-`gh` policy; reads and continuation never migrate them to a new account. Empty
-optional fields are omitted from legacy canonical bytes. New creation retries
+Format-1 records and format-2 gh bindings retain their original serialization,
+request hashes, connection identifiers and receipts. Reading this history is passive.
+The gh request backend is retired: claims, continuation and remote reconciliation
+that need its GitHub authority fail with `integration_legacy_connection`, including
+unbound format-1 GitHub tasks. Neither an explicit native selector nor a new default
+can transfer that authority. Start separately authorized native work only after
+resolving any original uncertain effect; retirement does not prove its outcome or
+permit replay. Local pause/cancel controls remain available under their existing guards.
+
+Empty optional fields are omitted from legacy canonical bytes. New creation retries
 compare the original caller request, not subsequently resolved connection state.
-Existing format-2 gh bindings are historical-only as well; neither user-supplied
-bindings nor default selection can use them to create new work. Routine credential
-rotation preserves authorization revisions. Account recovery does not replay a
-GitHub mutation or renew task authority.
+Routine native credential rotation preserves authorization revisions. Account
+recovery does not replay a GitHub mutation or renew task authority.
 
 ## Claims, effects and completion
 

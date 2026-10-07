@@ -22,7 +22,7 @@ NO_EFFECT = {"integration_disconnected", "integration_connection_changed", "inte
              "context_unavailable", "path_denied", "legacy_workspace_busy",
              "ambiguous_workspace", "invalid_github_request", "github_not_allowed", "github_self_review",
              "github_object_changed", "github_candidate_changed", "github_identity_changed",
-             "github_unavailable", "github_authentication_required", "github_access_denied",
+             "github_authentication_required", "github_access_denied",
              "github_not_found", "github_conflict", "github_rejected"}
 
 
@@ -127,7 +127,7 @@ class TaskAdmission:
             raise Fault("unsupported_operation", "Task admission applies only to the explicit existing mutation entrypoints.")
         if method in GITHUB_METHODS:
             return self.app._github_call(method.removeprefix("github_"), arguments,
-                                         binding=binding, legacy=supervised and binding is None)
+                                         binding=binding, historical_unbound=supervised and binding is None)
         if method == "start_execution" and supervised:
             return self.app.machines.start_execution(**arguments, task_admitted=True)
         return getattr(self.app.machines, method)(**arguments)
@@ -320,7 +320,7 @@ class TaskAdmission:
             elif arguments.get("connection_id") or record["format"] >= 2:
                 raise Fault("task_scope_denied", "This task has no accepted binding for the selected account.")
             observed = self.app._github_call("read", dict(action="repository", repository=arguments["repository"]),
-                                             binding=binding, legacy=binding is None)
+                                             binding=binding, historical_unbound=binding is None)
             if observed.get("configured_write") is not True or observed["data"].get("permissions", {}).get("push") is not True:
                 raise Fault("github_not_allowed", "The selected task repository has no current verified write grant.")
             return
@@ -406,7 +406,7 @@ class TaskAdmission:
         locator = operation["locator"]
         if locator["kind"] == "github":
             observed = self.app._github_call("reconcile", dict(locator=locator, request=arguments),
-                                             binding=locator.get("connection"), legacy="connection" not in locator)
+                                             binding=locator.get("connection"), historical_unbound="connection" not in locator)
             if verify and operation["result"] is not None and operation["result"]["receipt_sha256"] is not None:
                 if records.digest(observed.get("receipt") or {}) != operation["result"]["receipt_sha256"]:
                     raise Fault("task_evidence_changed", "The selected provider destination no longer matches its original verified observation.")
