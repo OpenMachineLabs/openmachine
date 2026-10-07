@@ -93,6 +93,10 @@ The selector adds those concrete tests once; it does not recursively expand an
 import graph or run every consumer module. Shared foundation, configuration and
 application changes must name the affected consumer boundaries in the manifest.
 
+The bundled `skills/openmachine/SKILL.md` is a shipped package input owned by
+`skills`. Editing it selects the installed resource tests, including rebuilding
+the wheel, even though its content is Markdown.
+
 A changed test runs that test directly. Shared fixture changes run their declared
 consumers, including consumers reached through another helper; package initializer
 changes include the affected package's tests and fixture consumers. Changed

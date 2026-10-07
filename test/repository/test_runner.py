@@ -54,10 +54,21 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
-        self.write("spec/86/test-migration.json", '{"format": 1}\n')
+        self.write("spec/fixture/inputs.json", '{"format": 1}\n')
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+
+    def test_bundled_skill_change_selects_installed_resource_coverage(self):
+        for full in (False, True):
+            with self.subTest(full=full), patch.object(
+                    runner, "changed_paths", return_value={"skills/openmachine/SKILL.md"}):
+                plan = runner.make_plan(ROOT, "HEAD", full=full)
+                self.assertTrue(plan["runtime_required"])
+                self.assertEqual(plan["environment"], "wheel")
+                self.assertIn("test/component/skills/test_resources.py", self.product_tests(plan))
+                if not full:
+                    self.assertEqual(self.product_tests(plan), {"test/component/skills/test_resources.py"})
 
     def test_repository_fixture_change_does_not_require_product_installation(self):
         self.manifest["support"]["test/support/wire.py"] = ["test/repository/test_rules.py"]
