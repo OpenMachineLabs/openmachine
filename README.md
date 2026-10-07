@@ -2,21 +2,26 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.9
+## v0.2.11
 
-This release adds task-owned recovery Chats without an originating-Chat URL,
-verified offline Python/Core/Git preparation, and a stable management CLI with
-persistent Stop and login-startup policy. It also shares recovery evidence checks,
-avoids duplicate reads within a validation step, and trims stale guidance without
-changing module ownership, execution boundaries or historical readers.
+This release adds Desktop recovery-profile setup, reversible configuration-only
+updates, prepared SSH machine management, and a typed Draft-to-ready GitHub PR
+action. Chat recovery is now opt-in for new tasks, foreground work proceeds
+independently of recovery readiness, and verified unsent setup can recover within
+its original limits. Packaged browser setup is more reliable, and module-owned
+test layers provide change-aware verification.
 
-Recovery remains bounded by readiness, original receipts, finite retries and
-pre-dispatch revalidation. Offline hosts, missing login, human decisions and
+Runtime GitHub requests now require native GitHub App connections. Historical
+`gh` task and connection records remain readable, but their retired backend cannot
+execute or reconcile requests; new native work requires separate authorization.
+
+Enabled recovery remains bounded by readiness, original receipts, finite retries
+and pre-dispatch revalidation. Offline hosts, missing login, human decisions and
 uncertain or exhausted delivery remain stop conditions. State contract 15, SSH
 protocol 6 and execution format 5 are compatibility contracts, not release versions.
 See [task operations](docs/tasks.md) and [tool contracts](docs/operations.md).
 
-Version `0.2.9` is an initial-development release, not a stable 1.x API promise.
+Version `0.2.11` is an initial-development release, not a stable 1.x API promise.
 Build from its exact tag; later `main` commits may be unreleased. Inspect installed
 capabilities separately: a source checkout or release does not update an installation.
 
@@ -31,12 +36,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.9 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.11 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.9-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.11-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -206,8 +211,8 @@ remains English. Current code/tests describe implementation; historical Issues
 and PRs retain evidence, not instructions to repeat completed milestones.
 
 ```sh
-python3 -m unittest discover -s test/system -p 'test_*.py'
-python3 scripts/check_repository.py
+python3 scripts/run_tests.py --base origin/main --plan
+python3 scripts/premerge.py --base origin/main
 ```
 
 ## Trust boundary
