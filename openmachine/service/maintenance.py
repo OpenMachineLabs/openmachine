@@ -1,5 +1,6 @@
 """Bound management CLI and finite, independent product install/update operations."""
 
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -25,6 +26,8 @@ from openmachine.foundation.state import lease, private_directory, save_json
 from . import checks, install, payload, runtime, state as service_state, transition
 
 MAX_OPERATIONS = 128
+RETIRE_LIFECYCLE_WAIT_SECONDS = 5.0
+RETIRE_LIFECYCLE_POLL_SECONDS = 0.05
 PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activating",
           "deferred", "completed", "rejected", "restored", "recovery_required"}
 TERMINAL = {"completed", "rejected", "restored"}
@@ -230,6 +233,24 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         return {"status": "accepted", "operation": record}
 
 
+def _retirement_lifecycle(state: Path) -> ExitStack:
+    """Acquire retirement exclusivity within one finite pre-effect budget."""
+    deadline = time.monotonic() + RETIRE_LIFECYCLE_WAIT_SECONDS
+    while True:
+        owned = ExitStack()
+        try:
+            owned.enter_context(lease(state / "locks/lifecycle.lock"))
+            return owned
+        except Fault as error:
+            owned.close()
+            if error.code != "resource_busy":
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(RETIRE_LIFECYCLE_POLL_SECONDS, remaining))
+
+
 def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
     """Terminally reject only a deferred update proven not to have activated."""
     with lease(state / "service/operation.lock", create=False):
@@ -242,7 +263,7 @@ def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
             raise Fault("maintenance_not_retirable",
                         "Only a deferred update with completed preparation can be retired before activation.")
         request, prepared = record["request"], record["prepared"]
-        with lease(state / "locks/lifecycle.lock"):
+        with _retirement_lifecycle(state):
             selected = service_state._record(state)
             _bound(config_path, state, selected)
             if selected["pending"] is not None:

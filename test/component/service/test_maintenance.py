@@ -99,6 +99,92 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(original["status"], "rejected")
         maintenance._available(self.state)
 
+    def test_deferred_update_retirement_waits_only_for_lifecycle_acquisition(self):
+        record = self.operation_fixture("deferred")
+        lifecycle = self.state / "locks/lifecycle.lock"
+        attempts = 0
+
+        class BusyLease:
+            def __enter__(self):
+                raise Fault("resource_busy", "fixture")
+
+            def __exit__(self, *args):
+                return False
+
+        def controlled(path, **kwargs):
+            nonlocal attempts
+            if path != lifecycle:
+                return lease(path, **kwargs)
+            attempts += 1
+            return BusyLease() if attempts < 3 else lease(path, **kwargs)
+
+        with patch.object(maintenance, "lease", side_effect=controlled), \
+                patch.object(maintenance.time, "monotonic", side_effect=[0.0, 0.1, 0.2]), \
+                patch.object(maintenance.time, "sleep") as sleep, patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "observe", return_value={"status": "ready", "current": self.a}) as observe:
+            result = maintenance.retire_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual((result["status"], result["operation"]["phase"]), ("retired", "rejected"))
+        self.assertEqual(attempts, 3)
+        self.assertEqual(sleep.call_count, 2)
+        observe.assert_called_once()
+
+    def test_deferred_update_retirement_contention_budget_has_no_effect(self):
+        record = self.operation_fixture("deferred")
+        path = maintenance._operation_path(self.state, record["operation_id"])
+        before = path.read_bytes()
+        lifecycle = self.state / "locks/lifecycle.lock"
+
+        class BusyLease:
+            def __enter__(self):
+                raise Fault("resource_busy", "fixture")
+
+            def __exit__(self, *args):
+                return False
+
+        def controlled(path, **kwargs):
+            return BusyLease() if path == lifecycle else lease(path, **kwargs)
+
+        with patch.object(maintenance, "lease", side_effect=controlled), \
+                patch.object(maintenance.time, "monotonic", side_effect=[0.0, 5.0]), \
+                patch.object(maintenance.time, "sleep") as sleep, patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "observe") as observe:
+            self.assert_fault("resource_busy",
+                              lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+        sleep.assert_not_called()
+        observe.assert_not_called()
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_deferred_update_retirement_does_not_replay_body_failure(self):
+        record = self.operation_fixture("deferred")
+        path = maintenance._operation_path(self.state, record["operation_id"])
+        before = path.read_bytes()
+        lifecycle = self.state / "locks/lifecycle.lock"
+        attempts = 0
+
+        class BusyLease:
+            def __enter__(self):
+                raise Fault("resource_busy", "fixture")
+
+            def __exit__(self, *args):
+                return False
+
+        def controlled(path, **kwargs):
+            nonlocal attempts
+            if path != lifecycle:
+                return lease(path, **kwargs)
+            attempts += 1
+            return BusyLease() if attempts == 1 else lease(path, **kwargs)
+
+        with patch.object(maintenance, "lease", side_effect=controlled), \
+                patch.object(maintenance.time, "monotonic", side_effect=[0.0, 0.1]), \
+                patch.object(maintenance.time, "sleep"), patch.object(maintenance, "_bound"), \
+                patch.object(maintenance, "observe", side_effect=Fault("maintenance_retirement_unverified", "fixture")) as observe:
+            self.assert_fault("maintenance_retirement_unverified",
+                              lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+        self.assertEqual(attempts, 2)
+        observe.assert_called_once()
+        self.assertEqual(path.read_bytes(), before)
+
     def test_deferred_update_retirement_requires_deliberate_verified_stop(self):
         selected = self.policy_fixture()
         cases = [("running", False, None, False), ("stopped", True, None, False),
