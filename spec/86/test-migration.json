@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "base_sha": "a6e3429c73bf65ad5f268a5e38aa276be05b0408",
+  "base_explicit_test_methods": 567,
+  "candidate_explicit_test_methods": 593,
+  "frozen_mcp_contract_identical": true,
+  "policy": "All base test methods remain unless listed in replacements. Each replacement preserves the old observable risk while assigning it to narrower module/layer ownership.",
+  "replacements": {
+    "test_multistage_task_pause_restart_and_completion_on_both_protocols": {
+      "reason": "Separate protocol conformance from lifecycle resilience instead of multiplying the complete lifecycle by both protocols.",
+      "retained": [
+        "test/resilience/app/test_mcp_admission.py::test_multistage_task_pause_restart_and_completion",
+        "test/contract/mcp/tasks/test_admission.py::test_supervised_write_keeps_original_context_on_both_protocols"
+      ]
+    },
+    "test_resolve_commit_and_dirty_guard_are_explicit": {
+      "reason": "Split Git identity, dirty-worktree, and fail-closed selection behavior into focused repository runner/premerge tests.",
+      "retained": [
+        "test/repository/test_runner.py::test_missing_wrong_and_empty_bases_never_become_an_implicit_full_pass",
+        "test/repository/test_premerge.py::test_dirty_changes_and_clean_same_tree_head_drift_cannot_be_cached"
+      ]
+    },
+    "test_cache_is_git_local_and_bound_to_candidate_identity": {
+      "reason": "Replace whole-premerge cache assertions with exact scope/head/base/selection identity coverage.",
+      "retained": [
+        "test/repository/test_premerge.py::test_cache_is_exact_for_scope_head_base_and_selected_checks",
+        "test/repository/test_premerge.py::test_dirty_changes_and_clean_same_tree_head_drift_cannot_be_cached"
+      ]
+    },
+    "test_matching_cache_skips_checks_and_force_reruns": {
+      "reason": "Separate affected/full cache isolation from force invalidation.",
+      "retained": [
+        "test/repository/test_premerge.py::test_affected_pass_cannot_satisfy_full_and_force_invalidates_failed_attempt",
+        "test/repository/test_premerge.py::test_cache_is_exact_for_scope_head_base_and_selected_checks"
+      ]
+    },
+    "test_application_mutations_share_admission_and_preserve_dispatch_arguments": {
+      "reason": "Replace one cross-domain table with module-owned dispatch/admission tests so unrelated providers no longer couple parameter lists.",
+      "retained": [
+        "test/component/app/test_execution_dispatch.py::test_execution_dispatch_preserves_lifecycle_admission_and_arguments",
+        "test/component/app/test_workspace_dispatch.py::test_workspace_dispatch_preserves_lifecycle_admission_and_arguments",
+        "test/component/app/test_task_dispatch.py::test_task_dispatch_preserves_lifecycle_admission_and_arguments",
+        "test/component/app/test_github_dispatch.py::test_github_dispatch_preserves_lifecycle_admission_and_arguments"
+      ]
+    }
+  }
+}

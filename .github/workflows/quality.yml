@@ -5,19 +5,20 @@ on:
     types: [opened, synchronize, reopened, edited, ready_for_review]
   push:
     branches: [main]
-  issues:
-    types: [opened, edited, reopened]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Metadata edits cannot cancel a code candidate, even when both concern the same PR.
 concurrency:
-  group: quality-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: quality-${{ github.event_name }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'code' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   repository:
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'repository-metadata-edit' || 'repository' }}
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -28,30 +29,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Test repository checks
-        run: python3 -m unittest discover -s test/system -p 'test_*.py'
-      - name: Check repository and event metadata
+      - name: Check repository and candidate metadata
         run: python3 scripts/check_repository.py
 
   runtime:
-    if: github.event_name != 'issues'
+    needs: repository
+    # A skipped metadata job has a different name from the required code check.
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'runtime-metadata-edit' || 'runtime' }}
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install the locked build and runtime dependencies
-        run: python3 -m pip install -r requirements.lock
-      - name: Build and install the independent wheel
-        run: |
-          python3 -m pip wheel --no-deps --no-build-isolation . --wheel-dir /tmp/openmachine-wheel
-          python3 -m pip install --no-deps /tmp/openmachine-wheel/openmachine-*.whl
-      - name: Test the installed runtime outside its checkout
-        working-directory: /tmp
-        run: |
-          python3 -m unittest discover -s "$GITHUB_WORKSPACE/test/unit" -p 'test_*.py'
-          python3 -m unittest discover -s "$GITHUB_WORKSPACE/test/contract" -p 'test_*.py'
+      - name: Verify the exact candidate with its required test layers
+        run: python3 scripts/premerge.py --ci --force
