@@ -96,7 +96,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 result = response.json()["result"]
                 self.assert_wire_tool_result(result, version)
                 self.assertTrue(result["isError"])
-                self.assertEqual(result["structuredContent"]["error"]["code"], "task_not_found")
+                self.assertEqual(result["structuredContent"]["error"]["code"], "tasks_uninitialized")
                 arguments["transition"]["scope"] = {"fields": ["title"]}
                 response = await self.wire_call(client, "tools/call",
                     {"name": "control_task", "arguments": arguments})
