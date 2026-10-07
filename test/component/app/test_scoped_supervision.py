@@ -191,6 +191,24 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         wrong["labels"] = ["different"]
         self.fault("task_operation_conflict", self.control, "bind_effect_scope", operation_id=original["id"],
                    method="github_pull_request", arguments=wrong, reason="Wrong original request is rejected.")
+        malformed = [({}, "task_operation_conflict"),
+            (dict(original_arguments, repository=7), "task_operation_conflict"),
+            ({key: value for key, value in original_arguments.items() if key != "repository"}, "task_operation_conflict"),
+            ({key: value for key, value in original_arguments.items() if key != "action"}, "task_operation_conflict"),
+            (dict(original_arguments, body=7), "invalid_task_control"),
+            (dict(original_arguments, body={"text": "Invalid body type."}), "invalid_task_control"),
+            (dict(original_arguments, body="x" * 60000), "invalid_github_request")]
+        before = self.path.read_bytes()
+        for arguments, code in malformed:
+            with self.subTest(arguments=list(arguments), code=code):
+                unchanged = deepcopy(arguments)
+                self.fault(code, self.control, "bind_effect_scope", operation_id=original["id"],
+                           method="github_pull_request", arguments=arguments, reason="Reject malformed original arguments.")
+                self.assertEqual(arguments, unchanged)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.assertEqual(self.provider.pull_request.call_count, 1)
+        self.provider.reconcile.assert_not_called()
         proof = self.control_arguments("bind_effect_scope", operation_id=original["id"], method="github_pull_request",
                                        arguments=original_arguments, reason="Exact retained request scope; outcome remains unknown.")
         bound = self.app.control_task(**proof)["record"]
@@ -203,6 +221,33 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.update_pr(body="Now independent.")
         self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertNotIn("arguments", json.loads(self.path.read_bytes())["effect_scopes"][0])
+
+    def test_matching_malformed_historical_scope_proof_has_a_bounded_error(self):
+        with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
+            self.update_pr(labels=["bug"])
+            original_arguments = deepcopy(fingerprint.call_args.args[1])
+        historical = self.view()["record"]
+        operation = historical["operations"][0]
+        operation.pop("effect_scope")
+        context = {"task_id": historical["task_id"], "operation_id": operation["id"]}
+        malformed = [{key: value for key, value in original_arguments.items() if key != "repository"},
+                     dict(original_arguments, repository=[])]
+        for arguments in malformed:
+            with self.subTest(repository=arguments.get("repository"), number=arguments.get("number")):
+                # Synthetic retained opaque hashes exercise failures after the
+                # exact fingerprint guard; no real historical record is changed.
+                normalized = self.app.task_admission._normalize("github_pull_request", arguments, context)
+                operation["request_sha256"] = self.app.task_admission._fingerprint("github_pull_request", normalized, operation)
+                self.path.write_bytes(records.canonical(historical))
+                self.app.rebuild_task_index()
+                before = self.path.read_bytes()
+                original = deepcopy(operation)
+                self.fault("invalid_task_control", self.control, "bind_effect_scope", operation_id=operation["id"],
+                           method="github_pull_request", arguments=arguments, reason="Reject a malformed retained proof.")
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.assertEqual(self.provider.pull_request.call_count, 1)
+        self.provider.reconcile.assert_not_called()
 
     def test_historical_scope_retry_is_idempotent_after_verified_observation(self):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:

@@ -113,14 +113,17 @@ class TaskAdmission:
             raise Fault("task_evidence_invalid", "Scope evidence requires an original unscoped GitHub operation.")
         context = {"task_id": record["task_id"], "operation_id": operation["id"]}
         method = transition["method"]
-        arguments = self._normalize(method, transition["arguments"], context)
-        if self._fingerprint(method, arguments, operation) != operation["request_sha256"]:
-            raise Fault("task_operation_conflict", "Scope proof must reproduce the exact original normalized request fingerprint.")
-        locator = self._locator(method, arguments, context)
-        if (tasks.operation_key(locator) != tasks.operation_key(operation["locator"])
-                or locator["object_type"] != operation["locator"]["object_type"]):
-            raise Fault("task_operation_conflict", "Scope proof must reproduce the exact original normalized request fingerprint.")
-        return effects.github_scope(method, arguments)
+        try:
+            arguments = self._normalize(method, transition["arguments"], context)
+            if self._fingerprint(method, arguments, operation) != operation["request_sha256"]:
+                raise Fault("task_operation_conflict", "Scope proof must reproduce the exact original normalized request fingerprint.")
+            locator = self._locator(method, arguments, context)
+            if (tasks.operation_key(locator) != tasks.operation_key(operation["locator"])
+                    or locator["object_type"] != operation["locator"]["object_type"]):
+                raise Fault("task_operation_conflict", "Scope proof must reproduce the exact original normalized request fingerprint.")
+            return effects.github_scope(method, arguments)
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise Fault("invalid_task_control", "Scope proof requires structurally valid original GitHub arguments.") from error
 
     def _bind_scope(self, record: dict, request: dict, scope: dict, now_ms: int) -> None:
         transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
