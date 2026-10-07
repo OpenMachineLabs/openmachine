@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 import re
 
 from openmachine import execution, tasks
-from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 from openmachine.tasks import records, transitions
 
@@ -290,7 +290,8 @@ class TaskAdmission:
                 observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
-                no_effect = code in NO_EFFECT or (method in GITHUB_METHODS and code in self.app.github.DEFINITE_FAILURES)
+                no_effect = (code in NO_EFFECT or method in FILE_METHODS and code in PRE_EFFECT_REQUEST_FAILURES
+                             or method in GITHUB_METHODS and code in self.app.github.DEFINITE_FAILURES)
                 if method in GITHUB_METHODS and code == "github_rate_limited":
                     result, enriched = _receipt("failed", summary=f"Domain failure: {code}."), locator
                 else:

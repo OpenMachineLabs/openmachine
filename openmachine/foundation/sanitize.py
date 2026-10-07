@@ -3,6 +3,12 @@
 import re
 
 
+PRE_EFFECT_REQUEST_FAILURES = frozenset({
+    "invalid_change_id", "invalid_content", "invalid_edits", "invalid_patch",
+    "invalid_precondition", "path_conflict", "request_limit",
+})
+
+
 class Fault(Exception):
     def __init__(self, code: str, message: str, evidence: dict | None = None):
         super().__init__(message)

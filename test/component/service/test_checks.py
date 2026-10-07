@@ -294,6 +294,26 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 "complete": True, "has_more": False, "entries": [{"task_id": "original", "metadata_sha256": "a" * 64,
                 "record": {"operations": [{"state": "unknown", "result": None}]}}]}):
             self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        historical = [
+            {"state": "unknown", "locator": {"kind": "github"},
+             "result": {"status": "unknown", "receipt_sha256": "a" * 64,
+                        "summary": "Original provider outcome is unresolved; no request was repeated."}},
+            {"state": "unknown", "locator": {"kind": "change"},
+             "result": {"status": "unknown", "receipt_sha256": None, "summary": "Domain failure: invalid_edits."}},
+        ]
+        with patch.object(service_checks.tasks, "observation_page", return_value={
+                "complete": True, "has_more": False, "entries": [{"task_id": "historical", "metadata_sha256": "b" * 64,
+                "record": {"operations": historical}}]}):
+            service_checks.activation_safe(self.state)
+        for operation in (
+                {"state": "unknown", "locator": {"kind": "change"},
+                 "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original change outcome is unresolved."}},
+                {"state": "unknown", "locator": {"kind": "execution"},
+                 "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original execution outcome is unresolved."}}):
+            with self.subTest(operation=operation), patch.object(service_checks.tasks, "observation_page", return_value={
+                    "complete": True, "has_more": False, "entries": [{"task_id": "unsafe", "metadata_sha256": "c" * 64,
+                    "record": {"operations": [operation]}}]}):
+                self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         private_directory(self.state / "executions/original")
         with patch.object(service_checks.execution, "read_record", return_value={"status": "running"}):
             self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))

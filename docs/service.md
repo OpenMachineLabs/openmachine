@@ -302,6 +302,11 @@ work becomes idle. Configuration or policy drift rejects continuation rather tha
 rebasing the accepted request. Incomplete preparation is retained; no immutable
 runtime or original history is replaced to retry it.
 
+Retained unknown GitHub outcomes stay unknown across compatible local activation;
+they do not represent a local worker to stop or replay. Historical workspace
+operations are nonblocking only when their exact retained task result names a
+pre-admission validation failure that cannot have allocated a change receipt.
+
 These CLI/reader tests are separate from native GUI startup permission, signed
 product installation/update and real ChatGPT-route acceptance. Management adds
 no daemon, HTTP service, transport or release feed.
