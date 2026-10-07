@@ -13,7 +13,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 import integrations.credentials as credentials
-from integrations.github import connection
 from openmachine.config import GitHubConfig, Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
@@ -267,6 +266,7 @@ class Connections:
 
     def _policy(self, item: Connection, repository: str, write=False):
         config = self._enabled()
+        from integrations.github import connection
         if repository:
             connection.authorize(self.config, repository, write=write)
             connection.authorize(self.config.model_copy(update={"github": item.policy}), repository, write=write)
@@ -583,6 +583,7 @@ class Connections:
 
     def select(self, repository="", *, connection_id="", binding=None, write=False, historical_unbound=False):
         config = self._enabled()
+        from integrations.github import connection
         if historical_unbound:
             raise Fault("integration_legacy_connection", "The gh backend for unbound historical GitHub tasks is retired. "
                         "Retain original outcomes; use native connections for separately authorized work.")
