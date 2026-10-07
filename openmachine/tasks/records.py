@@ -10,8 +10,9 @@ from openmachine.foundation.sanitize import Fault, redact
 
 MAX_RECORD = 65536
 MAX_ACCEPTANCE = 49152
+MAX_SCOPE_REQUEST = 131072
 MAX_INTEGER = 2**53 - 1
-READ_FORMATS = (1, 2, 3)
+READ_FORMATS = (1, 2, 3, 4)
 
 
 def _text(value: str, limit: int) -> str:
@@ -224,11 +225,36 @@ class GitHubLocator(Model):
         return value
 
 
+class GitHubEffectScope(Model):
+    resource: Literal["object", "comment", "review"]
+    number: Revision | None
+    parent_number: Revision | None
+    fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "create"]], Field(min_length=1, max_length=5)]
+
+    @model_validator(mode="after")
+    def canonical_fields(self):
+        if self.fields != sorted(set(self.fields)) or "*" in self.fields and len(self.fields) != 1:
+            raise ValueError("effect fields need a unique canonical set")
+        if self.resource == "object" and self.parent_number is not None:
+            raise ValueError("object scopes have no parent")
+        return self
+
+
 class Result(Model):
     status: Literal["running", "succeeded", "failed", "cancelled", "partial", "unknown"]
     receipt_sha256: SHA | None
     summary: Text256
     log_offset: Integer | None
+    failure_code: Name | None = None
+    effect: Literal["known_no_effect", "active", "effect_verified", "effect_partial", "effect_unknown"] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        for key in ("failure_code", "effect"):
+            if value[key] is None:
+                value.pop(key)
+        return value
 
 
 class Operation(Model):
@@ -243,6 +269,14 @@ class Operation(Model):
     state: Literal["admitted", "observed", "unknown"]
     observed_at_ms: Integer | None
     result: Result | None
+    effect_scope: GitHubEffectScope | None = None
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.effect_scope is None:
+            value.pop("effect_scope", None)
+        return value
 
     @model_validator(mode="after")
     def bounds(self):
@@ -252,7 +286,18 @@ class Operation(Model):
             raise ValueError("observed operation needs original result evidence")
         if self.observed_at_ms is not None and self.observed_at_ms < self.admitted_at_ms:
             raise ValueError("observation precedes admission")
+        if self.effect_scope is not None and not isinstance(self.locator, GitHubLocator):
+            raise ValueError("only GitHub operations carry provider field scopes")
         return self
+
+
+class EffectScopeWitness(Model):
+    id: ID
+    operation_id: ID
+    request_sha256: SHA
+    scope: GitHubEffectScope
+    principal_ref: Annotated[Text256, Field(min_length=1)]
+    at_ms: Integer
 
 
 class History(Model):
@@ -303,7 +348,7 @@ class LastUpdate(Model):
 
 
 class Record(Model):
-    format: Annotated[int, Field(strict=True, ge=1, le=3)]
+    format: Annotated[int, Field(strict=True, ge=1, le=4)]
     task_id: TaskID
     revision: Revision
     title: Title
@@ -321,20 +366,32 @@ class Record(Model):
     terminal: Terminal | None
     last_update: LastUpdate
     chat_registration: ID | None = None
+    control_revision: Revision | None = None
+    effect_scopes: Annotated[list[EffectScopeWitness], Field(max_length=64)] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
         if self.format < 3:
             value.pop("chat_registration", None)
+        if self.format < 4:
+            value.pop("control_revision", None)
+            value.pop("effect_scopes", None)
         return value
 
     @model_validator(mode="after")
     def references(self):
         _stages(self.contract, self.plan.stages)
         if (self.format < 3 and (self.contract.recovery_policy is not None or self.chat_registration is not None)
-                or self.format == 3 and self.contract.recovery_policy is None):
+                or self.format >= 3 and self.contract.recovery_policy is None):
             raise ValueError("task-owned recovery requires explicit format-3 creation semantics")
+        if self.format < 4:
+            if self.control_revision is not None or self.effect_scopes or any(
+                    op.effect_scope is not None or op.result is not None and (
+                        op.result.failure_code is not None or op.result.effect is not None) for op in self.operations):
+                raise ValueError("scoped supervision requires format 4")
+        elif self.control_revision is None or self.control_revision > self.revision:
+            raise ValueError("format 4 needs its material control revision")
         if self.format == 1 and (self.contract.github_connections or any(
                 isinstance(op.locator, GitHubLocator) and op.locator.connection is not None for op in self.operations)):
             raise ValueError("legacy records cannot acquire a new account binding")
@@ -349,7 +406,7 @@ class Record(Model):
                     or operation.epoch > self.control.epoch or not self.created_at_ms <= operation.admitted_at_ms <= self.updated_at_ms
                     or operation.observed_at_ms is not None and operation.observed_at_ms > self.updated_at_ms):
                 raise ValueError("invalid operation binding")
-            if (self.format == 2 or self.format == 3 and operation.plan_revision == self.plan.revision) and isinstance(operation.locator, GitHubLocator) and operation.locator.connection is None:
+            if (self.format == 2 or self.format >= 3 and operation.plan_revision == self.plan.revision) and isinstance(operation.locator, GitHubLocator) and operation.locator.connection is None:
                 raise ValueError("new GitHub operations require their account binding")
             if operation.plan_revision == self.plan.revision and operation.source_sha256 != stages[operation.stage_id].source_sha256:
                 raise ValueError("operation source binding mismatch")
@@ -358,6 +415,14 @@ class Record(Model):
                                 if repo.casefold() == operation.locator.repository.casefold()), None)
                 if operation.locator.connection != binding:
                     raise ValueError("operation account differs from the accepted repository binding")
+        _unique([item.id for item in self.effect_scopes])
+        _unique([item.operation_id for item in self.effect_scopes])
+        for witness in self.effect_scopes:
+            operation = operations.get(witness.operation_id)
+            if (operation is None or not isinstance(operation.locator, GitHubLocator)
+                    or operation.effect_scope is not None or witness.request_sha256 != operation.request_sha256
+                    or not operation.admitted_at_ms <= witness.at_ms <= self.updated_at_ms):
+                raise ValueError("scope witness must bind an original unscoped GitHub request")
         for stage in self.plan.stages:
             _unique(stage.evidence)
             if any(key not in operations or operations[key].stage_id != stage.id for key in stage.evidence):
@@ -416,7 +481,8 @@ def new_record(request: dict, now_ms: int) -> dict:
         raise Fault("task_authority_expired", "Task creation requires a future explicit authority expiry.")
     stages = [dict(stage, state="pending", evidence=[]) for stage in request["stages"]]
     first = stages[0]
-    value = {"format": 3, "task_id": request["task_id"], "revision": 1, "title": request["title"],
+    value = {"format": 4, "control_revision": 1, "effect_scopes": [],
+             "task_id": request["task_id"], "revision": 1, "title": request["title"],
              "anchors": request["anchors"], "created_at_ms": now_ms, "updated_at_ms": now_ms,
              "origin": request["origin"], "contract": contract, "plan": {"revision": 1, "stages": stages},
              "control": {"state": "waiting_for_ai", "current_stage_id": first["id"], "stop_intent": "none",
@@ -448,6 +514,19 @@ class TaskContext(Model):
 class Claim(Model):
     action: Literal["claim"]
     handoff_id: ID
+
+
+class Renew(Model):
+    action: Literal["renew"]
+    claim_id: ID
+
+
+class BindEffectScope(Model):
+    action: Literal["bind_effect_scope"]
+    operation_id: ID
+    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"]
+    arguments: dict[str, object]
+    reason: Annotated[Text512, Field(min_length=1)]
 
 
 class ReasonedControl(Model):
@@ -489,7 +568,7 @@ class Finish(Model):
     limitations: Text2048
 
 
-Transition = Annotated[Claim | ReasonedControl | RevisePlan | RecordDecision | Finish, Field(discriminator="action")]
+Transition = Annotated[Claim | Renew | BindEffectScope | ReasonedControl | RevisePlan | RecordDecision | Finish, Field(discriminator="action")]
 
 
 class ControlRequest(Model):
@@ -503,7 +582,9 @@ class ControlRequest(Model):
 
 def normalize_control(value: dict) -> dict:
     try:
-        if len(canonical(value)) > MAX_ACCEPTANCE:
+        transition = value.get("transition") if isinstance(value, dict) else None
+        bound = MAX_SCOPE_REQUEST if isinstance(transition, dict) and transition.get("action") == "bind_effect_scope" else MAX_ACCEPTANCE
+        if len(canonical(value)) > bound:
             raise ValueError("control request exceeds its bound")
         return ControlRequest.model_validate(value).model_dump()
     except (ValueError, TypeError, UnicodeError, RecursionError) as error:

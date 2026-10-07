@@ -63,8 +63,12 @@ A maintainer-authorized squash uses `<PR title> (#<number>)`, at most 72 charact
 Use `agent/<domain>-<scope>-<outcome>` for a task branch. Keep related changes
 reviewable and atomic; do not rewrite published history to meet a commit count.
 Commit bodies briefly state `Why`, `Scope`, `Validation`, `Boundary`, and `Lane`,
-with actual results rather than expected PASS claims. Use the PR template and
-link the design or identify the current user request as the design source.
+with actual results rather than expected PASS claims. Use the PR template as
+presentation guidance and link the design or identify the current user request
+as the design source. Explain the problem and outcome, scope, actual validation,
+and material risks in the form that fits the change. Fixed PR section names are
+advisory; review still owns the substance. Retain one `- Issue: #N` field when
+linking a Spec so the post-merge Development automation can find it.
 
 Review the entire candidate, not only its final commit. Governance, CI
 permissions, architecture, security, deployment, and public-contract changes
@@ -90,6 +94,7 @@ this scaffold PR does not install them on `main`.
 
 No external Project, release field, milestone, assignee, or private organization
 workflow is assumed. Add planning integration only when it has an actual owner.
+Do not add an assignee or rewrite unrelated metadata merely to fill a template.
 
 ## Checks and evidence
 
@@ -133,11 +138,29 @@ python3 -m unittest discover -s test/repository -p 'test_*.py'
 python3 scripts/check_repository.py
 ```
 
+Before publishing a PR, check its exact draft title and body with the same
+metadata validator used by CI:
+
+```sh
+python3 scripts/check_repository.py --mode metadata --event-name pull_request --event-path /absolute/pr-event.json
+```
+
+The JSON file contains `{"pull_request": {"title": "...", "body": "..."}}`, with
+the actual draft strings. Both explicit event arguments are required together;
+`issues` uses an `issue` object. Metadata mode reads only that event data and
+does not run source checks, contact GitHub, or publish anything. PR titles,
+English text and a nonempty valid body remain hard checks; suggested section
+names produce presentation warnings. A passing body is not proof of meaningful
+acceptance, sufficient review or authorization.
+
 The repository suite tests the checker, selector and runner and verifies source
 dependency direction. The checker validates candidate text hygiene, relative
 Markdown file links, the label manifest, and naming and English-language rules
-for supported GitHub events. It rejects CJK text as a common accidental language
-switch; it does not detect all non-English prose or prove English grammar.
+for supported GitHub events. `--mode source` checks repository files and the
+final commit range for a push event, without reading PR or Issue metadata.
+The default `--mode all` preserves the combined local entry point. The checker
+rejects CJK text as a common accidental language switch; it does not detect all
+non-English prose or prove English grammar.
 Review remains responsible for English content, meaningful acceptance,
 authorization and the live primary label. Local link checks validate file
 targets, not URL availability or heading anchors.
@@ -145,10 +168,13 @@ targets, not URL availability or heading anchors.
 Quality CI uses GitHub-hosted runners, pinned action revisions, read-only
 permissions, no credentials supplied to candidate code, and a five-minute
 budget. Its code checks use the same premerge pipeline and exact GitHub event
-candidate. Metadata has a separate workflow and concurrency identity; a
+candidate with explicit source mode. PR and Issue metadata checks run only in
+their separate workflow and concurrency identity, including each new PR head; a
 metadata-only edit cannot replace a failed code check with a same-named skipped
-result or cancel code verification. Changing a PR's base still requires code
-verification against the new candidate.
+result or cancel code verification. A missing PR heading does not block code
+verification, and a corrected body can pass metadata checks without a new source
+commit. Changing a PR's base still requires code verification against the new
+candidate.
 
 Only separate default-branch metadata workflows have write access: label sync
 and post-merge Spec Development linking use `issues: write`. Never use

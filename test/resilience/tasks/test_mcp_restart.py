@@ -40,7 +40,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(index.read_text(), "Interrupted derived index fixture")
                 index.write_bytes(original)
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 15)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 16)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

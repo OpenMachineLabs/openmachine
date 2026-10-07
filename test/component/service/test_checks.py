@@ -103,8 +103,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (15, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (16, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16)
         self.assertEqual(actual, proof)
         for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
                        {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0}, {"task_records": True},
@@ -117,6 +117,116 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(path.read_bytes(), raw)
         path.unlink()
         self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
+
+    def test_candidate_resamples_a_concurrent_task_generation_once(self):
+        from test.support.tasks import task_contract
+        request = task_contract()
+        tasks.create(self.state, request.pop("task_id"), **request)
+        before = service.check_state(self.config, self.state)
+        generations = []
+
+        def candidate(*args, **kwargs):
+            if not generations:
+                tasks.save(self.state, "new-task", 0, "New task", "A concurrent legitimate publication.\n", [])
+            value = before if not generations else service.check_state(self.config, self.state)
+            generations.append(value["task_index_generation"])
+            return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+
+        selection = service_state._record(self.state)
+        with patch.object(service_checks, "_run", side_effect=candidate) as run, \
+                patch.object(service_checks.time, "sleep") as sleep:
+            observed = service_checks._candidate_state(Path(sys.executable), self.config, self.state)
+        self.assertEqual(observed, service.check_state(self.config, self.state))
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once()
+        self.assertNotEqual(*generations)
+        self.assertEqual(service_state._record(self.state), selection)
+
+    def test_candidate_generation_churn_is_bounded_and_fails_closed(self):
+        from test.support.tasks import task_contract
+        request = task_contract()
+        tasks.create(self.state, request.pop("task_id"), **request)
+        attempts = []
+
+        def moving_candidate(*args, **kwargs):
+            old = service.check_state(self.config, self.state)
+            attempts.append(old["task_index_generation"])
+            tasks.save(self.state, "moving-" + str(len(attempts)), 0,
+                       "Moving task", "Concurrent task publication.\n", [])
+            return subprocess.CompletedProcess([], 0, json.dumps(old), "")
+
+        selection = service_state._record(self.state)
+        with patch.object(service_checks, "_run", side_effect=moving_candidate) as run, \
+                patch.object(service_checks.time, "sleep") as sleep:
+            self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                Path(sys.executable), self.config, self.state))
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(len(set(attempts)), 3)
+        self.assertEqual(service_state._record(self.state), selection)
+
+    def test_scoped_task_history_requires_contract_16_and_complete_actual_reader(self):
+        from test.support.tasks import task_contract
+        from openmachine.tasks import records
+        repository = "fixture/project"
+        binding = {"connection_id": "a" * 32, "account_id": 1, "authorization_revision": 1}
+        request = task_contract()
+        request["contract"].update(repositories=[repository], github_connections={repository: binding})
+        created = tasks.create(self.state, request.pop("task_id"), **request)
+        value = created["record"]
+        self.assertEqual(value["format"], 4)
+        value.update(revision=value["revision"] + 1, updated_at_ms=value["updated_at_ms"] + 1)
+        value["control_revision"] = value["revision"]
+        operation_id = "b" * 32
+        scope = {"resource": "object", "number": 17, "parent_number": None, "fields": ["labels"]}
+        value["operations"] = [{"id": operation_id, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
+            "request_sha256": "b" * 64, "source_sha256": value["plan"]["stages"][0]["source_sha256"],
+            "locator": {"kind": "github", "repository": repository, "object_type": "pull_request",
+                "number": 17, "parent_number": None, "anchor": "om-task:structured-one:" + operation_id,
+                "connection": binding}, "admitted_at_ms": value["updated_at_ms"], "state": "unknown",
+            "observed_at_ms": value["updated_at_ms"], "result": {"status": "unknown", "receipt_sha256": None,
+                "summary": "Synthetic retained dispatch uncertainty.", "log_offset": None,
+                "failure_code": "github_response_unknown", "effect": "effect_unknown"}}]
+        value["effect_scopes"] = [{"id": "c" * 32, "operation_id": operation_id,
+            "request_sha256": "b" * 64, "scope": scope, "principal_ref": "fixture:owner",
+            "at_ms": value["updated_at_ms"]}]
+        path = self.state / "tasks/structured-one/task.json"
+        path.write_bytes(records.canonical(records.Record.model_validate(value).model_dump()))
+        tasks.rebuild_index(self.state)
+        paths = [path, self.state / "tasks/index.json"]
+        before = [item.read_bytes() for item in paths]
+        proof = service.check_state(self.config, self.state)
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (16, [4]))
+        self.assertIn(4, proof["structured_task_read_formats"])
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
+        for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
+                      {"structured_task_formats_present": []}, {"structured_task_formats_present": [3]},
+                      {"structured_task_formats_present": [4.0]}, {"structured_task_formats_present": [4, 4]}):
+            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                    Path(sys.executable), self.config, self.state))
+        self.assertEqual([item.read_bytes() for item in paths], before)
+
+    def test_format_3_history_keeps_directional_contract_15_compatibility(self):
+        from test.support.tasks import task_contract
+        from openmachine.tasks import records
+        request = task_contract()
+        created = tasks.create(self.state, request.pop("task_id"), **request)
+        value = created["record"]
+        value["format"] = 3
+        value.pop("control_revision")
+        value.pop("effect_scopes")
+        path = self.state / "tasks/structured-one/task.json"
+        path.write_bytes(records.canonical(records.Record.model_validate(value).model_dump()))
+        tasks.rebuild_index(self.state)
+        before = path.read_bytes()
+        proof = service.check_state(self.config, self.state)
+        older = proof | {"state_contract": 15, "structured_task_read_formats": [1, 2, 3]}
+        self.assertEqual(proof["structured_task_formats_present"], [3])
+        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(older), "")):
+            self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), older)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_candidate_ignoring_canonical_tasks_is_rejected_before_healthy_service_stop(self):
         from test.support.tasks import task_contract
@@ -141,8 +251,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (15, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (16, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -162,8 +272,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             expires_at_ms=chatgpt.now_ms() + 3600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (15, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), proof)
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (16, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
         for delta in ({"state_contract": 14}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
                       {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):

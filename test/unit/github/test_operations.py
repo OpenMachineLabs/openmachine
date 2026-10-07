@@ -219,6 +219,300 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             github.issue(settings(), "update", REPO, None, None, number=1, state="closed", expected_updated_at=STAMP, transport=self.transport)
             self.assertEqual(mutate.call_args.args[3], {"state": "closed"})
 
+    def test_each_writer_marks_preflight_failure_without_a_mutation(self):
+        calls = [
+            (github.issue, (settings(), "create", REPO, "Title", "Body"), {}),
+            (github.pull_request, (settings(), "create", REPO, "Title", "Body"), {"head": "topic", "base": "main"}),
+            (github.comment, (settings(), "create", REPO, "Body"), {"number": 1}),
+            (github.review, (settings(), "create", REPO, "Body"), {"number": 2, "expected_head_sha": HEAD}),
+            (github.merge, (settings(), REPO, 2, HEAD), {}),
+        ]
+        for writer, args, kwargs in calls:
+            failure = Fault("github_invalid_response", "The preliminary read was incomplete.", effect="effect_unknown")
+            with self.subTest(writer=writer.__name__), patch.object(self, "transport", side_effect=failure) as api:
+                with self.assertRaises(Fault) as caught:
+                    writer(*args, **kwargs, transport=self.transport)
+                self.assertEqual(caught.exception.effect, "known_no_effect")
+                self.assertEqual([call.args[0] for call in api.call_args_list], ["GET"])
+
+    def test_preflight_rejections_cover_object_type_and_graphql_query(self):
+        self.issue_value["pull_request"] = {"url": f"https://api.github.com/{ROOT}/pulls/1"}
+        with self.assertRaises(Fault) as caught:
+            github.issue(settings(), "update", REPO, "Title", None, number=1, transport=self.transport)
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("github_wrong_object_type", "known_no_effect"))
+        self.assertTrue(all(call.args[0] == "GET" for call in self.transport.call_args_list))
+
+        def unavailable_query(method, endpoint, payload=None):
+            if endpoint == "graphql":
+                self.assertTrue(payload["query"].startswith("query("))
+                raise Fault("github_response_unknown", "The evidence query reply was lost.", effect="effect_unknown")
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=unavailable_query) as api, self.assertRaises(Fault) as caught:
+            github.review(settings(), "create", REPO, "Review", number=2, expected_head_sha=HEAD, transport=self.transport)
+        self.assertEqual(caught.exception.effect, "known_no_effect")
+        self.assertFalse(any(call.args[1].endswith("/reviews") and call.args[0] == "POST" for call in api.call_args_list))
+
+    def test_same_failure_code_after_acknowledgment_stays_unverified(self):
+        for code in ("github_network_unavailable", "github_rate_limited", "github_identity_changed",
+                     "github_candidate_changed", "github_invalid_response"):
+            writes = []
+
+            def unavailable_readback(method, endpoint, payload=None):
+                if method == "POST" and endpoint == f"{ROOT}/issues":
+                    writes.append(copy.deepcopy(payload))
+                    return {"id": 101, "number": 1, **payload}
+                if writes and endpoint == f"{ROOT}/issues/1":
+                    raise Fault(code, "Destination read failed.", effect="known_no_effect")
+                return self.response(method, endpoint, payload)
+
+            with self.subTest(code=code), patch.object(self, "transport", side_effect=unavailable_readback):
+                result = github.issue(settings(), "create", REPO, "Title", "Body", transport=self.transport)
+            self.assertEqual(result["status"], "write_unverified")
+            self.assertEqual(result["error_code"], code)
+            self.assertEqual(result["receipt"]["number"], 1)
+            self.assertEqual(len(writes), 1)
+
+    def test_explicit_unknown_is_not_reclassified_from_a_legacy_failure_code(self):
+        for code in ("github_rate_limited", "github_network_unavailable", "resource_busy", "github_access_denied"):
+            failure = Fault(code, "The enclosing request may have taken effect.", effect="effect_unknown")
+            with self.subTest(code=code), patch.object(self, "transport", side_effect=failure) as api:
+                result = operations._mutate(REPO, "POST", "endpoint", {"body": "Body"}, lambda _: "readback", transport=self.transport)
+            self.assertEqual(result["status"], "write_outcome_unknown")
+            self.assertEqual(result["error_code"], code)
+            self.assertEqual(api.call_count, 1)
+            self.assertEqual(failure.effect, "effect_unknown")
+
+    def test_oserror_after_dispatch_or_acknowledgment_preserves_uncertainty(self):
+        cases = [([OSError("Lost response")], "write_outcome_unknown", ["POST"]),
+                 ([{"id": 9}, OSError("Lost readback")], "write_unverified", ["POST", "GET"])]
+        for responses, status, methods in cases:
+            with self.subTest(status=status), patch.object(self, "transport", side_effect=responses) as api:
+                result = operations._mutate(REPO, "POST", "endpoint", {"body": "Body"}, lambda _: "readback", transport=self.transport)
+            self.assertEqual(result["status"], status)
+            self.assertEqual(result["error_code"], "github_response_unknown")
+            self.assertEqual([call.args[0] for call in api.call_args_list], methods)
+
+    def test_unverified_receipts_keep_failure_codes_for_incomplete_readback(self):
+        cases = (
+            ([{"body": "Body"}], "github_response_unknown"),
+            ([{"id": 9}, {}], "github_response_unknown"),
+            ([{"id": 9}, {"id": 10, "body": "Body"}], "github_response_unknown"),
+            ([{"id": 9}, {"id": 9, "body": "Changed"}], "github_response_unknown"),
+            ([{"id": 9}, KeyError("Missing readback identity")], "github_response_unknown"),
+            ([{"id": 9}, None], "github_invalid_response"),
+        )
+        for responses, code in cases:
+            with self.subTest(responses=responses), patch.object(self, "transport", side_effect=responses) as api:
+                result = operations._mutate(REPO, "POST", "endpoint", {"body": "Body"}, lambda _: "readback", transport=self.transport)
+            self.assertEqual((result["status"], result["error_code"]), ("write_unverified", code))
+            self.assertEqual(sum(call.args[0] == "POST" for call in api.call_args_list), 1)
+
+    def test_head_pinned_pr_creation_keeps_final_observation_failure_code(self):
+        for error in (Fault("github_candidate_changed", "Candidate changed after publication.", effect="known_no_effect"),
+                      OSError("Final candidate read failed")):
+            writes = []
+
+            def created(method, endpoint, payload=None):
+                if method == "POST" and endpoint == f"{ROOT}/pulls":
+                    writes.append(copy.deepcopy(payload))
+                    self.pr.update(title=payload["title"], body=payload["body"], draft=payload["draft"])
+                    return copy.deepcopy(self.pr)
+                return self.response(method, endpoint, payload)
+
+            with self.subTest(error=type(error).__name__), patch.object(self, "transport", side_effect=created), \
+                    patch.object(evidence, "pull_request", side_effect=error):
+                result = github.pull_request(settings(), "create", REPO, "Title", "Body", head="topic", base="main",
+                                             expected_head_sha=HEAD, transport=self.transport)
+            self.assertEqual(result["status"], "write_unverified")
+            self.assertEqual(result["error_code"], error.code if isinstance(error, Fault) else "github_response_unknown")
+            self.assertEqual(result["receipt"]["number"], 2)
+            self.assertEqual(len(writes), 1)
+
+    def test_preflight_oserror_proves_no_business_mutation(self):
+        with patch.object(self, "transport", side_effect=OSError("Unavailable preliminary read")) as api:
+            with self.assertRaises(Fault) as caught:
+                github.issue(settings(), "create", REPO, "Title", "Body", transport=self.transport)
+        self.assertEqual(caught.exception.effect, "known_no_effect")
+        self.assertEqual([call.args[0] for call in api.call_args_list], ["GET"])
+
+    def test_merge_and_ready_acknowledgments_keep_readback_uncertainty(self):
+        for kind in ("merge", "ready"):
+            for error in (Fault("github_candidate_changed", "Readback changed.", effect="known_no_effect"),
+                          OSError("Readback unavailable")):
+                self.pr.update(draft=kind == "ready", merged=False, state="open")
+                writes = []
+
+                def unavailable_readback(method, endpoint, payload=None):
+                    if kind == "merge" and method == "PUT":
+                        writes.append(copy.deepcopy(payload))
+                        self.pr.update(merged=True, merge_commit_sha=MERGE, state="closed")
+                        return {"merged": True, "sha": MERGE}
+                    if kind == "ready" and method == "POST" and endpoint == "graphql":
+                        self.assertIn("markPullRequestReadyForReview", payload["query"])
+                        writes.append(copy.deepcopy(payload))
+                        return self.response(method, endpoint, payload)
+                    if writes and endpoint == f"{ROOT}/pulls/2":
+                        raise error
+                    return self.response(method, endpoint, payload)
+
+                with self.subTest(kind=kind, error=type(error).__name__), patch.object(self, "transport", side_effect=unavailable_readback):
+                    result = (github.merge(settings(), REPO, 2, HEAD, BASE, transport=self.transport) if kind == "merge"
+                              else github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                                       expected_head_sha=HEAD, transport=self.transport))
+                self.assertEqual(result["status"], "merge_unverified" if kind == "merge" else "write_unverified")
+                self.assertEqual(result["error_code"], error.code if isinstance(error, Fault) else "github_response_unknown")
+                self.assertEqual(len(writes), 1)
+
+    def test_merge_and_ready_keep_uncertain_dispatch_failure_codes(self):
+        for kind in ("merge", "ready"):
+            for error in (Fault("github_rate_limited", "Uncertain request.", effect="effect_unknown"),
+                          Fault("github_response_unknown", "Reply was lost.", effect="effect_unknown"),
+                          OSError("Reply unavailable")):
+                self.pr.update(draft=kind == "ready", merged=False, state="open")
+                writes = []
+
+                def lost(method, endpoint, payload=None):
+                    if kind == "merge" and method == "PUT" or kind == "ready" and method == "POST" and endpoint == "graphql":
+                        writes.append(copy.deepcopy(payload))
+                        raise error
+                    if writes and endpoint == f"{ROOT}/pulls/2":
+                        raise Fault("github_candidate_changed", "Readback also failed.", effect="known_no_effect")
+                    return self.response(method, endpoint, payload)
+
+                with self.subTest(kind=kind, error=type(error).__name__), patch.object(self, "transport", side_effect=lost):
+                    result = (github.merge(settings(), REPO, 2, HEAD, BASE, transport=self.transport) if kind == "merge"
+                              else github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                                       expected_head_sha=HEAD, transport=self.transport))
+                self.assertEqual(result["status"], "merge_outcome_unknown" if kind == "merge" else "write_outcome_unknown")
+                self.assertEqual(result["error_code"], error.code if isinstance(error, Fault) else "github_response_unknown")
+                self.assertEqual(len(writes), 1)
+
+    def test_field_guards_allow_unrelated_timestamp_activity_and_compare_sets(self):
+        self.pr.update(updated_at="later", labels=[{"name": "Maintenance"}], assignees=[ACTOR])
+        writes = []
+
+        def update_metadata(method, endpoint, payload=None):
+            if method == "PATCH":
+                writes.append((endpoint, copy.deepcopy(payload)))
+                self.pr.update(labels=[{"name": value} for value in payload["labels"]],
+                               assignees=[{"login": value} for value in payload["assignees"]])
+                return copy.deepcopy(self.pr)
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=update_metadata):
+            result = github.pull_request(settings(), "update", REPO, None, None, number=2,
+                expected_head_sha=HEAD, labels=["bug"], assignees=[],
+                expected_fields={"labels": ["maintenance"], "assignees": ["operator"]}, transport=self.transport)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(writes, [(f"{ROOT}/issues/2", {"labels": ["bug"], "assignees": []})])
+
+    def test_field_guards_reject_only_changed_replaced_fields_before_mutation(self):
+        self.pr.update(body="Changed by another editor", labels=[{"name": "bug"}])
+        cases = [(dict(body="Replacement", expected_fields={"body": "legacy"}), "github_object_changed"),
+                 (dict(body=None, labels=[], expected_fields={"labels": []}), "github_object_changed")]
+        with patch.object(operations, "_mutate") as mutate:
+            for kwargs, code in cases:
+                with self.subTest(kwargs=kwargs), self.assertRaises(Fault) as caught:
+                    github.pull_request(settings(), "update", REPO, None, number=2,
+                        expected_head_sha=HEAD, **kwargs, transport=self.transport)
+                self.assertEqual((caught.exception.code, caught.exception.effect), (code, "known_no_effect"))
+            mutate.assert_not_called()
+
+    def test_field_guards_require_exact_complete_bounded_values(self):
+        invalid = [{}, {"labels": [], "body": "legacy"}, {"labels": None}, {"labels": "bug"},
+                   {"labels": ["bug", "BUG"]}, {"labels": [None]}, {"labels": ["x"] * 101}, []]
+        with patch.object(operations, "_mutate") as mutate:
+            for expected in invalid:
+                with self.subTest(expected=expected), self.assertRaises(Fault) as caught:
+                    github.issue(settings(), "update", REPO, None, None, number=1,
+                        labels=["bug"], expected_fields=expected, transport=self.transport)
+                self.assertEqual((caught.exception.code, caught.exception.effect), ("invalid_github_request", "known_no_effect"))
+            for expected in ({"state": []}, {"body": "x" * 65537}, {"title": 3}):
+                kwargs = {next(iter(expected)): "closed" if "state" in expected else "new"}
+                with self.subTest(field=next(iter(expected))), self.assertRaises(Fault) as caught:
+                    github.issue(settings(), "update", REPO, kwargs.get("title"), kwargs.get("body"), number=1,
+                        state=kwargs.get("state"), expected_fields=expected, transport=self.transport)
+                self.assertEqual((caught.exception.code, caught.exception.effect), ("invalid_github_request", "known_no_effect"))
+            mutate.assert_not_called()
+
+    def test_field_guards_keep_timestamp_and_head_preconditions(self):
+        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+            for head, stamp, code in ((HEAD, "stale", "github_object_changed"), (BASE, STAMP, "github_candidate_changed")):
+                with self.subTest(head=head, stamp=stamp), self.assertRaises(Fault) as caught:
+                    github.pull_request(settings(), "update", REPO, None, None, number=2, labels=["bug"],
+                        expected_head_sha=head, expected_updated_at=stamp, expected_fields={"labels": []}, transport=self.transport)
+                self.assertEqual((caught.exception.code, caught.exception.effect), (code, "known_no_effect"))
+            mutate.assert_not_called()
+            github.pull_request(settings(), "update", REPO, None, None, number=2, labels=["bug"],
+                expected_head_sha=HEAD, expected_updated_at=STAMP, expected_fields={"labels": []}, transport=self.transport)
+            self.assertEqual(mutate.call_count, 1)
+
+    def test_comment_and_review_body_guards_preserve_original_provenance(self):
+        original = "Original\n\n" + POSTED
+        self.issue_value["body"] = original
+        self.reviews[0]["body"] = original
+        calls = [(github.comment, {"comment_id": 9}), (github.review, {"number": 2, "review_id": 9})]
+        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+            for writer, kwargs in calls:
+                with self.subTest(writer=writer.__name__):
+                    writer(settings(), "update", REPO, "Replacement", expected_fields={"body": original},
+                           **kwargs, transport=self.transport)
+                    self.assertEqual(mutate.call_args.args[3], {"body": "Replacement\n\n" + POSTED})
+                    with self.assertRaises(Fault) as caught:
+                        writer(settings(), "update", REPO, "Replacement", expected_fields={"body": "Original"},
+                               **kwargs, transport=self.transport)
+                    self.assertEqual(caught.exception.effect, "known_no_effect")
+            self.assertEqual(mutate.call_count, 2)
+
+    def test_field_guards_distinguish_missing_body_from_observed_null(self):
+        def missing_body(method, endpoint, payload=None):
+            response = self.response(method, endpoint, payload)
+            if method == "GET" and endpoint == f"{ROOT}/issues/1":
+                response.pop("body")
+            return response
+
+        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+            with patch.object(self, "transport", side_effect=missing_body), self.assertRaises(Fault) as caught:
+                github.issue(settings(), "update", REPO, None, "New", number=1,
+                    expected_fields={"body": None}, transport=self.transport)
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("github_object_changed", "known_no_effect"))
+            mutate.assert_not_called()
+            self.issue_value["body"] = None
+            github.issue(settings(), "update", REPO, None, "New", number=1,
+                expected_fields={"body": None}, transport=self.transport)
+            self.assertEqual(mutate.call_count, 1)
+
+    def test_creations_reject_field_guards_without_dispatch(self):
+        calls = [
+            (github.issue, (settings(), "create", REPO, "Title", "Body"), {}),
+            (github.pull_request, (settings(), "create", REPO, "Title", "Body"), {"head": "topic", "base": "main"}),
+            (github.comment, (settings(), "create", REPO, "Body"), {"number": 1}),
+            (github.review, (settings(), "create", REPO, "Body"), {"number": 2, "expected_head_sha": HEAD}),
+        ]
+        with patch.object(operations, "_mutate") as mutate:
+            for writer, args, kwargs in calls:
+                with self.subTest(writer=writer.__name__), self.assertRaises(Fault) as caught:
+                    writer(*args, **kwargs, expected_fields={}, transport=self.transport)
+                self.assertEqual((caught.exception.code, caught.exception.effect), ("invalid_github_request", "known_no_effect"))
+            mutate.assert_not_called()
+
+    def test_ready_for_review_accepts_only_the_current_draft_field(self):
+        self.pr.update(draft=True, updated_at="later")
+        result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+            expected_head_sha=HEAD, expected_fields={"draft": True}, transport=self.transport)
+        self.assertEqual(result["status"], "verified")
+        self.pr["draft"] = True
+        for expected, code in (({"draft": False}, "github_object_changed"), ({"body": "legacy"}, "invalid_github_request"),
+                               ({"draft": 1}, "invalid_github_request")):
+            with self.subTest(expected=expected), self.assertRaises(Fault) as caught:
+                github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                    expected_head_sha=HEAD, expected_fields=expected, transport=self.transport)
+            self.assertEqual((caught.exception.code, caught.exception.effect), (code, "known_no_effect"))
+        mutations = [call for call in self.transport.call_args_list
+                     if call.args[0] == "POST" and call.args[1] == "graphql"]
+        self.assertEqual(len(mutations), 1)
+
     def test_ready_for_review_uses_fixed_mutation_and_verified_readback(self):
         self.pr["draft"] = True
         with patch.object(self, "transport", side_effect=self.response) as api:
@@ -284,6 +578,87 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                                          expected_head_sha=HEAD, transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
         self.assertTrue(self.pr["draft"])
+
+    def test_ready_for_review_applied_mutation_lost_reply_stays_unknown(self):
+        for error in (Fault("github_response_unknown", "The applied mutation reply was lost."),
+                      Fault("github_rate_limited", "The dispatched mutation has no conclusive reply.", effect="effect_unknown"),
+                      OSError("The applied mutation reply was unavailable.")):
+            self.pr["draft"] = True
+            mutations = []
+
+            def lost(method, endpoint, payload=None):
+                if method == "POST" and endpoint == "graphql":
+                    mutations.append(copy.deepcopy(payload))
+                    self.response(method, endpoint, payload)
+                    raise error
+                return self.response(method, endpoint, payload)
+
+            with self.subTest(error=type(error).__name__, code=getattr(error, "code", None)), \
+                    patch.object(self, "transport", side_effect=lost):
+                result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                             expected_head_sha=HEAD, transport=self.transport)
+            self.assertFalse(self.pr["draft"], "The fixture mutation applied before its reply was lost.")
+            self.assertEqual(result["status"], "write_outcome_unknown")
+            self.assertEqual(result["error_code"], error.code if isinstance(error, Fault) else "github_response_unknown")
+            self.assertFalse(result.get("provider_response_verified", False))
+            self.assertFalse(result.get("fields_verified", False))
+            self.assertEqual(len(mutations), 1)
+
+    def test_ready_for_review_invalid_acknowledgment_cannot_use_ready_readback_as_proof(self):
+        def acknowledgement(**fields):
+            return {"data": {"markPullRequestReadyForReview": {"pullRequest": {
+                "id": self.pr["node_id"], "number": 2, "isDraft": False, **fields}}}}
+
+        cases = (
+            (None, "write_outcome_unknown", "github_invalid_response"),
+            ({}, "write_unverified", "github_response_unknown"),
+            (acknowledgement(id="another_pr"), "write_unverified", "github_response_unknown"),
+            (acknowledgement(number=3), "write_unverified", "github_response_unknown"),
+            (acknowledgement(number=2.0), "write_unverified", "github_response_unknown"),
+            (acknowledgement(isDraft=True), "write_unverified", "github_response_unknown"),
+            (dict(acknowledgement(), errors=[{"message": "Fixture GraphQL failure."}]),
+             "write_outcome_unknown", "github_graphql_error"),
+        )
+        for response, status, code in cases:
+            self.pr["draft"] = True
+            mutations = []
+
+            def invalid(method, endpoint, payload=None):
+                if method == "POST" and endpoint == "graphql":
+                    mutations.append(copy.deepcopy(payload))
+                    self.response(method, endpoint, payload)
+                    return copy.deepcopy(response)
+                return self.response(method, endpoint, payload)
+
+            with self.subTest(response=response), patch.object(self, "transport", side_effect=invalid):
+                result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                             expected_head_sha=HEAD, transport=self.transport)
+            self.assertFalse(self.pr["draft"], "Current ready state alone cannot prove the acknowledged operation.")
+            self.assertEqual((result["status"], result["error_code"]), (status, code))
+            self.assertFalse(result.get("provider_response_verified", False))
+            self.assertFalse(result.get("fields_verified", False))
+            self.assertEqual(len(mutations), 1)
+
+    def test_ready_for_review_acknowledged_mutation_with_malformed_readback_stays_unverified(self):
+        self.pr["draft"] = True
+        mutations = []
+
+        def malformed_readback(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql":
+                mutations.append(copy.deepcopy(payload))
+            response = self.response(method, endpoint, payload)
+            if mutations and method == "GET" and endpoint == f"{ROOT}/pulls/2":
+                response["head"]["sha"] = None
+            return response
+
+        with patch.object(self, "transport", side_effect=malformed_readback):
+            result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                         expected_head_sha=HEAD, transport=self.transport)
+        self.assertFalse(self.pr["draft"], "The provider acknowledged the applied transition.")
+        self.assertEqual((result["status"], result["error_code"]),
+                         ("write_unverified", "github_response_unknown"))
+        self.assertFalse(result.get("fields_verified", False))
+        self.assertEqual(len(mutations), 1)
 
     def test_ready_for_review_concurrent_push_keeps_completed_transition_unverified(self):
         self.pr["draft"] = True

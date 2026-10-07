@@ -258,8 +258,26 @@ def _change_support(value: dict) -> set[int]:
     return set(formats)
 
 
+class _TaskGenerationMoved(Exception):
+    """The candidate and local readers observed different task-index generations."""
+
+
 def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
                      *, env: dict[str, str] | None = None) -> dict:
+    # Only resample a provably changing task-index generation, before activation.
+    # Every attempt repeats the complete candidate/retained-state verification.
+    for attempt in range(3):
+        try:
+            return _candidate_state_once(python, config_path, state, expected_contract, env=env)
+        except _TaskGenerationMoved as error:
+            if attempt == 2:
+                raise Fault("incompatible_state",
+                            "Task history kept changing during candidate validation; no state was migrated.") from error
+            time.sleep(0.05)
+
+
+def _candidate_state_once(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
+                          *, env: dict[str, str] | None = None) -> dict:
     result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
                   **({"env": env} if env is not None else {}))
     try:
@@ -297,15 +315,23 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in policy.items())):
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
-        if 3 in retained_tasks["structured_task_formats_present"] and (
-                value["state_contract"] < 15 or 3 not in value.get("structured_task_read_formats", [])
-                or value.get("structured_task_formats_present") != retained_tasks["structured_task_formats_present"]):
-            raise ValueError("candidate ignores retained task-owned recovery admission semantics")
+        if (retained_tasks["task_index_format"] == 2
+                and type(value.get("task_index_generation")) is int
+                and value["task_index_generation"] != retained_tasks["task_index_generation"]):
+            raise _TaskGenerationMoved()
+        retained_formats = retained_tasks["structured_task_formats_present"]
+        if any(item >= 3 for item in retained_formats):
+            minimum_contract = 16 if 4 in retained_formats else 15
+            present = value.get("structured_task_formats_present")
+            if (value["state_contract"] < minimum_contract or not isinstance(present, list)
+                    or any(type(item) is not int for item in present) or present != retained_formats):
+                raise ValueError("candidate ignores retained task recovery or scoped admission semantics")
         if retained_tasks["task_index_format"] == 2:
             formats = value.get("structured_task_read_formats")
             if (value["state_contract"] < 6 or not isinstance(formats, list) or not formats
                     or any(type(item) is not int or item not in tasks.READ_FORMATS for item in formats)
-                    or len(formats) != len(set(formats)) or not ({1, 2} if connections["connections_present"] else {1}) <= set(formats)
+                    or len(formats) != len(set(formats))
+                    or not (set(retained_formats) | ({1, 2} if connections["connections_present"] else {1})) <= set(formats)
                     or any(type(value.get(key)) is not type(retained_tasks[key]) or value[key] != retained_tasks[key] for key in (
                         "task_store_present", "task_records", "structured_task_records", "task_index_format",
                         "task_index_generation", "task_index_coverage"))):

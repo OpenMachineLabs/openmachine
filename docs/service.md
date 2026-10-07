@@ -97,6 +97,12 @@ An old reader that ignores a directory cannot pass. Formats 1/2 and large retain
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
 
+A task-index generation may legitimately advance between the candidate process
+snapshot and the local compatibility read. Only that observed pre-effect generation
+mismatch permits up to three full reader checks with short pauses. Other reader,
+format, integrity or authorization failures remain fail-closed; continuing changes
+exhaust the finite budget without stopping or replacing the selected service.
+
 The removed Work adapter leaves any private `events.json` and its original lock
 untouched. Lifecycle checks validate the bounded archive envelope and canonical
 fingerprint without interpreting or scheduling its nested delivery records.
@@ -173,7 +179,10 @@ not infer support from the product version string.
 | `update --operation-id HEX32 --payload /absolute/payload --sha256 SHA256 [--candidate-config /absolute/candidate.toml]` | Submit the exact trusted payload and configuration for compatibility checks and activation. No download or feed discovery. |
 | `operation --operation-id HEX32` | Read the original request, phase, outcome, ownership and actual selection fingerprint. Never retries. |
 | `continue --operation-id HEX32` | Explicitly continue only a recorded known-unperformed or deferred step under the original configuration/selection identity. |
+| `retire --operation-id HEX32` | Terminally reject only a deferred update proven not to have activated, preserving its request, prepared payload and history so a later update may be admitted. |
 | `rollback` | Explicit existing compatible restoration; never reverses user workload effects. |
+
+`retire` is intentionally narrower than cancellation. It succeeds only when the operation is a deferred update, the accepted selection and configuration are unchanged, no activation is pending, the prepared candidate is not selected, and the currently selected service is stably ready or deliberately stopped. The original operation remains format 1 and becomes the existing terminal `rejected` phase with reason `retired_before_activation`; no payload, request or retained installation is deleted. Repeating the same retirement is readback, not another effect.
 
 Normal status distinguishes `not_installed`, `stopped`, `ready`, `unready`,
 `recovering`, `blocked`, `activation_pending`, `busy`, `incompatible` and `unknown`.

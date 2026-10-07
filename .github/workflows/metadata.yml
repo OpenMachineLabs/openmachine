@@ -2,7 +2,7 @@ name: metadata
 
 on:
   pull_request:
-    types: [opened, edited, reopened, ready_for_review]
+    types: [opened, synchronize, edited, reopened, ready_for_review]
   issues:
     types: [opened, edited, reopened]
 
@@ -24,5 +24,5 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Check repository and event metadata without product installation
-        run: python3 scripts/check_repository.py
+      - name: Check current event metadata without code verification
+        run: python3 scripts/check_repository.py --mode metadata

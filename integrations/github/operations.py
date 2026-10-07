@@ -97,6 +97,36 @@ def _named_match(value: dict, key: str, expected: list[str]) -> bool:
     return actual is not None and sorted(item.casefold() for item in actual) == sorted(item.casefold() for item in expected)
 
 
+def _expected_fields(current: dict, payload: dict, expected: dict | None) -> None:
+    if expected is None:
+        return
+    if type(expected) is not dict or set(expected) != set(payload):
+        raise Fault("invalid_github_request", "Expected fields must cover exactly the fields being replaced.")
+    for key, value in expected.items():
+        if key in {"labels", "assignees"}:
+            if value is None:
+                raise Fault("invalid_github_request", "Expected labels and assignees must be complete named sets.")
+            _metadata_fields(value if key == "labels" else None, value if key == "assignees" else None)
+        elif key == "body":
+            if value is not None and (not isinstance(value, str) or len(value) > 65536):
+                raise Fault("invalid_github_request", "Expected body must be a bounded observed string or null.")
+        elif key == "title":
+            if not isinstance(value, str) or len(value) > 256:
+                raise Fault("invalid_github_request", "Expected title must be a bounded observed string.")
+        elif key == "state":
+            if not isinstance(value, str) or value not in {"open", "closed"}:
+                raise Fault("invalid_github_request", "Expected state must be open or closed.")
+        elif key == "draft":
+            if type(value) is not bool:
+                raise Fault("invalid_github_request", "Expected draft must be an observed boolean.")
+        else:
+            raise Fault("invalid_github_request", "This writer does not support the expected field.")
+        matches = (_named_match(current, key, value) if key in {"labels", "assignees"}
+                   else key in current and current[key] == value)
+        if not matches:
+            raise Fault("github_object_changed", "A field being replaced changed since the supplied observation.")
+
+
 def _project(kind: str, value: dict) -> dict:
     value = object_response(value)
     result = {key: value[key] for key in FIELDS[kind].split() if key in value}
@@ -338,15 +368,19 @@ def _receipt(result: dict) -> dict:
 def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback,
             *, settings: Settings | None = None, actor: dict | None = None, transport) -> dict:
     try:
-        result = object_response(transport(method, endpoint, payload))
+        result = object_response(connection.mutation_request(method, endpoint, payload, transport=transport))
     except Fault as error:
-        if error.code in connection.DEFINITE_FAILURES:
+        if error.effect == "known_no_effect":
             raise
         return {"status": "write_outcome_unknown", "repository": repository, "endpoint": endpoint,
                 "error_code": error.code, "detail": "No conclusive write response. Read the original destination before any retry."}
+    except OSError:
+        return {"status": "write_outcome_unknown", "repository": repository, "endpoint": endpoint,
+                "error_code": "github_response_unknown", "detail": "The mutation response was lost. Read the original destination before any retry."}
     receipt = _receipt(result)
     if not any(type(result.get(key)) is int and result[key] > 0 for key in ("id", "number")):
         return {"status": "write_unverified", "repository": repository, "receipt": receipt,
+                "error_code": "github_response_unknown",
                 "detail": "The write response has no usable object identity; reconcile its destination before retrying."}
     try:
         observed = object_response(transport("GET", readback(result)))
@@ -363,18 +397,21 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
                 matches &= observed.get(key) == expected
         if settings is not None:
             matches &= connection.read_actor(settings, transport=transport) == actor
-    except (Fault, KeyError, TypeError) as error:
+    except (Fault, OSError, KeyError, TypeError) as error:
         return {"status": "write_unverified", "repository": repository, "receipt": receipt,
+                "error_code": error.code if isinstance(error, Fault) else "github_response_unknown",
                 "detail": "A write response was received, but destination/identity readback is incomplete. Do not replay."}
     if not matches:
         return {"status": "write_unverified", "repository": repository, "receipt": receipt,
+                "error_code": "github_response_unknown",
                 "detail": "Destination fields, object identity, or acting account did not match. Read before retrying."}
     return {"status": "verified", "repository": repository, "actor": actor, "receipt": _receipt(observed) or receipt,
             "verified_fields": list(payload), "fields_verified": True, "body_verified": "body" not in payload or observed.get("body") == payload["body"]}
 
 
 def _update_fields(current: dict, title: str | None, body: str | None, state: str | None,
-                   expected_updated_at: str, metadata: dict | None = None) -> dict:
+                   expected_updated_at: str, metadata: dict | None = None,
+                   expected_fields: dict | None = None) -> dict:
     if expected_updated_at and current.get("updated_at") != expected_updated_at:
         raise Fault("github_object_changed", "The object changed since the supplied observation; read before replacing its fields.")
     if state is not None and state not in {"open", "closed"}:
@@ -385,88 +422,104 @@ def _update_fields(current: dict, title: str | None, body: str | None, state: st
     payload.update(metadata or {})
     if not payload:
         raise Fault("invalid_github_request", "An update requires at least one field.")
+    _expected_fields(current, payload, expected_fields)
     return payload
 
 
 def issue(settings: Settings, action: Literal["create", "update"], repository: str,
           title: str | None, body: str | None, number: int = 0,
           state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
-          labels: list[str] | None = None, assignees: list[str] | None = None, *, transport) -> dict:
-    metadata = _metadata_fields(labels, assignees)
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    root = f"repos/{repository}/issues"
-    if action == "create":
-        if not title or state is not None:
-            raise Fault("invalid_github_request", "Creating an Issue requires a title; state is update-only.")
-        submitted = _attribute(settings, body or "", CREATED_FOOTER)
-        return _mutate(repository, "POST", root, {"title": title, "body": submitted, **metadata},
-                       lambda result: f"{root}/{result['number']}", settings=settings, actor=actor, transport=transport)
-    if action != "update" or number < 1:
-        raise Fault("invalid_github_request", "Updating an Issue requires its positive number.")
-    current = object_response(transport("GET", f"{root}/{number}"))
-    if "pull_request" in current:
-        raise Fault("github_wrong_object_type", "This number is a Pull Request; use github_pull_request with its candidate checks.")
-    payload = _update_fields(current, title, body, state, expected_updated_at, metadata)
-    return _mutate(repository, "PATCH", f"{root}/{number}", payload, lambda _: f"{root}/{number}", settings=settings, actor=actor, transport=transport)
+          labels: list[str] | None = None, assignees: list[str] | None = None, *,
+          expected_fields: dict | None = None, transport) -> dict:
+    with connection.preflight():
+        metadata = _metadata_fields(labels, assignees)
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        root = f"repos/{repository}/issues"
+        if action == "create":
+            if not title or state is not None or expected_fields is not None:
+                raise Fault("invalid_github_request", "Creating an Issue requires a title; state and expected_fields are update-only.")
+            submitted = _attribute(settings, body or "", CREATED_FOOTER)
+            method, endpoint = "POST", root
+            payload = {"title": title, "body": submitted, **metadata}
+            readback = lambda result: f"{root}/{result['number']}"
+        else:
+            if action != "update" or number < 1:
+                raise Fault("invalid_github_request", "Updating an Issue requires its positive number.")
+            endpoint = f"{root}/{number}"
+            current = object_response(transport("GET", endpoint))
+            if "pull_request" in current:
+                raise Fault("github_wrong_object_type", "This number is a Pull Request; use github_pull_request with its candidate checks.")
+            method = "PATCH"
+            payload = _update_fields(current, title, body, state, expected_updated_at, metadata, expected_fields)
+            readback = lambda _: endpoint
+    return _mutate(repository, method, endpoint, payload, readback,
+                   settings=settings, actor=actor, transport=transport)
 
 
 def _ready_for_review(settings: Settings, repository: str, number: int, expected_updated_at: str,
-                      expected_head_sha: str, *, transport) -> dict:
-    if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha):
-        raise Fault("invalid_github_request",
-                    "Ready for review requires a positive PR number and its exact observed HEAD SHA.")
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    current = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
-    if expected_updated_at and current.get("updated_at") != expected_updated_at:
-        raise Fault("github_object_changed",
-                    "The PR changed since the supplied observation; read it before marking it ready.")
-    if current.get("draft") is not True:
-        raise Fault("github_conflict", "The PR is already ready for review; no mutation was submitted.")
-    node_id = current.get("node_id")
-    if not isinstance(node_id, str) or not node_id:
-        raise Fault("github_invalid_response", "GitHub did not return the PR node identity required for Ready for review.")
-    if connection.read_actor(settings, transport=transport) != actor:
-        raise Fault("github_identity_changed", "The active GitHub account changed before the Ready for review mutation.")
+                      expected_head_sha: str, *, expected_fields: dict | None = None, transport) -> dict:
+    with connection.preflight():
+        if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha):
+            raise Fault("invalid_github_request",
+                        "Ready for review requires a positive PR number and its exact observed HEAD SHA.")
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        current = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
+        if expected_updated_at and current.get("updated_at") != expected_updated_at:
+            raise Fault("github_object_changed",
+                        "The PR changed since the supplied observation; read it before marking it ready.")
+        _expected_fields(current, {"draft": False}, expected_fields)
+        if current.get("draft") is not True:
+            raise Fault("github_conflict", "The PR is already ready for review; no mutation was submitted.")
+        node_id = current.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            raise Fault("github_invalid_response", "GitHub did not return the PR node identity required for Ready for review.")
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The active GitHub account changed before the Ready for review mutation.")
 
     query = ("mutation($pullRequestId:ID!){markPullRequestReadyForReview("
              "input:{pullRequestId:$pullRequestId}){pullRequest{id number isDraft}}}")
     response = None
     error_code = ""
     try:
-        response = object_response(transport(
-            "POST", "graphql", {"query": query, "variables": {"pullRequestId": node_id}}))
+        response = object_response(connection.mutation_request(
+            "POST", "graphql", {"query": query, "variables": {"pullRequestId": node_id}}, transport=transport))
         if response.get("errors"):
             error_code = "github_graphql_error"
     except Fault as error:
-        if error.code in connection.DEFINITE_FAILURES:
+        if error.effect == "known_no_effect":
             raise
         error_code = error.code
+    except OSError:
+        error_code = "github_response_unknown"
 
+    readback_error = ""
     try:
         observed = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
         identity_matches = observed.get("node_id") == node_id
         ready = observed.get("draft") is False
         actor_matches = connection.read_actor(settings, transport=transport) == actor
-    except Fault:
+    except (Fault, OSError, KeyError, TypeError) as error:
         observed, identity_matches, ready, actor_matches = None, False, False, False
+        readback_error = error.code if isinstance(error, Fault) else "github_response_unknown"
 
-    if observed is not None and identity_matches and ready and actor_matches:
-        data = response.get("data") if isinstance(response, dict) else None
-        mutation = data.get("markPullRequestReadyForReview") if isinstance(data, dict) else None
-        returned = mutation.get("pullRequest") if isinstance(mutation, dict) else None
-        provider_verified = (isinstance(returned, dict) and returned.get("id") == node_id
-                             and returned.get("number") == number and returned.get("isDraft") is False
-                             and not error_code)
+    data = response.get("data") if isinstance(response, dict) else None
+    mutation = data.get("markPullRequestReadyForReview") if isinstance(data, dict) else None
+    returned = mutation.get("pullRequest") if isinstance(mutation, dict) else None
+    provider_verified = (isinstance(returned, dict) and returned.get("id") == node_id
+                         and type(returned.get("number")) is int and returned["number"] == number
+                         and returned.get("isDraft") is False and not error_code)
+    if provider_verified and observed is not None and identity_matches and ready and actor_matches:
         return {"status": "verified", "repository": repository, "actor": actor,
                 "receipt": _receipt(observed), "verified_fields": ["draft"],
                 "fields_verified": True, "provider_response_verified": provider_verified}
     if error_code:
         return {"status": "write_outcome_unknown", "repository": repository, "number": number,
                 "expected_head_sha": expected_head_sha, "error_code": error_code,
-                "detail": "Ready for review may have been submitted, but the exact PR state was not verified. Read the original PR before any retry."}
+                "detail": "Ready for review may have been submitted, but its mutation response was inconclusive. Read the original PR before any retry."}
     return {"status": "write_unverified", "repository": repository,
             "receipt": _receipt(observed) if observed is not None else {},
-            "detail": "GitHub acknowledged Ready for review, but exact PR readback did not verify the effect. Read before retrying."}
+            "error_code": readback_error or "github_response_unknown",
+            "detail": "The mutation response or exact PR readback did not verify Ready for review. Read before retrying."}
 
 
 def pull_request(settings: Settings, action: Literal["create", "update", "ready_for_review"], repository: str,
@@ -474,106 +527,123 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
                  head: str = "", base: str = "", draft: bool = False,
                  state: Literal["open", "closed"] | None = None, expected_updated_at: str = "",
                  expected_head_sha: str = "", labels: list[str] | None = None,
-                 assignees: list[str] | None = None, *, transport) -> dict:
-    metadata = _metadata_fields(labels, assignees)
+                 assignees: list[str] | None = None, *, expected_fields: dict | None = None, transport) -> dict:
+    with connection.preflight():
+        metadata = _metadata_fields(labels, assignees)
+        if action == "ready_for_review" and (any(value is not None for value in (title, body, state)) or head or base or draft or metadata):
+            raise Fault("invalid_github_request",
+                        "Ready for review accepts only number, expected_head_sha, optional draft/updated_at guards and connection identity.")
     if action == "ready_for_review":
-        if any(value is not None for value in (title, body, state)) or head or base or draft or metadata:
-            raise Fault("invalid_github_request",
-                        "Ready for review accepts only number, expected_head_sha, optional expected_updated_at and connection identity.")
         return _ready_for_review(settings, repository, number, expected_updated_at,
-                                 expected_head_sha, transport=transport)
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    root = f"repos/{repository}/pulls"
-    if action == "create":
-        if metadata:
-            raise Fault("invalid_github_request",
-                        "Creating a PR cannot set labels or assignees in the same verified write; create it first, then update shared metadata.")
-        if not title or not head or not base or head == base or state is not None:
-            raise Fault("invalid_github_request", "Creating a PR requires title and distinct head/base; state is update-only.")
-        if expected_head_sha:
-            if not re.fullmatch(evidence.SHA, expected_head_sha) or ":" in head:
-                raise Fault("invalid_github_request", "HEAD-pinned creation requires a same-repository branch and full SHA.")
-            branch = object_response(transport("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
-            if object_response(branch.get("commit")).get("sha") != expected_head_sha:
-                raise Fault("github_candidate_changed", "The pushed branch changed before PR creation.")
-        submitted = _attribute(settings, body or "", CREATED_FOOTER)
-        payload = {"title": title, "body": submitted, "head": head, "base": base, "draft": draft}
-        result = _mutate(repository, "POST", root, payload, lambda value: f"{root}/{value['number']}", settings=settings, actor=actor, transport=transport)
-        if result["status"] == "verified" and expected_head_sha:
-            try:
-                evidence.pull_request(repository, result["receipt"]["number"], expected_head_sha, transport=transport)
-            except Fault:
-                result.update(status="write_unverified", detail="The PR exists, but its candidate does not match the requested HEAD. Read it; do not create another PR.")
-        return result
-    if action != "update" or number < 1:
-        raise Fault("invalid_github_request", "Updating a PR requires its positive number.")
-    if draft:
-        raise Fault("invalid_github_request",
-                    "Draft is creation-only; use action='ready_for_review' to publish a Draft PR for review.")
-    current = evidence.pull_request(repository, number, expected_head_sha, transport=transport)
-    if metadata and any(value is not None for value in (title, body, state)):
-        raise Fault("invalid_github_request",
-                    "Update PR labels/assignees separately from title/body/state so one provider endpoint owns the effect.")
-    payload = _update_fields(current, title, body, state, expected_updated_at, metadata)
-    endpoint = f"repos/{repository}/issues/{number}" if metadata else f"{root}/{number}"
-    return _mutate(repository, "PATCH", endpoint, payload, lambda _: endpoint,
-                   settings=settings, actor=actor, transport=transport)
+                                 expected_head_sha, expected_fields=expected_fields, transport=transport)
+    with connection.preflight():
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        root = f"repos/{repository}/pulls"
+        if action == "create":
+            if metadata:
+                raise Fault("invalid_github_request",
+                            "Creating a PR cannot set labels or assignees in the same verified write; create it first, then update shared metadata.")
+            if not title or not head or not base or head == base or state is not None or expected_fields is not None:
+                raise Fault("invalid_github_request", "Creating a PR requires title and distinct head/base; state and expected_fields are update-only.")
+            if expected_head_sha:
+                if not re.fullmatch(evidence.SHA, expected_head_sha) or ":" in head:
+                    raise Fault("invalid_github_request", "HEAD-pinned creation requires a same-repository branch and full SHA.")
+                branch = object_response(transport("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
+                if object_response(branch.get("commit")).get("sha") != expected_head_sha:
+                    raise Fault("github_candidate_changed", "The pushed branch changed before PR creation.")
+            submitted = _attribute(settings, body or "", CREATED_FOOTER)
+            method, endpoint = "POST", root
+            payload = {"title": title, "body": submitted, "head": head, "base": base, "draft": draft}
+            readback = lambda value: f"{root}/{value['number']}"
+        else:
+            if action != "update" or number < 1:
+                raise Fault("invalid_github_request", "Updating a PR requires its positive number.")
+            if draft:
+                raise Fault("invalid_github_request",
+                            "Draft is creation-only; use action='ready_for_review' to publish a Draft PR for review.")
+            current = evidence.pull_request(repository, number, expected_head_sha, transport=transport)
+            if metadata and any(value is not None for value in (title, body, state)):
+                raise Fault("invalid_github_request",
+                            "Update PR labels/assignees separately from title/body/state so one provider endpoint owns the effect.")
+            method = "PATCH"
+            payload = _update_fields(current, title, body, state, expected_updated_at, metadata, expected_fields)
+            endpoint = f"repos/{repository}/issues/{number}" if metadata else f"{root}/{number}"
+            readback = lambda _: endpoint
+    result = _mutate(repository, method, endpoint, payload, readback, settings=settings, actor=actor, transport=transport)
+    if action == "create" and result["status"] == "verified" and expected_head_sha:
+        try:
+            evidence.pull_request(repository, result["receipt"]["number"], expected_head_sha, transport=transport)
+        except (Fault, OSError) as error:
+            result.update(status="write_unverified",
+                          error_code=error.code if isinstance(error, Fault) else "github_response_unknown",
+                          detail="The PR exists, but its candidate does not match the requested HEAD. Read it; do not create another PR.")
+    return result
 
 
 def comment(settings: Settings, action: Literal["create", "update"], repository: str,
-            body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *, transport) -> dict:
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    if action == "create":
-        if number < 1:
-            raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number.")
-        object_response(transport("GET", f"repos/{repository}/issues/{number}"))
-        submitted = _attribute(settings, body, POSTED_FOOTER)
-        endpoint = f"repos/{repository}/issues/{number}/comments"
-        return _mutate(repository, "POST", endpoint, {"body": submitted},
-                       lambda result: f"repos/{repository}/issues/comments/{result['id']}", settings=settings, actor=actor, transport=transport)
-    if action != "update" or comment_id < 1:
-        raise Fault("invalid_github_request", "Updating a comment requires its positive ID.")
-    endpoint = f"repos/{repository}/issues/comments/{comment_id}"
-    current = object_response(transport("GET", endpoint))
-    payload = _update_fields(current, None, body, None, expected_updated_at)
-    return _mutate(repository, "PATCH", endpoint, payload, lambda _: endpoint, settings=settings, actor=actor, transport=transport)
+            body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *,
+            expected_fields: dict | None = None, transport) -> dict:
+    with connection.preflight():
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        if action == "create":
+            if number < 1 or expected_fields is not None:
+                raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number; expected_fields is update-only.")
+            object_response(transport("GET", f"repos/{repository}/issues/{number}"))
+            submitted = _attribute(settings, body, POSTED_FOOTER)
+            method, endpoint = "POST", f"repos/{repository}/issues/{number}/comments"
+            payload = {"body": submitted}
+            readback = lambda result: f"repos/{repository}/issues/comments/{result['id']}"
+        else:
+            if action != "update" or comment_id < 1:
+                raise Fault("invalid_github_request", "Updating a comment requires its positive ID.")
+            method, endpoint = "PATCH", f"repos/{repository}/issues/comments/{comment_id}"
+            current = object_response(transport("GET", endpoint))
+            payload = _update_fields(current, None, body, None, expected_updated_at, expected_fields=expected_fields)
+            readback = lambda _: endpoint
+    return _mutate(repository, method, endpoint, payload, readback, settings=settings, actor=actor, transport=transport)
 
 
 def review(settings: Settings, action: Literal["create", "update"], repository: str,
            body: str, number: int = 0, review_id: int = 0, expected_head_sha: str = "",
-           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT", *, transport) -> dict:
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    if action == "create":
-        if number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha) or event not in {"COMMENT", "APPROVE", "REQUEST_CHANGES"}:
-            raise Fault("invalid_github_request", "Creating a review requires a positive PR number, exact HEAD and supported event.")
-        current = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
-        if event != "COMMENT" and (current.get("user") or {}).get("id") == actor["id"]:
-            raise Fault("github_self_review", "GitHub does not permit self-approval or self-requested changes; submit COMMENT without claiming independent approval.")
-        # A review may report failed checks. Missing evidence, unlike a known failure, rejects submission.
-        evidence.merge_gate(repository, number, expected_head_sha, current["base"]["sha"], transport=transport)
-        submitted = _attribute(settings, body, POSTED_FOOTER)
-        endpoint = f"repos/{repository}/pulls/{number}/reviews"
-        return _mutate(repository, "POST", endpoint, {"commit_id": expected_head_sha, "event": event, "body": submitted},
-                       lambda result: f"{endpoint}/{result['id']}", settings=settings, actor=actor, transport=transport)
-    if action != "update" or number < 1 or review_id < 1:
-        raise Fault("invalid_github_request", "Updating a review requires positive PR and review IDs.")
-    endpoint = f"repos/{repository}/pulls/{number}/reviews/{review_id}"
-    current = object_response(transport("GET", endpoint))
-    return _mutate(repository, "PUT", endpoint, {"body": _preserve(current.get("body") or "", body)},
-                   lambda _: endpoint, settings=settings, actor=actor, transport=transport)
+           event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT", *,
+           expected_fields: dict | None = None, transport) -> dict:
+    with connection.preflight():
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        if action == "create":
+            if (number < 1 or not re.fullmatch(evidence.SHA, expected_head_sha)
+                    or event not in {"COMMENT", "APPROVE", "REQUEST_CHANGES"} or expected_fields is not None):
+                raise Fault("invalid_github_request", "Creating a review requires a positive PR number, exact HEAD and supported event; expected_fields is update-only.")
+            current = evidence.pull_request(repository, number, expected_head_sha, open_only=True, transport=transport)
+            if event != "COMMENT" and (current.get("user") or {}).get("id") == actor["id"]:
+                raise Fault("github_self_review", "GitHub does not permit self-approval or self-requested changes; submit COMMENT without claiming independent approval.")
+            # A review may report failed checks. Missing evidence, unlike a known failure, rejects submission.
+            evidence.merge_gate(repository, number, expected_head_sha, current["base"]["sha"], transport=transport)
+            submitted = _attribute(settings, body, POSTED_FOOTER)
+            method, endpoint = "POST", f"repos/{repository}/pulls/{number}/reviews"
+            payload = {"commit_id": expected_head_sha, "event": event, "body": submitted}
+            readback = lambda result: f"{endpoint}/{result['id']}"
+        else:
+            if action != "update" or number < 1 or review_id < 1:
+                raise Fault("invalid_github_request", "Updating a review requires positive PR and review IDs.")
+            method, endpoint = "PUT", f"repos/{repository}/pulls/{number}/reviews/{review_id}"
+            current = object_response(transport("GET", endpoint))
+            payload = _update_fields(current, None, body, None, "", expected_fields=expected_fields)
+            readback = lambda _: endpoint
+    return _mutate(repository, method, endpoint, payload, readback, settings=settings, actor=actor, transport=transport)
 
 
 def merge(settings: Settings, repository: str, number: int, expected_head_sha: str,
           expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
           commit_title: str = "", commit_message: str = "", *, transport) -> dict:
-    actor, _ = connection.access(settings, repository, write=True, transport=transport)
-    if method not in {"squash", "merge", "rebase"}:
-        raise Fault("invalid_github_request", "Select squash, merge or rebase; queues and auto-merge are not implemented.")
-    gate = evidence.merge_gate(repository, number, expected_head_sha, expected_base_sha, transport=transport)
-    if gate["blockers"]:
-        return _public({"status": "merge_blocked", "repository": repository, "actor": actor, "gate": gate})
-    if connection.read_actor(settings, transport=transport) != actor:
-        raise Fault("github_identity_changed", "The selected GitHub account changed before merge; no merge was submitted.")
+    with connection.preflight():
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        if method not in {"squash", "merge", "rebase"}:
+            raise Fault("invalid_github_request", "Select squash, merge or rebase; queues and auto-merge are not implemented.")
+        gate = evidence.merge_gate(repository, number, expected_head_sha, expected_base_sha, transport=transport)
+        if gate["blockers"]:
+            return _public({"status": "merge_blocked", "repository": repository, "actor": actor, "gate": gate})
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The selected GitHub account changed before merge; no merge was submitted.")
     payload = {"sha": expected_head_sha, "merge_method": method}
     if commit_title:
         payload["commit_title"] = commit_title
@@ -581,12 +651,17 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
         payload["commit_message"] = commit_message
     endpoint = f"repos/{repository}/pulls/{number}/merge"
     try:
-        result = object_response(transport("PUT", endpoint, payload))
+        result = object_response(connection.mutation_request("PUT", endpoint, payload, transport=transport))
     except Fault as error:
-        if error.code in connection.DEFINITE_FAILURES:
+        if error.effect == "known_no_effect":
             raise
         return {"status": "merge_outcome_unknown", "repository": repository, "number": number,
-                "expected_head_sha": expected_head_sha, "detail": "Read the original PR and destination; never replay an uncertain merge."}
+                "expected_head_sha": expected_head_sha, "error_code": error.code,
+                "detail": "Read the original PR and destination; never replay an uncertain merge."}
+    except OSError:
+        return {"status": "merge_outcome_unknown", "repository": repository, "number": number,
+                "expected_head_sha": expected_head_sha, "error_code": "github_response_unknown",
+                "detail": "The merge response was lost; read the original PR and destination without replay."}
     receipt = {"status": "merge_unverified", "repository": repository, "number": number,
                "actor": actor, "head_sha": expected_head_sha, "base_sha": gate["base_sha"],
                "merge_commit_sha": result.get("sha"), "method": method}
@@ -594,14 +669,14 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
         merged = evidence.pull_request(repository, number, expected_head_sha, transport=transport)
         sha = result.get("sha", "")
         if result.get("merged") is not True or not re.fullmatch(evidence.SHA, sha) or merged.get("merged") is not True or merged.get("merge_commit_sha") != sha:
-            return receipt
+            return {**receipt, "error_code": "github_response_unknown"}
         destination = _merge_destination(f"repos/{repository}", sha, gate["base_ref"], transport=transport)
         if destination is None or connection.read_actor(settings, transport=transport) != actor:
-            return receipt
+            return {**receipt, "error_code": "github_response_unknown"}
         _, tip = destination
         receipt.update(status="merged_verified", base_ref=gate["base_ref"], observed_base_tip=tip,
                        html_url=merged.get("html_url"), destination_verified=True,
                        checks_state=gate["checks"]["state"], self_review_is_independent_approval=False)
-    except (Fault, KeyError, TypeError):
-        return receipt
+    except (Fault, OSError, KeyError, TypeError) as error:
+        return {**receipt, "error_code": error.code if isinstance(error, Fault) else "github_response_unknown"}
     return receipt

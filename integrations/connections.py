@@ -618,14 +618,35 @@ class Connections:
         selected = item.binding()
 
         def send(method, endpoint, payload=None):
-            with self.admit(), _guard(self.state / "locks" / f"credential-{item.id}.lock"):
-                retained = self.select(repository, binding=selected, write=write)
-                current = self._token(retained)
-                try:
-                    return self.native.request(current.access_token, method, endpoint, payload)
-                except Fault as error:
-                    if error.code != "github_authentication_required":
-                        raise
-                replacement = self._token(retained, force=True)
-                return self.native.request(replacement.access_token, method, endpoint, payload)
+            preparing, request_error = True, None
+            try:
+                with self.admit(), _guard(self.state / "locks" / f"credential-{item.id}.lock"):
+                    retained = self.select(repository, binding=selected, write=write)
+                    for force in (False, True):
+                        current = self._token(retained, force=force)
+                        preparing, request_error = False, None
+                        try:
+                            result = self.native.request(current.access_token, method, endpoint, payload)
+                        except Fault as error:
+                            request_error = error
+                            if force or error.code != "github_authentication_required" or error.effect == "effect_unknown":
+                                raise
+                            # A definite first 401 rejected the business request. A
+                            # refresh failure cannot make that request take effect.
+                            preparing = True
+                        else:
+                            return result
+            except Fault as error:
+                if preparing:
+                    error.effect = "known_no_effect"
+                elif error is not request_error:
+                    # Admission/lock cleanup after dispatch is not a provider rejection.
+                    error.effect = "effect_unknown"
+                raise
+            except OSError as error:
+                if not preparing:
+                    raise
+                raise Fault("integration_store_unavailable",
+                            "GitHub request preparation could not complete; no business mutation took effect.",
+                            effect="known_no_effect") from error
         return send

@@ -74,12 +74,22 @@ class Application:
             return self.connections.disconnect(connection_id, expected_revision)
 
     def _github_call(self, operation: str, arguments: dict, *, binding=None, historical_unbound: bool = False) -> dict:
-        provider = self._provider()
         arguments = dict(arguments)
         selected = arguments.pop("connection_id", "")
         repository = arguments.get("repository", (arguments.get("locator") or {}).get("repository", ""))
-        transport = self.connections.request(repository, connection_id=selected, binding=binding,
-            write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound)
+        try:
+            provider = self._provider()
+            transport = self.connections.request(repository, connection_id=selected, binding=binding,
+                write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound)
+        except Fault as error:
+            if operation not in {"read", "reconcile"}:
+                raise Fault(error.code, str(error), error.evidence, effect="known_no_effect") from error
+            raise
+        except OSError as error:
+            if operation not in {"read", "reconcile"}:
+                raise Fault("integration_store_unavailable", "Business transport preparation failed before mutation.",
+                            effect="known_no_effect") from error
+            raise
         return getattr(provider, operation)(self.config, **arguments, transport=transport)
 
     def probe_machine(self, machine: str) -> dict:
@@ -230,7 +240,8 @@ class Application:
             raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
         return self.chat_recovery.configure(task_id, update_id, expected_revision, change)
 
-    def _validate_task_scope(self, request: dict, *, bind_new: bool = False, check_head: bool = True) -> None:
+    def _validate_task_scope(self, request: dict, *, bind_new: bool = False, check_head: bool = True,
+                             check_identity: bool = True) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
@@ -257,7 +268,7 @@ class Application:
             if tools & {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}:
                 self.config.workspace_machine(machine)
             observed = self.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1)["context"]
-            if (observed.get("workspace_identity") != target["workspace_identity"]
+            if (check_identity and observed.get("workspace_identity") != target["workspace_identity"]
                     or check_head and (observed.get("head_sha") or None) != target["head_sha"]):
                 raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")
         github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"})
@@ -352,37 +363,45 @@ class Application:
     def github_issue(self, action: Literal["create", "update"], repository: str, title: str | None = None,
                      body: str | None = None, number: int = 0, state: Literal["open", "closed"] | None = None,
                      expected_updated_at: str = "", labels: list[str] | None = None,
-                     assignees: list[str] | None = None, task_context: dict | None = None, connection_id: str = "") -> dict:
+                     assignees: list[str] | None = None, task_context: dict | None = None, connection_id: str = "",
+                     expected_fields: dict | None = None) -> dict:
         with self._admit():
             return self.task_admission.run("github_issue", dict(action=action, repository=repository, title=title,
                 body=body, number=number, state=state, expected_updated_at=expected_updated_at,
-                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {}),
+                **({"expected_fields": expected_fields} if expected_fields is not None else {})), task_context)
 
     def github_pull_request(self, action: Literal["create", "update", "ready_for_review"], repository: str,
                             title: str | None = None, body: str | None = None, number: int = 0, head: str = "",
                             base: str = "", draft: bool = False, state: Literal["open", "closed"] | None = None,
                             expected_updated_at: str = "", expected_head_sha: str = "",
                             labels: list[str] | None = None, assignees: list[str] | None = None,
-                            task_context: dict | None = None, connection_id: str = "") -> dict:
+                            task_context: dict | None = None, connection_id: str = "",
+                            expected_fields: dict | None = None) -> dict:
         with self._admit():
             return self.task_admission.run("github_pull_request", dict(action=action, repository=repository,
                 title=title, body=body, number=number, head=head, base=base, draft=draft, state=state,
                 expected_updated_at=expected_updated_at, expected_head_sha=expected_head_sha,
-                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {}),
+                **({"expected_fields": expected_fields} if expected_fields is not None else {})), task_context)
 
     def github_comment(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
-                       comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "") -> dict:
+                       comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "",
+                       expected_fields: dict | None = None) -> dict:
         with self._admit():
             return self.task_admission.run("github_comment", dict(action=action, repository=repository, body=body,
-                number=number, comment_id=comment_id, expected_updated_at=expected_updated_at, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                number=number, comment_id=comment_id, expected_updated_at=expected_updated_at, **({"connection_id": connection_id} if connection_id else {}),
+                **({"expected_fields": expected_fields} if expected_fields is not None else {})), task_context)
 
     def github_review(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
                       review_id: int = 0, expected_head_sha: str = "",
                       event: Literal["COMMENT", "APPROVE", "REQUEST_CHANGES"] = "COMMENT",
-                      task_context: dict | None = None, connection_id: str = "") -> dict:
+                      task_context: dict | None = None, connection_id: str = "",
+                      expected_fields: dict | None = None) -> dict:
         with self._admit():
             return self.task_admission.run("github_review", dict(action=action, repository=repository, body=body,
-                number=number, review_id=review_id, expected_head_sha=expected_head_sha, event=event, **({"connection_id": connection_id} if connection_id else {})), task_context)
+                number=number, review_id=review_id, expected_head_sha=expected_head_sha, event=event, **({"connection_id": connection_id} if connection_id else {}),
+                **({"expected_fields": expected_fields} if expected_fields is not None else {})), task_context)
 
     def github_merge(self, repository: str, number: int, expected_head_sha: str, expected_base_sha: str = "",
                      method: Literal["squash", "merge", "rebase"] = "squash", commit_title: str = "",

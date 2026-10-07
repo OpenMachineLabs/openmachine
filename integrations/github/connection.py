@@ -1,5 +1,6 @@
 """Shared GitHub identity, repository-grant and response checks."""
 
+from contextlib import contextmanager
 import re
 
 from openmachine.config import REPOSITORY_PATTERN, Settings
@@ -9,6 +10,32 @@ from openmachine.foundation.sanitize import Fault
 DEFINITE_FAILURES = {"integration_disconnected", "integration_connection_changed", "integration_not_found", "integration_store_invalid", "resource_busy", "github_authentication_required", "github_access_denied",
                      "github_not_found", "github_conflict", "github_rejected",
                      "github_network_unavailable", "github_rate_limited"}
+
+
+@contextmanager
+def preflight():
+    """Failures here precede the enclosing writer's provider mutation."""
+    try:
+        yield
+    except Fault as error:
+        error.effect = "known_no_effect"
+        raise
+    except OSError as error:
+        raise Fault("github_evidence_unavailable",
+                    "GitHub preflight could not complete; no provider mutation was sent.",
+                    effect="known_no_effect") from error
+
+
+def mutation_request(method: str, endpoint: str, payload: dict, *, transport):
+    """Call one explicit mutation, preserving the native transport's rejection boundary."""
+    try:
+        return transport(method, endpoint, payload)
+    except Fault as error:
+        # These native transport/connection failures prove rejection before this
+        # request's effect. They never classify a later destination readback.
+        if error.effect is None:
+            error.effect = "known_no_effect" if error.code in DEFINITE_FAILURES else "effect_unknown"
+        raise
 
 
 def object_response(value) -> dict:

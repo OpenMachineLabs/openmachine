@@ -413,6 +413,8 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         historical = self.create()["record"]
         historical["format"] = 1
         historical.pop("chat_registration")
+        historical.pop("control_revision")
+        historical.pop("effect_scopes")
         historical["contract"].pop("recovery_policy")
         self.path.write_bytes(records.canonical(historical))  # Original-format reader fixture.
         self.app.rebuild_task_index()
@@ -426,7 +428,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         enrolled = self.control("revise_plan", contract=contract, stages=self.request["stages"],
             invalidated_stage_ids=["verify"], reason="Explicitly enroll the original historical task.")
         self.assertEqual((enrolled["record"]["task_id"], enrolled["record"]["format"],
-                          enrolled["record"]["plan"]["revision"]), ("structured-one", 3, 2))
+                          enrolled["record"]["plan"]["revision"]), ("structured-one", 4, 2))
         self.assertIsNotNone(enrolled["record"]["chat_registration"])
         self.assertEqual(enrolled["chat_recovery"]["state"], "preparing")
 
@@ -478,7 +480,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         before = self.app.read_task("structured-one")
         recovery = before["chat_recovery"]
         self.assertEqual(recovery["state"], "preparing")
-        self.assertEqual(before["record"]["format"], 3)
+        self.assertEqual(before["record"]["format"], 4)
         self.assertEqual(before["record"]["chat_registration"], recovery["preparation"]["preparation_id"])
         self.assertFalse(recovery["default_enabled"])
         self.assertFalse(recovery["bound"])

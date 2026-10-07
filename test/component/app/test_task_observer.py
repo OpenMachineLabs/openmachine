@@ -119,8 +119,11 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             with patch.object(self.app.task_admission, "_read", side_effect=slow):
                 observer.start()
                 self.until(lambda: len(entered) == 4)
-                with lease(self.state / "locks/lifecycle.lock"), lease(self.state / "locks/tasks.lock"):
-                    pass
+                # Coordinator discovery/publication may briefly contend with this probe.
+                def unrelated_locks_available():
+                    with lease(self.state / "locks/lifecycle.lock"), lease(self.state / "locks/tasks.lock"):
+                        return True
+                self.until(unrelated_locks_available, seconds=2)
                 self.until(lambda: all(self.raw(identity)["recovery"] for identity in identities[:4]))
                 self.assertEqual(len(entered), 4)
                 self.assertEqual(len(observer._reads), 4)
