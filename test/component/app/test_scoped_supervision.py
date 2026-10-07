@@ -223,6 +223,37 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertNotIn("arguments", json.loads(self.path.read_bytes())["effect_scopes"][0])
 
+    def test_plan_revision_cannot_hide_an_account_switch_behind_repository_aliases(self):
+        self.update_pr(body="Original unknown body.")
+        record = self.view()["record"]
+        original = deepcopy(record["operations"][0])
+        binding = original["locator"]["connection"]
+        other = dict(binding, connection_id="e" * 32, account_id=2)
+        definitions = [{key: value for key, value in stage.items() if key not in {"state", "evidence"}}
+                       for stage in record["plan"]["stages"]]
+        before = self.path.read_bytes()
+        for aliases in ([("Owner/repo", other), ("owner/repo", binding)],
+                        [("Owner/repo", binding), ("owner/repo", other)]):
+            with self.subTest(first_binding=aliases[0][1]):
+                contract = deepcopy(record["contract"])
+                contract.update(repositories=[key for key, _ in aliases], github_connections=dict(aliases))
+                self.fault("task_effect_unresolved", self.control, "revise_plan", contract=contract,
+                    stages=definitions, invalidated_stage_ids=["verify"],
+                    reason="An alias cannot substitute another account for unresolved work.")
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.provider.pull_request.call_count, 1)
+
+        contract["github_connections"] = {key: deepcopy(binding) for key in contract["repositories"]}
+        revised = self.control("revise_plan", contract=contract, stages=definitions,
+            invalidated_stage_ids=["verify"], reason="Identical aliases retain the original account.")["record"]
+        self.assertEqual(revised["operations"][0], original)
+        self.control("claim", handoff_id=revised["handoff"]["id"])
+        self.provider.pull_request.return_value = self.verified()
+        self.update_pr(title="Independent title under the retained account.")
+        self.assertEqual(self.app.connections.request.call_args.kwargs["binding"], binding)
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+
     def test_historical_body_timeout_scope_recovery_and_independent_stages(self):
         # Reproduce the 0.2.11 shape: the request has no persisted scope and
         # retains an unknown result after the provider loses its response.

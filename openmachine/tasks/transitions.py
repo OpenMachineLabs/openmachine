@@ -199,12 +199,15 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                 raise Fault("task_effect_unresolved", "Reconcile outstanding local effects before replacing their plan.")
             if outstanding:
                 repositories = {repo.casefold() for repo in contract["repositories"]}
-                bindings = {repo.casefold(): value for repo, value in contract.get("github_connections", {}).items()}
+                bindings = contract.get("github_connections", {})
                 for item in outstanding:
                     locator = item["locator"]
                     repository = locator["repository"].casefold()
                     binding = locator.get("connection")
-                    if repository not in repositories or binding is None or bindings.get(repository) != binding:
+                    # Admission may select the first alias; none may substitute another account.
+                    matching = [value for repo, value in bindings.items() if repo.casefold() == repository]
+                    if (repository not in repositories or binding is None or not matching
+                            or any(value != binding for value in matching)):
                         raise Fault("task_effect_unresolved", "An unresolved GitHub effect must retain its original repository and native account binding.")
             old = {stage["id"]: stage for stage in record["plan"]["stages"]}
             definitions = change["stages"]
