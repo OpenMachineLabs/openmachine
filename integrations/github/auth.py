@@ -16,6 +16,11 @@ CLIENT_ID = "Iv23li3ZkAK2uC1mTD4q"  # Official OpenMachineLabs Open Machine Conn
 INSTALL_URL = "https://github.com/apps/open-machine-connector/installations/new"
 
 
+def _integer_header(headers, name: str) -> int | None:
+    value = headers.get(name, "").strip()
+    return int(value) if re.fullmatch(r"[0-9]{1,10}", value) else None
+
+
 def _client_id() -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{8,128}", CLIENT_ID):
         raise Fault("integration_configuration_required",
@@ -38,8 +43,19 @@ def _exchange(method: str, url: str, *, token: str = "", data=None, payload=None
                     errors = {401: "github_authentication_required", 403: "github_access_denied",
                               404: "github_not_found", 405: "github_rejected", 409: "github_conflict",
                               422: "github_rejected", 429: "github_rate_limited"}
-                    raise Fault(errors.get(code, "github_response_unknown"),
-                                "GitHub did not accept this request; preserve its original outcome.")
+                    retry_after = _integer_header(response.headers, "retry-after")
+                    remaining = _integer_header(response.headers, "x-ratelimit-remaining")
+                    limited = code == 429 or code == 403 and (remaining == 0 or retry_after is not None)
+                    evidence = None
+                    if limited:
+                        evidence = {"http_status": code}
+                        if retry_after is not None:
+                            evidence["retry_after_seconds"] = retry_after
+                        reset = _integer_header(response.headers, "x-ratelimit-reset")
+                        if remaining == 0 and reset is not None:
+                            evidence["rate_limit_reset_epoch_seconds"] = reset
+                    raise Fault("github_rate_limited" if limited else errors.get(code, "github_response_unknown"),
+                                "GitHub did not accept this request; preserve its original outcome.", evidence)
                 raw = bytearray()
                 for chunk in response.iter_bytes(chunk_size=16384):
                     raw.extend(chunk)

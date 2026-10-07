@@ -250,13 +250,15 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
             result = reserve(*args, **kwargs)
             self.config.machines["desktop"].execution_enabled = False
             return result
+        execution_id = uuid.uuid4().hex
         with patch.object(chatgpt, "reserve_delivery", side_effect=reserve_then_revoke), \
                 patch.object(codex, "start") as launch:
             self.fault("execution_disabled", self.app._start_chat_recovery_delivery,
-                       "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+                       "structured-one", uuid.uuid4().hex, execution_id)
             launch.assert_not_called()
         delivery = chatgpt.get(self.state, "structured-one").delivery
-        self.assertEqual((delivery.status, delivery.attempts, delivery.executions), ("deferred", 0, []))
+        self.assertEqual((delivery.status, delivery.reason, delivery.attempts, delivery.executions),
+                         ("blocked", "execution_disabled", 1, [execution_id]))
 
     def test_late_setup_result_retains_destination_without_undoing_pause(self):
         arguments = self.receiver_fixture()
@@ -640,35 +642,72 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
             result = self.app._read_chat_recovery_delivery("structured-one")
         self.assertEqual(result["chat_recovery"]["delivery"]["status"], "sent_reported")
 
-    def test_prelaunch_rejection_releases_only_proven_unsent_reservation(self):
+    def _assert_prelaunch_rejection_blocks_delivery(self, code):
         view = self.create()
         self.enable()
+        original_task = self.path.read_bytes()
+        recovery_id, execution_id = uuid.uuid4().hex, uuid.uuid4().hex
+        deadline = view["record"]["contract"]["expires_at_ms"]
         with patch("time.time_ns", return_value=time.time_ns()) as clock:
-            for code in ("task_stopped", "chat_recovery_conflict", "task_authority_expired"):
-                with self.subTest(code=code), patch.object(self.app.chat_recovery, "_task",
-                        side_effect=[(view, False), Fault(code, "Rejected before launch.")]), \
-                        patch.object(codex, "start") as start:
-                    self.fault(code, self.app._start_chat_recovery_delivery,
-                               "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
-                    start.assert_not_called()
-                    delivery = chatgpt.get(self.state, "structured-one").delivery
-                    self.assertEqual((delivery.status, delivery.attempts, delivery.executions), ("deferred", 0, []))
-                clock.return_value += chatgpt.GRACE_MS * 1000000
-            deadline = delivery.deadline_ms
-            resource = hashlib.sha256(codex.RESOURCE.encode()).hexdigest()
-            with lease(self.state / "locks" / f"resource-{resource}.lock"):
-                self.fault("resource_busy", self.app._start_chat_recovery_delivery,
-                           "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
-            self.assertEqual(chatgpt.get(self.state, "structured-one").delivery.attempts, 0)
-            self.assertEqual(chatgpt.get(self.state, "structured-one").delivery.deadline_ms, deadline)
+            with patch.object(self.app.chat_recovery, "_task",
+                    side_effect=[(view, False), Fault(code, "Rejected before launch.")]), \
+                    patch.object(codex, "start") as start:
+                self.fault(code, self.app._start_chat_recovery_delivery,
+                           "structured-one", recovery_id, execution_id)
+                start.assert_not_called()
+            delivery = chatgpt.get(self.state, "structured-one").delivery
+            self.assertEqual((delivery.status, delivery.reason, delivery.attempts), ("blocked", code, 1))
+            self.assertEqual(
+                (delivery.recovery_id, delivery.execution_id, delivery.executions, delivery.deadline_ms),
+                (recovery_id, execution_id, [execution_id], deadline))
             clock.return_value += chatgpt.GRACE_MS * 1000000
+            with patch.object(codex, "start") as start, patch.object(codex, "read") as read:
+                self.fault("chat_recovery_route_blocked", self.app._start_chat_recovery_delivery,
+                           "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+                start.assert_not_called()
+                read.assert_not_called()
+        self.assertEqual(chatgpt.get(self.state, "structured-one").delivery, delivery)
+        self.assertEqual(self.path.read_bytes(), original_task)
+
+    def test_prelaunch_task_stop_blocks_delivery(self):
+        self._assert_prelaunch_rejection_blocks_delivery("task_stopped")
+
+    def test_prelaunch_conflict_blocks_delivery(self):
+        self._assert_prelaunch_rejection_blocks_delivery("chat_recovery_conflict")
+
+    def test_prelaunch_authority_expiry_blocks_delivery(self):
+        self._assert_prelaunch_rejection_blocks_delivery("task_authority_expired")
+
+    def test_prelaunch_contention_defers_only_proven_unsent_delivery(self):
+        view = self.create()
+        self.enable()
+        recovery_id = uuid.uuid4().hex
+        deadline = view["record"]["contract"]["expires_at_ms"]
+        resource = hashlib.sha256(codex.RESOURCE.encode()).hexdigest()
+        with patch("time.time_ns", return_value=time.time_ns()) as clock:
+            for proposed_recovery_id in (recovery_id, uuid.uuid4().hex):
+                identity = uuid.uuid4().hex
+                with lease(self.state / "locks" / f"resource-{resource}.lock"):
+                    self.fault("resource_busy", self.app._start_chat_recovery_delivery,
+                               "structured-one", proposed_recovery_id, identity)
+                delivery = chatgpt.get(self.state, "structured-one").delivery
+                self.assertEqual(
+                    (delivery.status, delivery.reason, delivery.attempts, delivery.executions),
+                    ("deferred", "prelaunch_rejection", 0, []))
+                self.assertEqual(
+                    (delivery.recovery_id, delivery.execution_id, delivery.deadline_ms),
+                    (recovery_id, identity, deadline))
+                clock.return_value += chatgpt.GRACE_MS * 1000000
             identity = uuid.uuid4().hex
             with patch.object(self.app.machines, "start_execution",
                               side_effect=Fault("execution_start_unverified", "Original launch is uncertain.")):
                 self.fault("execution_start_unverified", self.app._start_chat_recovery_delivery,
                            "structured-one", uuid.uuid4().hex, identity)
         retained = chatgpt.get(self.state, "structured-one").delivery
-        self.assertEqual((retained.execution_id, retained.status), (identity, "reserved"))
+        self.assertEqual(
+            (retained.execution_id, retained.status, retained.attempts, retained.executions),
+            (identity, "reserved", 1, [identity]))
+        self.assertEqual((retained.recovery_id, retained.deadline_ms), (recovery_id, deadline))
 
     def test_reserved_delivery_keeps_its_original_controller_until_observed(self):
         self.create()

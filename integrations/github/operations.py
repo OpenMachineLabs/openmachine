@@ -10,7 +10,7 @@ from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault, redact
 
 from . import client, connection, evidence
-from .connection import object_response
+from .connection import DEFINITE_FAILURES, object_response
 
 
 ATTRIBUTION_URL = "https://github.com/OpenMachineLabs/openmachine"

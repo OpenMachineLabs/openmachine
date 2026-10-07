@@ -26,6 +26,12 @@ engineering decision is not automatically a user decision. Use this recovery ord
 - A changed hash, branch or HEAD requires reconciliation, not blindly copying new
   preconditions. Continue only when the current target and intent remain within
   the authorized scope. Never overwrite unrelated edits or bypass a busy lease.
+- For native GitHub pre-send connection failure, credential contention or rate
+  limiting, retain the known no-effect receipt and continue the same task after
+  the prerequisite is restored. Honor valid retry_after_seconds and, when the
+  primary quota is exhausted, rate_limit_reset_epoch_seconds within the task's
+  authority and budget. Re-read current guards before a new operation ID.
+  Missing hints grant no immediate retry; permission denial needs its cause fixed.
 - For missing replies, partial effects or unknown outcomes, read the original ID
   and destination first. Do not turn uncertainty into a new operation or retry.
 - Observe an active command or CI run rather than restart it. Reuse valid evidence;
@@ -425,6 +431,8 @@ Setup and continuation episodes each retain at most three attempts within one ho
 or earlier authority expiry, with a 600-second browser bound. Only verified no-send
 and generating evidence permits another attempt, at least ten minutes later.
 Proven pre-launch contention does not consume an attempt or reset the deadline.
+Other pre-launch rejections retain a blocked delivery and its exact reason; task
+stop, expired authority or a real denial is not a transient contention retry.
 After repairing a proven pre-browser setup failure or verified pre-send blocker
 with no destination or receiver read, explicitly enable recovery within the same
 attempt and time limits. Pre-send blockers retain the ten-minute retry delay.
