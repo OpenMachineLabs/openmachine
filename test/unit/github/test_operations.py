@@ -396,9 +396,22 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual([item["body"] for item in observed["data"]], ["unique-test-comment"])
 
     def test_known_rejection_is_not_an_unknown_write_or_retry(self):
-        with patch.object(self, "transport", side_effect=Fault("github_access_denied", "denied")) as api:
-            self.assert_fault("github_access_denied", operations._mutate, REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback", transport=self.transport)
-        self.assertEqual(api.call_count, 1)
+        for code in ("github_access_denied", "github_network_unavailable", "github_rate_limited", "resource_busy"):
+            fault = Fault(code, "Known rejection.", {"retry_after_seconds": 60})
+            with self.subTest(code=code), patch.object(self, "transport", side_effect=fault) as api:
+                with self.assertRaises(Fault) as caught:
+                    operations._mutate(REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback", transport=self.transport)
+                self.assertIs(caught.exception, fault)
+                self.assertEqual(api.call_count, 1)
+
+    def test_readback_failure_preserves_acknowledged_write_without_replay(self):
+        for code in ("github_network_unavailable", "github_rate_limited", "resource_busy"):
+            with self.subTest(code=code), patch.object(self, "transport",
+                    side_effect=[{"id": 9}, Fault(code, "Read unavailable.")]) as api:
+                result = operations._mutate(REPO, "POST", "endpoint", {"body": "x"}, lambda _: "readback", transport=self.transport)
+                self.assertEqual(result["status"], "write_unverified")
+                self.assertEqual(result["receipt"]["id"], 9)
+                self.assertEqual([call.args[0] for call in api.call_args_list], ["POST", "GET"])
 
     def test_candidate_pages_require_both_revisions_and_report_missing_patch(self):
         first = github.read(settings(), "files", REPO, number=2, expected_head_sha=HEAD, limit=1, transport=self.transport)

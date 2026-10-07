@@ -675,8 +675,10 @@ class ChatRecovery:
                         chatgpt.mark_preparation(self.app.state, binding.task_id, execution_id,
                             "deferred" if error.code == "resource_busy" else "blocked",
                             "prelaunch_rejection" if error.code == "resource_busy" else error.code)
-                    else:
+                    elif error.code == "resource_busy":
                         chatgpt.release_reservation(self.app.state, binding.task_id, execution_id)
+                    else:
+                        chatgpt.mark_delivery(self.app.state, binding.task_id, execution_id, "blocked", error.code)
             raise
 
     def _binding(self, record: dict):

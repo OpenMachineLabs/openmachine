@@ -7,7 +7,8 @@ from openmachine.foundation.sanitize import Fault
 
 
 DEFINITE_FAILURES = {"integration_disconnected", "integration_connection_changed", "integration_not_found", "integration_store_invalid", "resource_busy", "github_authentication_required", "github_access_denied",
-                     "github_not_found", "github_conflict", "github_rejected"}
+                     "github_not_found", "github_conflict", "github_rejected",
+                     "github_network_unavailable", "github_rate_limited"}
 
 
 def object_response(value) -> dict:

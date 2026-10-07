@@ -290,13 +290,19 @@ class TaskAdmission:
                 observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
-                try:
-                    observed = self._read(operation, arguments)
-                    result, enriched = self._observation(operation, observed)
-                except (Fault, OSError):
-                    unstarted = code == "resource_busy" and method == "start_execution" and self._unstarted_local(operation)
-                    result, enriched = _receipt("failed" if code in NO_EFFECT or unstarted else "unknown",
-                                                summary=f"Domain failure: {code}."), locator
+                no_effect = code in NO_EFFECT or (method in GITHUB_METHODS and code in self.app.github.DEFINITE_FAILURES)
+                if method in GITHUB_METHODS and code == "github_rate_limited":
+                    result, enriched = _receipt("failed", summary=f"Domain failure: {code}."), locator
+                else:
+                    try:
+                        observed = self._read(operation, arguments)
+                        result, enriched = self._observation(operation, observed)
+                    except (Fault, OSError):
+                        unstarted = code == "resource_busy" and method == "start_execution" and self._unstarted_local(operation)
+                        result, enriched = _receipt("failed" if no_effect or unstarted else "unknown",
+                                                    summary=f"Domain failure: {code}."), locator
+                if method in GITHUB_METHODS and no_effect and result["status"] == "unknown":
+                    result = _receipt("failed", summary=f"Domain failure: {code}.")
                 self._publish(record["task_id"], [(operation["id"], result, enriched)])
                 raise
             result, enriched = self._observation(operation, observed)
