@@ -76,10 +76,11 @@ class TaskAdmission:
             if action not in {"pause", "cancel", "release"}:
                 contract = request["transition"].get("contract", record["contract"])
                 # Reattachment acquires ownership, not permission for a new effect.
+                # Scope evidence also describes a past request, not the current HEAD.
                 # Keep identity/grant checks; a changed HEAD still requires an
                 # explicit plan revision before admission or acceptance.
                 self.app._validate_task_scope(
-                    {"contract": contract}, check_head=action not in {"claim", "renew", "resume"},
+                    {"contract": contract}, check_head=action not in {"claim", "renew", "resume", "bind_effect_scope"},
                     check_identity=action not in {"claim", "renew"})
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)

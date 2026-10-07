@@ -198,16 +198,14 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             if any(item["locator"]["kind"] != "github" for item in outstanding):
                 raise Fault("task_effect_unresolved", "Reconcile outstanding local effects before replacing their plan.")
             if outstanding:
-                bindings = record["contract"].get("github_connections", {})
-                if (contract["repositories"] != record["contract"]["repositories"]
-                        or contract.get("github_connections", {}) != bindings):
-                    raise Fault("task_effect_unresolved", "Unresolved GitHub effects retain their original repositories and native account bindings.")
+                repositories = {repo.casefold() for repo in contract["repositories"]}
+                bindings = {repo.casefold(): value for repo, value in contract.get("github_connections", {}).items()}
                 for item in outstanding:
                     locator = item["locator"]
-                    binding = next((value for repo, value in bindings.items()
-                                    if repo.casefold() == locator["repository"].casefold()), None)
-                    if binding is None or locator.get("connection") != binding:
-                        raise Fault("task_effect_unresolved", "An unresolved historical GitHub effect cannot acquire another account or binding.")
+                    repository = locator["repository"].casefold()
+                    binding = locator.get("connection")
+                    if repository not in repositories or binding is None or bindings.get(repository) != binding:
+                        raise Fault("task_effect_unresolved", "An unresolved GitHub effect must retain its original repository and native account binding.")
             old = {stage["id"]: stage for stage in record["plan"]["stages"]}
             definitions = change["stages"]
             retained_order = [stage["id"] for stage in definitions if stage["id"] in old]

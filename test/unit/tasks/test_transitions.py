@@ -192,6 +192,35 @@ class TaskTransitionTests(unittest.TestCase):
         self.assertEqual(record["contract"]["recovery_policy"], "disabled")
         self.assertIsNone(record["control"]["owner"])
 
+    def test_unresolved_effect_only_pins_its_own_repository_binding(self):
+        for change in ("add", "remove", "rebind"):
+            with self.subTest(change=change):
+                record = self.record()
+                if change != "add":
+                    record["contract"]["repositories"].append("Owner/independent")
+                    record["contract"]["github_connections"]["Owner/independent"] = {
+                        "connection_id": "e" * 32, "account_id": 2, "authorization_revision": 1}
+                record["operations"] = [self.operation(record, "3" * 32, status="unknown", fields=["body"])]
+                original = deepcopy(record["operations"])
+                revision = self.revision(record, 1000)
+                contract = revision["contract"]
+                if change == "add":
+                    contract["repositories"].append("Owner/independent")
+                    contract["github_connections"]["Owner/independent"] = {
+                        "connection_id": "e" * 32, "account_id": 2, "authorization_revision": 1}
+                elif change == "remove":
+                    contract["repositories"].remove("Owner/independent")
+                    del contract["github_connections"]["Owner/independent"]
+                else:
+                    contract["github_connections"]["Owner/independent"]["authorization_revision"] = 2
+                revision["invalidated_stage_ids"] = ["verify"]
+                self.control(record, "revise_plan", **revision)
+                records.Record.model_validate(record)
+                self.assertEqual(record["operations"], original)
+                self.assertEqual(record["contract"], contract)
+                self.assertEqual(record["plan"]["stages"][0]["state"], "invalidated")
+                self.assertIsNone(record["control"]["owner"])
+
     def test_unresolved_provider_effect_cannot_be_rebound_during_reauthorization(self):
         record = self.record()
         record["operations"] = [self.operation(record, "3" * 32, status="unknown")]

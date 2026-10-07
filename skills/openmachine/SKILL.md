@@ -310,6 +310,14 @@ original normalized GitHub arguments whose method/plan/source fingerprint matche
 the retained request. Runtime derives and appends an immutable scope witness; it
 does not dispatch, replace the original operation or prove no effect. Never infer
 past non-execution from today's destination. Missing original proof stays unknown.
+Check the actual `control_task` schema: `bind_effect_scope` is a transition action,
+and the original 0.2.11 runtime does not expose it. New source or Skill text does
+not upgrade an installed server or cached client catalog. Managed installation
+and catalog refresh require their own authority; never strip task_context.
+Scope binding retains owner, identity and grant checks but does not require the
+historical local HEAD. New local work and acceptance still enforce that HEAD.
+Plan revisions preserve each unresolved operation's own repository/account
+binding; unrelated repositories may change with ordinary scope validation.
 Verified historical GitHub receipts remain immutable; current merge acceptance
 still reads current HEAD/base, protections, checks and discussions. Independent
 stage evidence can be accepted while disjoint uncertainty is explicitly retained;
