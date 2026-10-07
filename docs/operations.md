@@ -25,7 +25,7 @@
 | `control_execution` | Original machine/ID, observed `expected_control_seq`, `action=write_stdin/interrupt/resize`, optional exact `text` or `terminal_size`; one retained control receipt, without consuming output. |
 | `github_read` | Conditional on `[github]`; identity/status, scoped objects, pinned source and paged PR/check/discussion observations; never dispatches arbitrary endpoints. |
 | `github_issue` | Create/update a scoped Issue, including open/closed state, with field readback and retained provenance. |
-| `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request with Created via attribution on eligible new artifacts. |
+| `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request or mark an observed Draft PR ready for review, with Created via attribution on eligible new artifacts. |
 | `github_comment` | Conditional on `[github]`; create/update a top-level Issue/PR comment with Posted via attribution on eligible new posts. |
 | `github_review` | Submit an exact-HEAD summary after complete gate observation, or update its body; self-review is COMMENT, not independent approval. |
 | `github_merge` | Explicit current-HEAD merge after complete checks/discussions and clean native policy; verify the actual destination commit. |
@@ -343,6 +343,18 @@ API's 3,000-file ceiling and partial check/review/thread evidence remain explici
 Writes verify all submitted fields, object identity and acting account. Prefer observed
 `expected_updated_at` and exact PR HEAD; preflight/write is not atomic CAS, and
 legacy omission retains its weaker contract. Pinned creation uses a same-repo branch.
+
+`github_pull_request(action="ready_for_review")` requires a positive PR number
+and exact observed `expected_head_sha`; `expected_updated_at` is optional. It
+accepts no title, body, state, branch or metadata edits. The operation checks that
+the PR is open and Draft before calling GitHub's fixed
+[`markPullRequestReadyForReview`](https://docs.github.com/en/graphql/reference/pulls#markpullrequestreadyforreview)
+mutation. GitHub accepts only the PR node ID, with no conditional HEAD or timestamp
+input. A concurrent push can therefore take effect before the transition; this
+operation does not atomically pin or approve a commit. A successful readback must
+still match the observed HEAD, PR node and actor and show an open, non-Draft PR.
+Changed or unavailable readback remains unverified, even if the transition already
+occurred; reconcile the original destination without replaying the write.
 
 Review complete evidence before an exact-head review and authorized merge.
 The gate allows at most 1,000 check/review/thread records per family, chooses latest

@@ -1,58 +1,126 @@
 # Tests
 
-## Run the installed candidate
+## Choose the required scope
 
-For a clean committed candidate, use the single premerge entry point:
+Use the owning module during development, then verify the complete changed
+candidate before requesting review or merge:
 
 ```sh
+python3 scripts/run_tests.py --module github --layer unit
+python3 scripts/run_tests.py --base origin/main --plan
+python3 scripts/run_tests.py --base origin/main
 python3 scripts/premerge.py --base origin/main
 ```
 
-The command validates that the requested local base exists and is an ancestor of
-HEAD before expensive work, runs the repository/system checks, creates an isolated
-temporary environment with locked dependencies, builds and installs one independent
-wheel, then runs all unit and contract tests outside the checkout. It also runs
-`git diff --check` and requires the tracked/untracked worktree to remain clean. It
-never fetches a missing base ref; fetch the intended base explicitly first.
+The first command runs the selected pure unit tests against the current checkout
+source, using the project's already installed dependencies. It is fast focused
+feedback, not installed-candidate or complete-module acceptance. Omitting
+`--layer unit` runs the module's declared layers and boundaries against a newly
+built, independently installed wheel.
 
-Pull-request-internal commit subjects are not a merge gate: rewriting published PR
-history loses useful provenance. PR metadata is checked on pull-request events, and
-the final commit that lands on `main` remains subject to the push-event commit rule.
+`--base` compares the entire candidate range with an explicit local ancestor.
+Development selection also includes staged, unstaged and ordinary untracked
+changes; execution tests the current worktree bytes. Both sides of renames and
+deletions remain visible. Selection does not fetch refs, guess a base, silently
+ignore unknown paths, or treat an empty product selection as behavioral coverage.
+Resolve a missing base or update the candidate's base relationship explicitly.
 
-A successful result is cached only under Git metadata for the exact HEAD, resolved
-base and local Python/workflow fingerprint. Re-running the same candidate reuses
-that PASS; use `--force` to execute every check again. Failed or dirty candidates
-are never cached. For focused work before committing, run the owning test file
-directly; the cache is deliberately only for an exact committed candidate.
+`--plan` prints the changed paths, owning modules, selected files, layers and
+reasons without installing dependencies or running tests. A recognized
+documentation-only change runs repository checks without creating a product
+environment. An explicit module or layer with no tests is an error.
 
-All tests remain under root `test/`; no additional framework, network account or
-GPU is required. Private disposable directories, short owned processes and local
-Unix sockets are fixtures, not production projects or live SSH/ChatGPT acceptance.
+`premerge.py` requires a clean committed worktree. It uses the same selector and
+runner as development and CI, checks whitespace and repository rules before
+installing dependencies, builds one candidate wheel, and runs only the required
+test files outside the checkout. Its import check ensures product modules come
+from that wheel. Repository tests remain dependency-free, and the test package
+is loaded without putting the checkout ahead of the installed product.
 
-## Coverage by responsibility
+All entry points report environment preparation and test-layer timings, test
+counts, skips and the slowest cases. These measurements are evidence for the
+current run; a directory name or a target budget is not a performance result.
 
-| Group | Important behavior |
+## Full verification and cache identity
+
+Request the complete layered suite explicitly when needed:
+
+```sh
+python3 scripts/premerge.py --base origin/main --full
+python3 scripts/run_tests.py --full
+```
+
+The initial ownership migration, changes to locked dependencies or packaging,
+and changes to the shared runner or code-quality workflow require full
+verification. Ordinary module, fixture, test or ownership additions select their
+affected checks. An ownership-manifest edit selects the changed entries' old and
+new tests and boundaries; it does not automatically select every module.
+`--full` cannot be combined with a focused module or layer.
+
+A successful local premerge result is cached only inside Git metadata for the
+exact HEAD, resolved base, scope, selected test set, candidate bytes, ownership
+manifest and Python/verification fingerprint. Source-unit results and dirty
+worktrees never populate this cache. An affected PASS cannot satisfy a full
+request. `--force` reruns the selected scope; it does not itself request full
+verification. A failed or interrupted fresh attempt invalidates its earlier
+cached PASS. HEAD, base, candidate files, index and selection are rechecked
+before publishing success.
+
+Hosted CI always obtains its own evidence. Pull-request verification binds the
+checked-out merge candidate and both event-pinned parents; main pushes bind the
+exact before/after range. Manual workflow dispatch requests full verification.
+PR-internal commit subjects remain outside the merge gate. PR metadata is checked
+on pull-request events, and the final commit landing on main is checked on push.
+
+## Directory and ownership rules
+
+| Directory | Responsibility |
 | --- | --- |
-| `unit/test_codex.py` | Browser scope, native evidence, original execution reuse, cancellation, setup failure and private result boundaries. |
-| `unit/test_runtime.py` | Configuration, passive discovery, workspace/Git reading, shared resources, retained logs and dependency boundaries. |
-| `unit/test_execution.py`, `test_interactive.py` | Launch versus exit 127, signals/grace/cleanup, original-ID conflicts, waiting, pipe/PTY controls, lost replies, backpressure and cancellation isolation. |
-| `unit/test_workspace_changes.py` | Exact edits, original-byte matching, preview purity, grants, hashes/identities, leases, record ownership, races and no replay. |
-| `unit/test_workspace_reads.py` | Raw/line windows, long Unicode lines, source-context redaction, filtered discovery, incomplete coverage and cursor/snapshot continuity. |
-| `unit/test_workspace_patch.py` | Strict add/update/delete/move grammar, full preflight, parents, exact BOM/terminators/EOF, ordered effects, partial/unknown failures and bounded records. |
-| `unit/test_continuity.py` | Legacy checkpoint/index integrity, real original-ID association, Skill resources and whole writes. |
-| `unit/test_tasks.py`, `test_task_admission.py` | Canonical publication, bounded index rebuild, process-loss boundaries, claims/epochs, stale intent, scope, plan invalidation, capacity and terminal acceptance. |
-| `unit/test_task_observer.py`, `test_task_ssh.py` | Absent-client original results, pause/terminal races, durable read budgets, actual slot ownership, stale snapshots and shared target recovery. |
-| `unit/test_service.py` | Selection, reader compatibility, before-stop rejection, configuration restoration, first-upgrade failures, bounded supervision, persistent Stop/login policy, exact legacy definitions, stable management CLI, original maintenance phases and unchanged recovery budgets. |
-| `unit/test_ssh.py`, `test_github.py` | Pinned target transport/archive isolation; exact provider scope/account, complete paged evidence, merge gates and original-destination reconciliation. |
-| `contract/test_mcp*.py` | Installed private-socket SDK/wire contracts, workflow/restart continuity and independent admission; split by execution, workspace, patches and tasks; retired Events methods are rejected. |
-| `system/test_repository.py`, `test_premerge.py` | Repository hygiene, metadata and commit checking; clean-candidate base validation, cache identity and early premerge failure. |
+| `unit/<module>/` | Pure parsing, validation, transformations and state decisions; no real server, process lifecycle or timed waiting. |
+| `component/<module>/` | Module behavior with local files, state stores and application collaborators. |
+| `contract/mcp/<module>/` | Wire encoding, catalog/schema, routing, result and error boundaries. |
+| `resilience/<module>/` | Real owned processes, crash/restart, cancellation, lost replies and retained-state recovery. |
+| `repository/` | Repository hygiene, dependency direction, test selection and runner behavior. |
+| `support/` | Shared fixtures with explicit consumers; no TestCase subclasses or test methods. |
 
-`support_tasks.py`, `support_execution.py`, `support_workspace.py` and
-`support_mcp.py` contain shared fixture helpers, not TestCase subclasses or tests.
-Tests do not import another test case to borrow setup or assertions. Keep a
-behavior in its owning group; a lower-level unit, wire boundary and real restart
-can cover distinct risks even when their names overlap. Fault injection targets
-the real owner, not a facade re-export. Never weaken assertions just to pass.
+[ownership.json](ownership.json) is the executable ownership map. Every
+production Python file has one explicit module owner, and every test file has
+one owning module. The source entries use exact file paths so a newly added
+production file cannot be absorbed by a broad pattern without review.
+
+Each module lists its own `tests` and explicit `boundary_tests` owned elsewhere.
+The selector adds those concrete tests once; it does not recursively expand an
+import graph or run every consumer module. Shared foundation, configuration and
+application changes must name the affected consumer boundaries in the manifest.
+
+The bundled `skills/openmachine/SKILL.md` is a shipped package input owned by
+`skills`. Editing it selects the installed resource tests, including rebuilding
+the wheel, even though its content is Markdown.
+
+A changed test runs that test directly. Shared fixture changes run their declared
+consumers, including consumers reached through another helper; package initializer
+changes include the affected package's tests and fixture consumers. Changed
+ownership entries select the union of old and new mappings. Deleted or renamed
+sources use the baseline and current manifests together.
+
+Every changed or deleted source must retain its own mapped coverage. Removing
+an entire owner while changing another module cannot borrow that other module's
+tests as proof. When retiring an owner, keep its retained absence or replacement
+boundary explicitly registered until the design change is accepted. Full mode
+does not bypass missing ownership or retained-coverage checks.
+
+Keep each assertion with the module and layer that own its risk. Tests import
+shared fixtures from `test.support`, never another test case. Split mixed files
+by behavior rather than merely moving a large file to a different directory.
+Real lifecycle tests preserve unique crash, cancellation, corruption, permission
+and no-replay scenarios; protocol conformance does not multiply every business
+lifecycle by every supported protocol. Deleting repeated coverage requires an
+explicit retained-coverage map in the PR.
+
+All tests remain under root `test/`; no additional test framework, network
+account or GPU is required. Private disposable directories, short owned processes
+and local Unix sockets are fixtures, not production projects or live
+SSH/ChatGPT acceptance.
 
 ## Compatibility and packaging
 
@@ -79,7 +147,7 @@ compatibility contracts, not cosmetic implementation details.
 
 ## Frozen MCP contract
 
-[contract/mcp_contract.json](contract/mcp_contract.json) retains the released baseline
+[contract/mcp/mcp_contract.json](contract/mcp/mcp_contract.json) retains the released baseline
 and explicitly approved schema deltas. It is an independent expected catalog, not
 regenerated from a candidate to hide drift. Compare all four GitHub/SSH enablement
 configurations and both supported protocols without normalizing actual results.
