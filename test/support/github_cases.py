@@ -40,7 +40,7 @@ def settings(attribution=None, **scopes):
 class GitHubCaseFixture(object):
     def setUp(self):
         self.metadata = {"id": 100, "full_name": REPO, "private": False, "default_branch": "main"}
-        self.pr = {"id": 202, "number": 2, "state": "open", "draft": False, "title": "old", "body": "legacy",
+        self.pr = {"id": 202, "node_id": "PR_fixture", "number": 2, "state": "open", "draft": False, "title": "old", "body": "legacy",
                    "head": {"sha": HEAD, "ref": "topic", "label": "Owner:topic"},
                    "base": {"sha": BASE, "ref": "main", "label": "Owner:main"},
                    "user": ACTOR, "assignees": [], "labels": [], "updated_at": STAMP, "changed_files": 2}
@@ -82,6 +82,11 @@ class GitHubCaseFixture(object):
             if parsed.path == f"{ROOT}/commits/{HEAD}/status":
                 return {"sha": HEAD, "state": "pending", "total_count": len(self.statuses), "statuses": portion(self.statuses)}
         if method == "POST" and endpoint == "graphql":
+            if "markPullRequestReadyForReview" in payload["query"]:
+                self.assertEqual(payload["variables"], {"pullRequestId": self.pr["node_id"]})
+                self.pr["draft"] = False
+                return {"data": {"markPullRequestReadyForReview": {"pullRequest": {
+                    "id": self.pr["node_id"], "number": self.pr["number"], "isDraft": False}}}}
             value = {"headRefOid": self.pr["head"]["sha"], "baseRefOid": self.pr["base"]["sha"]}
             if "reviewThreads" in payload["query"]:
                 start = int(payload["variables"].get("cursor") or 0)

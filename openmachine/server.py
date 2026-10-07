@@ -461,7 +461,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
             return _reply(lambda: application.github_issue(action, repository, title, body, number, state, expected_updated_at, labels, assignees, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
-        def github_pull_request(action: Literal["create", "update"], repository: str,
+        def github_pull_request(action: Literal["create", "update", "ready_for_review"], repository: str,
                                 title: Annotated[str | None, Field(max_length=256)] = None,
                                 body: Annotated[str | None, Field(max_length=60000)] = None,
                                 number: Annotated[int, Field(ge=0)] = 0,
@@ -470,7 +470,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 expected_head_sha: str = "", labels: GitHubNames | None = None,
                                 assignees: GitHubNames | None = None, task_context: tasks.TaskContext | None = None,
                                 connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Create/update a scoped PR using the selected native GitHub connection. On update, labels/assignees replace the complete supplied set through GitHub's shared Issue metadata endpoint; omit them to preserve metadata and pass [] to clear. Keep metadata updates separate from title/body/state so one provider endpoint owns each effect. PR creation does not accept labels/assignees. Prefer expected_head_sha and observed updated_at. Pinned creation uses an existing same-repository branch. Readback verifies supplied fields and identity; uncertain creation must not be repeated. Local commits and push stay with native execution."""
+            """Create/update a scoped PR, or mark an observed Draft PR ready for review, using the selected native GitHub connection. action='ready_for_review' accepts only number, exact expected_head_sha, optional observed updated_at, and connection identity; it uses GitHub's fixed Ready-for-review mutation and verifies the same PR, HEAD and actor with an open, non-Draft readback before success. GitHub provides no conditional HEAD input: concurrent pushes can precede the transition, so this does not atomically pin or approve a commit; changed readback remains unverified even if the transition occurred. On update, labels/assignees replace the complete supplied set through GitHub's shared Issue metadata endpoint; omit them to preserve metadata and pass [] to clear. Keep metadata updates separate from title/body/state so one provider endpoint owns each effect. PR creation does not accept labels/assignees. Pinned creation uses an existing same-repository branch. Uncertain writes require original-destination readback, never blind retry. Local commits and push stay with native execution."""
             return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, labels, assignees, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)

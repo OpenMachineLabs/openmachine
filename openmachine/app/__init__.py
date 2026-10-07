@@ -358,7 +358,7 @@ class Application:
                 body=body, number=number, state=state, expected_updated_at=expected_updated_at,
                 labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {})), task_context)
 
-    def github_pull_request(self, action: Literal["create", "update"], repository: str,
+    def github_pull_request(self, action: Literal["create", "update", "ready_for_review"], repository: str,
                             title: str | None = None, body: str | None = None, number: int = 0, head: str = "",
                             base: str = "", draft: bool = False, state: Literal["open", "closed"] | None = None,
                             expected_updated_at: str = "", expected_head_sha: str = "",

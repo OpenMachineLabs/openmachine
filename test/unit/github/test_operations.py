@@ -219,6 +219,93 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             github.issue(settings(), "update", REPO, None, None, number=1, state="closed", expected_updated_at=STAMP)
             self.assertEqual(mutate.call_args.args[3], {"state": "closed"})
 
+    def test_ready_for_review_uses_fixed_mutation_and_verified_readback(self):
+        self.pr["draft"] = True
+        with patch.object(connection, "request", side_effect=self.response) as api:
+            result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                         expected_updated_at=STAMP, expected_head_sha=HEAD)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["verified_fields"], ["draft"])
+        self.assertTrue(result["provider_response_verified"])
+        self.assertFalse(self.pr["draft"])
+        mutations = [call for call in api.call_args_list
+                     if call.args[0] == "POST" and call.args[1] == "graphql"]
+        self.assertEqual(len(mutations), 1)
+        self.assertIn("markPullRequestReadyForReview", mutations[0].args[2]["query"])
+        reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
+                                      {"action": "ready_for_review", "expected_head_sha": HEAD})
+        self.assertEqual(reconciled["status"], "verified")
+        self.assertTrue(reconciled["fields_verified"])
+
+    def test_ready_for_review_rejects_stale_wrong_or_non_draft_candidates_before_mutation(self):
+        with patch.object(connection, "request", side_effect=self.response) as api:
+            self.assert_fault("github_conflict", github.pull_request, settings(), "ready_for_review",
+                              REPO, None, None, number=2, expected_updated_at=STAMP,
+                              expected_head_sha=HEAD)
+            self.pr["draft"] = True
+            self.assert_fault("github_object_changed", github.pull_request, settings(), "ready_for_review",
+                              REPO, None, None, number=2, expected_updated_at="stale",
+                              expected_head_sha=HEAD)
+            self.assert_fault("github_candidate_changed", github.pull_request, settings(), "ready_for_review",
+                              REPO, None, None, number=2, expected_head_sha=BASE)
+            self.assert_fault("invalid_github_request", github.pull_request, settings(), "ready_for_review",
+                              REPO, None, None, number=2, expected_head_sha="")
+            self.assert_fault("invalid_github_request", github.pull_request, settings(), "ready_for_review",
+                              REPO, "changed", None, number=2, expected_head_sha=HEAD)
+        self.assertFalse(any(call.args[0] == "POST" and call.args[1] == "graphql"
+                             for call in api.call_args_list))
+
+    def test_ready_for_review_unknown_and_unverified_results_are_never_replayed(self):
+        self.pr["draft"] = True
+        mutations = []
+        def timeout(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql":
+                mutations.append(payload)
+                raise Fault("github_timeout", "fixture lost acknowledgement")
+            return self.response(method, endpoint, payload)
+        with patch.object(connection, "request", side_effect=timeout):
+            result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                         expected_head_sha=HEAD)
+            self.assertEqual(result["status"], "write_outcome_unknown")
+            self.pr["draft"] = False
+            reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
+                                          {"action": "ready_for_review", "expected_head_sha": HEAD})
+            self.assertEqual(reconciled["status"], "verified")
+        self.assertEqual(len(mutations), 1)
+
+        self.pr["draft"] = True
+        def unverified(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql":
+                return {"data": {"markPullRequestReadyForReview": {"pullRequest": {
+                    "id": self.pr["node_id"], "number": self.pr["number"], "isDraft": False}}}}
+            return self.response(method, endpoint, payload)
+        with patch.object(connection, "request", side_effect=unverified):
+            result = github.pull_request(settings(), "ready_for_review", REPO, None, None, number=2,
+                                         expected_head_sha=HEAD)
+        self.assertEqual(result["status"], "write_unverified")
+        self.assertTrue(self.pr["draft"])
+
+    def test_ready_for_review_concurrent_push_keeps_completed_transition_unverified(self):
+        self.pr["draft"] = True
+        mutations = []
+
+        def concurrent_push(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql":
+                mutations.append(payload)
+                self.pr["head"]["sha"] = BASE
+            return self.response(method, endpoint, payload)
+
+        with patch.object(connection, "request", side_effect=concurrent_push):
+            result = github.pull_request(settings(), "ready_for_review", REPO, None, None,
+                                         number=2, expected_head_sha=HEAD)
+            self.assertEqual(result["status"], "write_unverified")
+            self.assertFalse(self.pr["draft"])
+            reconciled = github.reconcile(settings(), self.task_locator("pull_request", 2),
+                                          {"action": "ready_for_review", "expected_head_sha": HEAD})
+            self.assertEqual(reconciled["status"], "observed")
+            self.assertFalse(reconciled["fields_verified"])
+        self.assertEqual(len(mutations), 1)
+
     def test_issue_update_rejects_pull_request_before_mutation(self):
         self.issue_value["pull_request"] = {"url": "https://api.github.com/repos/Owner/repo/pulls/1"}
         with patch.object(operations, "_mutate") as mutate:
