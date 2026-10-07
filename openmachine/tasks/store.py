@@ -14,7 +14,7 @@ import uuid
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.foundation.sanitize import Fault, redact
 
-from . import records
+from . import effects, records
 from .index import (MAX_CHECKPOINT, MAX_INDEX, MAX_TASKS, INDEX_PAGE, catalog_complete, directory_names,
                     load_index, metadata as validate_metadata, private_path, read_checkpoint, read_index,
                     read_structured, structured_metadata, task_id)
@@ -127,7 +127,8 @@ def read(state: Path, identity: str) -> dict:
 
 def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
            expected_revision: int | None = None, last_update: dict | None = None,
-           require_current: bool = False) -> dict:
+           require_current: bool = False, allow_observations: bool = False,
+           observation: bool = False, upgrade: bool = False) -> dict:
     """Publish one guarded canonical revision. The callback must not perform IO."""
     task_id(identity)
     with _writing(state, initialize=False) as root:
@@ -136,7 +137,9 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             if original["last_update"] != last_update:
                 raise Fault("task_conflict", "The retained update ID belongs to a different normalized request.")
             return {**_view(root, original, before), "status": "unchanged"}
-        if expected_revision is not None and expected_revision != original["revision"]:
+        compatible_revision = (allow_observations and original["format"] >= 4
+                               and original["control_revision"] <= expected_revision <= original["revision"]) if expected_revision is not None else False
+        if expected_revision is not None and expected_revision != original["revision"] and not compatible_revision:
             raise Fault("task_conflict", "The original task advanced; read its current revision before another transition.",
                         {"task_id": identity, "task_revision": original["revision"],
                          "plan_revision": original["plan"]["revision"], "continuation_epoch": original["control"]["epoch"]})
@@ -150,14 +153,20 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                 raise
             index = None
         value = deepcopy(original)
+        if upgrade and value["format"] == 3:
+            value.update(format=4, control_revision=original["revision"], effect_scopes=[])
         now_ms = max(time.time_ns() // 1000000, original["updated_at_ms"])
         transform(value, now_ms)
         if last_update is not None:
             value["last_update"] = last_update
         if value == original:
             return {**_view(root, original, before), "status": "unchanged"}
+        if upgrade and value["format"] == 3:
+            value.update(format=4, control_revision=original["revision"])
+            value.setdefault("effect_scopes", [])
         if value["format"] != original["format"] and not (
-                original["format"] < 3 and value["format"] == 3
+                original["format"] == 3 and value["format"] == 4 and upgrade
+                or original["format"] < 3 and value["format"] in {3, 4}
                 and value["contract"].get("recovery_policy") in {"task_chat", "disabled"}
                 and value["plan"]["revision"] == original["plan"]["revision"] + 1):
             raise Fault("task_identity_conflict", "Only an explicit plan revision may enroll historical task recovery.")
@@ -166,7 +175,30 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
         for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
             if value[key] != original[key]:
                 raise Fault("task_identity_conflict", "A transition cannot replace the original task identity or initiating request.")
+        old_witnesses = original.get("effect_scopes", [])
+        if value.get("effect_scopes", [])[:len(old_witnesses)] != old_witnesses:
+            raise Fault("task_identity_conflict", "Original scope evidence is immutable and append-only.")
+        old_operations = {item["id"]: item for item in original["operations"]}
+        if not old_operations.keys() <= {item["id"] for item in value["operations"]}:
+            raise Fault("task_identity_conflict", "Original operation history cannot be removed.")
+        for operation in value["operations"]:
+            old = old_operations.get(operation["id"])
+            if old is None:
+                continue
+            for key in ("stage_id", "plan_revision", "epoch", "request_sha256", "source_sha256", "admitted_at_ms", "effect_scope"):
+                if operation.get(key) != old.get(key):
+                    raise Fault("task_identity_conflict", "Original operation intent and scope cannot be rewritten.")
+            if (old["locator"]["kind"] == "github" and old["result"] is not None and not records.pending(old)
+                    and operation != old):
+                raise Fault("task_identity_conflict", "Verified historical provider evidence cannot follow mutable current state.")
         value.update(revision=original["revision"] + 1, updated_at_ms=now_ms)
+        if value["format"] >= 4:
+            material = not observation or any(value[key] != original[key] for key in ("contract", "plan", "terminal"))
+            # Observation may publish a result/handoff, but never ownership or a
+            # new authority/control intent under the evidence-only watermark.
+            material |= any(value["control"][key] != original["control"][key]
+                            for key in ("owner", "epoch", "stop_intent", "current_stage_id"))
+            value["control_revision"] = value["revision"] if material else original.get("control_revision", original["revision"])
         try:
             value = records.Record.model_validate(value).model_dump()
             raw = records.canonical(value)
@@ -191,13 +223,13 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
         return {**_view(root, value, raw, index_status="current" if index is not None else "stale"), "status": "saved"}
 
 
-def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict | None:
-    """Bounded original-identity lookup, not a second ledger or background poll."""
-    generation, offset, found = None, 0, None
+def _matching_operations(state: Path, predicate) -> list[dict]:
+    """Scan canonical owners with complete bounded index coverage."""
+    generation, offset, found = None, 0, []
     while True:
         with _reading(state) as root:
             if root is None:
-                return None
+                return []
             index = read_index(root)
             if generation is not None and generation != index["generation"]:
                 raise Fault("task_index_changed", "Task identity coverage changed; read original evidence before new work.")
@@ -222,18 +254,30 @@ def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict |
                 checked += 1
                 if item != structured_metadata(record, raw):
                     raise Fault("task_index_incomplete", "Canonical identity coverage is stale; rebuild before a new effect.")
-                matches = [operation for operation in record["operations"]
-                           if operation_id and operation["id"] == operation_id or operation_key(operation["locator"]) == key
-                           or key[0] == "github_destination" and records.pending(operation)
-                           and operation["locator"]["kind"] == "github"
-                           and operation_key(dict(operation["locator"], anchor="")) == key]
+                matches = [operation for operation in record["operations"] if predicate(record, operation)]
                 if matches:
-                    if found is not None and found["task_id"] != identity:
-                        raise Fault("task_operation_conflict", "An original operation is ambiguously bound; preserve both tasks without dispatch.")
-                    found = {"task_id": identity, "operations": matches}
+                    found.append({"task_id": identity, "operations": matches})
             offset += checked
             if offset == len(identities):
                 return found
+
+
+def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict | None:
+    """Original operation identity is independent from resource conflicts."""
+    found = _matching_operations(state, lambda record, operation:
+        operation_id and operation["id"] == operation_id or operation_key(operation["locator"]) == key)
+    if len(found) > 1:
+        raise Fault("task_operation_conflict", "An original operation is ambiguously bound; preserve both tasks without dispatch.")
+    return found[0] if found else None
+
+
+def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list[dict]:
+    """Native GitHub routes share durable conflicts across task and account IDs."""
+    if proposed["locator"]["kind"] != "github":
+        return []
+    return _matching_operations(state, lambda record, operation:
+        operation["id"] != proposed.get("id") and effects.unresolved(operation)
+        and effects.conflicts(record, operation, proposed_record, proposed))
 
 
 def operation_key(locator: dict) -> tuple:

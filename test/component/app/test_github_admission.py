@@ -50,7 +50,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.app.github_issue(**args)
         self.assertEqual(self.view()["record"]["operations"][0]["state"], "unknown")
         bare = {key: value for key, value in args.items() if key != "task_context"}
-        self.fault("task_context_required", self.app.github_issue, **bare)
+        self.fault("task_effect_unresolved", self.app.github_issue, **bare)
         self.assertEqual(provider.issue.call_count, 1)
         recovered = self.app.github_issue(**args)
         self.assertEqual(recovered["status"], "write_outcome_unknown")
@@ -64,7 +64,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                     identity = uuid.uuid4().hex
                     args = dict(action="create", repository="Owner/repo", title="Retry fixture", body="Authorized work.",
                                 task_context=self.context_for(identity))
-                    provider.issue.side_effect = Fault(code, "Known no-effect failure.")
+                    provider.issue.side_effect = Fault(code, "Known no-effect failure.", effect="known_no_effect")
                     provider.reconcile.side_effect = Fault("github_response_unknown", "Read unavailable.") if read_fails else None
                     calls = provider.issue.call_count
                     self.fault(code, self.app.github_issue, **args)
@@ -92,7 +92,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
 
     def test_rate_rejection_returns_wait_evidence_without_immediate_provider_read(self):
         provider = self.github_fixture()
-        fault = Fault("github_rate_limited", "Wait before another request.", {"retry_after_seconds": 60})
+        fault = Fault("github_rate_limited", "Wait before another request.", {"retry_after_seconds": 60}, effect="known_no_effect")
         provider.issue.side_effect = fault
         with self.assertRaises(Fault) as caught:
             self.app.github_issue(action="create", repository="Owner/repo", title="Fixture", body="Fixture",
@@ -102,15 +102,16 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "failed")
         self.assertIsNone(self.view()["record"]["terminal"])
 
-    def test_conclusive_original_read_is_preserved_after_dispatch_fault(self):
+    def test_no_effect_rejection_cannot_be_promoted_by_a_matching_destination(self):
         provider = self.github_fixture()
-        provider.issue.side_effect = Fault("github_access_denied", "Rejected.")
+        provider.issue.side_effect = Fault("github_access_denied", "Rejected.", effect="known_no_effect")
         provider.reconcile.return_value = {"status": "verified", "receipt": {"id": 71, "number": 7}}
         self.fault("github_access_denied", self.app.github_issue, action="create",
                    repository="Owner/repo", title="Fixture", body="Fixture",
                    task_context=self.context_for(uuid.uuid4().hex))
-        self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "succeeded")
+        self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "failed")
         self.assertEqual(provider.issue.call_count, 1)
+        provider.reconcile.assert_not_called()
 
     def test_all_provider_entrypoints_reject_stale_context_before_provider_access(self):
         self.accept_plan()

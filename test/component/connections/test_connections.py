@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 from integrations import connections, credentials
-from integrations.github import auth
+from integrations.github import auth, operations
 from openmachine import tasks
 from openmachine.bootstrap import create_application
 from openmachine.config import GitHubConfig
@@ -160,8 +160,178 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.fault("github_not_allowed", create_application(wider, self.state).github_read, "repository", "Other/repo")
         self.app.disconnect_integration(item["id"], item["authorization_revision"])
         self.calls.clear()
-        self.fault("integration_disconnected", send, "GET", "repos/Example/repo")
+        with self.assertRaises(Fault) as caught:
+            send("GET", "repos/Example/repo")
+        self.assertEqual(caught.exception.code, "integration_disconnected")
+        self.assertEqual(caught.exception.effect, "known_no_effect")
         self.assertFalse(self.calls)
+
+    def test_admission_and_credential_preparation_errors_precede_business_dispatch(self):
+        self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+        cases = (
+            (self.app.connections, "admit", Fault("resource_busy", "Fixture.", effect="effect_unknown"), "resource_busy"),
+            (connections, "_guard", Fault("resource_busy", "Fixture.", effect="effect_unknown"), "resource_busy"),
+            (self.app.connections, "_token", OSError("Fixture."), "integration_store_unavailable"),
+        )
+        for owner, name, failure, code in cases:
+            with self.subTest(phase=name), patch.object(owner, name, side_effect=failure), self.assertRaises(Fault) as caught:
+                operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                   {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+            self.assertEqual(caught.exception.code, code)
+            self.assertEqual(caught.exception.effect, "known_no_effect")
+            self.assertFalse(self.calls)
+        self.refresh.assert_not_called()
+
+    def test_refresh_reply_loss_is_no_business_effect_and_keeps_uncertain_credentials(self):
+        item = self.connect()
+        self.stop()
+        self.expire_access(item)
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+        self.refresh.side_effect = Fault("github_response_unknown", "Refresh reply was lost.", effect="effect_unknown")
+        with self.assertRaises(Fault) as caught:
+            operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                               {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual(caught.exception.code, "github_response_unknown")
+        self.assertEqual(caught.exception.effect, "known_no_effect")
+        self.assertFalse(self.calls)
+        self.assertIsNone(self.comment)
+        self.refresh.assert_called_once()
+        retained, pair = self.stored(item)
+        self.assertEqual((retained.status, pair.phase), ("reauthorization_required", "refreshing"))
+
+    def test_business_reply_loss_keeps_the_same_code_unknown_without_refresh_or_replay(self):
+        item = self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+
+        def lost(token, method, endpoint, payload=None):
+            self.api(token, method, endpoint, payload)
+            raise Fault("github_response_unknown", "Business reply was lost.", effect="effect_unknown")
+
+        with patch.object(auth, "request", side_effect=lost):
+            result = operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                        {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual((result["status"], result["error_code"]), ("write_outcome_unknown", "github_response_unknown"))
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertEqual(self.comment["body"], "Once.")
+        self.refresh.assert_not_called()
+        retained, pair = self.stored(item)
+        self.assertEqual((retained.status, pair.phase), ("connected", "ready"))
+
+    def test_first_401_refresh_failure_is_no_business_effect_without_replay(self):
+        item = self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+        self.refresh.side_effect = Fault("github_response_unknown", "Refresh reply was lost.", effect="effect_unknown")
+
+        def rejected(token, method, endpoint, payload=None):
+            self.calls.append((method, endpoint))
+            raise Fault("github_authentication_required", "The provider rejected this request.")
+
+        with patch.object(auth, "request", side_effect=rejected), self.assertRaises(Fault) as caught:
+            operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                               {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual(caught.exception.code, "github_response_unknown")
+        self.assertEqual(caught.exception.effect, "known_no_effect")
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertIsNone(self.comment)
+        self.refresh.assert_called_once()
+        retained, pair = self.stored(item)
+        self.assertEqual((retained.status, pair.phase), ("reauthorization_required", "refreshing"))
+
+    def test_refresh_failure_before_readback_keeps_acknowledged_write_unverified(self):
+        item = self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+        self.refresh.side_effect = Fault("github_response_unknown", "Readback refresh reply was lost.", effect="effect_unknown")
+
+        def acknowledged(token, method, endpoint, payload=None):
+            result = self.api(token, method, endpoint, payload)
+            if method == "POST":
+                self.expire_access(item)
+            return result
+
+        with patch.object(auth, "request", side_effect=acknowledged):
+            result = operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                        {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual(result["status"], "write_unverified")
+        self.assertEqual(result["error_code"], "github_response_unknown")
+        self.assertEqual(result["receipt"]["id"], 50)
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertEqual(self.comment["body"], "Once.")
+        self.refresh.assert_called_once()
+        retained, pair = self.stored(item)
+        self.assertEqual((retained.status, pair.phase), ("reauthorization_required", "refreshing"))
+
+    def test_explicitly_unknown_401_does_not_refresh_or_replay_business_write(self):
+        self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+
+        def lost(token, method, endpoint, payload=None):
+            self.api(token, method, endpoint, payload)
+            raise Fault("github_authentication_required", "This business request may have taken effect.", effect="effect_unknown")
+
+        with patch.object(auth, "request", side_effect=lost):
+            result = operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                        {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual((result["status"], result["error_code"]), ("write_outcome_unknown", "github_authentication_required"))
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertEqual(self.comment["body"], "Once.")
+        self.refresh.assert_not_called()
+
+    def test_reply_loss_after_refresh_keeps_second_business_request_unknown(self):
+        item = self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+        attempts = []
+
+        def reply(token, method, endpoint, payload=None):
+            if method == "POST":
+                attempts.append(endpoint)
+                if len(attempts) == 1:
+                    self.calls.append((method, endpoint))
+                    raise Fault("github_authentication_required", "The provider rejected the first request.")
+                self.api(token, method, endpoint, payload)
+                raise Fault("github_response_unknown", "The second business reply was lost.", effect="effect_unknown")
+            return self.api(token, method, endpoint, payload)
+
+        with patch.object(auth, "request", side_effect=reply):
+            result = operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                        {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual((result["status"], result["error_code"]), ("write_outcome_unknown", "github_response_unknown"))
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments"), ("GET", "user"),
+                                      ("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertEqual(self.comment["body"], "Once.")
+        self.refresh.assert_called_once()
+        self.assertEqual(self.stored(item)[1].phase, "ready")
+
+    def test_acknowledged_request_cleanup_failure_stays_unknown(self):
+        self.connect()
+        self.stop()
+        send = self.app.connections.request("Example/repo", write=True)
+        self.calls.clear()
+
+        @contextmanager
+        def fail_on_exit():
+            yield
+            raise Fault("resource_busy", "Admission cleanup failed after acknowledgment.", effect="known_no_effect")
+
+        with patch.object(self.app.connections, "admit", fail_on_exit):
+            result = operations._mutate("Example/repo", "POST", "repos/Example/repo/issues/1/comments",
+                                        {"body": "Once."}, lambda _: "repos/Example/repo/issues/comments/50", transport=send)
+        self.assertEqual((result["status"], result["error_code"]), ("write_outcome_unknown", "resource_busy"))
+        self.assertEqual(self.calls, [("POST", "repos/Example/repo/issues/1/comments")])
+        self.assertEqual(self.comment["body"], "Once.")
 
     def test_concurrent_refresh_is_single_and_preserves_authority(self):
         item = self.connect()
@@ -287,8 +457,15 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def test_legacy_task_identity_and_serialization_are_not_migrated(self):
         self.request["contract"].update(repositories=["Example/repo"], tools=["github_comment"])
         old = tasks.create(self.state, self.request["task_id"], **{k: v for k, v in self.request.items() if k != "task_id"})["record"]
-        # Seed an actual historical shape; the current constructor creates format 3.
+        # Seed an actual historical shape; the current constructor creates format 4.
         old["format"] = 1
+        old.pop("control_revision", None)
+        old.pop("effect_scopes", None)
+        for operation in old["operations"]:
+            operation.pop("effect_scope", None)
+            if operation["result"] is not None:
+                operation["result"].pop("failure_code", None)
+                operation["result"].pop("effect", None)
         old.pop("chat_registration")
         old["contract"].pop("recovery_policy")
         self.path.write_bytes(records.canonical(old))
@@ -321,6 +498,13 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.stop()
         old = self.view()["record"]
         old["format"] = 2
+        old.pop("control_revision", None)
+        old.pop("effect_scopes", None)
+        for operation in old["operations"]:
+            operation.pop("effect_scope", None)
+            if operation["result"] is not None:
+                operation["result"].pop("failure_code", None)
+                operation["result"].pop("effect", None)
         old.pop("chat_registration")
         old["contract"].pop("recovery_policy")
         # Seed retained pre-native authority, including its original receipt.
@@ -343,14 +527,23 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.assertEqual(self.app.read_integration_login(attempt_id)["status"], "succeeded")
         self.assertEqual(self.view()["record"]["operations"], old["operations"])
         self.fault("integration_legacy_connection", self.app.github_read, "status", connection_id=retained.id)
-        self.fault("integration_legacy_connection", self.app.github_comment, **args)
+        historical = self.app.github_comment(**args)
+        self.assertEqual((historical["status"], historical["current_state_observed"], historical["task_operation_replayed"]),
+                         ("retained_task_evidence", False, False))
+        self.assertEqual(historical["result"], old["operations"][0]["result"])
+        self.assertEqual(self.path.read_bytes(), raw_task)
         self.assertEqual(self.calls, [])
         self.assertEqual((self.state / "connections.json").read_bytes(), raw_connections)
         self.actor = {"id": 2, "login": "other"}
         native = self.connect()
         self.calls.clear()
         self.fault("integration_legacy_connection", self.control, "claim", handoff_id="f" * 32)
-        self.fault("integration_legacy_connection", self.app.github_comment, **args)
+        historical = self.app.github_comment(**args)
+        self.assertEqual((historical["status"], historical["current_state_observed"], historical["task_operation_replayed"]),
+                         ("retained_task_evidence", False, False))
+        self.assertEqual(historical["result"], old["operations"][0]["result"])
+        self.fault("integration_legacy_connection", self.app.github_comment,
+                   **dict(args, task_context=self.context_for("b" * 32)))
         self.fault("task_scope_denied", self.app.github_comment, "create", "Example/repo", "Fixture.", 1,
                    connection_id=native["id"], task_context=self.context_for("c" * 32))
         self.assertEqual(self.calls, [])
@@ -373,6 +566,13 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.stop()
         old = self.view()["record"]
         old["format"] = 1
+        old.pop("control_revision", None)
+        old.pop("effect_scopes", None)
+        for operation in old["operations"]:
+            operation.pop("effect_scope", None)
+            if operation["result"] is not None:
+                operation["result"].pop("failure_code", None)
+                operation["result"].pop("effect", None)
         old.pop("chat_registration")
         old["contract"].pop("recovery_policy")
         old["contract"].pop("github_connections")
@@ -392,7 +592,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 15)
+        self.assertEqual(proof["state_contract"], 16)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

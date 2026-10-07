@@ -80,7 +80,7 @@ class ApplicationAdmissionFixture(object):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 15)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 16)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):

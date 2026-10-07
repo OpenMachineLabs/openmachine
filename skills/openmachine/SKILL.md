@@ -129,7 +129,11 @@ below; every continuation still reads and claims the original task safely.
    comment bodies have separate paged reads. Respect coverage/redaction gaps.
    Keep branch/commit/push in native execution with existing user-owned credentials.
    Use typed Issue/PR/comment/review writes to preserve provenance and field readback.
-   Prefer observed updated_at and exact HEAD guards. Submit a current-HEAD review;
+   Use expected_fields for every field being replaced when unrelated activity can
+   change updated_at; complete labels/assignees sets include explicit empty sets.
+   A supplied updated_at remains enforced, and exact HEAD remains independent.
+   These are owner preflight/readback guards, not a server-side atomic field CAS.
+   Avoid optional metadata writes without acceptance value. Submit a current-HEAD review;
    self-review is COMMENT, not independent approval. Merge only under explicit
    authority and native protections; only merged_verified proves its destination.
    Save original external locators in the existing checkpoint. Unknown/unverified
@@ -264,16 +268,28 @@ or claim authority. Explicit bounded maintenance preserves generations and locks
 
 Claim the current handoff and carry task/plan revisions, epoch and operation ID in
 task_context. Start/file IDs equal execution/change IDs; controls/cancel use distinct
-IDs and retain original execution/sequence. Reuse valid ownership or claim after
-release/expiry, never displace a live owner. Claims last at most 300 seconds or
-earlier expiry, which does not stop original commands. Release for handover. Final
+IDs and retain original execution/sequence. Reuse valid ownership or explicitly
+renew the same claim with `{"action":"renew","claim_id":"original-claim-id"}`.
+Renew requires current control/plan/epoch and unchanged native principal/claim;
+it keeps the epoch and never extends task authority or resets recovery budgets.
+An expired, unreplaced claim can renew within its existing authority. Claim after
+release/expiry never displaces a live owner. Each claim/renewal lasts at most
+300 seconds or earlier authority expiry, which does not stop original commands.
+Ownership reattachment rechecks configuration and grants; branch/HEAD drift still
+requires an exact revised target before new effects. Release for handover. Final
 accepted work still needs explicit finish, not another run or legacy checkpoint.
 
 Pause suppresses new admission, not admitted effects; cancel needs verified original
 worker outcomes. Original-ID cancellation stays usable with busy task metadata.
 Resume does not claim, extend authority or reopen terminal work. revise_plan
-invalidates affected/dependent stages, retaining other acceptance. Stale revisions
-need fresh readback. Unknown effects reconcile original receipts, never new IDs,
+invalidates affected/dependent stages, retaining other acceptance. Expired authority
+needs an explicit revised future contract with a new authority reference; it grants
+no implicit claim/resume or recovery enablement. External GitHub pending evidence
+can survive revision only with its original repository/account binding retained.
+Control changes keep strict revision CAS. Format-4 business admission tolerates only
+intervening evidence observations after its material control revision, with exact
+plan/epoch/current ownership and domain guards. Use returned context; repeated
+status polls add no authority. Unknown effects reconcile original receipts, never new IDs,
 deleted history or stripped supervised context. Do not save a second legacy journal.
 
 After applicable record_decision evidence, finish every accepted stage with:
@@ -283,6 +299,21 @@ Finish has no reason/summary/evidence field. Terminal history is read-only;
 follow-up is a linked new task. GitHub original-destination lookup is bounded to
 three 100-item pages; duplicate/partial/bodyless unknown effects can remain blocked.
 Receipt hashes cover semantic observations, not copied raw logs or source.
+
+GitHub conflict scopes cover the fields/resources actually written across native
+task, bare and account routes. Unknown labels/assignees block the same fields;
+independent local work, body updates and reviews can continue. State/draft/review
+and merge dependencies remain excluded, and an unknown merge cannot be repeated.
+Local uncertain execution and partial writes retain their original target exclusion.
+Opaque historical requests fail safe. `bind_effect_scope` accepts only the complete
+original normalized GitHub arguments whose method/plan/source fingerprint matches
+the retained request. Runtime derives and appends an immutable scope witness; it
+does not dispatch, replace the original operation or prove no effect. Never infer
+past non-execution from today's destination. Missing original proof stays unknown.
+Verified historical GitHub receipts remain immutable; current merge acceptance
+still reads current HEAD/base, protections, checks and discussions. Independent
+stage evidence can be accepted while disjoint uncertainty is explicitly retained;
+task finish still requires every original unresolved effect to be reconciled.
 
 ## Observation and recovery
 

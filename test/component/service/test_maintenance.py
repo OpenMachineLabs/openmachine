@@ -99,6 +99,32 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(original["status"], "rejected")
         maintenance._available(self.state)
 
+    def test_deferred_update_retirement_requires_deliberate_verified_stop(self):
+        selected = self.policy_fixture()
+        cases = [("running", False, None, False), ("stopped", True, None, False),
+                 ("stopped", False, 123, False), ("stopped", False, None, True)]
+        for desired, socket_alive, pid, allowed in cases:
+            with self.subTest(desired=desired, socket_alive=socket_alive, pid=pid):
+                self.save(selected | {"policy": selected["policy"] | {"desired": desired}})
+                record = self.operation_fixture("deferred")
+                path = maintenance._operation_path(self.state, record["operation_id"])
+                before = path.read_bytes()
+                observed = {"status": "stopped", "current": self.a, "loaded": False,
+                            "pid": pid, "supervisor_pid": None}
+                with patch.object(maintenance, "_bound"), \
+                        patch.object(service_runtime, "status", return_value=observed), \
+                        patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                        patch.object(service_runtime, "socket_alive", return_value=socket_alive):
+                    if allowed:
+                        result = maintenance.retire_operation(self.config, self.state, record["operation_id"])
+                        self.assertEqual((result["status"], result["operation"]["phase"]), ("retired", "rejected"))
+                    else:
+                        self.assert_fault("maintenance_retirement_unverified",
+                            lambda: maintenance.retire_operation(self.config, self.state, record["operation_id"]))
+                        self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(service_state._record(self.state)["current"], self.a)
+                self.assertEqual(service_state._record(self.state)["pending"], None)
+
     def test_deferred_update_retirement_rejects_changed_active_or_uncertain_state(self):
         record = self.operation_fixture("prepared")
         self.assert_fault("maintenance_not_retirable",
