@@ -79,3 +79,27 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                   {"invalid_tool_call", "invalid_task_contract", "context_mismatch"})
                     self.assertFalse((self.state / "tasks").exists())
                     self.assertFalse((self.state / "executions").exists())
+
+    async def test_scope_binding_is_exposed_and_dispatched_on_both_protocols(self):
+        self.launch()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                arguments = dict(task_id="missing-original", expected_revision=1,
+                    expected_plan_revision=1, expected_epoch=0, update_id="e" * 32,
+                    transition={"action": "bind_effect_scope", "operation_id": "a" * 32,
+                        "method": "github_pull_request", "arguments": {
+                            "action": "update", "repository": "Example/repo", "number": 8,
+                            "body": "Original retained body."},
+                        "reason": "Prove tool routing without a provider effect."})
+                response = await self.wire_call(client, "tools/call",
+                    {"name": "control_task", "arguments": arguments})
+                result = response.json()["result"]
+                self.assert_wire_tool_result(result, version)
+                self.assertTrue(result["isError"])
+                self.assertEqual(result["structuredContent"]["error"]["code"], "tasks_uninitialized")
+                arguments["transition"]["scope"] = {"fields": ["title"]}
+                response = await self.wire_call(client, "tools/call",
+                    {"name": "control_task", "arguments": arguments})
+                self.assertEqual(response.json()["result"]["structuredContent"]["error"]["code"], "invalid_tool_call")
+        self.assertFalse((self.state / "tasks").exists())
+        self.assertFalse((self.state / "executions").exists())

@@ -195,6 +195,33 @@ current destination snapshot can prove a historical request was never dispatched
 The witness input is bounded at 128 KiB; only its fingerprint, compact scope,
 principal and timestamp are retained, not raw bodies or parameters.
 
+Scope binding rechecks the current owner, authority, workspace identity and native
+grants. A changed local HEAD does not block this evidence-only action; new local
+effects and stage acceptance still require the accepted HEAD. Plan revision pins
+each unresolved GitHub operation's own repository and native account binding.
+Explicit changes to unrelated repositories remain possible under ordinary scope
+validation and stage invalidation.
+
+For a retained 0.2.11 task, first inspect the running server's capabilities and
+the actual `control_task` schema. The scoped reader supports record formats 1..4;
+`bind_effect_scope` is a `control_task.transition.action`, not a separate tool.
+The original 0.2.11 runtime lacks this action even when newer source or Skill text
+is present. Update through the managed compatibility checks only under explicit
+installation authority, then refresh the client's tool catalog. Do not drop
+`task_context` to work around an older catalog.
+
+Read the original task and destination before continuing. Resume only under
+existing user authority, claim the same task, and retain its original operation ID.
+For format 3, a valid control upgrades the record without replacing its operations.
+Older native-account records require an explicit plan revision retaining their
+bindings and declaring a recovery policy before scope enrollment; retired gh history cannot
+be transferred to a native account. Supply the exact complete normalized original
+arguments to `bind_effect_scope`; if they are unavailable, retain the conservative
+scope. To reconcile the outcome, call the original GitHub method with those same
+arguments and operation ID: this path reads the destination and never dispatches
+again. Scope binding alone leaves the outcome unknown. A missing, changed or
+unverifiable destination leaves the original uncertainty intact.
+
 New owner failures retain a failure code and effect classification. An explicit
 business preflight rejection is failed/known-no-effect without a reconciling read
 that could replace the result. A dispatched or acknowledged write with insufficient
