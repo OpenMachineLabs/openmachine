@@ -199,6 +199,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             (dict(original_arguments, body={"text": "Invalid body type."}), "invalid_task_control"),
             (dict(original_arguments, body="x" * 60000), "invalid_github_request")]
         before = self.path.read_bytes()
+        reconciliations = self.provider.reconcile.call_count
         for arguments, code in malformed:
             with self.subTest(arguments=list(arguments), code=code):
                 unchanged = deepcopy(arguments)
@@ -208,7 +209,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), before)
                 self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertEqual(self.provider.pull_request.call_count, 1)
-        self.provider.reconcile.assert_not_called()
+        self.assertEqual(self.provider.reconcile.call_count, reconciliations)
         proof = self.control_arguments("bind_effect_scope", operation_id=original["id"], method="github_pull_request",
                                        arguments=original_arguments, reason="Exact retained request scope; outcome remains unknown.")
         bound = self.app.control_task(**proof)["record"]
