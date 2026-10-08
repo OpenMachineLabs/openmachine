@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack
 from copy import deepcopy
+import hashlib
 import os
 from pathlib import PurePosixPath
 import re
@@ -377,8 +378,10 @@ class TaskAdmission:
                 allow_observations=True, upgrade=True, operation_ids=operation_ids, reserve_disk=method != "cancel_execution")
             operation = next(item for item in admitted["record"]["operations"] if item["id"] == context["operation_id"])
             expected = {operation["id"]: records.digest(operation)}
+            dispatch_arguments = (dict(arguments, expected_base_ref=locator["merge"]["base_ref"])
+                                  if method == "github_merge" else arguments)
             try:
-                observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
+                observed = self._dispatch(method, dispatch_arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
                 owner_effect = getattr(error, "effect", None)
@@ -431,6 +434,20 @@ class TaskAdmission:
                                              binding=binding, historical_unbound=binding is None)
             if observed.get("configured_write") is not True or observed["data"].get("permissions", {}).get("push") is not True:
                 raise Fault("github_not_allowed", "The selected task repository has no current verified write grant.")
+            if method == "github_merge":
+                candidate = self.app._github_call("read", dict(action="pull_request", repository=arguments["repository"],
+                    number=arguments["number"], expected_head_sha=arguments["expected_head_sha"],
+                    expected_base_sha=arguments["expected_base_sha"]), binding=binding,
+                    historical_unbound=binding is None)["data"]
+                try:
+                    locator["merge"] = records.GitHubMergeBinding(
+                        head_sha=arguments["expected_head_sha"], base_ref=candidate["base"]["ref"],
+                        commit_title_sha256=hashlib.sha256(arguments["commit_title"].encode()).hexdigest() if arguments["commit_title"] else None,
+                        commit_message_sha256=hashlib.sha256(arguments["commit_message"].rstrip("\n").encode()).hexdigest() if arguments["commit_message"] else None,
+                    ).model_dump()
+                except (KeyError, TypeError, ValueError) as error:
+                    raise Fault("github_evidence_unavailable", "The original merge destination could not be retained; no merge was admitted.",
+                                effect="known_no_effect") from error
             return
         machine = arguments["machine"]
         target = self.app.config.machine(machine, write=method in EXECUTION_METHODS or

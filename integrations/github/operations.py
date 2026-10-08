@@ -1,6 +1,7 @@
 """Scoped collaboration, provenance and destination reconciliation."""
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import re
 from typing import Literal, get_args
@@ -289,7 +290,9 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     if kind == "merge":
         if number is None:
             return unknown
-        value = evidence.pull_request(repository, number, (request or {}).get("expected_head_sha", ""), transport=transport)
+        binding = locator.get("merge")
+        head = binding["head_sha"] if binding else (request or {}).get("expected_head_sha", "")
+        value = evidence.pull_request(repository, number, head, transport=transport)
         sha = value.get("merge_commit_sha", "")
         if value.get("merged") is not True or not isinstance(sha, str) or not re.fullmatch(evidence.SHA, sha):
             return unknown
@@ -297,18 +300,26 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         base_ref = object_response(value.get("base")).get("ref")
         if not isinstance(base_ref, str) or not isinstance(head, str) or not re.fullmatch(evidence.SHA, head):
             return unknown
+        if binding and base_ref != binding["base_ref"]:
+            return unknown
         destination = _merge_destination(root, sha, base_ref, transport=transport)
         if destination is None:
             return unknown
         commit, _ = destination
         message = object_response(commit.get("commit")).get("message", "")
+        if not isinstance(message, str):
+            return unknown
+        if binding and any(binding[key] is not None and hashlib.sha256(text.encode()).hexdigest() != binding[key]
+                           for key, text in (("commit_title_sha256", message.split("\n", 1)[0]),
+                                             ("commit_message_sha256", message.partition("\n\n")[2].rstrip("\n")))):
+            return unknown
         if request is not None and (
                 request.get("commit_title") and message.split("\n", 1)[0] != request["commit_title"]
                 or request.get("commit_message") and message.partition("\n\n")[2].rstrip("\n") != request["commit_message"].rstrip("\n")):
             return unknown
         if connection.read_actor(settings, transport=transport) != actor:
             raise Fault("github_identity_changed", "The acting account changed during original-result observation.")
-        return {"status": "merged_verified" if request is not None else "observed", "repository": repository,
+        return {"status": "merged_verified" if binding or request is not None else "observed", "repository": repository,
                 "receipt": {"number": number, "head_sha": head, "merge_commit_sha": sha}, "destination_verified": True}
     if parent is None and (kind == "review" or kind == "comment" and number is None):
         return unknown
@@ -694,12 +705,14 @@ def review_thread(settings: Settings, action: Literal["resolve", "unresolve"], r
 
 def merge(settings: Settings, repository: str, number: int, expected_head_sha: str,
           expected_base_sha: str = "", method: Literal["squash", "merge", "rebase"] = "squash",
-          commit_title: str = "", commit_message: str = "", *, transport) -> dict:
+          commit_title: str = "", commit_message: str = "", *, expected_base_ref: str = "", transport) -> dict:
     with connection.preflight():
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
         if method not in {"squash", "merge", "rebase"}:
             raise Fault("invalid_github_request", "Select squash, merge or rebase; queues and auto-merge are not implemented.")
         gate = evidence.merge_gate(repository, number, expected_head_sha, expected_base_sha, transport=transport)
+        if expected_base_ref and gate["base_ref"] != expected_base_ref:
+            raise Fault("github_candidate_changed", "The original merge destination changed; no merge was submitted.")
         if gate["blockers"]:
             return _public({"status": "merge_blocked", "repository": repository, "actor": actor, "gate": gate})
         if connection.read_actor(settings, transport=transport) != actor:

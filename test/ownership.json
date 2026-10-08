@@ -601,6 +601,7 @@
       "test/resilience/execution/test_worktrees.py"
     ],
     "test/support/github_cases.py": [
+      "test/component/app/test_github_admission.py",
       "test/component/github/test_transport.py",
       "test/unit/github/test_operations.py"
     ],

@@ -164,6 +164,39 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         with patch.object(connection, "read_actor", side_effect=[ACTOR, actor]):
             self.assert_fault("github_identity_changed", github.reconcile, settings(), locator, transport=self.transport)
 
+    def test_retained_merge_binding_verifies_head_destination_and_message(self):
+        self.pr.update(merged=True, merge_commit_sha=MERGE)
+        binding = {"head_sha": HEAD, "base_ref": "main",
+                   "commit_title_sha256": hashlib.sha256(b"Fixture merge").hexdigest(),
+                   "commit_message_sha256": hashlib.sha256(b"Fixture body").hexdigest()}
+        locator = dict(self.task_locator("merge", 2), merge=binding)
+        commit = {"sha": MERGE, "commit": {"message": "Fixture merge\n\nFixture body\n"}}
+        comparison = {"status": "ahead", "merge_base_commit": {"sha": MERGE}}
+        def response(method, target, payload=None):
+            values = {f"{ROOT}/commits/{MERGE}": commit, f"{ROOT}/branches/main": {"commit": {"sha": TREE}},
+                      f"{ROOT}/compare/{MERGE}...{TREE}": comparison}
+            return copy.deepcopy(values[target]) if target in values else self.response(method, target, payload)
+        with patch.object(self, "transport", side_effect=response) as transport:
+            self.assertEqual(github.reconcile(settings(), locator, transport=transport)["status"], "merged_verified")
+            for key, changed in (("merged", False), ("base", dict(self.pr["base"], ref="other"))):
+                with self.subTest(key=key), patch.dict(self.pr, {key: changed}):
+                    self.assertEqual(github.reconcile(settings(), locator, transport=transport)["status"], "write_outcome_unknown")
+            with patch.dict(self.pr["head"], sha=BASE):
+                self.assert_fault("github_candidate_changed", github.reconcile, settings(), locator, transport=transport)
+            for message in ("Wrong title\n\nFixture body", "Fixture merge\n\nWrong body", None):
+                with self.subTest(message=message), patch.dict(commit["commit"], message=message):
+                    self.assertEqual(github.reconcile(settings(), locator, transport=transport)["status"], "write_outcome_unknown")
+            comparison["merge_base_commit"]["sha"] = BASE
+            self.assertEqual(github.reconcile(settings(), locator, transport=transport)["status"], "write_outcome_unknown")
+            self.assertTrue(all(call.args[0] == "GET" for call in transport.call_args_list))
+
+    def test_merge_rejects_destination_change_before_mutation(self):
+        self.pr["base"]["ref"] = "other"
+        with self.assertRaises(Fault) as caught:
+            github.merge(settings(), REPO, 2, HEAD, BASE, expected_base_ref="main", transport=self.transport)
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("github_candidate_changed", "known_no_effect"))
+        self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
+
     def test_attribution_has_only_the_two_fixed_footer_literals(self):
         self.assertEqual(operations.ATTRIBUTION_URL, "https://github.com/OpenMachineLabs/openmachine")
         self.assertEqual(operations.CREATED_FOOTER, CREATED)

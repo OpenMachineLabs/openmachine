@@ -76,6 +76,24 @@ native policy. Zero checks is `no_checks`, not PASS. Self-review COMMENT is not
 independent approval. No bypass, auto-merge, queue or stacked-PR orchestration.
 Only `merged_verified` proves the original commit reached the destination branch.
 
+New supervised merges retain their exact HEAD, original destination branch and
+hashes of explicitly supplied commit text before dispatch (state contract 19).
+The existing explicit task reconciliation can then verify a merged destination
+after a lost reply or runtime restart, without recovering the original Chat's
+arguments. Later commits on the destination are allowed when the actual merge
+commit remains its ancestor. Changed HEAD, destination, supplied text or unavailable
+ancestry evidence leaves the original outcome unresolved. No request is resent.
+This verifies the requested destination outcome, not which client caused it.
+
+Passive `read_task` and the local execution observer do not reconcile GitHub.
+An explicit `control_task` stage decision observes outstanding original results;
+if that observation advances the task revision, read the new revision before
+submitting the decision again. Old merges without retained binding still need
+the original arguments and operation ID through the existing same-ID path.
+A changed base before dispatch is a known-no-effect rejection: re-read the
+candidate, assess the intervening changes and current gates, then submit corrected
+intent only within existing authority. Never treat a lost response as that case.
+
 Creates are non-idempotent. Preserve original locators; uncertain/unverified
 writes and merges require destination reads, never automatic retries or new IDs.
 For a verified pre-send connection failure, credential contention or rate limit,

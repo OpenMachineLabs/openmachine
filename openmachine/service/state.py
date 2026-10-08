@@ -17,7 +17,7 @@ from openmachine.foundation.state import private_directory, save_json
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
 # Contract 18 activates the Task ledger after stopping the old controller.
-STATE_CONTRACT = 18
+STATE_CONTRACT = 19
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

@@ -8,6 +8,19 @@ from openmachine.tasks import records, transitions
 
 
 class TaskTransitionTests(unittest.TestCase):
+    def test_merge_binding_is_optional_bounded_and_only_for_a_numbered_merge(self):
+        locator = {"kind": "github", "repository": "Owner/repo", "object_type": "merge", "number": 7,
+                   "parent_number": None, "anchor": "om-task:fixture:" + "a" * 32}
+        self.assertEqual(records.GitHubLocator.model_validate(locator).model_dump(), locator)
+        binding = {"head_sha": "a" * 40, "base_ref": "main",
+                   "commit_title_sha256": None, "commit_message_sha256": "b" * 64}
+        self.assertEqual(records.GitHubLocator.model_validate(dict(locator, merge=binding)).model_dump()["merge"], binding)
+        for delta in ({"object_type": "issue"}, {"number": None}, {"parent_number": 9},
+                      {"merge": dict(binding, head_sha="invalid")}, {"merge": dict(binding, base_ref="")},
+                      {"merge": dict(binding, commit_title_sha256="raw text")}, {"merge": dict(binding, base_ref="x" * 257)}):
+            with self.subTest(delta=delta), self.assertRaises(ValueError):
+                records.GitHubLocator.model_validate(dict(locator, merge=binding) | delta)
+
     def record(self):
         request = records.normalize_create({"task_id": "fixture", "update_id": "1" * 32,
             "title": "Retain original fixture evidence", "anchors": [],
