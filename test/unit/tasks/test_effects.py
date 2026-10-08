@@ -3,7 +3,7 @@
 from copy import deepcopy
 import unittest
 
-from openmachine.tasks import effects
+from openmachine.tasks import effects, records
 
 
 class EffectScopeTests(unittest.TestCase):
@@ -30,6 +30,42 @@ class EffectScopeTests(unittest.TestCase):
         another = self.operation("github_merge")
         another["locator"]["number"] = another["effect_scope"]["number"] = 8
         self.assertFalse(self.conflict(thread, another))
+
+    def creation(self, kind="pull_request", head="topic", base="main"):
+        operation = self.operation("github_" + kind)
+        operation["locator"]["number"] = None
+        args = {"action": "create", "number": 0, "repository": "Owner/repo"}
+        if kind == "pull_request":
+            args.update(head=head, base=base)
+        operation["effect_scope"] = effects.github_scope("github_" + kind, args)
+        return operation
+
+    def test_pr_creation_is_independent_of_numbered_pr_history(self):
+        creating = self.creation()
+        for number in (78, 80, 93):
+            for method in ("github_issue", "github_pull_request", "github_merge"):
+                with self.subTest(number=number, method=method):
+                    existing = self.operation(method)
+                    existing["locator"]["number"] = existing["effect_scope"]["number"] = number
+                    self.assertFalse(self.conflict(creating, existing))
+        self.assertFalse(self.conflict(creating, self.operation("github_review", body="comment", review_id=11)))
+        self.assertFalse(self.conflict(creating, self.operation("github_comment", comment_id=12, body="comment")))
+
+    def test_pr_creation_uses_source_target_and_kind_to_detect_duplicates(self):
+        creating = self.creation()
+        duplicate = self.creation()
+        self.assertEqual(creating["effect_scope"]["creation_key"], duplicate["effect_scope"]["creation_key"])
+        self.assertTrue(self.conflict(creating, duplicate))
+        self.assertFalse(self.conflict(creating, self.creation(head="another")))
+        self.assertFalse(self.conflict(creating, self.creation(base="release")))
+        self.assertTrue(self.conflict(creating, self.creation(head="Owner:topic")))
+        self.assertTrue(self.conflict(creating, self.creation(head="OWNER:topic")))
+        self.assertTrue(self.conflict(self.creation(head="Fork:topic"), self.creation(head="fork:topic")))
+        self.assertFalse(self.conflict(creating, self.creation(head="Fork:topic")))
+        self.assertFalse(self.conflict(creating, self.creation(head="Owner:Topic")))
+        self.assertFalse(self.conflict(creating, self.creation(kind="issue")))
+        self.assertTrue(self.conflict(self.creation(kind="issue"), self.creation(kind="issue")))
+        self.assertNotIn("creation_key", self.operation("github_pull_request")["effect_scope"])
 
     def test_shared_issue_metadata_alias_and_disjoint_fields(self):
         label = self.operation("github_pull_request", labels=[])
@@ -73,10 +109,22 @@ class EffectScopeTests(unittest.TestCase):
         opaque = self.operation("github_pull_request", labels=[])
         opaque.pop("effect_scope")
         self.assertTrue(self.conflict(opaque, self.operation("github_pull_request", body="new")))
-        create = self.operation("github_pull_request")
-        create["locator"]["number"] = None
-        create["effect_scope"] = effects.github_scope("github_pull_request", {"action": "create", "number": 0})
-        self.assertTrue(self.conflict(create, self.operation("github_merge")))
+        create = self.creation()
+        self.assertFalse(self.conflict(create, self.operation("github_merge")))
+        after_create = deepcopy(create)
+        after_create["locator"]["number"] = 7
+        self.assertTrue(self.conflict(after_create, self.operation("github_merge")))
+        self.assertEqual(records.GitHubEffectScope.model_validate(
+            self.operation("github_pull_request")["effect_scope"]).model_dump(),
+            self.operation("github_pull_request")["effect_scope"])
+        historic = self.creation()
+        historic.pop("effect_scope")
+        self.assertTrue(self.conflict(historic, self.operation("github_merge")))
+        self.assertTrue(self.conflict(historic, self.creation(head="another")))
+        missing_identity = self.creation()
+        missing_identity["effect_scope"] = effects.github_scope(
+            "github_pull_request", {"action": "create", "number": 0})
+        self.assertTrue(self.conflict(missing_identity, self.creation(head="another")))
         other = deepcopy(create)
         other["locator"]["repository"] = "Owner/another"
         self.assertFalse(self.conflict(create, other))

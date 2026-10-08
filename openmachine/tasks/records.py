@@ -242,6 +242,7 @@ class GitHubEffectScope(Model):
     number: Revision | None
     parent_number: Revision | None
     fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "threads", "create"]], Field(min_length=1, max_length=5)]
+    creation_key: SHA | None = None
 
     @model_validator(mode="after")
     def canonical_fields(self):
@@ -249,7 +250,16 @@ class GitHubEffectScope(Model):
             raise ValueError("effect fields need a unique canonical set")
         if self.resource == "object" and self.parent_number is not None:
             raise ValueError("object scopes have no parent")
+        if self.creation_key is not None and (self.resource != "object" or self.number is not None or self.fields != ["create"]):
+            raise ValueError("creation identity belongs only to an unnumbered object creation")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.creation_key is None:
+            value.pop("creation_key", None)
+        return value
 
 
 class Result(Model):

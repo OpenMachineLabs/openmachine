@@ -120,6 +120,11 @@ lock before domain IO. Each domain retains source, sequence, permission and leas
 checks. Per-effect locks span bounded dispatch, not a command's lifetime. Capacity
 reserves space/slots for original results, stopping and completion. One unresolved
 mutation blocks conflicting work; original commands still allow authorized controls.
+A new PR has no number yet: its creation scope identifies the operation type and
+source/target branches, so numbered historical PR writes and different creation
+branches remain independent. The same source/target pair still excludes duplicate
+creation; older unnumbered writes without verified identity remain conservative.
+These task-side guards do not replace GitHub's live authorization or merge policy.
 Original-ID cancellation remains available when task metadata/capacity is blocked.
 
 Pause prevents new admission, not already-admitted effects. Cancellation records

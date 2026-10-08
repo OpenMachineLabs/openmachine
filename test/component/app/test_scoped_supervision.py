@@ -155,12 +155,27 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                                      task_context=context)
         self.assertEqual(len(self.app.read_task("second-task")["record"]["operations"]), 1)
 
-    def test_bare_creation_with_missing_locator_number_still_scans_pending(self):
+    def test_unverified_pr_creation_excludes_duplicates_not_unrelated_branches(self):
         self.app.github_pull_request(action="create", repository="Owner/repo", title="Original", body="Original",
             head="topic", base="main", task_context=self.context_for(uuid.uuid4().hex))
-        self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
-                   title="Duplicate", body="Duplicate", head="another", base="main")
-        self.assertEqual(self.provider.pull_request.call_count, 1)
+        for head in ("topic", "Owner:topic", "OWNER:topic"):
+            self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
+                       title="Duplicate", body="Different title", head=head, base="main")
+        created = self.app.github_pull_request(action="create", repository="Owner/repo", title="Independent",
+            body="Independent", head="another", base="main")
+        self.assertEqual(created["status"], "write_outcome_unknown")
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+
+    def test_old_pr_unknown_does_not_block_new_pr_in_another_task(self):
+        self.update_pr(body="Historical uncertainty.")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        created = self.app.github_pull_request(
+            action="create", repository="Owner/repo", title="New PR", body="Independent change",
+            head="fresh", base="main", task_context=self.second_task())
+        self.assertEqual(created["status"], "write_outcome_unknown")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.provider.pull_request.assert_called()
+        self.assertEqual(self.provider.pull_request.call_count, 2)
 
     def test_repo_lease_covers_bare_and_supervised_writers_until_publication(self):
         entered, release = threading.Event(), threading.Event()

@@ -13,7 +13,14 @@ def github_scope(method: str, arguments: dict) -> dict:
              "number": positive(number), "parent_number": None, "fields": ["*"]}
     if kind in {"issue", "pull_request"}:
         if action == "create":
-            scope["number"] = None
+            scope.update(number=None, fields=["create"])
+            if kind == "issue":
+                scope["creation_key"] = records.digest([kind])
+            elif arguments.get("head") and arguments.get("base"):
+                owner, colon, branch = arguments["head"].partition(":")
+                if not colon:
+                    owner, branch = arguments["repository"].split("/", 1)[0], owner
+                scope["creation_key"] = records.digest([kind, owner.casefold(), branch, arguments["base"]])
         elif action == "update":
             scope["fields"] = sorted(key for key in ("title", "body", "state", "labels", "assignees")
                                      if arguments.get(key) is not None) or ["*"]
@@ -66,16 +73,21 @@ def github_conflict(first: dict, second: dict) -> bool:
     if first["repository"].casefold() != second["repository"].casefold():
         return False
     left, right = first["resource"], second["resource"]
-    # Missing destination for an object creation/opaque legacy request is a
-    # repository wildcard until original evidence identifies its destination.
-    if any(item["resource"] == "object" and item["number"] is None for item in (first, second)):
-        return True
+    unnumbered = [item for item in (first, second)
+                  if item["resource"] == "object" and item["number"] is None]
+    if unnumbered:
+        # Historical opaque creations without a proven source remain conservative.
+        if any(item["fields"] != ["create"] or not item.get("creation_key") for item in unnumbered):
+            return True
+        # A new PR cannot replace any already-numbered Issue/PR or review.
+        return (len(unnumbered) == 2 and left == right == "object"
+                and first["creation_key"] == second["creation_key"])
     if left == right == "object":
         if first["number"] != second["number"]:
             return False
         a, b = set(first["fields"]), set(second["fields"])
         lifecycle = {"state", "draft", "merge", "threads"}
-        return "*" in a or "*" in b or bool(a & b) or bool(a & lifecycle and b & lifecycle)
+        return "*" in a or "*" in b or "create" in a or "create" in b or bool(a & b) or bool(a & lifecycle and b & lifecycle)
     if left == right:
         if first["number"] is not None and second["number"] is not None:
             return first["number"] == second["number"]
