@@ -37,6 +37,8 @@ class TaskObserver:
         self._wake = threading.Event()
         self._dirty = threading.Event()
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._sequence = 0
         self._thread = None
         self._snapshot = {"state": "not_started", "observed_at_ms": None, "blocker": None,
                           "active": {}, "last": {}, "errors": {}}
@@ -74,6 +76,8 @@ class TaskObserver:
             self._admission_at = 0
             self._admission_error = None
             self._snapshot = dict(self._snapshot, state="starting", blocker=None)
+            self._sequence += 1
+            self._condition.notify_all()
             self._thread = threading.Thread(target=self._run, name="om-task-observer", daemon=True)
             self._thread.start()
 
@@ -87,14 +91,37 @@ class TaskObserver:
         # the owner lease until it exits, but never publishes after stopping.
 
     def notify(self) -> None:
+        with self._condition:
+            self._sequence += 1
+            self._condition.notify_all()
         self._dirty.set()
         self._wake.set()
 
-    def _status(self, state: str, blocker: str | None = None) -> None:
+    def sequence(self) -> int:
         with self._lock:
-            self._snapshot = {"state": state, "observed_at_ms": observation.now_ms(), "blocker": blocker or self._admission_error,
+            return self._sequence
+
+    def wait(self, sequence: int, seconds: float, cancelled: threading.Event | None = None) -> int:
+        deadline = time.monotonic() + max(0.0, seconds)
+        with self._condition:
+            while self._sequence == sequence and not (cancelled is not None and cancelled.is_set()):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._condition.wait(min(remaining, 0.1 if cancelled is not None else remaining))
+            return self._sequence
+
+    def _status(self, state: str, blocker: str | None = None) -> None:
+        with self._condition:
+            value = {"state": state, "observed_at_ms": observation.now_ms(), "blocker": blocker or self._admission_error,
                 "active": dict(self._active), "last": dict(self._last), "errors": dict(self._errors),
                 "connections": dict(self._connections)}
+            changed = any(value.get(key) != self._snapshot.get(key)
+                          for key in ("state", "blocker", "active", "last", "errors", "connections"))
+            self._snapshot = value
+            if changed:
+                self._sequence += 1
+                self._condition.notify_all()
 
     def _run(self) -> None:
         failure = None

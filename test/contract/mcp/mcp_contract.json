@@ -3647,6 +3647,44 @@
         "type": "object"
       }
     },
+    "wait_task": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "default": 30.0,
+            "maximum": 30.0,
+            "minimum": 0,
+            "title": "Wait Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_revision"
+        ],
+        "title": "wait_taskArguments",
+        "type": "object"
+      }
+    },
     "write_workspace_file": {
       "annotations": {
         "destructiveHint": true,

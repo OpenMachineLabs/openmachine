@@ -415,6 +415,18 @@
         "test/resilience/ssh/test_transport.py"
       ]
     },
+    "task_attention": {
+      "boundary_tests": [
+        "test/component/app/test_task_admission.py"
+      ],
+      "sources": [
+        "openmachine/app/task_attention.py"
+      ],
+      "tests": [
+        "test/component/app/test_task_attention.py",
+        "test/contract/mcp/tasks/test_attention.py"
+      ]
+    },
     "task_admission": {
       "boundary_tests": [
         "test/component/app/test_execution_dispatch.py",
@@ -583,6 +595,7 @@
       "test/contract/mcp/server/test_transport.py",
       "test/contract/mcp/ssh/test_discovery.py",
       "test/contract/mcp/tasks/test_admission.py",
+      "test/contract/mcp/tasks/test_attention.py",
       "test/contract/mcp/tasks/test_schema.py",
       "test/contract/mcp/workspace/test_edits.py",
       "test/contract/mcp/workspace/test_patch.py",
@@ -652,6 +665,7 @@
       "test/component/app/test_ssh_observation.py",
       "test/component/app/test_ssh_routes.py",
       "test/component/app/test_task_admission.py",
+      "test/component/app/test_task_attention.py",
       "test/component/app/test_task_observer.py",
       "test/component/chat_recovery/test_recovery.py",
       "test/component/codex/test_discovery.py",

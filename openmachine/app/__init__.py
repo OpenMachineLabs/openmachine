@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import threading
+import time
 from types import ModuleType
 from typing import Literal
 
@@ -15,6 +16,7 @@ from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_P
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
+from . import task_attention
 from .chat_recovery import ChatRecovery
 from .machines import Machines
 from .task_admission import TaskAdmission
@@ -23,6 +25,7 @@ from .task_observer import TaskObserver
 MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
 MAX_SOURCE = workspace.MAX_SOURCE
 bound_workspace_result = workspace.bound_result
+MAX_TASK_WAIT = task_attention.MAX_WAIT_SECONDS
 
 
 class Application:
@@ -106,6 +109,9 @@ class Application:
             "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
                       "index_format": 2, "supervised_admission": True, "runtime_recovery": False,
                       "events_delivery": False,
+                      "foreground_wait": {"max_seconds": task_attention.MAX_WAIT_SECONDS,
+                          "handoff_grace_seconds": task_attention.HANDOFF_GRACE_MS // 1000,
+                          "attention_reasons": list(task_attention.ATTENTION_REASONS)},
                       "local_result_observation": True,
                       "ssh_result_observation": self.machines.ssh_recovery is not None},
             "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
@@ -208,12 +214,49 @@ class Application:
                    limit: int = 20, expected_generation: int = -1) -> dict:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
-    def read_task(self, task_id: str, preparation_id: str | None = None) -> dict:
+    def _task_view(self, task_id: str, *, wait_expired: bool = False) -> dict:
         view = self.task_observer.project(tasks.read(self.state, task_id))
+        return task_attention.project(view, wait_expired=wait_expired)
+
+    def read_task(self, task_id: str, preparation_id: str | None = None) -> dict:
+        view = self._task_view(task_id)
         if preparation_id is not None:
             if self.chat_recovery is None:
                 raise Fault("chat_recovery_unavailable", "No receiver preparation is available.")
             return self.chat_recovery.preparation_read(view, preparation_id)
+        return self.chat_recovery.project(view) if self.chat_recovery is not None else view
+
+    def wait_task(self, task_id: str, expected_revision: int, wait_seconds: float = MAX_TASK_WAIT,
+                  *, cancelled: threading.Event | None = None) -> dict:
+        if type(expected_revision) is not int or expected_revision < 1 or not 0 <= wait_seconds <= MAX_TASK_WAIT:
+            raise Fault("invalid_task_wait", "Supply an observed positive task revision and a finite 0..30 second wait.")
+        started = time.monotonic()
+        sequence = self.task_observer.sequence()
+        while True:
+            view = self._task_view(task_id)
+            if "record" not in view:
+                raise Fault("task_legacy", "Foreground waiting requires a structured task record.")
+            record, foreground = view["record"], view["foreground"]
+            if foreground["status"] in {"attention_required", "ready", "terminal"}:
+                wait_status = foreground["status"]
+                break
+            if record["revision"] != expected_revision:
+                wait_status = "changed"
+                break
+            if cancelled is not None and cancelled.is_set():
+                view = self._task_view(task_id, wait_expired=True)
+                wait_status = "cancelled"
+                break
+            remaining = wait_seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                view = self._task_view(task_id, wait_expired=True)
+                wait_status = "expired"
+                break
+            sequence = self.task_observer.wait(
+                sequence, min(remaining, task_attention.WAIT_SLICE_SECONDS), cancelled)
+        elapsed = max(0, int((time.monotonic() - started) * 1000))
+        view = {**view, "wait": {"status": wait_status, "expected_revision": expected_revision,
+            "current_revision": view["record"]["revision"], "elapsed_ms": elapsed}}
         return self.chat_recovery.project(view) if self.chat_recovery is not None else view
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
@@ -246,7 +289,7 @@ class Application:
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
-                 "find_tasks", "read_task", "save_task", "create_task", "control_task", "configure_chat_recovery", "start_execution", "read_execution",
+                 "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "configure_chat_recovery", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_merge",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",

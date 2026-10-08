@@ -235,6 +235,28 @@ protections, checks, review decisions and discussions. A stage can accept nonemp
 successful evidence independent of all unresolved scopes, while the unresolved
 IDs remain visible. Finish still blocks every original unresolved effect.
 
+## Bounded foreground waiting
+
+`wait_task` performs one read-only foreground wait for a structured task. It accepts
+an observed task revision and waits at most 30 seconds for a task revision, ready
+handoff, terminal result or derived attention condition. Expiry returns
+`foreground.status=wait_expired`, `stop_foreground=true`, whether original work is
+still running, and a bounded resume prompt. It never extends an execution timeout,
+claims continuation, dispatches another effect or cancels original work.
+
+Attention distinguishes an unconsumed handoff after its two-minute grace, an
+expired continuation without verified original work, and a pending execution whose
+observer is stopped, stale or blocked. Silent output alone is not failure: a
+verifiably observed command remains running until its own timeout or result. New
+business effects for an attention task fail with `task_attention_required`; passive
+reads and original-ID cancellation remain available. A later caller reads the same
+record and receipts, then claims an eligible handoff before new work.
+
+The operating Skill treats `foreground.stop_foreground=true` as an end-of-turn
+boundary and reports the reason plus resume prompt. This foreground mechanism is
+not Desktop notification or task-owned Chat recovery, and it cannot inject a message
+into a Chat that has already disconnected.
+
 Every persisted observation advances `revision` only when its content changes.
 Format 4 also records the last material `control_revision`. Business admission can
 use an observed revision within that interval if plan, epoch, live ownership and
