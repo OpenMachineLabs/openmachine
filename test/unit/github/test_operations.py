@@ -13,6 +13,67 @@ from test.support.github_cases import ACTOR, BASE, CREATED, GitHubCaseFixture, H
 
 
 class GitHubTests(GitHubCaseFixture, unittest.TestCase):
+    def test_review_thread_resolve_and_unresolve_verify_exact_destination(self):
+        thread_id = "PRRT_fixture"
+        for action, initial, expected in (("resolve", False, True), ("unresolve", True, False)):
+            with self.subTest(action=action):
+                self.threads = [{"id": thread_id, "isResolved": initial, "isOutdated": True}]
+                mutation = "resolveReviewThread" if expected else "unresolveReviewThread"
+                def api(method, endpoint, payload=None):
+                    if method == "POST" and endpoint == "graphql" and payload["query"].startswith("mutation("):
+                        self.assertEqual(payload["variables"], {"threadId": thread_id})
+                        self.assertIn(mutation, payload["query"])
+                        self.threads[0]["isResolved"] = expected
+                        return {"data": {mutation: {"thread": {"id": thread_id, "isResolved": expected}}}}
+                    return self.response(method, endpoint, payload)
+                with patch.object(self, "transport", side_effect=api) as transport:
+                    result = github.review_thread(settings(), action, REPO, 2, thread_id, HEAD, BASE, transport=self.transport)
+                self.assertEqual((result["status"], result["fields_verified"]), ("verified", True))
+                self.assertEqual(result["receipt"], {"number": 2, "thread_id": thread_id, "requested_isResolved": expected, "isResolved": expected})
+                self.assertEqual(sum("mutation(" in call.args[2]["query"] for call in transport.call_args_list
+                                     if call.args[1] == "graphql"), 1)
+
+    def test_review_thread_preflight_rejects_wrong_target_state_and_head(self):
+        self.threads = [{"id": "PRRT_fixture", "isResolved": True, "isOutdated": True}]
+        cases = [("github_object_changed", "resolve", "PRRT_fixture", HEAD, BASE),
+                 ("github_not_found", "resolve", "PRRT_other", HEAD, BASE),
+                 ("github_candidate_changed", "resolve", "PRRT_fixture", BASE, BASE),
+                 ("github_candidate_changed", "resolve", "PRRT_fixture", HEAD, HEAD),
+                 ("invalid_github_request", "resolve", "invalid", HEAD, BASE)]
+        for code, action, thread_id, head, base in cases:
+            with self.subTest(code=code, thread_id=thread_id):
+                self.assert_fault(code, github.review_thread, settings(), action, REPO, 2,
+                                  thread_id, head, base, transport=self.transport)
+        self.assertFalse(any(call.args[1] == "graphql" and "mutation(" in call.args[2]["query"]
+                             for call in self.transport.call_args_list))
+
+    def test_review_thread_unknown_and_unverified_results_never_replay(self):
+        thread_id = "PRRT_fixture"
+        self.threads = [{"id": thread_id, "isResolved": False, "isOutdated": False}]
+        def lost_reply(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql" and payload["query"].startswith("mutation("):
+                self.threads[0]["isResolved"] = True
+                raise OSError("Response lost after mutation")
+            return self.response(method, endpoint, payload)
+        with patch.object(self, "transport", side_effect=lost_reply) as transport:
+            result = github.review_thread(settings(), "resolve", REPO, 2, thread_id, HEAD, transport=self.transport)
+            locator = dict(self.task_locator("review_thread", 2), thread_id=thread_id, expected_head_sha=HEAD)
+            observed = github.reconcile(settings(), locator, transport=self.transport)
+        self.assertEqual((result["status"], observed["status"]), ("write_outcome_unknown", "write_outcome_unknown"))
+        self.assertTrue(observed["receipt"]["isResolved"])
+        self.assertNotIn("isResolved", result["receipt"])
+        self.assertEqual(sum(call.args[1] == "graphql" and "mutation(" in call.args[2]["query"]
+                             for call in transport.call_args_list), 1)
+
+        self.threads[0]["isResolved"] = False
+        def false_ack(method, endpoint, payload=None):
+            if method == "POST" and endpoint == "graphql" and payload["query"].startswith("mutation("):
+                return {"data": {"resolveReviewThread": {"thread": {"id": thread_id, "isResolved": True}}}}
+            return self.response(method, endpoint, payload)
+        with patch.object(self, "transport", side_effect=false_ack):
+            unverified = github.review_thread(settings(), "resolve", REPO, 2, thread_id, HEAD, transport=self.transport)
+        self.assertEqual(unverified["status"], "write_unverified")
+
     def test_task_publication_reconciliation_reads_original_destination_only(self):
         locator = self.task_locator("issue")
         body = "Retained fixture request.\n\n<!-- " + locator["anchor"] + " -->"

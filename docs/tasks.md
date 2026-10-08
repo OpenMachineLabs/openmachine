@@ -120,6 +120,11 @@ lock before domain IO. Each domain retains source, sequence, permission and leas
 checks. Per-effect locks span bounded dispatch, not a command's lifetime. Capacity
 reserves space/slots for original results, stopping and completion. One unresolved
 mutation blocks conflicting work; original commands still allow authorized controls.
+A new PR has no number yet: its creation scope identifies the operation type and
+source/target branches, so numbered historical PR writes and different creation
+branches remain independent. The same source/target pair still excludes duplicate
+creation; older unnumbered writes without verified identity remain conservative.
+These task-side guards do not replace GitHub's live authorization or merge policy.
 Original-ID cancellation remains available when task metadata/capacity is blocked.
 
 Pause prevents new admission, not already-admitted effects. Cancellation records
@@ -195,6 +200,33 @@ current destination snapshot can prove a historical request was never dispatched
 The witness input is bounded at 128 KiB; only its fingerprint, compact scope,
 principal and timestamp are retained, not raw bodies or parameters.
 
+Scope binding rechecks the current owner, authority, workspace identity and native
+grants. A changed local HEAD does not block this evidence-only action; new local
+effects and stage acceptance still require the accepted HEAD. Plan revision pins
+each unresolved GitHub operation's own repository and native account binding.
+Explicit changes to unrelated repositories remain possible under ordinary scope
+validation and stage invalidation.
+
+For a retained 0.2.11 task, first inspect the running server's capabilities and
+the actual `control_task` schema. The scoped reader supports record formats 1..4;
+`bind_effect_scope` is a `control_task.transition.action`, not a separate tool.
+The original 0.2.11 runtime lacks this action even when newer source or Skill text
+is present. Update through the managed compatibility checks only under explicit
+installation authority, then refresh the client's tool catalog. Do not drop
+`task_context` to work around an older catalog.
+
+Read the original task and destination before continuing. Resume only under
+existing user authority, claim the same task, and retain its original operation ID.
+For format 3, a valid control upgrades the record without replacing its operations.
+Older native-account records require an explicit plan revision retaining their
+bindings and declaring a recovery policy before scope enrollment; retired gh history cannot
+be transferred to a native account. Supply the exact complete normalized original
+arguments to `bind_effect_scope`; if they are unavailable, retain the conservative
+scope. To reconcile the outcome, call the original GitHub method with those same
+arguments and operation ID: this path reads the destination and never dispatches
+again. Scope binding alone leaves the outcome unknown. A missing, changed or
+unverifiable destination leaves the original uncertainty intact.
+
 New owner failures retain a failure code and effect classification. An explicit
 business preflight rejection is failed/known-no-effect without a reconciling read
 that could replace the result. A dispatched or acknowledged write with insufficient
@@ -207,6 +239,28 @@ Current acceptance remains separate: each merge reads the current HEAD/base,
 protections, checks, review decisions and discussions. A stage can accept nonempty,
 successful evidence independent of all unresolved scopes, while the unresolved
 IDs remain visible. Finish still blocks every original unresolved effect.
+
+## Bounded foreground waiting
+
+`wait_task` performs one read-only foreground wait for a structured task. It accepts
+an observed task revision and waits at most 30 seconds for a task revision, ready
+handoff, terminal result or derived attention condition. Expiry returns
+`foreground.status=wait_expired`, `stop_foreground=true`, whether original work is
+still running, and a bounded resume prompt. It never extends an execution timeout,
+claims continuation, dispatches another effect or cancels original work.
+
+Attention distinguishes an unconsumed handoff after its two-minute grace, an
+expired continuation without verified original work, and a pending execution whose
+observer is stopped, stale or blocked. Silent output alone is not failure: a
+verifiably observed command remains running until its own timeout or result. New
+business effects for an attention task fail with `task_attention_required`; passive
+reads and original-ID cancellation remain available. A later caller reads the same
+record and receipts, then claims an eligible handoff before new work.
+
+The operating Skill treats `foreground.stop_foreground=true` as an end-of-turn
+boundary and reports the reason plus resume prompt. This foreground mechanism is
+not Desktop notification or task-owned Chat recovery, and it cannot inject a message
+into a Chat that has already disconnected.
 
 Every persisted observation advances `revision` only when its content changes.
 Format 4 also records the last material `control_revision`. Business admission can

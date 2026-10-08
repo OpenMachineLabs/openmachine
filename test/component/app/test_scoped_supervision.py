@@ -21,14 +21,14 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
             reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
-        for name in ("issue", "pull_request", "comment", "review", "merge"):
+        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge"):
             setattr(self.provider, name, Mock(return_value={"status": "write_outcome_unknown"}))
         self.app.github = self.provider
         self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
             "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
         self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
-        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_merge",
+        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                                "write_workspace_file", "start_execution", "read_task", "control_task"])
 
     def update_pr(self, **values):
@@ -47,6 +47,25 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             update_id=uuid.uuid4().hex, transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
         return {"task_id": "second-task", "task_revision": claimed["revision"], "plan_revision": claimed["plan"]["revision"],
                 "continuation_epoch": claimed["control"]["epoch"], "operation_id": uuid.uuid4().hex}
+
+    def test_review_thread_unknown_keeps_precise_identity_and_blocks_merge(self):
+        op_id = uuid.uuid4().hex
+        args = dict(action="resolve", repository="Owner/repo", number=7,
+                    thread_id="PRRT_fixture", expected_head_sha="e" * 40,
+                    task_context=self.context_for(op_id))
+        self.assertEqual(self.app.github_review_thread(**args)["status"], "write_outcome_unknown")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        self.assertEqual(original["effect_scope"]["fields"], ["threads"])
+        self.assertEqual((original["locator"]["thread_id"], original["locator"]["expected_head_sha"]),
+                         ("PRRT_fixture", "e" * 40))
+        replay = self.app.github_review_thread(**args)
+        self.assertFalse(replay["task_operation_replayed"])
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+        self.assertEqual(original, self.view()["record"]["operations"][0])
+        self.fault("task_effect_unresolved", self.app.github_merge, repository="Owner/repo",
+                   number=7, expected_head_sha="e" * 40,
+                   task_context=self.context_for(uuid.uuid4().hex))
+        self.provider.merge.assert_not_called()
 
     def test_explicit_no_effect_dominates_matching_snapshot_and_retains_failure(self):
         self.provider.pull_request.side_effect = Fault("github_object_changed", "Preflight rejection.", effect="known_no_effect")
@@ -136,12 +155,27 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                                      task_context=context)
         self.assertEqual(len(self.app.read_task("second-task")["record"]["operations"]), 1)
 
-    def test_bare_creation_with_missing_locator_number_still_scans_pending(self):
+    def test_unverified_pr_creation_excludes_duplicates_not_unrelated_branches(self):
         self.app.github_pull_request(action="create", repository="Owner/repo", title="Original", body="Original",
             head="topic", base="main", task_context=self.context_for(uuid.uuid4().hex))
-        self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
-                   title="Duplicate", body="Duplicate", head="another", base="main")
-        self.assertEqual(self.provider.pull_request.call_count, 1)
+        for head in ("topic", "Owner:topic", "OWNER:topic"):
+            self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
+                       title="Duplicate", body="Different title", head=head, base="main")
+        created = self.app.github_pull_request(action="create", repository="Owner/repo", title="Independent",
+            body="Independent", head="another", base="main")
+        self.assertEqual(created["status"], "write_outcome_unknown")
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+
+    def test_old_pr_unknown_does_not_block_new_pr_in_another_task(self):
+        self.update_pr(body="Historical uncertainty.")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        created = self.app.github_pull_request(
+            action="create", repository="Owner/repo", title="New PR", body="Independent change",
+            head="fresh", base="main", task_context=self.second_task())
+        self.assertEqual(created["status"], "write_outcome_unknown")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.provider.pull_request.assert_called()
+        self.assertEqual(self.provider.pull_request.call_count, 2)
 
     def test_repo_lease_covers_bare_and_supervised_writers_until_publication(self):
         entered, release = threading.Event(), threading.Event()
@@ -222,6 +256,120 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.update_pr(body="Now independent.")
         self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertNotIn("arguments", json.loads(self.path.read_bytes())["effect_scopes"][0])
+
+    def test_plan_revision_cannot_hide_an_account_switch_behind_repository_aliases(self):
+        self.update_pr(body="Original unknown body.")
+        record = self.view()["record"]
+        original = deepcopy(record["operations"][0])
+        binding = original["locator"]["connection"]
+        other = dict(binding, connection_id="e" * 32, account_id=2)
+        definitions = [{key: value for key, value in stage.items() if key not in {"state", "evidence"}}
+                       for stage in record["plan"]["stages"]]
+        before = self.path.read_bytes()
+        for aliases in ([("Owner/repo", other), ("owner/repo", binding)],
+                        [("Owner/repo", binding), ("owner/repo", other)]):
+            with self.subTest(first_binding=aliases[0][1]):
+                contract = deepcopy(record["contract"])
+                contract.update(repositories=[key for key, _ in aliases], github_connections=dict(aliases))
+                self.fault("task_effect_unresolved", self.control, "revise_plan", contract=contract,
+                    stages=definitions, invalidated_stage_ids=["verify"],
+                    reason="An alias cannot substitute another account for unresolved work.")
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.provider.pull_request.call_count, 1)
+
+        contract["github_connections"] = {key: deepcopy(binding) for key in contract["repositories"]}
+        revised = self.control("revise_plan", contract=contract, stages=definitions,
+            invalidated_stage_ids=["verify"], reason="Identical aliases retain the original account.")["record"]
+        self.assertEqual(revised["operations"][0], original)
+        self.control("claim", handoff_id=revised["handoff"]["id"])
+        self.provider.pull_request.return_value = self.verified()
+        self.update_pr(title="Independent title under the retained account.")
+        self.assertEqual(self.app.connections.request.call_args.kwargs["binding"], binding)
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+
+    def test_historical_body_timeout_scope_recovery_and_independent_stages(self):
+        # Reproduce the 0.2.11 shape: the request has no persisted scope and
+        # retains an unknown result after the provider loses its response.
+        self.provider.pull_request.side_effect = Fault("github_response_unknown", "Response connection closed after dispatch.", effect="effect_unknown")
+        with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
+            self.fault("github_response_unknown", self.update_pr, body="Original PR body.")
+            arguments = deepcopy(fingerprint.call_args.args[1])
+        historical = self.view()["record"]
+        historical["format"] = 3
+        historical.pop("control_revision")
+        historical.pop("effect_scopes")
+        operation = historical["operations"][0]
+        operation.pop("effect_scope")
+        operation["result"].pop("effect", None)
+        operation["result"].pop("failure_code", None)
+        records.Record.model_validate(historical)
+        self.path.write_bytes(records.canonical(historical))
+        self.app.rebuild_task_index()
+        original = deepcopy(operation)
+        self.control("pause", reason="Retain the original unknown request.")
+        self.control("resume", reason="Continue explicitly authorized independent work.")
+        self.control("claim", handoff_id=self.view()["record"]["handoff"]["id"])
+        self.fault("task_effect_unresolved", self.update_pr, title="Independent title before scope proof.")
+
+        read = self.app.machines.read_workspace_file
+        def changed_head(*args, **kwargs):
+            value = read(*args, **kwargs)
+            return dict(value, context=dict(value["context"], head_sha="f" * 40))
+
+        with patch.object(self.app.machines, "read_workspace_file", side_effect=changed_head):
+            proof = self.control_arguments("bind_effect_scope", operation_id=original["id"],
+                method="github_pull_request", arguments=arguments,
+                reason="Bind exact original intent while an unrelated local HEAD has changed.")
+            bound = self.app.control_task(**proof)["record"]
+            self.assertEqual(self.app.control_task(**proof)["record"], bound)
+            self.fault("context_mismatch", self.app.write_workspace_file, **self.write_arguments())
+        self.assertEqual(bound["effect_scopes"][0]["scope"]["fields"], ["body"])
+        self.assertEqual(bound["operations"][0], original)
+        self.assertEqual(bound["format"], 4)
+        self.assertEqual(self.provider.pull_request.call_count, 1)
+
+        self.provider.pull_request.side_effect = None
+        self.provider.pull_request.return_value = self.verified()
+        self.provider.reconcile.side_effect = Fault("github_connection_failed", "Original destination is temporarily offline.")
+        self.update_pr(title="Independent title after scope proof.")
+        self.fault("task_effect_unresolved", self.update_pr, body="Do not overwrite the unknown body.")
+        self.fault("task_effect_unresolved", self.app.github_merge, repository="Owner/repo", number=7,
+            expected_head_sha="e" * 40, task_context=self.context_for(uuid.uuid4().hex))
+        self.provider.merge.assert_not_called()
+
+        record = self.view()["record"]
+        definitions = [{key: value for key, value in stage.items() if key not in {"state", "evidence"}}
+                       for stage in record["plan"]["stages"]]
+        definitions.append(dict(definitions[0], id="next", depends_on=["verify"]))
+        revised = self.control("revise_plan", contract=record["contract"], stages=definitions,
+            invalidated_stage_ids=[], reason="Continue independently verified local stages.")["record"]
+        self.control("claim", handoff_id=revised["handoff"]["id"])
+        for stage_id in ("verify", "next"):
+            written = self.app.write_workspace_file(**self.write_arguments(path=stage_id + ".txt"))
+            self.control("record_decision", stage_id=stage_id, outcome="accepted",
+                evidence=[written["change_id"]], reason="Accept independent verified local work.")
+        self.fault("task_effect_unresolved", self.control, "finish", outcome="completed",
+            acceptance=[{"stage_id": stage["id"], "operation_id": stage["evidence"][0]}
+                        for stage in self.view()["record"]["plan"]["stages"]], limitations="")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+
+        # The original method and ID remain an observation route, never replay.
+        self.provider.reconcile.side_effect = None
+        self.provider.reconcile.return_value = {"status": "write_outcome_unknown"}
+        retried = self.app.github_pull_request(**arguments, task_context=self.context_for(original["id"]))
+        self.assertFalse(retried["task_operation_replayed"])
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+        self.provider.reconcile.return_value = self.verified()
+        recovered = self.app.github_pull_request(**arguments, task_context=self.context_for(original["id"]))
+        self.assertEqual(recovered["status"], "verified")
+        self.assertEqual(self.provider.pull_request.call_count, 2)
+        final = self.control("finish", outcome="completed",
+            acceptance=[{"stage_id": stage["id"], "operation_id": stage["evidence"][0]}
+                        for stage in self.view()["record"]["plan"]["stages"]], limitations="")["record"]
+        self.assertEqual(final["terminal"]["outcome"], "completed")
+        self.assertEqual(final["operations"][0]["request_sha256"], original["request_sha256"])
+        self.assertEqual(final["effect_scopes"], bound["effect_scopes"])
 
     def test_matching_malformed_historical_scope_proof_has_a_bounded_error(self):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:

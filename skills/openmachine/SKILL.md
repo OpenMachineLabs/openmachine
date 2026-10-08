@@ -108,7 +108,9 @@ below; every continuation still reads and claims the original task safely.
 6. Read original receipts and bounded log pages. Success requires
    `status=succeeded`, a verified zero exit and actual output/readback;
    cancelled/timed-out work can also return zero. An output_gap means expired logs, not complete
-   evidence. Run the project's relevant tests, inspect real exit/output and diff,
+   evidence. After an admitted supervised operation remains active, call
+   `wait_task` once with its returned task revision instead of open-ended polling.
+   Run the project's relevant tests, inspect real exit/output and diff,
    then verify changed and unrelated files. Save material progress and pending
    decisions under the current revision, not on every poll. For structured work,
    use `record_decision` with verified original evidence, then continue the next
@@ -157,6 +159,25 @@ updated user Skills on demand without reinstalling. Preserve old execution recei
 and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
 through OpenAI and redaction is best effort. Original worker/host loss does not authorize reconstruction or replay.
+
+## Foreground task attention
+
+`wait_task` is one bounded foreground wait, not a scheduler or recovery loop. Call
+it at most once for the same active operation in one Chat turn. A returned
+`foreground.stop_foreground=true`, including `attention_required` or
+`wait_expired`, is a mandatory end-of-turn boundary: do not call `wait_task`
+again, renew or claim continuation, start another effect, or hide the result behind
+a progress update. State the concise reason, whether original work may still be
+running, and the returned resume prompt. A `task_attention_required` admission
+fault has the same boundary; read the task once if needed to present its current
+foreground facts, then end the turn.
+
+Foreground wait expiry does not cancel or time out the original execution. It
+only stops the Chat from appearing to work indefinitely. A later Chat reads the
+same task, handoff and original receipts, then claims an eligible handoff before
+new effects. Never replay completed, failed, partial or unknown operations. This
+foreground stop neither opens a browser nor uses task-owned Chat recovery, and it
+cannot push a message into a caller that has already disconnected.
 
 ## Runtime and target compatibility
 
@@ -310,6 +331,14 @@ original normalized GitHub arguments whose method/plan/source fingerprint matche
 the retained request. Runtime derives and appends an immutable scope witness; it
 does not dispatch, replace the original operation or prove no effect. Never infer
 past non-execution from today's destination. Missing original proof stays unknown.
+Check the actual `control_task` schema: `bind_effect_scope` is a transition action,
+and the original 0.2.11 runtime does not expose it. New source or Skill text does
+not upgrade an installed server or cached client catalog. Managed installation
+and catalog refresh require their own authority; never strip task_context.
+Scope binding retains owner, identity and grant checks but does not require the
+historical local HEAD. New local work and acceptance still enforce that HEAD.
+Plan revisions preserve each unresolved operation's own repository/account
+binding; unrelated repositories may change with ordinary scope validation.
 Verified historical GitHub receipts remain immutable; current merge acceptance
 still reads current HEAD/base, protections, checks and discussions. Independent
 stage evidence can be accepted while disjoint uncertainty is explicitly retained;

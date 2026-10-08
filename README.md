@@ -194,8 +194,9 @@ persisted handoff, readback, claim and actual next intent are different facts.
 
 Workspace preparation and record ownership are separate from application.
 Task models remain in `records.py`; pure decisions live in `transitions.py`.
-`app/task_observer.py` owns threads/leases; `task_observation.py` owns observation
-policy and read-only views. Service remains independent of Desktop. Existing
+`app/task_observer.py` owns threads/leases; `task_observation.py` owns receipt
+observation facts, and `task_attention.py` derives bounded foreground stop views.
+Service remains independent of Desktop. Existing
 `python -m openmachine.execution` and `python -m openmachine.service check-state`
 entries remain intact.
 

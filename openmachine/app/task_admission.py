@@ -10,9 +10,10 @@ from openmachine import execution, tasks
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 from openmachine.tasks import effects, records, transitions
+from . import task_attention
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
-GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"}
+GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"}
 METHODS = FILE_METHODS | GITHUB_METHODS | {"start_execution", "control_execution", "cancel_execution"}
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
@@ -62,6 +63,14 @@ class TaskAdmission:
         # is neither a model-supplied identity nor a ChatGPT conversation ID.
         return f"native-uid:{os.getuid()}"
 
+    def _require_foreground_clear(self, view: dict) -> None:
+        projected = task_attention.project(self.app.task_observer.project(view))
+        foreground = projected.get("foreground", {})
+        if foreground.get("status") == "attention_required":
+            raise Fault("task_attention_required", foreground["summary"],
+                        {"task_id": projected["record"]["task_id"], "foreground": foreground},
+                        effect="known_no_effect")
+
     def control(self, request: dict) -> dict:
         request = records.normalize_control(request)
         view = tasks.read(self.app.state, request["task_id"])
@@ -76,10 +85,11 @@ class TaskAdmission:
             if action not in {"pause", "cancel", "release"}:
                 contract = request["transition"].get("contract", record["contract"])
                 # Reattachment acquires ownership, not permission for a new effect.
+                # Scope evidence also describes a past request, not the current HEAD.
                 # Keep identity/grant checks; a changed HEAD still requires an
                 # explicit plan revision before admission or acceptance.
                 self.app._validate_task_scope(
-                    {"contract": contract}, check_head=action not in {"claim", "renew", "resume"},
+                    {"contract": contract}, check_head=action not in {"claim", "renew", "resume", "bind_effect_scope"},
                     check_identity=action not in {"claim", "renew"})
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)
@@ -186,7 +196,8 @@ class TaskAdmission:
             number = arguments.get("comment_id" if kind == "comment" else "review_id" if kind == "review" else "number", 0)
             return {"kind": "github", "repository": arguments["repository"], "object_type": kind,
                     "number": number or None, "parent_number": arguments.get("number") or None if kind in {"comment", "review"} else None,
-                    "anchor": anchor}
+                    "anchor": anchor, **({"thread_id": arguments["thread_id"],
+                    "expected_head_sha": arguments["expected_head_sha"]} if kind == "review_thread" else {})}
         target = self.app.config.machine(arguments["machine"])
         if method in FILE_METHODS:
             if not arguments.get("change_id"):
@@ -328,6 +339,8 @@ class TaskAdmission:
             # Observe only already known identities, without writing through read_task.
             current = self.reconcile(view)
             transitions.guards(current["record"], context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)
+            if method != "cancel_execution":
+                self._require_foreground_clear(current)
             stage = transitions.stage_for(record)
             operation = {"id": context["operation_id"], "stage_id": stage["id"], "plan_revision": record["plan"]["revision"],
                 "epoch": record["control"]["epoch"], "request_sha256": "", "source_sha256": stage["source_sha256"],

@@ -668,6 +668,7 @@
                   "github_pull_request",
                   "github_comment",
                   "github_review",
+                  "github_review_thread",
                   "github_merge"
                 ],
                 "title": "Method",
@@ -2844,6 +2845,124 @@
         "type": "object"
       }
     },
+    "github_review_thread": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "action": {
+            "enum": [
+              "resolve",
+              "unresolve"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "expected_base_sha": {
+            "default": "",
+            "title": "Expected Base Sha",
+            "type": "string"
+          },
+          "expected_head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "number": {
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "thread_id": {
+            "pattern": "^PRRT_[A-Za-z0-9_-]{1,128}$",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "repository",
+          "number",
+          "thread_id",
+          "expected_head_sha"
+        ],
+        "title": "github_review_threadArguments",
+        "type": "object"
+      }
+    },
     "inspect_skills": {
       "annotations": {
         "destructiveHint": false,
@@ -3644,6 +3763,44 @@
           "argv"
         ],
         "title": "start_executionArguments",
+        "type": "object"
+      }
+    },
+    "wait_task": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "default": 30.0,
+            "maximum": 30.0,
+            "minimum": 0,
+            "title": "Wait Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_revision"
+        ],
+        "title": "wait_taskArguments",
         "type": "object"
       }
     },

@@ -71,7 +71,8 @@ def reserve(record: dict, *, operation_limit: int = 62, new_work: bool = True,
                 # partial outcomes without persisting any synthetic evidence.
                 future["result"].update(failure_code="x" * 64, effect="effect_verified")
             if future["locator"]["kind"] == "github":
-                future["locator"] = dict(future["locator"], number=MAX_INTEGER, parent_number=MAX_INTEGER)
+                future["locator"] = dict(future["locator"], number=MAX_INTEGER,
+                    parent_number=None if future["locator"]["object_type"] == "review_thread" else MAX_INTEGER)
             if new_operation is not None and operation["id"] == new_operation["id"]:
                 try:
                     Operation.model_validate(future)
@@ -198,16 +199,17 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             if any(item["locator"]["kind"] != "github" for item in outstanding):
                 raise Fault("task_effect_unresolved", "Reconcile outstanding local effects before replacing their plan.")
             if outstanding:
-                bindings = record["contract"].get("github_connections", {})
-                if (contract["repositories"] != record["contract"]["repositories"]
-                        or contract.get("github_connections", {}) != bindings):
-                    raise Fault("task_effect_unresolved", "Unresolved GitHub effects retain their original repositories and native account bindings.")
+                repositories = {repo.casefold() for repo in contract["repositories"]}
+                bindings = contract.get("github_connections", {})
                 for item in outstanding:
                     locator = item["locator"]
-                    binding = next((value for repo, value in bindings.items()
-                                    if repo.casefold() == locator["repository"].casefold()), None)
-                    if binding is None or locator.get("connection") != binding:
-                        raise Fault("task_effect_unresolved", "An unresolved historical GitHub effect cannot acquire another account or binding.")
+                    repository = locator["repository"].casefold()
+                    binding = locator.get("connection")
+                    # Admission may select the first alias; none may substitute another account.
+                    matching = [value for repo, value in bindings.items() if repo.casefold() == repository]
+                    if (repository not in repositories or binding is None or not matching
+                            or any(value != binding for value in matching)):
+                        raise Fault("task_effect_unresolved", "An unresolved GitHub effect must retain its original repository and native account binding.")
             old = {stage["id"]: stage for stage in record["plan"]["stages"]}
             definitions = change["stages"]
             retained_order = [stage["id"] for stage in definitions if stage["id"] in old]

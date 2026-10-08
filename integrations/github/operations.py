@@ -266,7 +266,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
-    if (kind not in {"issue", "pull_request", "comment", "review", "merge"}
+    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge"}
             or not isinstance(anchor, str) or not re.fullmatch(r"om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}", anchor)
             or any(value is not None and (type(value) is not int or value < 1) for value in (number, parent))):
         raise Fault("invalid_github_request", "Reconciliation requires the original bounded publication locator.")
@@ -274,6 +274,18 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     root, marker = f"repos/{repository}", f"<!-- {anchor} -->"
     unknown = {"status": "write_outcome_unknown", "repository": repository,
                "detail": "Original destination is unresolved; no publication was repeated."}
+    if kind == "review_thread":
+        thread_id, head = locator.get("thread_id"), locator.get("expected_head_sha")
+        if (number is None or parent is not None or not isinstance(thread_id, str)
+                or not re.fullmatch(r"PRRT_[A-Za-z0-9_-]{1,128}", thread_id)
+                or not isinstance(head, str) or not re.fullmatch(evidence.SHA, head)):
+            raise Fault("invalid_github_request", "Thread reconciliation requires the original PR, thread and HEAD.")
+        pr = evidence.pull_request(repository, number, head, transport=transport)
+        thread = evidence.review_thread(repository, number, head, pr["base"]["sha"], thread_id, transport=transport)
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The acting account changed during original-result observation.")
+        return _public({**unknown, "receipt": {"number": number, "thread_id": thread_id,
+            "isResolved": thread["isResolved"]}})
     if kind == "merge":
         if number is None:
             return unknown
@@ -630,6 +642,54 @@ def review(settings: Settings, action: Literal["create", "update"], repository: 
             payload = _update_fields(current, None, body, None, "", expected_fields=expected_fields)
             readback = lambda _: endpoint
     return _mutate(repository, method, endpoint, payload, readback, settings=settings, actor=actor, transport=transport)
+
+
+def review_thread(settings: Settings, action: Literal["resolve", "unresolve"], repository: str,
+                  number: int, thread_id: str, expected_head_sha: str,
+                  expected_base_sha: str = "", *, transport) -> dict:
+    desired = action == "resolve"
+    with connection.preflight():
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        if (action not in {"resolve", "unresolve"} or type(number) is not int or number < 1
+                or not isinstance(thread_id, str) or not re.fullmatch(r"PRRT_[A-Za-z0-9_-]{1,128}", thread_id)
+                or not isinstance(expected_head_sha, str) or not re.fullmatch(evidence.SHA, expected_head_sha)):
+            raise Fault("invalid_github_request", "Supply resolve/unresolve, a positive PR, exact HEAD and a review thread ID.")
+        pr = evidence.pull_request(repository, number, expected_head_sha, expected_base_sha, open_only=True, transport=transport)
+        base = pr["base"]["sha"]
+        current = evidence.review_thread(repository, number, expected_head_sha, base, thread_id, transport=transport)
+        if current["isResolved"] == desired:
+            raise Fault("github_object_changed", "The thread already has the requested resolution state.")
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The acting GitHub account changed before thread mutation.")
+
+    mutation = "resolveReviewThread" if desired else "unresolveReviewThread"
+    payload = {"query": f"mutation($threadId:ID!){{{mutation}(input:{{threadId:$threadId}}){{thread{{id isResolved}}}}}}",
+               "variables": {"threadId": thread_id}}
+    receipt = {"number": number, "thread_id": thread_id, "requested_isResolved": desired}
+    try:
+        response = object_response(connection.mutation_request("POST", "graphql", payload, transport=transport))
+    except Fault as error:
+        if error.effect == "known_no_effect":
+            raise
+        return _public({"status": "write_outcome_unknown", "repository": repository, "receipt": receipt,
+                        "error_code": error.code})
+    except OSError:
+        return _public({"status": "write_outcome_unknown", "repository": repository, "receipt": receipt,
+                        "error_code": "github_response_unknown"})
+
+    verified = False
+    try:
+        reply = object_response(object_response(object_response(response["data"])[mutation])["thread"])
+        pr = evidence.pull_request(repository, number, expected_head_sha, base, open_only=True, transport=transport)
+        observed = evidence.review_thread(repository, number, expected_head_sha, pr["base"]["sha"], thread_id, transport=transport)
+        verified = (not response.get("errors") and reply.get("id") == thread_id
+                    and reply.get("isResolved") is desired and observed["isResolved"] is desired
+                    and connection.read_actor(settings, transport=transport) == actor)
+    except (Fault, OSError, KeyError, TypeError):
+        pass
+    return _public({"status": "verified" if verified else "write_unverified", "repository": repository,
+                    "actor": actor, "receipt": {**receipt, **({"isResolved": desired} if verified else {})},
+                    "fields_verified": verified})
 
 
 def merge(settings: Settings, repository: str, number: int, expected_head_sha: str,

@@ -52,6 +52,18 @@ def thread_page(repository: str, number: int, head: str, base: str, cursor: str,
         raise Fault("github_evidence_unavailable", "The discussion continuation cursor is missing or unchanged.")
     return nodes, next_cursor
 
+def review_thread(repository: str, number: int, head: str, base: str, thread_id: str, *, transport) -> dict:
+    cursor = ""
+    for _ in range(client.MAX_GATE_PAGES):
+        threads, following = thread_page(repository, number, head, base, cursor, 100, transport=transport)
+        found = [item for item in threads if item["id"] == thread_id]
+        if found:
+            return found[0]
+        if following is None:
+            raise Fault("github_not_found", "The thread does not belong to the inspected pull request.")
+        cursor = following
+    raise Fault("github_evidence_unavailable", "The thread exceeds the 1,000-discussion verification limit.")
+
 
 def _checks(repository: str, head: str, *, transport) -> dict:
     runs = client.all_pages(f"repos/{repository}/commits/{head}/check-runs?filter=latest", "check_runs", transport=transport)
