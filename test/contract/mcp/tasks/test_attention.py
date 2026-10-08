@@ -80,7 +80,7 @@ class MCPAttentionContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 "transition": {"action": "claim", "handoff_id": created["handoff"]["id"]}}))["record"]
             execution_id = uuid.uuid4().hex
             started = await call("start_execution", {"machine": "desktop", "execution_id": execution_id,
-                "cwd": str(self.work), "argv": [sys.executable, "-c", "import time; time.sleep(10)"],
+                "cwd": str(self.work.resolve()), "argv": [sys.executable, "-c", "import time; time.sleep(10)"],
                 "timeout_seconds": 20, "expected_head_sha": "", "workspace_access": "exclusive",
                 "task_context": {"task_id": identity, "task_revision": claimed["revision"],
                     "plan_revision": claimed["plan"]["revision"],

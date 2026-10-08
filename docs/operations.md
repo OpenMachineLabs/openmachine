@@ -7,7 +7,7 @@
 | Tool | Current input and result |
 | --- | --- |
 | `get_capabilities` | Version, configuration hash, configured machines/workspaces and implemented limits; health remains `not_probed`. |
-| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`; optional `path_glob` enables filtered file discovery/search. |
+| `inspect_workspace` | `machine`, `workspace_name`, `action=files/read/search/status/diff/worktrees`, relative `path`, `offset`, `limit`; search adds literal `query`, diff adds `staged`, paged search/Git reads accept `expected_snapshot`; optional `path_glob` enables filtered file discovery/search. Optional `worktree` selects one authorized registered absolute root. |
 | `inspect_skills` | `list/read/files`, exact discovered `skill`, relative resource `path`, query/range and `expected_snapshot`; bundled and explicit user sources only. |
 | `read_workspace_file` | Machine/workspace/path, byte offset and optional whole-file SHA256, or `start_line`/`line_count`; 2 MiB source, 32 KiB UTF-8-safe pages, raw hash/context and explicit absence. |
 | `write_workspace_file` | Complete bounded text, observed HEAD/hash; optional `change_id` requires `expected_workspace_identity` and retains the original change result. No-ID behavior stays legacy. |
@@ -19,6 +19,7 @@
 | `read_task` | Original task ID; canonical record with truthful support/index status, or the verified legacy checkpoint. |
 | `save_task` | Task ID, expected revision, title, checkpoint body and exact anchors; compare-and-save with idempotent last-write retries. |
 | `start_execution` | Original 32-hex ID, machine, absolute `cwd`, explicit `argv`; optional timeout, expected HEAD, `workspace_access`, `resource_keys`, an existing `task_id`, `termination_grace_seconds`, explicit `tty=false/true` and optional `terminal_size={rows,cols}`. |
+| `create_worktree` | Machine/workspace, absent absolute `destination`, explicit local `base_ref`, original 32-hex `execution_id`, source `expected_workspace_identity`; optional absent `new_branch` or detached default, source `worktree` and current `task_context`. Observe and cancel through the existing execution tools. |
 | `read_execution` | Original machine/ID, absolute byte offset and optional `wait_seconds=0..5`; observed state, command/stop/cleanup facts, output/presentation flags and next offset. Waiting never changes command lifetime. |
 | `list_executions` | Machine, opaque ID cursor and page size up to 100; receipt summaries and unreadable records, without raw commands/logs. Stable ID order is not chronological or a logical-task lookup. |
 | `cancel_execution` | Original machine/ID; records a cancellation request for the owning worker. Read again for the final outcome; requesting cancellation is not proof of termination. |
@@ -97,6 +98,62 @@ Untracked content needs explicit reads. Renames are add/delete; submodule conten
 are not inspected. Readers disable optional index writes, pager, fsmonitor,
 external diff, textconv and clean/process filters. Configured filters produce a
 raw-comparison warning. Narrow the scope when capture is incomplete.
+
+### On-demand worktrees
+
+The AI chooses whether isolation helps the current task. Neither a new Chat, a PR,
+nor a dirty status allocates a worktree. Inspect task intent, original changes and
+`action=worktrees` first. Reuse a suitable existing tree, continue in the current
+tree when its unfinished work belongs to the task, and create only for independent
+work that would otherwise interfere. A registry entry is not proof of cleanliness,
+ownership or permission to continue another task. Find related tasks through stable
+project/PR anchors and read their actual targets before reusing a candidate.
+
+File inspection, reads, writes, exact edits and patches accept an optional absolute
+`worktree`. It selects one call's root without changing configuration or another
+Chat's directory. The configured source must be a Git top-level root. The selected
+directory must be registered to the same Git common directory and already lie in
+a configured root on that machine. Subdirectory grants do not expand to a whole
+repository; sibling paths receive no implicit grant. Read selected context and
+applicable instructions again, and put that selector, identity and HEAD in the
+existing task's revised target before editing. Commands use that exact `cwd`.
+
+Creation is one supervised execution with an original ID and fixed Git argv. The
+explicit `base_ref` resolves once to a commit already present locally. Choose the
+intended PR branch for continuation or an inspected default-branch ref for new
+independent work. There is no automatic fetch, branch switching, dirty-file copy
+or stash. A nonempty `new_branch` must be absent; empty creates a detached tree.
+Destination parents must already exist inside current machine grants, with no
+symlink components and outside any existing Git working tree. Creating a nested
+tree would write into that tree while bypassing its file lock. Existing or registered
+destinations are preserved. The bounded
+command disables hooks, fsmonitor, submodule recursion, sparse checkout and up to
+eight configured external filter drivers. Conditional Git includes are rejected
+because a new tree can activate different executable filters. This operation does
+not change Git configuration to resolve that limitation. Bounded worktree operations
+also reject partial/promisor repositories before object inspection, preventing
+Git from implicitly fetching missing objects.
+
+The runtime locks the destination and a common-Git resource, so a busy source file
+lock does not prevent isolation. It holds shared reservations on the destination's
+configured parent scopes, excluding their active writers while allowing separate
+creations to share a container. Ordinary commands and file writes retain their
+existing worktree locks and permissions. Source identity, destination parent and
+fixed base are rechecked before launch; success additionally verifies the registered
+result and returns `context.created_worktree`. This coordinates OM operations,
+not external editors or every possible native Git command. Worktrees share refs
+and Git metadata and do not remove later merge conflicts, port or database conflicts.
+
+Retain `execution_id`; identical intent observes the original result even if the
+source or ref has since changed. A lost reply, cancellation, partial directory or
+failed verification never authorizes a replacement creation. Read the original
+execution and inspect the destination. Creation uses receipt format 6; ordinary
+commands remain format 5 and previous records remain readable. Task targets with
+a selector and typed creation require state contract 17; matching SSH endpoints
+use protocol 7. No separate worktree registry, task allocation service or cleanup
+daemon is introduced. Explicit safe Git removal remains a native command after
+checking task references, uncommitted/unpushed work and current users; there is no
+automatic deletion or force removal.
 
 ### Exact edits and durable writes
 
@@ -464,7 +521,7 @@ lingering policy). A probe during login does not prove last-login survival.
 OM never enables lingering or reconstructs work after manager teardown, reboot,
 disk loss, account tampering or deliberate cgroup escape. Preserve original target
 state, archives and interpreters. Scope observations enrich returned copies, not
-old worker receipts. New calls use matching protocol-6 endpoints; updates retain
+old worker receipts. New calls use matching protocol-7 endpoints; updates retain
 original compatible read/cancel routes rather than silently provisioning them.
 
 ## Skills
@@ -482,7 +539,9 @@ duplicated sources deduplicate by identity, not name, and resource links cannot
 escape the selected directory. Useful dotfiles remain visible; credentials are
 excluded. Discovery scans at most 2,000 entries and reports skipped/inaccessible
 sources. Follow hashes, snapshots and paging; incomplete discovery is not absence.
-An empty read selector returns the single bundled `SKILL.md`. User edits are live
+An empty read selector returns the bundled `SKILL.md`. Use `action=files` for its
+packaged resources and `action=read, path="worktrees.md"` for the detailed Worktree
+workflow. Only the listed bundled files are exposed. User edits are live
 on the next read; changing configured roots follows service restart. Instructions
 never confer grants, install tools or execute embedded resources automatically.
 

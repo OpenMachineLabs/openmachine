@@ -12,6 +12,34 @@ from test.support.tasks_cases import StructuredTaskCaseFixture
 
 
 class StructuredTaskTests(StructuredTaskCaseFixture, unittest.TestCase):
+    def test_empty_worktree_target_preserves_original_canonical_record_and_creation(self):
+        from copy import deepcopy
+        from openmachine.tasks import records
+        first = self.create()
+        original = self.path.read_bytes()
+        self.assertNotIn("worktree", first["record"]["contract"]["targets"][0])
+        self.assertEqual(records.canonical(records.decode(original)), original)
+        repeated = deepcopy(self.request)
+        repeated["contract"]["targets"][0]["worktree"] = ""
+        self.assertEqual(self.create(repeated)["record"], first["record"])
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_worktree_target_requires_bounded_absolute_path_and_distinct_selection(self):
+        from copy import deepcopy
+        for path in ("relative/tree", "/project/../tree", "/line\nbreak", "/" + "x" * 1024,
+                     "/" + "\u00e9" * 512, None):
+            with self.subTest(path=path):
+                request = deepcopy(self.request)
+                request["contract"]["targets"][0]["worktree"] = path
+                self.fault("invalid_task_contract", tasks.normalize_create, request)
+        request = deepcopy(self.request)
+        target = request["contract"]["targets"][0]
+        request["contract"]["targets"].append(dict(target, worktree="/fixture/linked"))
+        normalized = tasks.normalize_create(request)
+        self.assertEqual(len(normalized["contract"]["targets"]), 2)
+        request["contract"]["targets"].append(dict(target, worktree=""))
+        self.fault("invalid_task_contract", tasks.normalize_create, request)
+
     def test_first_format_three_admission_reserves_format_four_result_before_publication(self):
         from openmachine.tasks import records, transitions
         repository = "O" * 39 + "/" + "r" * 100

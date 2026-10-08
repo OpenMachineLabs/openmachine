@@ -82,6 +82,11 @@
       "approval": "Current maintainer explicitly authorizes the 2026-10-07 supervision friction audit, scoped fixes, reviewed candidate bootstrap if necessary, and normal protected merges.",
       "base_commit": "340fecf63fa678a12ad3bc6b566fd03f8a1fcb3b",
       "change": "Add optional expected_fields to four GitHub writers and explicit renew/bind_effect_scope task controls. Expectations are independently authored from the reviewed interface; all existing tools, arguments, annotations and baseline provenance remain exact."
+    },
+    {
+      "approval": "Current maintainer request on 2026-10-08 authorizes on-demand worktree isolation in OM and a directly implemented PR.",
+      "base_commit": "31c1da2d98c81fe081cab562547a829f6f01e4aa",
+      "change": "Add explicit create_worktree, registered worktree discovery and optional per-call/TaskTarget worktree selection. Preserve prior defaults and omit empty selectors from canonical task history; real installed MCP discovery verifies all schemas and annotations."
     }
   ],
   "baseline": {
@@ -96,7 +101,7 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": false
       },
       "inputSchema": {
@@ -234,6 +239,12 @@
           },
           "workspace_name": {
             "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
             "type": "string"
           }
         },
@@ -463,7 +474,7 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": false,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": false
       },
       "inputSchema": {
@@ -1190,6 +1201,12 @@
                 "pattern": "^[0-9a-f]{64}$",
                 "title": "Workspace Identity",
                 "type": "string"
+              },
+              "worktree": {
+                "default": "",
+                "maxLength": 1024,
+                "title": "Worktree",
+                "type": "string"
               }
             },
             "required": [
@@ -1608,6 +1625,12 @@
                 "pattern": "^[0-9a-f]{64}$",
                 "title": "Workspace Identity",
                 "type": "string"
+              },
+              "worktree": {
+                "default": "",
+                "maxLength": 1024,
+                "title": "Worktree",
+                "type": "string"
               }
             },
             "required": [
@@ -1678,6 +1701,129 @@
         "type": "object"
       }
     },
+    "create_worktree": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "base_ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Base Ref",
+            "type": "string"
+          },
+          "destination": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Destination",
+            "type": "string"
+          },
+          "execution_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "expected_workspace_identity": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Workspace Identity",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "new_branch": {
+            "default": "",
+            "maxLength": 256,
+            "title": "New Branch",
+            "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name",
+          "destination",
+          "base_ref",
+          "execution_id",
+          "expected_workspace_identity"
+        ],
+        "title": "create_worktreeArguments",
+        "type": "object"
+      }
+    },
     "disconnect_integration": {
       "annotations": {
         "destructiveHint": true,
@@ -1711,7 +1857,7 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": false
       },
       "inputSchema": {
@@ -1848,6 +1994,12 @@
           },
           "workspace_name": {
             "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
             "type": "string"
           }
         },
@@ -3025,7 +3177,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "inputSchema": {
@@ -3036,7 +3188,8 @@
               "read",
               "search",
               "status",
-              "diff"
+              "diff",
+              "worktrees"
             ],
             "title": "Action",
             "type": "string"
@@ -3087,6 +3240,12 @@
           "workspace_name": {
             "title": "Workspace Name",
             "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
+            "type": "string"
           }
         },
         "required": [
@@ -3102,7 +3261,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "inputSchema": {
@@ -3188,7 +3347,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "inputSchema": {
@@ -3290,7 +3449,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "inputSchema": {
@@ -3322,7 +3481,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "inputSchema": {
@@ -3370,6 +3529,12 @@
           },
           "workspace_name": {
             "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
             "type": "string"
           }
         },
@@ -3808,7 +3973,7 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": false
       },
       "inputSchema": {
@@ -3909,6 +4074,12 @@
           },
           "workspace_name": {
             "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
             "type": "string"
           }
         },

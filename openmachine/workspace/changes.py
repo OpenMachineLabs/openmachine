@@ -9,6 +9,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 from .files import MAX_SOURCE, digest, publish_file, publish_path, root_for, snapshot
 from .git import context, lock_root
+from .worktrees import resolve_root
 from . import change_records as records
 from . import preparation
 
@@ -32,6 +33,8 @@ def _scope(config, state: Path, machine: str, record: dict) -> str:
             continue
         try:
             root = root_for(config, machine, name)
+            if str(root) != record["context"]["root"]:
+                root = resolve_root(config, machine, name, record["context"]["root"])
             info = root.stat()
             if str(root) == record["context"]["root"] and [info.st_dev, info.st_ino] == record["context"]["root_id"]:
                 return name

@@ -7,6 +7,7 @@
         "test/component/app/test_ssh_routes.py",
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_observer.py",
+        "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
         "test/contract/mcp/tasks/test_schema.py",
         "test/resilience/chat_recovery/test_foreground.py",
@@ -138,6 +139,7 @@
     "execution": {
       "boundary_tests": [
         "test/component/app/test_execution_dispatch.py",
+        "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_admission.py",
         "test/component/service/test_checks.py",
         "test/resilience/app/test_mcp_admission.py",
@@ -169,6 +171,7 @@
         "test/resilience/execution/test_mcp_sessions.py",
         "test/resilience/execution/test_mcp_waiting.py",
         "test/resilience/execution/test_process.py",
+        "test/resilience/execution/test_worktrees.py",
         "test/unit/execution/test_output.py"
       ]
     },
@@ -224,6 +227,7 @@
       "boundary_tests": [
         "test/component/app/test_execution_dispatch.py",
         "test/component/app/test_workspace_dispatch.py",
+        "test/component/app/test_worktree_admission.py",
         "test/component/ssh/test_workspace_changes.py",
         "test/component/ssh/test_workspace_patch.py",
         "test/component/ssh/test_workspace_reads.py",
@@ -384,7 +388,8 @@
       "boundary_tests": [],
       "sources": [
         "openmachine/skills.py",
-        "skills/openmachine/SKILL.md"
+        "skills/openmachine/SKILL.md",
+        "skills/openmachine/worktrees.md"
       ],
       "tests": [
         "test/component/skills/test_resources.py"
@@ -415,18 +420,6 @@
         "test/resilience/ssh/test_transport.py"
       ]
     },
-    "task_attention": {
-      "boundary_tests": [
-        "test/component/app/test_task_admission.py"
-      ],
-      "sources": [
-        "openmachine/app/task_attention.py"
-      ],
-      "tests": [
-        "test/component/app/test_task_attention.py",
-        "test/contract/mcp/tasks/test_attention.py"
-      ]
-    },
     "task_admission": {
       "boundary_tests": [
         "test/component/app/test_execution_dispatch.py",
@@ -444,10 +437,23 @@
         "test/component/app/test_github_admission.py",
         "test/component/app/test_scoped_supervision.py",
         "test/component/app/test_task_admission.py",
+        "test/component/app/test_worktree_admission.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/resilience/app/test_mcp_admission.py",
         "test/resilience/app/test_task_association.py",
         "test/resilience/app/test_task_execution.py"
+      ]
+    },
+    "task_attention": {
+      "boundary_tests": [
+        "test/component/app/test_task_admission.py"
+      ],
+      "sources": [
+        "openmachine/app/task_attention.py"
+      ],
+      "tests": [
+        "test/component/app/test_task_attention.py",
+        "test/contract/mcp/tasks/test_attention.py"
       ]
     },
     "task_observer": {
@@ -471,6 +477,7 @@
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_dispatch.py",
         "test/component/app/test_task_observer.py",
+        "test/component/app/test_worktree_admission.py",
         "test/component/service/test_checks.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/resilience/app/test_mcp_admission.py",
@@ -499,6 +506,7 @@
     "workspace": {
       "boundary_tests": [
         "test/component/app/test_workspace_dispatch.py",
+        "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
         "test/component/service/test_workspace_compatibility.py",
         "test/component/ssh/test_workspace_changes.py",
@@ -506,6 +514,7 @@
         "test/component/ssh/test_workspace_reads.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/resilience/app/test_mcp_admission.py",
+        "test/resilience/execution/test_worktrees.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py"
       ],
       "sources": [
@@ -516,7 +525,8 @@
         "openmachine/workspace/git.py",
         "openmachine/workspace/inspect.py",
         "openmachine/workspace/patch.py",
-        "openmachine/workspace/preparation.py"
+        "openmachine/workspace/preparation.py",
+        "openmachine/workspace/worktrees.py"
       ],
       "tests": [
         "test/component/workspace/test_changes.py",
@@ -524,6 +534,7 @@
         "test/component/workspace/test_legacy_writes.py",
         "test/component/workspace/test_patch.py",
         "test/component/workspace/test_reads.py",
+        "test/component/workspace/test_worktrees.py",
         "test/contract/mcp/workspace/test_edits.py",
         "test/contract/mcp/workspace/test_patch.py",
         "test/contract/mcp/workspace/test_reads.py",
@@ -573,13 +584,15 @@
       "test/component/execution/test_records.py",
       "test/component/execution/test_validation.py",
       "test/resilience/execution/test_interactive.py",
-      "test/resilience/execution/test_process.py"
+      "test/resilience/execution/test_process.py",
+      "test/resilience/execution/test_worktrees.py"
     ],
     "test/support/execution_cases.py": [
       "test/component/execution/test_presentation.py",
       "test/component/execution/test_records.py",
       "test/component/execution/test_validation.py",
-      "test/resilience/execution/test_process.py"
+      "test/resilience/execution/test_process.py",
+      "test/resilience/execution/test_worktrees.py"
     ],
     "test/support/github_cases.py": [
       "test/component/github/test_transport.py",
@@ -667,6 +680,7 @@
       "test/component/app/test_task_admission.py",
       "test/component/app/test_task_attention.py",
       "test/component/app/test_task_observer.py",
+      "test/component/app/test_worktree_admission.py",
       "test/component/chat_recovery/test_recovery.py",
       "test/component/codex/test_discovery.py",
       "test/component/connections/test_connections.py",
@@ -697,6 +711,7 @@
       "test/component/workspace/test_changes.py",
       "test/component/workspace/test_patch.py",
       "test/component/workspace/test_reads.py",
+      "test/component/workspace/test_worktrees.py",
       "test/resilience/workspace/test_leases.py"
     ]
   }

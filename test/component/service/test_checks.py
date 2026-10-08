@@ -103,8 +103,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         tasks.rebuild_index(self.state)
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (16, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (17, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17)
         self.assertEqual(actual, proof)
         for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
                        {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0}, {"task_records": True},
@@ -196,9 +196,9 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         paths = [path, self.state / "tasks/index.json"]
         before = [item.read_bytes() for item in paths]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (16, [4]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (17, [4]))
         self.assertIn(4, proof["structured_task_read_formats"])
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
                       {"structured_task_formats_present": []}, {"structured_task_formats_present": [3]},
                       {"structured_task_formats_present": [4.0]}, {"structured_task_formats_present": [4, 4]}):
@@ -251,8 +251,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (16, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (17, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -272,8 +272,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             expires_at_ms=chatgpt.now_ms() + 3600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (16, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 16), proof)
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (17, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
         for delta in ({"state_contract": 14}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
                       {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):

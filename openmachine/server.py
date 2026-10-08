@@ -142,7 +142,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
+        guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -224,13 +224,14 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=machine_read, structured_output=False)
-    def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff"],
+    def inspect_workspace(machine: str, workspace_name: str, action: Literal["files", "read", "search", "status", "diff", "worktrees"],
                           path: str = ".", offset: Annotated[int, Field(ge=0)] = 0,
                           limit: Annotated[int, Field(ge=1, le=200)] = 100, query: str = "",
                           staged: bool = False, expected_snapshot: str = "",
-                          path_glob: Annotated[str, Field(max_length=1024)] = "") -> CallToolResult:
-        """Read files, literal-search, or inspect Git status/diff. Optional path_glob selects workspace-relative, case-sensitive file discovery/search (* never crosses /; no **). Git discovery includes tracked and ordinary untracked source; omitted filter preserves traversal. Echo snapshot between pages; heed skipped/truncated results."""
-        return _reply(lambda: application.inspect_workspace(machine, workspace_name, action, path, offset, limit, query, staged, expected_snapshot, path_glob), workspace_output=True)
+                          path_glob: Annotated[str, Field(max_length=1024)] = "",
+                          worktree: Annotated[str, Field(max_length=4096)] = "") -> CallToolResult:
+        """Read files, search, inspect Git status/diff, or list registered worktrees. Inspect existing worktrees and task context before creating isolation; dirty files alone do not require a new tree. Optional worktree selects an authorized registered absolute root in this repository for this call only; omitted uses the configured root. Listing is not a claim or proof a tree is idle: inspect a candidate's status and related tasks before reuse. Optional path_glob filters workspace-relative files/search (* never crosses /; no **). Echo snapshot between pages; heed skipped/truncated results."""
+        return _reply(lambda: application.inspect_workspace(machine, workspace_name, action, path, offset, limit, query, staged, expected_snapshot, path_glob, worktree), workspace_output=True)
 
     @mcp.tool(annotations=READ, structured_output=False)
     def inspect_skills(action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
@@ -244,9 +245,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                             offset: Annotated[int, Field(ge=0, le=MAX_SOURCE)] = 0,
                             expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
                             start_line: Annotated[int | None, Field(strict=True, ge=1)] = None,
-                            line_count: Annotated[int, Field(strict=True, ge=1, le=500)] = 200) -> CallToolResult:
+                            line_count: Annotated[int, Field(strict=True, ge=1, le=500)] = 200,
+                            worktree: Annotated[str, Field(max_length=4096)] = "") -> CallToolResult:
         """Read up to 2 MiB of configured UTF-8 source with whole-file SHA256/context and 32 KiB pages. Optional 1-based start_line requires offset=0; line_count is 1..500. range_complete describes available requested bytes, while has_more describes remaining source. A long line continues in byte mode at next_offset with the same SHA; next_line exists only at a known boundary. Numbers remain metadata, not source text. Redaction uses full bounded source. Never reconstruct full files from partial/redacted pages. SSH reads occur only on the pinned target."""
-        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256, start_line, line_count), workspace_output=True)
+        return _reply(lambda: application.read_workspace_file(machine, workspace_name, path, offset, expected_sha256, start_line, line_count, worktree), workspace_output=True)
 
     @mcp.tool(annotations=file_write, structured_output=False)
     async def write_workspace_file(machine: str, workspace_name: str, path: str,
@@ -255,10 +257,11 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                              expected_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")],
                              change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                              expected_workspace_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
-                             task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                             task_context: tasks.TaskContext | None = None,
+                             worktree: Annotated[str, Field(max_length=4096)] = "") -> CallToolResult:
         """Publish one bounded whole file. A change_id requires observed workspace identity and retains the original result; no-ID calls retain legacy behavior without durable recovery. Empty source hash means absence. Uses the independent effective edit grant and the original workspace lease; no commands, parents or implicit replay. Unknown effects require original-ID readback. Native checks are not a kernel CAS or sandbox."""
         operation = partial(_reply, lambda: application.write_workspace_file(machine, workspace_name, path, content,
-            expected_head_sha, expected_sha256, change_id, expected_workspace_identity, _task_context(task_context)), workspace_output=True,
+            expected_head_sha, expected_sha256, change_id, expected_workspace_identity, _task_context(task_context), worktree), workspace_output=True,
             workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
@@ -271,11 +274,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                             dry_run: Annotated[bool, Field(strict=True)] = False,
                             expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
-                            task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                            task_context: tasks.TaskContext | None = None,
+                            worktree: Annotated[str, Field(max_length=4096)] = "") -> CallToolResult:
         """Replace exact non-overlapping fragments located in the same original UTF-8 file. Preview requires empty ID and has no writes; apply requires a caller-generated ID. Echo observed whole-file hash, HEAD and workspace identity; optionally bind preview plan SHA. Same ID/request observes, never replays; ambiguous matches fail. Sources/results support 2 MiB; combined replacement strings remain 128 KiB. File changes are not test results."""
         operation = partial(_reply, lambda: application.edit_workspace_file(machine, workspace_name, path,
             [edit.model_dump() for edit in edits], expected_workspace_identity, expected_head_sha, expected_sha256,
-            change_id, dry_run, expected_plan_sha256, _task_context(task_context)), workspace_output=True, workspace_mutation=True, change_id=change_id)
+            change_id, dry_run, expected_plan_sha256, _task_context(task_context), worktree), workspace_output=True, workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=file_write, structured_output=False)
@@ -288,11 +292,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                             change_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                             dry_run: Annotated[bool, Field(strict=True)] = False,
                             expected_plan_sha256: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = "",
-                            task_context: tasks.TaskContext | None = None) -> CallToolResult:
+                            task_context: tasks.TaskContext | None = None,
+                            worktree: Annotated[str, Field(max_length=4096)] = "") -> CallToolResult:
         """Apply one strict om_patch_v1 add/update/delete/move plan on one workspace. Exact preconditions cover both move endpoints; empty hash means absence. All files are prepared before effects, then published in declared order, not as an atomic batch. Preview has no state or filesystem writes and requires an empty ID. Apply requires a caller-generated ID; retained identical requests never replay. Explicit parent creation is bounded. Partial and unknown outcomes retain the original effect evidence; do not retry or roll back automatically. File changes are not test results."""
         operation = partial(_reply, lambda: application.apply_workspace_patch(machine, workspace_name, patch,
             expected_workspace_identity, expected_head_sha, [item.model_dump() for item in preconditions],
-            create_parents, change_id, dry_run, expected_plan_sha256, _task_context(task_context)), workspace_output=True,
+            create_parents, change_id, dry_run, expected_plan_sha256, _task_context(task_context), worktree), workspace_output=True,
             workspace_mutation=True, change_id=change_id)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
@@ -400,6 +405,20 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     def read_codex_task(machine: str, execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]) -> CallToolResult:
         """Read the original Codex browser report and native final-page evidence without starting work. Process success is not semantic completion; Chat must inspect this report before stage acceptance. Missing evidence stays unknown, and cancellation/timeout is never promoted to completion."""
         return _reply(lambda: application.read_codex_task(machine, execution_id))
+
+    @mcp.tool(annotations=WRITE, structured_output=False)
+    async def create_worktree(machine: str, workspace_name: str,
+                              destination: Annotated[str, Field(min_length=1, max_length=4096)],
+                              base_ref: Annotated[str, Field(min_length=1, max_length=256)],
+                              execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
+                              expected_workspace_identity: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+                              new_branch: Annotated[str, Field(max_length=256)] = "",
+                              worktree: Annotated[str, Field(max_length=4096)] = "",
+                              task_context: tasks.TaskContext | None = None) -> CallToolResult:
+        """Create one worktree only when task context calls for isolation. List first and prefer a suitable existing tree; never allocate one per Chat, PR or retry. Supply an absent absolute destination inside existing machine grants and an explicit locally available base_ref: use the intended PR branch for continuation or an inspected default-branch ref for independent work. The runtime pins that commit, does not fetch or copy uncommitted files, and disables hooks/filters; conditional Git includes require explicit resolution before this bounded operation. new_branch must be absent, or empty means detached. Creation uses destination/common-Git locks without taking the source file lock. Save execution_id before calling, then use read_execution/cancel_execution on that original ID; uncertainty never permits a replacement ID. Success returns context.created_worktree. It does not change any default directory or grant access: explicitly select that worktree for file tools and cwd for commands, and revise the existing task target before edits. No automatic removal."""
+        operation = partial(_reply, lambda: application.create_worktree(machine, workspace_name, destination,
+            base_ref, execution_id, expected_workspace_identity, new_branch, worktree, _task_context(task_context)), execution_output=True)
+        return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     def start_execution(machine: str, execution_id: str, cwd: str,

@@ -46,6 +46,30 @@ A committed canonical record remains readable when the index is stale. A lost
 durability acknowledgement is uncertain; retain the original task/update IDs and
 observe them, rather than allocating replacement work. No arbitrary overwrite API.
 
+## Optional worktree targets
+
+A target may include `worktree`, an absolute registered root from the configured
+repository and existing machine grants. Omit it to retain the configured root.
+Empty selectors remain absent from canonical history and request fingerprints.
+No target is allocated merely because a task or Chat exists, and the task record
+does not reserve a checkout for its entire lifetime.
+
+Inspect existing worktrees and related task records before choosing a location.
+Stable project/PR anchors help find candidates; `find_tasks` does not search inside
+target paths or infer checkout ownership. Use one existing tree when suitable.
+If isolation is needed, explicitly authorize `create_worktree` in the current
+contract and preserve its execution ID as the operation ID. The source identity
+is checked, while creation pins its separately supplied base commit; an ordinary
+source HEAD advance does not substitute a different base.
+
+After verified creation or reuse, revise the same task contract to the observed
+selector, workspace identity and HEAD before subsequent edits. File selectors and
+command `cwd` must match that target. Current unresolved local effects still block
+plan replacement; another tree is not a way to abandon unknown work. Independent
+tasks use existing operation locks and explicit context, without an extra global
+checkout ownership ledger. Selectors require state-contract-17 readers; older
+strict readers reject the new field rather than silently writing the default root.
+
 ## GitHub account binding
 
 New GitHub task contracts resolve native `github_connections` per repository and retain

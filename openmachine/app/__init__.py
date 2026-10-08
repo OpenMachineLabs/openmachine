@@ -125,7 +125,8 @@ class Application:
             "codex": self.codex.capabilities(self.config) if self.codex is not None else None,
             "chat_recovery": self.chat_recovery.capabilities() if self.chat_recovery is not None else None,
             "transport": "private_unix_socket",
-            "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
+            "execution": {"receipt_format": execution.FORMAT, "worktree_receipt_format": execution.CREATION_FORMAT,
+                          "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
                           "control_protocol": execution.CONTROL_PROTOCOL, "max_input_bytes": execution.MAX_INPUT,
                           "control_frame_bytes": execution.MAX_FRAME, "control_seconds": execution.CONTROL_SECONDS,
                           "terminal_dimensions": {"default": {"rows": 24, "cols": 80}, "min": 1, "max": 1000},
@@ -134,6 +135,9 @@ class Application:
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
                           "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
             "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
+                          "worktrees": {"discovery": True, "selection": True, "creation": True,
+                                        "automatic_allocation": False, "automatic_cleanup": False,
+                                        "destination_scope": "configured_roots", "copies_uncommitted_changes": False},
                           "patch": True, "patch_language": workspace.PATCH_LANGUAGE,
                           "change_read_formats": list(workspace.READ_CHANGE_FORMATS),
                           "max_patch_paths": workspace.MAX_PATHS, "max_patch_hunks": workspace.MAX_HUNKS,
@@ -158,11 +162,11 @@ class Application:
         }
 
     def inspect_workspace(self, machine: str, workspace_name: str,
-                          action: Literal["files", "read", "search", "status", "diff"], path: str = ".",
+                          action: Literal["files", "read", "search", "status", "diff", "worktrees"], path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
-                          expected_snapshot: str = "", path_glob: str = "") -> dict:
+                          expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
         return self.machines.inspect_workspace(machine, workspace_name, action, path, offset, limit, query,
-                                               staged, expected_snapshot, path_glob)
+                                               staged, expected_snapshot, path_glob, worktree)
 
     def inspect_skills(self, action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
                        query: str = "", offset: int = 0, limit: int = 100, expected_snapshot: str = "") -> dict:
@@ -170,25 +174,28 @@ class Application:
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str, offset: int = 0,
                             expected_sha256: str = "", start_line: int | None = None,
-                            line_count: int = 200) -> dict:
+                            line_count: int = 200, worktree: str = "") -> dict:
         return self.machines.read_workspace_file(machine, workspace_name, path, offset, expected_sha256,
-                                                 start_line, line_count)
+                                                 start_line, line_count, worktree)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
-                             expected_workspace_identity: str = "", task_context: dict | None = None) -> dict:
+                             expected_workspace_identity: str = "", task_context: dict | None = None,
+                             worktree: str = "") -> dict:
         with self._admit():
             return self.task_admission.run("write_workspace_file", dict(machine=machine, workspace_name=workspace_name,
                 path=path, content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256,
-                change_id=change_id, expected_workspace_identity=expected_workspace_identity), task_context)
+                change_id=change_id, expected_workspace_identity=expected_workspace_identity,
+                **({"worktree": worktree} if worktree else {})), task_context)
 
     def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
                             expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
                             change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
-                            task_context: dict | None = None) -> dict:
+                            task_context: dict | None = None, worktree: str = "") -> dict:
         arguments = dict(machine=machine, workspace_name=workspace_name, path=path, edits=edits,
             expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
-            expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run, expected_plan_sha256=expected_plan_sha256)
+            expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run, expected_plan_sha256=expected_plan_sha256,
+            **({"worktree": worktree} if worktree else {}))
         if dry_run is True:
             return self.machines.edit_workspace_file(**arguments)
         with self._admit():
@@ -197,11 +204,12 @@ class Application:
     def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
                               expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
                               create_parents: bool = False, change_id: str = "", dry_run: bool = False,
-                              expected_plan_sha256: str = "", task_context: dict | None = None) -> dict:
+                              expected_plan_sha256: str = "", task_context: dict | None = None,
+                              worktree: str = "") -> dict:
         arguments = dict(machine=machine, workspace_name=workspace_name, patch=patch,
             expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
             preconditions=preconditions, create_parents=create_parents, change_id=change_id, dry_run=dry_run,
-            expected_plan_sha256=expected_plan_sha256)
+            expected_plan_sha256=expected_plan_sha256, **({"worktree": worktree} if worktree else {}))
         if dry_run is True:
             return self.machines.apply_workspace_patch(**arguments)
         with self._admit():
@@ -209,6 +217,16 @@ class Application:
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False) -> dict:
         return self.machines.read_workspace_change(machine, change_id, observe_current)
+
+    def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
+                        execution_id: str, expected_workspace_identity: str, new_branch: str = "",
+                        worktree: str = "", task_context: dict | None = None) -> dict:
+        arguments = dict(machine=machine, workspace_name=workspace_name, destination=destination,
+                         base_ref=base_ref, new_branch=new_branch, execution_id=execution_id,
+                         expected_workspace_identity=expected_workspace_identity, task_id="",
+                         **({"worktree": worktree} if worktree else {}))
+        with self._admit():
+            return self.task_admission.run("create_worktree", arguments, task_context)
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
                    limit: int = 20, expected_generation: int = -1) -> dict:
@@ -287,7 +305,7 @@ class Application:
                              check_identity: bool = True) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
-        known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file",
+        known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "configure_chat_recovery", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
@@ -298,7 +316,7 @@ class Application:
             raise Fault("invalid_task_contract", "Codex delegation requires the underlying start_execution grant.")
         if not tools <= known:
             raise Fault("invalid_task_contract", "Task scope must name implemented tools, not future actions.")
-        if tools & {"start_execution", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
+        if tools & {"start_execution", "create_worktree", "control_execution", "write_workspace_file", "edit_workspace_file", "apply_workspace_patch"} and not contract["targets"]:
             raise Fault("invalid_task_contract", "Native mutation scope requires an explicit configured target.")
         for target in contract["targets"]:
             machine, name = target["machine"], target["workspace"]
@@ -306,11 +324,13 @@ class Application:
             configured = self.config.workspaces.get(name)
             if configured is None or configured.machine != machine:
                 raise Fault("invalid_task_contract", "Task target must bind an existing workspace to its configured machine.")
-            if tools & {"start_execution", "control_execution"}:
+            if tools & {"start_execution", "create_worktree", "control_execution"}:
                 self.config.machine(machine, write=True)
             if tools & {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}:
                 self.config.workspace_machine(machine)
-            observed = self.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1)["context"]
+            selection = {"worktree": target["worktree"]} if target.get("worktree") else {}
+            observed = self.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1,
+                                                         **selection)["context"]
             if (check_identity and observed.get("workspace_identity") != target["workspace_identity"]
                     or check_head and (observed.get("head_sha") or None) != target["head_sha"]):
                 raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")

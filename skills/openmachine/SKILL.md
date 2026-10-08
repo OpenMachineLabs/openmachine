@@ -170,6 +170,14 @@ and active workers' original installations. Full native commands retain account
 access beyond reader scopes; this is not a sandbox. Returned data reaches ChatGPT
 through OpenAI and redaction is best effort. Original worker/host loss does not authorize reconstruction or replay.
 
+## Choose a workspace without automatic allocation
+
+Inspect task intent and existing worktrees before independent coding work. Reuse
+compatible work; create only when isolation is needed, never for every Chat or PR.
+Read [Worktree selection and recovery](worktrees.md) before selecting or creating
+a tree: `inspect_skills(action="read", path="worktrees.md")`. The reference covers
+uncommitted changes, explicit bases, authorization, original IDs and task targets.
+
 ## Foreground task attention
 
 `foreground.status=renewal_required` or `task_renewal_required` means lease expiry

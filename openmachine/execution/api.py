@@ -17,11 +17,12 @@ from openmachine import __version__
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.workspace.git import context, lock_root
+from openmachine.workspace import worktrees
 
 from . import control as controls, logs
 from .logs import MAX_READ
 from .process import supported
-from .records import (CONTROL_PROTOCOL, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
+from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
                       effective_request, is_remote, read_record, resolve_terminal_size, termination_grace)
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ MAX_WAITERS = 16
 
 
 def _directory(state: Path, execution_id: str) -> Path:
-    if not re.fullmatch(r"[0-9a-f]{32}", execution_id):
+    if not isinstance(execution_id, str) or not re.fullmatch(r"[0-9a-f]{32}", execution_id):
         raise Fault("invalid_execution_id", "Use a 32-character lowercase hexadecimal execution ID.")
     return state / "executions" / execution_id
 
@@ -99,72 +100,198 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
             if original != request:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return read(config, state, machine, execution_id)
-        supported()
+        _admit(config, state, machine, execution_id, working, request,
+               remote_worker=remote_worker, validate_new=validate_new)
+    return read(config, state, machine, execution_id)
+
+
+def create_worktree(config: "Settings", state: Path, machine: str, workspace_name: str,
+                    destination: str, base_ref: str, new_branch: str, execution_id: str,
+                    expected_workspace_identity: str, worktree: str = "", task_id: str = "",
+                    *, remote_worker: Path | None = None,
+                    validate_new: Callable[[], object] | None = None) -> dict:
+    """Create an optional checkout through the existing durable execution lifecycle."""
+    before_admission = True
+    try:
+        directory = _directory(state, execution_id)
+        if any(not isinstance(value, str) or not 1 <= len(value) <= 128 or "\0" in value
+               for value in (machine, workspace_name)):
+            raise Fault("invalid_workspace", "Supply the configured machine and workspace names.")
+        if not isinstance(task_id, str) or (task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id)):
+            raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
+        intent = {"workspace": workspace_name, **worktrees.normalize_creation(
+            destination, base_ref, new_branch, expected_workspace_identity, worktree)}
+        target = config.machine(machine)
+        if target.transport != "local":
+            raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
+
+        def original_result():
+            original = read_record(directory)["request"]
+            if (original.get("worktree_creation") != intent or original["machine"] != machine
+                    or original.get("task_id", "") != task_id):
+                raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
+            # Resolve no mutable repository, ref or destination on an original-ID retry.
+            return read(config, state, machine, execution_id)
+
+        if not target.execution_enabled and (directory.exists() or directory.is_symlink()):
+            # Retained receipts remain readable without allocating new launch state.
+            before_admission = False
+            return original_result()
+        # Check the grant before creating any state or ID lock for a fresh request.
+        config.machine(machine, write=True)
+        state = private_directory(state)
+        private_directory(state / "executions")
+        locks = private_directory(state / "locks")
+        with lease(locks / f"{execution_id}.lock"):
+            if directory.exists() or directory.is_symlink():
+                before_admission = False
+                return original_result()
+            config.machine(machine, write=True)
+            if validate_new is not None:
+                validate_new()
+            plan = worktrees.prepare_creation(config, machine, workspace_name, destination, base_ref,
+                                              new_branch, expected_workspace_identity, worktree)
+            request = {"machine": machine, "cwd": plan["source_root"], "argv": plan["argv"],
+                       "timeout_seconds": DEFAULT_TIMEOUT, "expected_head_sha": "",
+                       "workspace_access": "exclusive", "resource_keys": plan["resource_keys"],
+                       "task_id": task_id, "termination_grace_seconds": termination_grace(None),
+                       "tty": False, "terminal_size": None, "worktree_creation": intent}
+            before_admission = False
+            _admit(config, state, machine, execution_id, Path(plan["source_root"]), request,
+                   remote_worker=remote_worker, creation_plan=plan)
+        return read(config, state, machine, execution_id)
+    except (Fault, OSError) as error:
+        if before_admission:
+            code = error.code if isinstance(error, Fault) else "execution_unavailable"
+            message = str(error) if isinstance(error, Fault) else "No checkout creation was admitted."
+            evidence = error.evidence if isinstance(error, Fault) else None
+            raise Fault(code, message, evidence, effect="known_no_effect") from error
+        # Missing receipts after dispatch or an original-ID read are not proof of no effect.
+        if isinstance(error, OSError):
+            raise Fault("execution_unavailable", "Read the original worktree execution; its outcome is unverified.",
+                        effect="effect_unknown") from error
+        if error.effect is None:
+            raise Fault(error.code, str(error), error.evidence, effect="effect_unknown") from error
+        raise
+
+
+def _creation_parent_roots(config: "Settings", machine: str, destination: Path) -> list[str]:
+    """Reserve existing non-Git grant scopes without serializing sibling creates."""
+    roots = set()
+    for item in config.workspaces.values():
+        if item.machine != machine:
+            continue
         try:
-            control_path = controls.socket_path(state, execution_id)
-        except Fault as error:
-            if tty or error.code != "control_path_too_long":
-                raise
-            control_path = None
-        if control_path is not None:
-            private_directory(control_path.parent)
-            if control_path.exists() or control_path.is_symlink():
-                raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
-        if validate_new is not None:
-            validate_new()  # Only new admissions need controller reference validation.
-        observed = context(working)
-        if observed["git_status"] == "unavailable":
-            raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
-        check_workspace_leases(config, state, scope=working)
-        observed["workspace_lock_root"] = lock_root(config, machine, working, observed)
-        key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
-        with ExitStack() as leases:
+            root = Path(item.root).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if destination.is_relative_to(root):
+            roots.add(str(root))
+    if not roots:
+        raise Fault("path_denied", "The destination must stay inside an existing configured root.")
+    return sorted(roots)
+
+
+def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
+           working: Path, request: dict, *, remote_worker: Path | None,
+           validate_new: Callable[[], object] | None = None,
+           creation_plan: dict | None = None) -> None:
+    """Admit once under the original ID lease; creation plans are internal only."""
+    directory = _directory(state, execution_id)
+    locks = state / "locks"
+    timeout_seconds = request["timeout_seconds"]
+    expected_head_sha = request["expected_head_sha"]
+    workspace_access = request["workspace_access"]
+    tty = request["tty"]
+    with ExitStack() as leases:
+        try:
+            supported()
+            try:
+                control_path = controls.socket_path(state, execution_id)
+            except Fault as error:
+                if tty or error.code != "control_path_too_long":
+                    raise
+                control_path = None
+            if control_path is not None:
+                private_directory(control_path.parent)
+                if control_path.exists() or control_path.is_symlink():
+                    raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
+            if validate_new is not None:
+                validate_new()  # Only new admissions need controller reference validation.
+            if creation_plan is not None:
+                worktrees.ensure_local_objects(working)
+            observed = context(working)
+            if observed["git_status"] == "unavailable":
+                raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
+            if creation_plan is None:
+                check_workspace_leases(config, state, scope=working)
+                observed["workspace_lock_root"] = lock_root(config, machine, working, observed)
+            else:
+                # Creation writes the destination and shared Git metadata, not source files.
+                check_workspace_leases(config, state, scope=Path(creation_plan["destination"]))
+                observed.update(workspace_lock_root=creation_plan["destination"], creation_plan=creation_plan)
+            key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
             owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            if creation_plan is not None:
+                for root in _creation_parent_roots(config, machine, Path(creation_plan["destination"])):
+                    digest = hashlib.sha256(root.encode()).hexdigest()
+                    # Block existing container writers from either side; distinct
+                    # creations can share this reservation for their own lifetime.
+                    owned.append(leases.enter_context(lease(locks / f"workspace-{digest}.lock", shared=True)))
             for name in request["resource_keys"]:
                 digest = hashlib.sha256(name.encode()).hexdigest()
                 owned.append(leases.enter_context(lease(locks / f"resource-{digest}.lock")))
             if expected_head_sha and observed["head_sha"] != expected_head_sha:
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
-            private_directory(directory)
-            record = {"request": request, "context": observed, "version": __version__, "format_version": FORMAT,
-                      "status": "accepted", "exit_code": None, "created_at": time.time(),
-                      "log_truncated": False, "output_incomplete": False, "io_mode": "pty" if tty else "pipe",
-                      "terminal_size": request["terminal_size"], "control_ready": False,
-                      "control": {"protocol": CONTROL_PROTOCOL, "seq": 0, "last": None} if control_path else None,
-                      "command": {"spawned": False, "exited": False, "started_at": None,
-                                  "exited_at": None, "exit_signal": None},
-                      "stop": {"reason": None, "requested_at": None,
-                               "grace_seconds": request["termination_grace_seconds"], "force_used": False},
-                      "cleanup": {"containment": "systemd_scope" if remote_worker else "posix_session",
-                                  "status": "pending", "error": None}}
+            if creation_plan is not None:
+                worktrees.validate_creation(creation_plan)
+        except (Fault, OSError) as error:
+            if creation_plan is None:
+                raise
+            code = error.code if isinstance(error, Fault) else "execution_unavailable"
+            message = str(error) if isinstance(error, Fault) else "No checkout creation was admitted."
+            evidence = error.evidence if isinstance(error, Fault) else None
+            raise Fault(code, message, evidence, effect="known_no_effect") from error
+        private_directory(directory)
+        record = {"request": request, "context": observed, "version": __version__,
+                  "format_version": CREATION_FORMAT if creation_plan is not None else FORMAT,
+                  "status": "accepted", "exit_code": None, "created_at": time.time(),
+                  "log_truncated": False, "output_incomplete": False, "io_mode": "pty" if tty else "pipe",
+                  "terminal_size": request["terminal_size"], "control_ready": False,
+                  "control": {"protocol": CONTROL_PROTOCOL, "seq": 0, "last": None} if control_path else None,
+                  "command": {"spawned": False, "exited": False, "started_at": None,
+                              "exited_at": None, "exit_signal": None},
+                  "stop": {"reason": None, "requested_at": None,
+                           "grace_seconds": request["termination_grace_seconds"], "force_used": False},
+                  "cleanup": {"containment": "systemd_scope" if remote_worker else "posix_session",
+                              "status": "pending", "error": None}}
+        if remote_worker is not None:
+            record.update(scope_unit=f"openmachine-{execution_id}.scope")
+            observed.update(target_identity=machine, worker_archive=str(remote_worker),
+                            worker_sha256=remote_worker.stem)
+        with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
+            save_json(directory / "record.json", record)
+            fds = [lease.fileno() for lease in owned]
+            launcher = [sys.executable, "-I", "-m", "openmachine.execution"]
             if remote_worker is not None:
-                record.update(scope_unit=f"openmachine-{execution_id}.scope")
-                observed.update(target_identity=machine, worker_archive=str(remote_worker),
-                                worker_sha256=remote_worker.stem)
-            with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
+                launcher = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
+                            "--expand-environment=no", "--unit=" + record["scope_unit"],
+                            f"--property=TimeoutStopSec={request['termination_grace_seconds'] + 7}s",
+                            f"--property=RuntimeMaxSec={timeout_seconds + request['termination_grace_seconds'] + 30}s",
+                            sys.executable, "-I", str(remote_worker), "worker"]
+            try:
+                process = subprocess.Popen(
+                    [*launcher, str(directory), str(worker_lease.fileno()), *(str(fd) for fd in fds)],
+                    cwd=state, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True,
+                    pass_fds=(*fds, worker_lease.fileno()),
+                )
+                threading.Thread(target=process.wait, daemon=True).start()
+            except OSError as error:
+                record.update(status="failed", error="worker_launch_failed", finished_at=time.time())
+                record["cleanup"]["status"] = "verified"
                 save_json(directory / "record.json", record)
-                fds = [lease.fileno() for lease in owned]
-                launcher = [sys.executable, "-I", "-m", "openmachine.execution"]
-                if remote_worker is not None:
-                    launcher = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
-                                "--expand-environment=no", "--unit=" + record["scope_unit"],
-                                f"--property=TimeoutStopSec={request['termination_grace_seconds'] + 7}s",
-                                f"--property=RuntimeMaxSec={timeout_seconds + request['termination_grace_seconds'] + 30}s",
-                                sys.executable, "-I", str(remote_worker), "worker"]
-                try:
-                    process = subprocess.Popen(
-                        [*launcher, str(directory), str(worker_lease.fileno()), *(str(fd) for fd in fds)],
-                        cwd=state, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, start_new_session=True,
-                        pass_fds=(*fds, worker_lease.fileno()),
-                    )
-                    threading.Thread(target=process.wait, daemon=True).start()
-                except OSError as error:
-                    record.update(status="failed", error="worker_launch_failed", finished_at=time.time())
-                    record["cleanup"]["status"] = "verified"
-                    save_json(directory / "record.json", record)
-                    raise Fault("worker_launch_failed", "The worker could not start; inspect this execution ID.") from error
-    return read(config, state, machine, execution_id)
+                raise Fault("worker_launch_failed", "The worker could not start; inspect this execution ID.") from error
 
 
 def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = False, scope: Path | None = None) -> None:

@@ -88,6 +88,7 @@ def _dispatch(request: dict, archive: Path) -> dict:
     operation, arguments = request["operation"], request["arguments"]
     if not isinstance(arguments, dict):
         raise Fault("invalid_request", "Operation arguments must be an object.")
+    arguments = dict(arguments)
     state = home / ".local/state/openmachine"
     if operation == "probe":
         execution.check_workspace_leases(config, state)
@@ -102,7 +103,8 @@ def _dispatch(request: dict, archive: Path) -> dict:
         result = {**change_state, "legacy_workspace_compatible": legacy_compatible, "identity_verified": bool(expected), "python": platform.python_version(), "systemd": _scope_ready() if config.execution_enabled else None,
                   "state_directory": str(state), "version": __version__,
                   "os": platform.system(), "architecture": platform.machine(),
-                  "execution": {"receipt_format": execution.FORMAT, "io_modes": ["pipe", "pty"],
+                  "execution": {"receipt_format": execution.FORMAT, "worktree_receipt_format": execution.CREATION_FORMAT,
+                                "io_modes": ["pipe", "pty"],
                                 "controls": sorted(execution.CONTROL_ACTIONS), "control_protocol": execution.CONTROL_PROTOCOL},
                   "unavailable_workspaces": [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]}
     elif not expected:
@@ -113,6 +115,12 @@ def _dispatch(request: dict, archive: Path) -> dict:
             raise Fault("invalid_request", "Use only the documented execution-start fields.")
         _scope_ready()
         result = execution.start(config, state, identity, **arguments, remote_worker=archive)
+    elif operation == "create_worktree":
+        if set(arguments) - {"workspace_name", "destination", "base_ref", "new_branch", "execution_id",
+                             "expected_workspace_identity", "worktree", "task_id"}:
+            raise Fault("invalid_request", "Use only the documented worktree-creation fields.")
+        result = execution.create_worktree(config, state, identity, **arguments,
+                                          remote_worker=archive, validate_new=_scope_ready)
     elif operation == "read_execution":
         if set(arguments) - {"execution_id", "offset", "max_bytes", "wait_seconds"}:
             raise Fault("invalid_request", "Use only the documented execution-read fields.")
@@ -126,27 +134,31 @@ def _dispatch(request: dict, archive: Path) -> dict:
             raise Fault("invalid_request", "Use only the documented execution-control fields.")
         result = execution.control_execution(config, state, identity, **arguments)
     elif operation == "inspect_workspace":
-        if set(arguments) - {"workspace", "action", "path", "offset", "limit", "query", "staged", "expected_snapshot", "path_glob"}:
+        if set(arguments) - {"workspace", "action", "path", "offset", "limit", "query", "staged", "expected_snapshot", "path_glob", "worktree"}:
             raise Fault("invalid_request", "Use only the documented inspection fields.")
         result = workspace.inspect(config, identity, **arguments)
     elif operation == "read_workspace_file":
-        if set(arguments) - {"workspace", "path", "offset", "expected_sha256", "start_line", "line_count"}:
+        if set(arguments) - {"workspace", "path", "offset", "expected_sha256", "start_line", "line_count", "worktree"}:
             raise Fault("invalid_request", "Use only the documented source-read fields.")
+        config = workspace.select_worktree(config, identity, arguments["workspace"], arguments.pop("worktree", ""))
         result = workspace.read_text_file(config, identity, **arguments)
     elif operation == "write_workspace_file":
-        if set(arguments) - {"workspace", "path", "content", "expected_head_sha", "expected_sha256", "change_id", "expected_workspace_identity"}:
+        if set(arguments) - {"workspace", "path", "content", "expected_head_sha", "expected_sha256", "change_id", "expected_workspace_identity", "worktree"}:
             raise Fault("invalid_request", "Use only the documented whole-file fields.")
+        config = workspace.select_worktree(config, identity, arguments["workspace"], arguments.pop("worktree", ""))
         result = workspace.write_text_file(config, state, identity, **arguments,
                                           validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
     elif operation == "edit_workspace_file":
-        if set(arguments) - {"workspace", "path", "edits", "expected_workspace_identity", "expected_head_sha", "expected_sha256", "change_id", "dry_run", "expected_plan_sha256"}:
+        if set(arguments) - {"workspace", "path", "edits", "expected_workspace_identity", "expected_head_sha", "expected_sha256", "change_id", "dry_run", "expected_plan_sha256", "worktree"}:
             raise Fault("invalid_request", "Use only the documented exact-edit fields.")
+        config = workspace.select_worktree(config, identity, arguments["workspace"], arguments.pop("worktree", ""))
         result = workspace.edit_text_file(config, state, identity, **arguments,
                                          validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
     elif operation == "apply_workspace_patch":
         if set(arguments) - {"workspace", "patch_text", "expected_workspace_identity", "expected_head_sha", "preconditions",
-                             "create_parents", "change_id", "dry_run", "expected_plan_sha256"}:
+                             "create_parents", "change_id", "dry_run", "expected_plan_sha256", "worktree"}:
             raise Fault("invalid_request", "Use only the documented coordinated-patch fields.")
+        config = workspace.select_worktree(config, identity, arguments["workspace"], arguments.pop("worktree", ""))
         result = workspace.apply_patch(config, state, identity, **arguments,
                                        validate_new=lambda root: execution.check_workspace_leases(config, state, scope=root))
     elif operation == "read_workspace_change":
@@ -157,7 +169,7 @@ def _dispatch(request: dict, archive: Path) -> dict:
         raise Fault("unsupported_operation", "Select a documented remote workspace or execution operation.")
     response = {"protocol": PROTOCOL, "version": __version__, "identity": identity,
                 "worker_sha256": archive.stem, "result": result}
-    if operation in {"start_execution", "read_execution", "cancel_execution"}:
+    if operation in {"start_execution", "create_worktree", "read_execution", "cancel_execution"}:
         response["result"] = execution.bound_output(
             result, lambda value: len(json.dumps(response | {"result": value}, ensure_ascii=True).encode()) + 1,
             MAX_MESSAGE,

@@ -19,6 +19,7 @@ packages = ["openmachine", "integrations"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills/openmachine/SKILL.md" = "openmachine/_skills/SKILL.md"
+"skills/openmachine/worktrees.md" = "openmachine/_skills/worktrees.md"
 
 [tool.hatch.build.targets.sdist]
 include = ["/openmachine", "/integrations", "/skills/openmachine", "/pyproject.toml", "/README.md", "/docs", "/LICENSE"]

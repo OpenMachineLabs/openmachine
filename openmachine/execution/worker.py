@@ -10,11 +10,12 @@ import time
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
 from openmachine.workspace.git import context
+from openmachine.workspace import worktrees
 
 from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process
-from .records import FORMAT, STOP_STATUS, is_remote, read_record
+from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, is_remote, read_record
 
 PREPARE_SECONDS = 15
 FORCE_SECONDS = 2
@@ -125,9 +126,15 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     # The command inherits workspace/resource leases, never the worker's identity lease.
     os.set_inheritable(worker_fd, False)
     record = read_record(directory)
-    if record.get("format_version") != FORMAT:
+    if record.get("format_version") not in (FORMAT, CREATION_FORMAT):
         raise Fault("unsupported_state_version", "Only the original runtime may start a legacy worker.")
     request = record["request"]
+    creation_plan = record["context"].get("creation_plan")
+    if creation_plan is not None:
+        # This dedicated worker must not inherit Git selectors from the controller.
+        for name in list(os.environ):
+            if name.startswith("GIT_"):
+                del os.environ[name]
     original_worktree = record["context"]["worktree"]
     process = None
     interrupted = scope_owned = False
@@ -146,13 +153,18 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             if not any(line.endswith("/" + record["scope_unit"]) for line in groups):
                 raise Fault("scope_mismatch", "The remote worker did not enter its owned user scope.")
             scope_owned = True
+        if creation_plan is not None:
+            worktrees.ensure_local_objects(Path(request["cwd"]))
         record.update(status="preparing", context=record["context"] | context(Path(request["cwd"])))
         if not _publish(directory, record):
             raise Fault("receipt_io_failed", "Preparation could not be persisted.")
-        if record["context"]["git_status"] == "unavailable" or record["context"]["worktree"] != original_worktree:
-            raise Fault("context_mismatch", "The canonical worktree changed before launch.")
-        if request["expected_head_sha"] and record["context"]["head_sha"] != request["expected_head_sha"]:
-            raise Fault("context_mismatch", "Git HEAD changed before command launch.")
+        if creation_plan is not None:
+            worktrees.validate_creation(creation_plan)
+        else:
+            if record["context"]["git_status"] == "unavailable" or record["context"]["worktree"] != original_worktree:
+                raise Fault("context_mismatch", "The canonical worktree changed before launch.")
+            if request["expected_head_sha"] and record["context"]["head_sha"] != request["expected_head_sha"]:
+                raise Fault("context_mismatch", "Git HEAD changed before command launch.")
         if time.monotonic() >= preparation_deadline:
             raise Fault("preparation_timeout", "The worker exceeded its prelaunch budget.")
         with logs.Writer(directory) as output:
@@ -192,6 +204,12 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                             controls.advance(stopping=True)
                             controls.close()
             record["log_truncated"] = output.total > MAX_LOG
+        if creation_plan is not None and record["status"] == "succeeded":
+            try:
+                record["context"]["created_worktree"] = worktrees.verify_creation(creation_plan)
+            except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
+                record.update(status="outcome_unknown",
+                              error=error.code if isinstance(error, Fault) else "worktree_verification_failed")
     except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
         record.update(error=error.code if isinstance(error, Fault) else type(error).__name__)
         if process is None or process.pid is None:

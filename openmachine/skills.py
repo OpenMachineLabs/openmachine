@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from openmachine.config import Settings
 
 BUNDLED = "package:openmachine/_skills/SKILL.md"
+BUNDLED_FILES = ("SKILL.md", "worktrees.md")
 
 
 def _resource(root: Path, path: str) -> bytes:
@@ -95,9 +96,9 @@ def inspect(config: "Settings", action: str = "list", skill: str = "", path: str
     if action == "read":
         relative = path or "SKILL.md"
         if source == BUNDLED:
-            if relative != "SKILL.md":
-                raise Fault("path_denied", "The installed bundled Skill has only SKILL.md.")
-            raw = files("openmachine").joinpath("_skills/SKILL.md").read_bytes()
+            if relative not in BUNDLED_FILES:
+                raise Fault("path_denied", "Select a bundled Skill resource from its files listing.")
+            raw = files("openmachine").joinpath("_skills", relative).read_bytes()
         else:
             raw = _resource(Path(source).parent, relative)
         if len(raw) > MAX_TEXT_FILE:
@@ -112,7 +113,7 @@ def inspect(config: "Settings", action: str = "list", skill: str = "", path: str
     if source == BUNDLED:
         if path not in ("", "."):
             raise Fault("path_denied", "The bundled Skill exposes only its root resource list.")
-        entries = [{"name": "SKILL.md", "directory": False, "symlink": False}]
+        entries = [{"name": name, "directory": False, "symlink": False} for name in BUNDLED_FILES]
         clipped = False
     else:
         parts = () if path in ("", ".") else file_parts(path)
