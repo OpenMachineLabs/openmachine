@@ -14,11 +14,11 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_expired_claim_preserves_live_command_and_renews_after_result(self):
         args, started = self.owned()
         observer = self.app.task_observer
+        tasks.update(self.state, "structured-one", lambda value, now:
+                     value["control"]["owner"].update(expires_at_ms=now - 1))
         with observer.running():
             self.until(lambda: observer._snapshot["last"].get("structured-one"))
-            tasks.update(self.state, "structured-one", lambda value, now:
-                         value["control"]["owner"].update(expires_at_ms=now - 1))
-            expired = self.view()
+            expired = self.until(self.view)
             owner = expired["record"]["control"]["owner"]
             self.assertEqual(expired["foreground"]["status"], "renewal_required")
             self.assertFalse(expired["foreground"]["stop_foreground"])
@@ -29,7 +29,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No background effects")):
                 (self.work / "release").touch()
                 self.until(lambda: (self.raw()["operations"][0]["result"] or {}).get("status") == "succeeded")
-                completed = self.view()
+                completed = self.until(self.view)
                 self.assertEqual(completed["record"]["control"]["owner"], owner)
                 self.assertEqual(completed["foreground"]["status"], "renewal_required")
                 self.assertFalse(completed["foreground"]["stop_foreground"])
