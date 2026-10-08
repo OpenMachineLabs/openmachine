@@ -42,6 +42,23 @@ ID cursor and at most 100 entries per page. It exposes no raw commands/logs.
 Stable ID order is not chronological or a logical-task lookup; use the original
 task/receipt identity instead of picking the newest unrelated execution.
 
+Command starts, worktree creation and execution reads include advisory
+`task_feedback`. `unbound` means the receipt names no task; `legacy` means it
+references a legacy checkpoint, not structured supervision. `supervised`
+requires the exact original execution and machine identity in the named task,
+and includes its current revision and existing `foreground` projection.
+`unavailable` carries an error code and recovery prompt when task metadata or
+the binding cannot be verified. The original status, exit code and output remain
+authoritative even when task feedback is unavailable; task observation may lag
+the execution. Feedback never claims, renews, accepts or rewrites work.
+
+Independent calls remain supported. If work was meant to continue a structured
+task but feedback is unbound, preserve the receipt and reconcile the original
+task before the next effect. Do not rerun completed work to fill missing history,
+infer ownership from a shared directory, or attach a receipt retroactively.
+Honor a verified `foreground.stop_foreground` under the
+[bounded waiting rules](../tasks/continue.md#bounded-foreground-waiting).
+
 ### Observation and terminal controls
 
 `read_execution(wait_seconds=0..5)` waits only for observation. `max_bytes` is

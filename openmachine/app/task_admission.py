@@ -342,7 +342,17 @@ class TaskAdmission:
                         raise
                 else:
                     raise Fault("task_operation_conflict", "An existing unbound domain operation cannot be adopted as newly admitted task evidence.")
-            self._scope(record, method, arguments, locator)
+            try:
+                self._scope(record, method, arguments, locator)
+            except Fault as error:
+                if error.code not in {"context_mismatch", "task_scope_denied"}:
+                    raise
+                evidence = {**(error.evidence or {}), "task_id": record["task_id"], "operation_id": context["operation_id"],
+                    "resume_prompt": f"Read Open Machine task {record['task_id']} and its original operation results. "
+                                     "Inspect the intended repository or workspace/worktree, identity, HEAD and grants; "
+                                     "revise the original task scope only within current authority before new work. Keep task_context; "
+                                     "do not switch to an unbound call or replay original effects."}
+                raise Fault(error.code, str(error), evidence, effect=error.effect) from error
             # Observe only already known identities, without writing through read_task.
             current = self.reconcile(view)
             transitions.guards(current["record"], context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)

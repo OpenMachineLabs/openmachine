@@ -9,18 +9,109 @@ import uuid
 from openmachine import tasks
 from openmachine.app import task_attention
 from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture
 
 
 class TaskAttentionTests(TaskFixture, unittest.TestCase):
-    def seed_running(self) -> dict:
+    def test_execution_feedback_keeps_receipt_and_reads_only_its_exact_task(self):
+        self.accept_plan()
+        record = self.seed_running()
+        identity = record["operations"][0]["id"]
+        self.control("pause", reason="Pause this task only.")
+        other = deepcopy(self.request)
+        other["task_id"] = "unrelated"
+        self.app.create_task(**other)
+        (self.state / "tasks/unrelated/task.json").write_text("unrelated corrupt fixture")
+        receipt = {"execution_id": identity, "task_id": "structured-one", "status": "failed",
+                   "exit_code": 1, "output": "Original failure output."}
+        before = self.path.read_bytes()
+        with patch.object(self.app.machines, "read_execution", return_value=receipt):
+            result = self.app.read_execution("desktop", identity)
+        feedback = result.pop("task_feedback")
+        self.assertEqual(result, receipt)
+        self.assertNotIn("task_feedback", receipt)
+        self.assertEqual(feedback["status"], "supervised")
+        self.assertEqual(feedback["foreground"]["reason"], "task_stopped")
+        self.assertTrue(feedback["foreground"]["stop_foreground"])
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_unbound_execution_never_infers_a_paused_task_from_its_workspace(self):
+        self.accept_plan()
+        self.control("pause", reason="Independent work stays independent.")
+        receipt = {"execution_id": "a" * 32, "task_id": "", "status": "succeeded", "exit_code": 0}
+        with patch.object(self.app.machines, "read_execution", return_value=receipt), \
+                patch("openmachine.app.tasks.read", side_effect=AssertionError("Unbound receipt looked up a task.")):
+            result = self.app.read_execution("desktop", receipt["execution_id"])
+        self.assertEqual(result, {**receipt, "task_feedback": {"status": "unbound"}})
+
+    def test_task_feedback_failures_never_hide_original_execution(self):
+        self.accept_plan()
+        identity = self.seed_running()["operations"][0]["id"]
+        receipt = {"execution_id": identity, "task_id": "structured-one", "status": "succeeded", "exit_code": 0}
+        with patch.object(self.app.machines, "read_execution", return_value=receipt):
+            with lease(self.state / "locks/tasks.lock"):
+                busy = self.app.read_execution("desktop", identity)
+            self.assertEqual(busy["task_feedback"]["error_code"], "resource_busy")
+            self.path.write_text("corrupt fixture")
+            corrupt = self.app.read_execution("desktop", identity)
+        for result in (busy, corrupt):
+            feedback = result.pop("task_feedback")
+            self.assertEqual(result, receipt)
+            self.assertEqual(feedback["status"], "unavailable")
+            self.assertIn("structured-one", feedback["resume_prompt"])
+            self.assertNotIn("foreground", feedback)
+        self.assertEqual(self.path.read_text(), "corrupt fixture")
+
+    def test_legacy_or_mismatched_reference_never_claims_supervision(self):
+        self.app.save_task("legacy", 0, "Original checkpoint", "Historical work.")
+        self.accept_plan()
+        self.seed_running()
+        for identity, status in (("legacy", "legacy"), ("structured-one", "unavailable")):
+            with self.subTest(task_id=identity):
+                receipt = {"execution_id": "a" * 32, "task_id": identity, "status": "succeeded"}
+                with patch.object(self.app.machines, "read_execution", return_value=receipt):
+                    feedback = self.app.read_execution("desktop", receipt["execution_id"])["task_feedback"]
+                self.assertEqual(feedback["status"], status)
+                self.assertNotIn("foreground", feedback)
+
+    def test_matching_execution_id_on_another_target_is_not_a_verified_binding(self):
+        self.accept_plan()
+        identity = self.seed_running(target_identity="f" * 64)["operations"][0]["id"]
+        receipt = {"execution_id": identity, "task_id": "structured-one", "status": "succeeded"}
+        with patch.object(self.app.machines, "read_execution", return_value=receipt):
+            result = self.app.read_execution("desktop", identity)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["task_feedback"]["error_code"], "task_operation_conflict")
+        self.assertNotIn("foreground", result["task_feedback"])
+
+    def test_scope_rejection_keeps_original_error_and_adds_exact_recovery_context(self):
+        self.accept_plan()
+        cases = [("context_mismatch", self.app.write_workspace_file,
+                  dict(self.write_arguments(), expected_workspace_identity="e" * 64)),
+                 ("task_scope_denied", self.app.start_execution,
+                  dict(self.start_arguments(), cwd=str(self.root)))]
+        before = self.path.read_bytes()
+        for code, operation, arguments in cases:
+            with self.subTest(code=code), self.assertRaises(Fault) as caught:
+                operation(**arguments)
+            error = caught.exception
+            self.assertEqual(error.code, code)
+            self.assertEqual(error.evidence["task_id"], "structured-one")
+            self.assertEqual(error.evidence["operation_id"], arguments["task_context"]["operation_id"])
+            self.assertIn("Keep task_context", error.evidence["resume_prompt"])
+            self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse((self.work / "result.txt").exists())
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+
+    def seed_running(self, target_identity=None) -> dict:
         identity = uuid.uuid4().hex
 
         def retain(record, now):
             record["operations"].append({"id": identity, "stage_id": "verify",
                 "plan_revision": record["plan"]["revision"], "epoch": record["control"]["epoch"],
                 "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                "locator": {"kind": "execution", "machine": "desktop", "target_identity": target_identity,
                             "execution_id": identity, "control_seq": None},
                 "admitted_at_ms": now, "state": "observed", "observed_at_ms": now,
                 "result": {"status": "running", "receipt_sha256": "c" * 64,

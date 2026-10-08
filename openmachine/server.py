@@ -438,14 +438,14 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                         tty: Annotated[bool, Field(strict=True)] = False,
                         terminal_size: TerminalSize | None = None,
                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
-        """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id is a legacy checkpoint association, not permission. Structured work requires current task_context; the original execution_id must equal operation_id. Admission precedes dispatch; unknown outcomes never permit a new ID."""
+        """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id is a legacy checkpoint association, not permission. Structured work requires current task_context; the original execution_id must equal operation_id. Check task_feedback for verified association or unavailable task status. Admission precedes dispatch; unknown outcomes never permit a new ID."""
         return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size.model_dump() if terminal_size is not None else None, _task_context(task_context)), execution_output=True)
 
     @guided_tool(annotations=machine_read)
     async def read_execution(machine: str, execution_id: str, offset: Annotated[int, Field(ge=0)] = 0,
                              max_bytes: Annotated[int, Field(ge=1, le=65536)] = 65536,
                              wait_seconds: Annotated[float, Field(strict=True, ge=0, le=MAX_WAIT, allow_inf_nan=False)] = 0) -> CallToolResult:
-        """Read the original receipt and raw-byte-cursor output. Optional 0..5-second waiting wakes on output/state/exit, never changes command timeout. At most 16 waiting readers per server; reader_busy rejects overflow. Cancellation/disconnect affects observation only. Observe output loss/presentation flags; unknown target/worker evidence never permits replay."""
+        """Read the original receipt and raw-byte-cursor output. task_feedback reports association and verified task foreground state without changing the execution outcome; unavailable task metadata does not hide the receipt. Optional 0..5-second waiting never changes command timeout. At most 16 waiting readers; cancellation/disconnect affects observation only. Observe output loss/presentation flags; unknown evidence never permits replay."""
         if wait_seconds and not waiting.acquire(blocking=False):
             return _result({"error": {"code": "reader_busy", "message": "At most 16 waiting readers are admitted; immediate reads and cancellation remain available."}}, True)
         cancelled = threading.Event()
