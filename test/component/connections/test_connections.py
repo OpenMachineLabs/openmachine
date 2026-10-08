@@ -21,6 +21,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks
 from openmachine.tasks import records
 from test.support.connections_cases import ConnectionCaseFixture
+from test.support.tasks import replace_task_record
 
 
 class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
@@ -468,11 +469,11 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
                 operation["result"].pop("effect", None)
         old.pop("chat_registration")
         old["contract"].pop("recovery_policy")
-        self.path.write_bytes(records.canonical(old))
-        self.app.rebuild_task_index()
-        raw = self.path.read_bytes()
+        old = replace_task_record(self.state, old)
+        raw = self.task_bytes()
         self.assertEqual(old["format"], 1)
-        self.assertEqual(records.canonical(records.Record.model_validate(old).model_dump()), raw)
+        observed = {key: value for key, value in self.view()["record"].items() if key not in {"_facts", "_decisions"}}
+        self.assertEqual(records.canonical(records.Record.model_validate(observed).model_dump()), records.canonical(old))
         self.fault("integration_legacy_connection", self.control, "claim", handoff_id=old["handoff"]["id"])
         self.assertEqual(self.calls, [])
         self.actor = {"id": 2, "login": "other"}
@@ -485,7 +486,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
                    dict(action="repository", repository="Example/repo", connection_id=native["id"]),
                    historical_unbound=True)
         self.assertEqual(self.calls, [])
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
 
     def test_retired_bound_history_is_readable_without_dispatch_or_native_fallback(self):
         self.connect()
@@ -511,8 +512,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         binding = dict(connection_id="e" * 32, account_id=1, authorization_revision=1)
         old["contract"]["github_connections"]["Example/repo"] = binding
         old["operations"][0]["locator"]["connection"] = binding
-        self.path.write_bytes(records.canonical(old))
-        self.app.rebuild_task_index()
+        old = replace_task_record(self.state, old)
         retained = connections.Connection(id=binding["connection_id"], provider="github", backend="gh",
             account_id=1, account_login="operator", authorization_revision=1, status="connected",
             policy=self.config.github, verified_at_ms=connections.now_ms())
@@ -521,7 +521,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             status="succeeded", created_at_ms=1, expires_at_ms=1000, connection_id=retained.id)
         save_json(self.state / "connections.json", connections.Store(format=1,
             connections={retained.id: retained}, attempts={attempt_id: attempt}).model_dump())
-        raw_task, raw_connections = self.path.read_bytes(), (self.state / "connections.json").read_bytes()
+        raw_task, raw_connections = self.task_bytes(), (self.state / "connections.json").read_bytes()
         self.calls.clear()
         self.assertTrue(self.app.list_integrations()["connections"][0]["historical_only"])
         self.assertEqual(self.app.read_integration_login(attempt_id)["status"], "succeeded")
@@ -531,7 +531,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.assertEqual((historical["status"], historical["current_state_observed"], historical["task_operation_replayed"]),
                          ("retained_task_evidence", False, False))
         self.assertEqual(historical["result"], old["operations"][0]["result"])
-        self.assertEqual(self.path.read_bytes(), raw_task)
+        self.assertEqual(self.task_bytes(), raw_task)
         self.assertEqual(self.calls, [])
         self.assertEqual((self.state / "connections.json").read_bytes(), raw_connections)
         self.actor = {"id": 2, "login": "other"}
@@ -547,7 +547,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.fault("task_scope_denied", self.app.github_comment, "create", "Example/repo", "Fixture.", 1,
                    connection_id=native["id"], task_context=self.context_for("c" * 32))
         self.assertEqual(self.calls, [])
-        self.assertEqual(self.path.read_bytes(), raw_task)
+        self.assertEqual(self.task_bytes(), raw_task)
 
     def test_retired_unbound_pending_effect_stays_unknown_without_reconciliation(self):
         self.connect()
@@ -577,22 +577,21 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         old["contract"].pop("recovery_policy")
         old["contract"].pop("github_connections")
         old["operations"][0]["locator"].pop("connection")
-        self.path.write_bytes(records.canonical(old))
-        self.app.rebuild_task_index()
-        raw = self.path.read_bytes()
+        replace_task_record(self.state, old)
+        raw = self.task_bytes()
         self.calls.clear()
         observed = self.app.task_admission.reconcile(self.view())
         self.assertEqual(observed["record"]["operations"][0]["result"]["status"], "unknown")
         self.fault("integration_legacy_connection", self.app.github_comment, **args)
         self.assertEqual(self.calls, [])
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
 
     def test_real_state_readers_must_understand_native_authority(self):
         self.connect()
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 17)
+        self.assertEqual(proof["state_contract"], 18)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

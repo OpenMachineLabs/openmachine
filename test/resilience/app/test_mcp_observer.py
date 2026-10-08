@@ -1,12 +1,12 @@
 """resilience app test_mcp_observer behavior."""
 
 import asyncio
-import json
 import sys
 import time
 import unittest
 import uuid
 from mcp import Client
+from openmachine import tasks
 from openmachine.foundation.state import lease
 from test.support.mcp import MCPFixture
 
@@ -24,7 +24,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 identity = "observe-" + mode + "-" + boundary
                 execution_id = uuid.uuid4().hex
                 counter, release, done = (self.work / (prefix + identity) for prefix in ("count-", "release-", "done-"))
-                path = self.state / "tasks" / identity / "task.json"
+                def retained_record():
+                    return tasks.read(self.state, identity, operation_ids=(execution_id,))["record"]
                 try:
                     async with Client(self.client(), mode=mode, cache=None) as client:
                         async def call(name, arguments):
@@ -49,7 +50,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         async with Client(self.client(), mode=mode, cache=None) as second:
                             self.assertEqual((await self.observer_task_view(second, identity))["task_id"], identity)
                     # No SDK sessions or tool calls remain. Only fixture control
-                    # and passive canonical bytes may be used to await publication.
+                    # and passive Task-owner SQLite reads may await publication.
                     if boundary != "live":
                         crashed = boundary.startswith("crash-")
                         if crashed:
@@ -58,14 +59,14 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                             self.assertTrue(self.socket.exists())
                         else:
                             self.stop(self.processes[-1])
-                        before = path.read_bytes()
+                        before = retained_record()
                         if boundary.endswith("-completed"):
                             release.touch()
                             deadline = time.monotonic() + 5
                             while not done.exists() and time.monotonic() < deadline:
                                 await asyncio.sleep(0.03)
                             self.assertTrue(done.exists())
-                            self.assertEqual(path.read_bytes(), before)
+                            self.assertEqual(retained_record(), before)
                         if boundary == "activation":
                             # The real lifecycle owner holds this lease through
                             # candidate startup/readiness. It must not strand the
@@ -79,7 +80,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                 self.assertTrue(done.exists())
                                 async with Client(self.client(), mode=mode, cache=None) as probe:
                                     self.assertEqual((await self.observer_task_view(probe, identity))["task_id"], identity)
-                                self.assertEqual(path.read_bytes(), before)
+                                self.assertEqual(retained_record(), before)
                         else:
                             # CI explicitly supplies managed startup; native
                             # launchd auto-restart is separate acceptance.
@@ -87,7 +88,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     release.touch()
                     deadline = time.monotonic() + 10
                     while time.monotonic() < deadline:
-                        record = json.loads(path.read_bytes())
+                        record = retained_record()
                         if (record["operations"][0]["result"] or {}).get("status") == "succeeded":
                             break
                         await asyncio.sleep(0.03)
@@ -97,17 +98,24 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(record["plan"]["stages"][0]["state"], "running")
                     self.assertIsNone(record["terminal"])
                     self.assertEqual([item["id"] for item in record["operations"]], [execution_id])
+                    self.assertEqual(record["_facts"]["operation_count"], 1)
                     self.assertEqual(counter.read_text(), "1")
-                    before = path.read_bytes()
+                    before = retained_record()
                     async with Client(self.client(), mode=mode, cache=None) as client:
                         view = await self.observer_task_view(client, identity)
                         self.assertTrue(view["support"]["local_result_observation"])
                         self.assertFalse(view["support"]["events_delivery"])
                         self.assertEqual(view["observations"][0]["state"], "unknown")
+                        self.assertNotIn("operations", view["record"])
+                        page = await client.call_tool("read_task", {"task_id": identity,
+                            "section": "operations", "operation_id": execution_id})
+                        self.assertFalse(page.is_error, page.structured_content)
+                        self.assertTrue(page.structured_content["complete"])
+                        self.assertEqual([item["id"] for item in page.structured_content["items"]], [execution_id])
                         original = (await client.call_tool("read_execution", {"machine": "desktop", "execution_id": execution_id})).structured_content
                         self.assertEqual(original["created_at"], started["created_at"])
                         self.assertEqual(original["status"], "succeeded")
-                        self.assertEqual(path.read_bytes(), before)
+                        self.assertEqual(retained_record(), before)
                 finally:
                     release.touch()
                     deadline = time.monotonic() + 5

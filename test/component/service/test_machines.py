@@ -103,9 +103,9 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         unpinned = config.model_copy(update={"machines": {**config.machines,
             "remote": config.machines["remote"].model_copy(update={"ssh_identity": ""})}})
         self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(unpinned, self.state, "remote"))
-        record = {"contract": {"targets": [{"machine": "remote"}]}, "operations": []}
-        with patch.object(service_checks.tasks, "observation_page", return_value={"complete": True, "entries": [{"record": record}], "has_more": False}):
+        with patch.object(service_checks.tasks, "references_target", return_value=True) as references:
             self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(config, self.state, "remote"))
+            references.assert_called_once_with(self.state, "remote", "d" * 64)
         # Use the public settings validator rather than manufacturing a workspace owner.
         config = Settings.model_validate(config.model_dump() | {"workspaces": {"work": {"machine": "remote", "root": "/remote/work"}}})
         self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(config, self.state, "remote"))
