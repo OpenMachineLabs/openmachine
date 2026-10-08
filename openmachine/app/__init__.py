@@ -106,6 +106,8 @@ class Application:
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
+            "skill_navigation": {"entry": skills.for_tool("get_capabilities"),
+                                 "tool": "inspect_skills", "selector": "tool"},
             "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
                       "index_format": 2, "supervised_admission": True, "runtime_recovery": False,
                       "events_delivery": False,
@@ -169,8 +171,9 @@ class Application:
                                                staged, expected_snapshot, path_glob, worktree)
 
     def inspect_skills(self, action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
-                       query: str = "", offset: int = 0, limit: int = 100, expected_snapshot: str = "") -> dict:
-        return skills.inspect(self.config, action, skill, path, query, offset, limit, expected_snapshot)
+                       query: str = "", offset: int = 0, limit: int = 100, expected_snapshot: str = "",
+                       tool: str = "") -> dict:
+        return skills.inspect(self.config, action, skill, path, query, offset, limit, expected_snapshot, tool)
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str, offset: int = 0,
                             expected_sha256: str = "", start_line: int | None = None,

@@ -29,6 +29,8 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
             ("openmachine.tasks.index", "from . import store", "must not depend"),
             ("integrations.github.connection", "from . import client", "must not depend"),
             ("openmachine.execution.records", "from openmachine.config import Settings", "must not depend"),
+            ("openmachine.skills.catalog", "from openmachine.app import Application", "must not depend"),
+            ("openmachine.skills.guidance", "import openmachine.server", "must not depend"),
             ("openmachine.new_owner", "import os", "explicit dependency owner"),
             ("openmachine.foundation.files", "from .sanitize import *", "wildcard import"),
             ("openmachine.foundation.files", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.tasks", "must not depend"),

@@ -32,8 +32,9 @@ environment. An explicit module or layer with no tests is an error.
 
 `premerge.py` requires a clean committed worktree. It uses the same selector and
 runner as development and CI, checks whitespace and repository rules before
-installing dependencies, builds one candidate wheel, and runs only the required
-test files outside the checkout. Its import check ensures product modules come
+installing dependencies, builds the direct and sdist-derived candidate wheels,
+compares their canonical Skill package bytes, and runs the required test files
+once against the installed direct wheel outside the checkout. Its import check ensures product modules come
 from that wheel. Repository tests remain dependency-free, and the test package
 is loaded without putting the checkout ahead of the installed product.
 
@@ -93,8 +94,9 @@ The selector adds those concrete tests once; it does not recursively expand an
 import graph or run every consumer module. Shared foundation, configuration and
 application changes must name the affected consumer boundaries in the manifest.
 
-The bundled `skills/openmachine/SKILL.md` is a shipped package input owned by
-`skills`. Editing it selects the installed resource tests, including rebuilding
+All runtime, YAML bindings and Markdown under `openmachine/skills/` are canonical
+shipped inputs owned by `skills`. Each has an exact ownership entry. Editing a
+guide selects installed resource and MCP navigation coverage, including rebuilding
 the wheel, even though its content is Markdown.
 
 A changed test runs that test directly. Shared fixture changes run their declared
@@ -130,9 +132,12 @@ pull controller dependencies onto SSH targets. Explicit checks do not model all
 implicit initialization/dynamic imports; isolated assembly/archive startup and
 full-source review cover those limits. Do not add a dynamic import to evade them.
 
-Build both wheel and sdist-derived wheel, compare their shipped Python/Skill files
-with the source and installed candidate, and verify the new reference guides are included in the
-sdist. Preserve the console and execution/service module entrypoints. The curated
+The installed runner builds both wheel and sdist-derived wheel in its existing
+temporary environment and compares every canonical Skill `.py`, `.yaml` and `.md`
+file with source bytes. Missing, extra, changed, duplicate and retired `_skills`
+resources fail the gate. Installed resource coverage compares the installed copy
+with the same source. Behavioral tests execute once after this payload parity
+check. Preserve the console and execution/service module entrypoints. The curated
 SSH archive runs with `-I -S` without controller app/tasks/service/GitHub/MCP/Pydantic.
 Its actual worker fixture verifies inherited leases and an original counter=1.
 New source members change artifact hashes, not protocol/state semantics by assertion.

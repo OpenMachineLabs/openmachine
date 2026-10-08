@@ -1,15 +1,28 @@
 """contract mcp server test_catalog behavior."""
 
+import ast
+import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 import unittest
 from mcp import Client, ClientSession
 import openmachine
+from openmachine import skills
 from test.support.mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    def guide_selector(self, tool):
+        calls = [ast.parse("inspect_skills(" + arguments + ")", mode="eval").body
+                 for arguments in re.findall(r"inspect_skills\(([^()]*)\)", tool.description or "")]
+        selectors = [{keyword.arg: ast.literal_eval(keyword.value) for keyword in call.keywords}
+                     for call in calls if not call.args]
+        matching = [selector for selector in selectors if selector.get("tool") == tool.name]
+        self.assertEqual(matching, [{"action": "read", "tool": tool.name}], tool.name)
+        return matching[0]
+
     async def test_tool_contract_without_github(self):
         local = self.config.read_text().split("[github]")[0]
         for ssh in (False, True):
@@ -25,7 +38,10 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     async with self.client() as (reader, writer):
                         async with ClientSession(reader, writer) as session:
                             await session.initialize()
-                            self.assert_tool_contract(await session.list_tools(), github=False, ssh=ssh)
+                            discovered = await session.list_tools()
+                            self.assert_tool_contract(discovered, github=False, ssh=ssh)
+                            for tool in discovered.tools:
+                                self.guide_selector(tool)
                             caps = (await session.call_tool("get_capabilities", {})).structured_content
                             self.assertEqual(caps["integrations"], ["ssh"] if ssh else [])
                 finally:
@@ -64,6 +80,25 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 caps = (await session.call_tool("get_capabilities", {})).structured_content
                 self.assertEqual(caps["machines"]["desktop"]["probe_status"], "not_probed")
                 self.assertEqual(caps["integrations"], ["github"])
+                self.assertEqual(caps["skill_navigation"], {
+                    "entry": skills.for_tool("get_capabilities"), "tool": "inspect_skills", "selector": "tool"})
+                for tool in discovered.tools:
+                    with self.subTest(guide=tool.name):
+                        selector = self.guide_selector(tool)
+                        guide = await session.call_tool("inspect_skills", selector)
+                        self.assertFalse(guide.is_error, guide)
+                        binding = skills.for_tool(tool.name)
+                        self.assertEqual({key: guide.structured_content[key] for key in ("skill", "path")}, binding)
+                        self.assertTrue(guide.structured_content["text"])
+                        self.assertFalse(guide.structured_content["has_more"])
+                        self.assertEqual(guide.structured_content["snapshot"],
+                                         hashlib.sha256(guide.structured_content["text"].encode()).hexdigest())
+                for arguments, code in (({"tool": "missing_tool"}, "skill_unavailable"),
+                                        ({"tool": "get_capabilities", "skill": "om.workspace"}, "invalid_skill_selector"),
+                                        ({"tool": "get_capabilities", "path": "other.md"}, "invalid_skill_selector")):
+                    rejected = await session.call_tool("inspect_skills", {"action": "read", **arguments})
+                    self.assertTrue(rejected.is_error)
+                    self.assertEqual(rejected.structured_content["error"]["code"], code)
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
                 self.assertFalse(skill.is_error)
                 self.assertIn("Operate Open Machine", skill.structured_content["text"])

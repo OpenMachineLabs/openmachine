@@ -10,10 +10,12 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import types
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,7 @@ GLOBAL_PATHS = {
 }
 REPOSITORY_PATHS = {
     "AGENTS.md", "CONTRIBUTING.md", "README.md", "LICENSE", ".gitignore",
+    "examples/config.toml",
     ".github/AGENTS.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/pull_request_template.md", ".github/labels.json",
     ".github/workflows/metadata.yml", ".github/workflows/labels.yml",
     ".github/workflows/spec-development.yml", "scripts/check_repository.py",
@@ -192,7 +195,8 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
         if missing:
             raise ValueError("stale ownership paths: " + ", ".join(missing))
         production = {path for path in files
-                      if path.endswith(".py") and path.startswith(("openmachine/", "integrations/"))}
+                      if (path.endswith(".py") and path.startswith(("openmachine/", "integrations/")))
+                      or (path.startswith("openmachine/skills/") and path.endswith((".md", ".yaml")))}
         tests = {path for path in files if path.startswith("test/")
                  and PurePosixPath(path).name.startswith("test_") and path.endswith(".py")}
         helpers = {path for path in files if path.startswith("test/") and path.endswith(".py")
@@ -226,6 +230,7 @@ def _old_manifest(root: Path, base_sha: str) -> dict | None:
 
 
 def _repository_only(path: str) -> bool:
+    # Keep retired docs classified so their deletion still selects repository checks.
     return (path in REPOSITORY_PATHS or
             path.startswith("spec/") or
             (path.endswith(".md") and path.startswith(("docs/", "test/"))) or
@@ -458,6 +463,34 @@ def run_files(root: Path, paths: list[str], *, installed: bool, source: bool = F
     return {"layers": results}
 
 
+def skill_sources(root: Path) -> dict[str, bytes]:
+    package = root / "openmachine/skills"
+    return {path.relative_to(root).as_posix(): path.read_bytes()
+            for path in package.rglob("*") if path.is_file() and path.suffix in {".py", ".yaml", ".md"}}
+
+
+def wheel_skills(wheel: Path) -> dict[str, bytes]:
+    with zipfile.ZipFile(wheel) as archive:
+        paths = [name for name in archive.namelist() if name.startswith("openmachine/skills/")
+                 and Path(name).suffix in {".py", ".yaml", ".md"}]
+        if len(paths) != len(set(paths)) or any(name.startswith("openmachine/_skills/") for name in archive.namelist()):
+            raise ValueError("wheel has duplicate or retired Skill resources")
+        return {name: archive.read(name) for name in paths}
+
+
+def verify_skill_payloads(root: Path, *wheels: Path) -> None:
+    expected = skill_sources(root)
+    if not {"openmachine/skills/__init__.py", "openmachine/skills/bindings.yaml",
+            "openmachine/skills/overview/SKILL.md"} <= expected.keys():
+        raise ValueError("canonical Skill package inputs are incomplete")
+    for wheel in wheels:
+        actual = wheel_skills(wheel)
+        if actual != expected:
+            missing, extra = sorted(expected.keys() - actual.keys()), sorted(actual.keys() - expected.keys())
+            changed = sorted(name for name in expected.keys() & actual.keys() if expected[name] != actual[name])
+            raise ValueError(f"Skill package differs from source in {wheel.name}: missing={missing}, extra={extra}, changed={changed}")
+
+
 def execute_plan(root: Path, plan: dict) -> dict:
     print_plan(plan)
     stages = {}
@@ -503,6 +536,29 @@ def execute_plan(root: Path, plan: dict) -> dict:
             artifacts = list(wheels.glob("openmachine-*.whl"))
             if len(artifacts) != 1:
                 raise ValueError("expected exactly one newly built candidate wheel")
+            sdists = temporary / "sdists"
+            sdists.mkdir()
+            stages["sdist build"] = run_command([str(python), "-c",
+                "from hatchling.build import build_sdist; import sys; build_sdist(sys.argv[1])", str(sdists)],
+                cwd=root, stage="build candidate sdist")
+            archives = list(sdists.glob("openmachine-*.tar.gz"))
+            if len(archives) != 1:
+                raise ValueError("expected exactly one newly built candidate sdist")
+            unpacked = temporary / "sdist-source"
+            with tarfile.open(archives[0]) as archive:
+                archive.extractall(unpacked, filter="data")
+            source_roots = list(unpacked.glob("*/pyproject.toml"))
+            if len(source_roots) != 1:
+                raise ValueError("expected one candidate source root in the sdist")
+            derived = temporary / "sdist-wheels"
+            derived.mkdir()
+            stages["sdist wheel build"] = run_command([str(python), "-m", "pip", "wheel", "--no-deps",
+                "--no-build-isolation", ".", "--wheel-dir", str(derived)],
+                cwd=source_roots[0].parent, stage="build wheel from candidate sdist")
+            derived_artifacts = list(derived.glob("openmachine-*.whl"))
+            if len(derived_artifacts) != 1:
+                raise ValueError("expected exactly one newly built sdist-derived wheel")
+            verify_skill_payloads(root, artifacts[0], derived_artifacts[0])
             stages["wheel install"] = run_command([str(python), "-m", "pip", "install", "--no-deps",
                                                    "--force-reinstall", str(artifacts[0])],
                                                   cwd=root, stage="install candidate wheel")

@@ -9,7 +9,7 @@ description = "A private MCP runtime for explicit work on your machines."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-dependencies = ["mcp==2.2.0", "httpx2==2.13.1", "jsonschema==4.26.0", "pydantic==2.13.5", "uvicorn==0.38.0"]
+dependencies = ["mcp==2.2.0", "httpx2==2.13.1", "jsonschema==4.26.0", "pydantic==2.13.5", "PyYAML==6.0.3", "uvicorn==0.38.0"]
 
 [project.scripts]
 openmachine = "openmachine.cli:main"
@@ -17,12 +17,8 @@ openmachine = "openmachine.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["openmachine", "integrations"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"skills/openmachine/SKILL.md" = "openmachine/_skills/SKILL.md"
-"skills/openmachine/worktrees.md" = "openmachine/_skills/worktrees.md"
-
 [tool.hatch.build.targets.sdist]
-include = ["/openmachine", "/integrations", "/skills/openmachine", "/pyproject.toml", "/README.md", "/docs", "/LICENSE"]
+include = ["/openmachine", "/integrations", "/pyproject.toml", "/README.md", "/LICENSE"]
 
 [tool.hatch.version]
 path = "openmachine/__init__.py"

@@ -118,9 +118,10 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         self.assertEqual(tasks.read(self.state, "task-one")["anchors"], ["branch=repair-fixture", "issue=example/project#1"])
         root_alias = self.root / "root-alias"
         root_alias.symlink_to(Path("/"), target_is_directory=True)
+        baseline = skills.inspect(self.config)["skills"]
         self.config.skills = SkillSources(roots=[str(root_alias)])
         result = skills.inspect(self.config)
-        self.assertEqual(len(result["skills"]), 1)
+        self.assertEqual(result["skills"], baseline)
         self.assertEqual(result["warnings"][0]["code"], "invalid_skill_root")
 
     def test_additive_anchor_limit_rejects_before_mutating_state(self):
