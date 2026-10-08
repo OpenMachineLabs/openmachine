@@ -15,7 +15,9 @@ from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
 from openmachine.tasks import database as task_database
+from openmachine.tasks import migration as task_migration
 from test.support.service_cases import ServiceCaseFixture
+from test.support.tasks import write_legacy_checkpoint
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
@@ -49,6 +51,29 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_state._record(self.state), self.record)
         self.assertEqual(stop.call_count, 2)
         self.assertEqual([item.args[1]["current"] for item in start.call_args_list], [self.a])
+
+    def test_unfenced_import_retry_uses_real_activation_gate_and_migration(self):
+        for identity in ("task-one", "task-one-c1"):
+            write_legacy_checkpoint(self.state, identity, "Retain the original checkpoint.\n")
+        root = self.state / "tasks"
+        original = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+        with patch.object(task_migration, "_verify_import", side_effect=Fault("task_migration_incomplete", "Fixture failed import.")):
+            self.assert_fault("task_migration_incomplete", lambda: tasks.migrate(self.state))
+        prepared = tasks.storage_state(self.state)
+        inode = (self.state / "locks/tasks.lock").stat().st_ino
+        _, stop, start = self.ledger_activation_fixture()
+
+        result = service_transition._activate(self.state, self.record, self.b, require_safe=True)
+
+        self.assertEqual(result["current"], self.b)
+        self.assertIsNone(service_state._record(self.state)["pending"])
+        self.assertEqual(tasks.storage_state(self.state)["identity"], prepared["identity"])
+        self.assertEqual((self.state / "locks/tasks.lock").stat().st_ino, inode)
+        archive = next(self.state.glob("tasks-legacy-*"))
+        self.assertEqual({path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}, original)
+        self.assertEqual(tasks.check_state(self.state)["task_records"], 2)
+        stop.assert_called_once()
+        start.assert_called_once()
 
     def test_fenced_task_migration_and_start_failures_never_restore_old_writer(self):
         verify, stop, start = self.ledger_activation_fixture()

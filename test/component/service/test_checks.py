@@ -8,12 +8,15 @@ import time
 import unittest
 from unittest.mock import call, patch
 from openmachine import service, tasks
+from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks as service_checks
 from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
+from openmachine.tasks import database as task_database, migration as task_migration, records as task_records
+from openmachine.tasks.index import structured_metadata
 from test.support.service_cases import ServiceCaseFixture
 from test.support.tasks import write_legacy_checkpoint, write_legacy_task
 
@@ -486,6 +489,43 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         before = recovery.read_bytes()
         self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         self.assertEqual(recovery.read_bytes(), before)
+
+    def test_unfenced_activation_reads_new_legacy_operations_and_rejects_dual_authority(self):
+        record = self.legacy_task_fixture()["record"]
+        with patch.object(task_migration, "_verify_import", side_effect=Fault("task_migration_incomplete", "Fixture failed import.")):
+            self.assert_fault("task_migration_incomplete", lambda: tasks.migrate(self.state))
+        service_checks.activation_safe(self.state)
+        now = time.time_ns() // 1000000
+        operation = {"id": "a" * 32, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
+            "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
+            "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                "execution_id": "a" * 32, "control_seq": None},
+            "admitted_at_ms": now, "state": "unknown", "observed_at_ms": now,
+            "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original unresolved work.", "log_offset": None}}
+        record["operations"] = [operation]
+        record.update(revision=2, control_revision=2, updated_at_ms=now)
+        record["control"].update(state="paused", stop_intent="pause")
+        record["plan"]["stages"][0].update(state="blocked", evidence=[operation["id"]])
+        record["handoff"] = None
+        path = self.state / "tasks/structured-one/task.json"
+        with lease(self.state / "locks/tasks.lock"):
+            path.write_bytes(task_records.canonical(record))
+            index_path = self.state / "tasks/index.json"
+            index = json.loads(index_path.read_text())
+            index["tasks"][record["task_id"]] = structured_metadata(record, path.read_bytes())
+            index["generation"] += 1
+            save_json(index_path, index)
+        original = path.read_bytes()
+        self.assertEqual(list(tasks.activation_blockers(self.state)), [operation])
+        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        self.assertEqual(path.read_bytes(), original)
+        path.write_bytes(b"{}")
+        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        path.write_bytes(original)
+        with task_database.connect(self.state, maintenance=True, write=True) as connection:
+            connection.execute("UPDATE store SET active=1")
+        self.assert_fault("corrupt_tasks", lambda: list(tasks.activation_blockers(self.state)))
+        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
 
     def test_product_admission_defers_actual_unresolved_task_and_execution_readers(self):
         from test.support.tasks import task_contract
