@@ -41,6 +41,48 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             startup.assert_called_once_with(self.state, False)
             self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
 
+    def test_retained_management_survives_selected_legacy_installation(self):
+        # A valid old payload anchor stays authoritative even when the selected
+        # newer Core was installed through the earlier wheel-only updater.
+        anchor = self.state / "service/versions" / self.a / "installation.json"
+        save_json(anchor, service_state._json(anchor) | {
+            "state_contract": 14, "management_contract": 1, "payload_sha256": "d" * 64})
+        python = self.state / "service/payloads" / ("d" * 64) / "python/bin/python3"
+        python.parent.mkdir(parents=True)
+        python.symlink_to(sys.executable)
+        bound = service_state._bind_management(self.state, self.record, self.a)
+        self.save(bound)
+        retained_entry = (self.state / "service/manage.py").read_bytes()
+        selected = self.state / "service/versions" / self.b / "installation.json"
+        save_json(selected, service_state._json(selected) | {
+            "version": "0.2.13", "state_contract": 16})
+        upgraded = bound | {"current": self.b, "previous": self.a}
+        self.save(upgraded)
+        self.assertEqual(service_state._bind_management(self.state, upgraded, self.b), upgraded)
+        self.assertEqual((self.state / "service/manage.py").read_bytes(), retained_entry)
+        with patch.object(service_runtime, "_verify_files"), \
+                patch.object(service_checks, "_candidate_state"), \
+                patch.object(service_runtime, "_stop") as stop, \
+                patch.object(service_runtime, "_sync_definition"), \
+                patch.object(maintenance, "observe", return_value={"status": "stopped"}), \
+                patch.object(service_runtime, "_startup", return_value={"enabled": True}):
+            observed = maintenance.control(self.config, self.state, "stop")
+        self.assertEqual(observed["status"], "stopped")
+        self.assertEqual(service_state._record(self.state)["policy"],
+                         {"desired": "stopped", "start_at_login": True})
+        self.assertEqual(service_state._record(self.state)["management"], bound["management"])
+        self.assertEqual((self.state / "service/manage.py").read_bytes(), retained_entry)
+        stop.assert_called_once_with(self.state)
+
+    def test_first_management_binding_still_requires_payload_authority(self):
+        selected = self.state / "service/versions" / self.a / "installation.json"
+        save_json(selected, service_state._json(selected) | {
+            "version": "0.2.13", "state_contract": 16, "management_contract": 1})
+        self.assert_fault("incoming_runtime_required",
+                          lambda: service_state._bind_management(self.state, self.record, self.a))
+        self.assertFalse((self.state / "service/manage.py").exists())
+        self.assertEqual(service_state._record(self.state), self.record)
+
     def test_management_contract_reports_timestamp_busy_incompatible_and_actual_selection(self):
         self.enterContext(patch.object(service_transition.sys, "platform", "darwin"))
         self.policy_fixture()

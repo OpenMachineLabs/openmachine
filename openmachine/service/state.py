@@ -172,13 +172,14 @@ def stopped(record: dict) -> bool:
 
 def _bind_management(state: Path, record: dict, identity: str) -> dict:
     installed = _installed(state, identity)
+    if "management" in record:
+        # The original verified entry stays pinned when a newer selected Core
+        # was installed without a product payload. Never rebind on control.
+        return record
     if installed.get("management_contract") != MANAGEMENT_CONTRACT or not installed.get("payload_sha256"):
         raise Fault("incoming_runtime_required", "Bind a verified retained payload implementation with management contract 1.")
     python = state / "service/payloads" / installed["payload_sha256"] / "python/bin/python3"
     binding = {"identity": identity, "launch_python": str(python.resolve(strict=True))}
-    if "management" in record:
-        # Never repin an existing stable entry on each upgrade.
-        return record
     bound = record | {"management": binding}
     path = state / "service/manage.py"
     content = management_entry(state, bound)
