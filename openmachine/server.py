@@ -359,7 +359,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                         expected_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
                         wait_seconds: Annotated[float, Field(strict=True, ge=0, le=MAX_TASK_WAIT,
                         allow_inf_nan=False)] = MAX_TASK_WAIT) -> CallToolResult:
-        """Wait once for bounded structured-task progress. Attention or wait expiry sets foreground.stop_foreground and supplies a safe resume prompt; callers must end the current Chat turn. This read never claims, retries, cancels, or extends original work."""
+        """Wait once for bounded structured-task progress. Renewal required returns immediately for guarded same-claim renewal without ending the turn. Attention or wait expiry sets foreground.stop_foreground and requires ending the turn. This read never claims, renews, retries, cancels, or extends original work."""
         if wait_seconds and not waiting.acquire(blocking=False):
             return _result({"error": {"code": "reader_busy",
                 "message": "At most 16 bounded waits are admitted; immediate task reads and cancellation remain available."}}, True)

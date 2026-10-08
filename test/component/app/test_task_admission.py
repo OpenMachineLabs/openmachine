@@ -1,9 +1,11 @@
 """Tests for app behavior at the component layer."""
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import subprocess
+import threading
 import unittest
 from unittest.mock import patch
 import uuid
@@ -17,6 +19,37 @@ from test.support.tasks import TaskFixture, task_contract
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_expired_renewal_and_handoff_claim_have_one_winner(self):
+        record = self.accept_plan()["record"]
+        tasks.update(self.state, "structured-one", lambda value, now:
+                     value["control"]["owner"].update(expires_at_ms=record["updated_at_ms"]))
+        owner = record["control"]["owner"]
+        requests = [self.control_arguments("renew", claim_id=owner["claim_id"]),
+                    self.control_arguments("claim", handoff_id=record["handoff"]["id"])]
+        barrier = threading.Barrier(2)
+
+        def compete(request):
+            barrier.wait(timeout=5)
+            try:
+                return self.app.control_task(**request)
+            except Fault as error:
+                return error.code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(compete, requests))
+        winners = [value for value in results if isinstance(value, dict)]
+        failures = [value for value in results if isinstance(value, str)]
+        self.assertEqual(len(winners), 1, results)
+        self.assertEqual(len(failures), 1, results)
+        self.assertIn(failures[0], {"task_conflict", "resource_busy"})
+        current = self.view()["record"]
+        self.assertEqual(current, winners[0]["record"])
+        self.assertEqual(current["operations"], [])
+        if current["control"]["owner"]["claim_id"] != owner["claim_id"]:
+            self.fault("task_owner_conflict", self.control, "renew", claim_id=owner["claim_id"])
+        else:
+            self.fault("task_owner_conflict", self.control, "claim", handoff_id=record["handoff"]["id"])
+
     def revised_plan(self, *, expires_at_ms=None, authority_ref=None):
         record = self.view()["record"]
         contract = json.loads(json.dumps(record["contract"]))

@@ -104,8 +104,9 @@ below; every continuation still reads and claims the original task safely.
    and compare `control.owner.expires_at_ms` with `observed_at_ms`. Allow time for
    the next bounded step and readback; renew the same retained claim if needed
    using the latest task/plan revisions and epoch, then use the returned context.
-   Re-read and reassess a stale control snapshot. Recheck between bounded external
-   observations, without a background keepalive. Honor `foreground.stop_foreground`
+   Recheck between bounded external observations, without a background keepalive.
+   For lease expiry or stale renewal context, use the bounded same-claim recovery
+   below. Honor `foreground.stop_foreground`
    and `task_attention_required` first; renewal never overrides those end-of-turn
    boundaries, stop intent, authority expiry, changed ownership or platform refusal.
    Admission records the intent; do not also call `save_task`. Commands/file writes
@@ -179,6 +180,20 @@ uncommitted changes, explicit bases, authorization, original IDs and task target
 
 ## Foreground task attention
 
+`foreground.status=renewal_required` or `task_renewal_required` means lease expiry
+alone, not a mandatory end of this turn. New effects remain blocked. Read the task
+and original results, check your retained claim ID, native principal, plan and
+epoch, and explicitly renew the same claim using current revisions and a new
+update ID. Do not adopt another claim based on the native account alone. Use the
+returned context before new work; unresolved effects keep their existing exclusions.
+For a confirmed no-effect renewal `task_conflict`, allow only one fresh read and
+one corrected renewal if only observations changed and the original claim, plan,
+epoch and format-4 `control_revision` still match. Stop after another conflict or
+another blocker. A missing reply requires original update readback, never a new
+ID or assumed success. Renewal cannot override a hard stop or reset command
+timeouts, foreground wait limits or recovery budgets. Do not repeatedly renew to
+hide an unchanged blocker or extend work without progress.
+
 `wait_task` is one bounded foreground wait, not a scheduler or recovery loop. Call
 it at most once for the same active operation in one Chat turn. A returned
 `foreground.stop_foreground=true`, including `attention_required` or
@@ -187,7 +202,10 @@ again, renew or claim continuation, start another effect, or hide the result beh
 a progress update. State the concise reason, whether original work may still be
 running, and the returned resume prompt. A `task_attention_required` admission
 fault has the same boundary; read the task once if needed to present its current
-foreground facts, then end the turn.
+foreground facts, then end the turn. Pause/cancel, expired task authority, changed
+ownership, unverified original work and permission/platform refusals remain real
+stops. A renewal-required return does not permit another wait for the same active
+operation in this turn.
 
 Foreground wait expiry does not cancel or time out the original execution. It
 only stops the Chat from appearing to work indefinitely. A later Chat reads the
