@@ -14,7 +14,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             with self.subTest(mode=mode):
                 async with Client(self.client(), mode=mode, cache=None) as client:
                     async def call(name, arguments):
-                        if name == "read_task":
+                        if name == "read_task" and set(arguments) == {"task_id"}:
                             return await self.observer_task_view(client, arguments["task_id"])
                         result = await client.call_tool(name, arguments)
                         self.assertFalse(result.is_error, result.structured_content)
@@ -56,7 +56,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     for key in ("status", "exit_code", "output", "created_at"):
                         self.assertEqual(paused[key], original[key])
                     if paused["task_feedback"]["status"] == "unavailable":
-                        self.assertEqual(paused["task_feedback"]["error_code"], "resource_busy")
+                        self.assertIn(paused["task_feedback"]["error_code"], {"resource_busy", "task_store_busy"})
                         paused = await self.execution_until(client,
                             {"machine": "desktop", "execution_id": execution_id},
                             lambda value: value["task_feedback"]["status"] != "unavailable")
@@ -80,7 +80,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                      "2025-11-25" if mode == "legacy" else "2026-07-28")
 
                     async def call(name, arguments):
-                        if name == "read_task":
+                        if name == "read_task" and set(arguments) == {"task_id"}:
                             return await self.observer_task_view(client, arguments["task_id"])
                         result = await client.call_tool(name, arguments)
                         self.assertFalse(result.is_error, result.structured_content)
@@ -119,9 +119,11 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(repeated[key], first[key])
                         self.assertEqual(original[key], first[key])
                     self.assertFalse(repeated["task_operation_replayed"])
-                    retained = (await call("read_task", {"task_id": task_id}))["record"]
-                    self.assertEqual([operation["id"] for operation in retained["operations"]], [change_id])
-                    operation = retained["operations"][0]
+                    retained = await call("read_task", {"task_id": task_id,
+                        "section": "operations", "operation_id": change_id})
+                    self.assertTrue(retained["complete"])
+                    self.assertEqual([operation["id"] for operation in retained["items"]], [change_id])
+                    operation = retained["items"][0]
                     self.assertEqual(operation["epoch"], claimed["control"]["epoch"])
                     self.assertEqual(operation["plan_revision"], claimed["plan"]["revision"])
                     self.assertEqual((self.work / path).read_text(), later)

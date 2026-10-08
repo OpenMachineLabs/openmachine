@@ -42,7 +42,7 @@ class TaskObserver:
         self._thread = None
         self._snapshot = {"state": "not_started", "observed_at_ms": None, "blocker": None,
                           "active": {}, "last": {}, "errors": {}}
-        self._known: dict[str, str] = {}
+        self._cursor = 0
         self._active: dict[str, int] = {}
         self._last: dict[str, dict[str, int]] = {}
         self._errors: dict[str, str] = {}
@@ -67,7 +67,7 @@ class TaskObserver:
                 raise Fault("task_observer_busy", "The original observer still owns its readers; do not replace it.")
             self._stop.clear()
             self._dirty.set()
-            self._known.clear()
+            self._cursor = 0
             self._active.clear()
             self._last.clear()
             self._errors.clear()
@@ -175,14 +175,14 @@ class TaskObserver:
         self._status("blocked" if failure else "stopped", failure)
 
     def _discover(self, now: int) -> None:
-        page = tasks.observation_page(self.app.state, self._known)
-        present = set(page["identities"])
-        self._known = {key: value for key, value in self._known.items() if key in present}
-        self._errors = {key: value for key, value in self._errors.items() if key in present or key in self._active}
+        page = tasks.observation_page(self.app.state, self._cursor)
+        self._discovery_error = None
         for entry in page["entries"]:
             identity = entry["task_id"]
             if entry["error"] is not None:
                 self._errors[identity] = entry["error"]
+                self._discovery_error = entry["error"]
+                break
             else:
                 record = entry["record"]
                 if record["terminal"] is not None or not observation.pending(record):
@@ -194,10 +194,9 @@ class TaskObserver:
                     self._errors.pop(identity, None)
                 else:
                     self._errors[identity] = "task_observer_capacity"
-                    # Revisit after a slot retires; never silently accept coverage.
-                    continue
-            self._known[identity] = entry["metadata_sha256"]
-        self._discovery_error = None if page["complete"] else "task_index_incomplete"
+                    # Keep this change unconsumed until an original slot retires.
+                    break
+            self._cursor = entry["change_seq"]
         self._discover_at = now + (50 if page["has_more"] and len(self._active) < observation.MAX_ACTIVE else observation.INTERVAL_MS)
 
     def _tick(self) -> None:
@@ -311,7 +310,7 @@ class TaskObserver:
             except (Fault, OSError) as error:
                 code = observation.error_code(error)
                 self._errors[identity] = code
-                if code not in {"resource_busy", "task_conflict", "task_write_unverified"}:
+                if code not in {"resource_busy", "task_store_busy", "task_conflict", "task_write_unverified"}:
                     self._active.pop(identity, None)
                 else:
                     self._active[identity] = now + observation.INTERVAL_MS
@@ -372,7 +371,8 @@ class TaskObserver:
         with self.app._admit():
             if self._stop.is_set():
                 return
-            view = tasks.update(self.app.state, identity, apply, expected_revision=read.expected_revision, observation=True)
+            view = tasks.update(self.app.state, identity, apply, expected_revision=read.expected_revision,
+                observation=True, operation_ids=tuple(item[0] for item in read.observations))
         # Updating this CAS guard only follows our own verified publication. A
         # pause/decision/foreground result produces a conflict instead of overwrite.
         read.expected_revision = view["record"]["revision"]
@@ -400,7 +400,7 @@ class TaskObserver:
             except (Fault, OSError) as error:
                 code = observation.error_code(error)
                 self._errors[identity] = code
-                if code in {"resource_busy", "activation_pending", "task_conflict", "ssh_recovery_conflict"}:
+                if code in {"resource_busy", "task_store_busy", "activation_pending", "task_conflict", "ssh_recovery_conflict"}:
                     self._active[identity] = observation.now_ms() + observation.INTERVAL_MS
                 else:
                     # Unacknowledged/permanent publication cannot durably account
@@ -416,4 +416,8 @@ class TaskObserver:
             return view
         with self._lock:
             snapshot = self._snapshot
+        identity = view["record"]["task_id"]
+        if (identity not in snapshot["active"] and len(snapshot["active"]) >= observation.MAX_ACTIVE
+                and observation.pending(view["record"])):
+            snapshot = {**snapshot, "errors": {identity: "task_observer_capacity", **snapshot["errors"]}}
         return observation.project(view, snapshot, self.app.machines.ssh_recovery is not None)

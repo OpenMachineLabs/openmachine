@@ -6,6 +6,22 @@ from test.support.mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_task_history_inputs_are_strict_and_bounded_on_both_protocols(self):
+        self.launch()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                for invalid in ({"section": "all"}, {"limit": 0}, {"limit": 51}, {"limit": True},
+                                {"cursor": "x" * 1025}, {"operation_id": "a" * 31},
+                                {"stage_id": "a" * 65}, {"stage_id": "bad/id"},
+                                {"decision_version": -1}, {"decision_version": True},
+                                {"decision_version": 9007199254740992}, {"unexpected": True}):
+                    response = await self.wire_call(client, "tools/call", {"name": "read_task",
+                        "arguments": {"task_id": "never-created", **invalid}})
+                    result = response.json()["result"]
+                    self.assert_wire_tool_result(result, version)
+                    self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
+        self.assertFalse((self.state / "tasks.db").exists())
+
     async def test_all_mutation_contexts_reject_unknown_and_forged_fields_before_dispatch(self):
         self.launch()
         for version in ("2025-11-25", "2026-07-28"):

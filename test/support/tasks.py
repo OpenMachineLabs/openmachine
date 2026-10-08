@@ -33,6 +33,8 @@ def task_contract(context=None, identity="structured-one"):
 def terminal_task_fixture(record):
     """Synthetic retained terminal shape for readers; no terminal writer is exposed."""
     value = json.loads(json.dumps(record))
+    value.pop("_facts", None)
+    value.pop("_decisions", None)
     value["revision"] += 1
     value["updated_at_ms"] += 1
     value["control"].update(state="completed", current_stage_id=None)
@@ -79,13 +81,18 @@ class TaskFixture(ContinuityFixture):
         self.app = create_application(self.config, self.state)
         self.context = self.app.read_workspace_file("desktop", "project", "AGENTS.md")["context"]
         self.request = task_contract(self.context)
-        self.path = self.state / "tasks/structured-one/task.json"
+        self.path = self.state / "tasks.db"
 
     def create(self, request=None):
-        return self.app.create_task(**(self.request if request is None else request))
+        result = self.app.create_task(**(self.request if request is None else request))
+        return {**result, **tasks.read(self.state, result["task_id"])}
 
     def view(self):
-        return self.app.read_task("structured-one")
+        view = self.app._task_view("structured-one")
+        return self.app.chat_recovery.project(view) if self.app.chat_recovery is not None else view
+
+    def task_bytes(self, task_id="structured-one"):
+        return tasks.records.canonical(tasks.read(self.state, task_id)["record"])
 
     def control_arguments(self, action, **values):
         record = self.view()["record"]
@@ -94,7 +101,8 @@ class TaskFixture(ContinuityFixture):
             update_id=uuid.uuid4().hex, transition=dict(action=action, **values))
 
     def control(self, action, **values):
-        return self.app.control_task(**self.control_arguments(action, **values))
+        result = self.app.control_task(**self.control_arguments(action, **values))
+        return {**result, **self.view()}
 
     def context_for(self, identity):
         record = self.view()["record"]
@@ -146,7 +154,7 @@ class ObserverFixture(TaskFixture):
         self.fail("The bounded fixture did not reach the required observable state")
 
     def raw(self, identity="structured-one"):
-        return json.loads((self.state / "tasks" / identity / "task.json").read_bytes())
+        return tasks.read(self.state, identity)["record"]
 
     def owned(self):
         self.accept_plan()
@@ -162,7 +170,7 @@ class ObserverFixture(TaskFixture):
         self.until(lambda: (self.work / "counter").exists())
         return args, started
 
-    def seed(self, count=1):
+    def seed(self, count=1, configure=None):
         """Synthetic pending receipts for bounded scheduling, not effect proof."""
         identities = []
         for index in range(count):
@@ -175,6 +183,8 @@ class ObserverFixture(TaskFixture):
                     "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
                         "execution_id": operation_id, "control_seq": None},
                     "admitted_at_ms": now, "state": "admitted", "observed_at_ms": None, "result": None}]
+                if configure is not None:
+                    configure(record, index)
                 record["control"]["state"] = record["plan"]["stages"][0]["state"] = "running"
                 record["handoff"] = None
             tasks.update(self.state, identity, pending)
@@ -184,3 +194,61 @@ class ObserverFixture(TaskFixture):
     def fixture_result(self, operation):
         return {"execution_id": operation["id"], "status": "succeeded", "exit_code": 0,
                 "cleanup": {"status": "verified"}, "created_at": 1.0}
+
+
+def write_legacy_task(state, record):
+    """Author explicit historical bytes in a disposable fixture, never a runtime writer."""
+    from openmachine.foundation.state import private_directory, save_json
+    from openmachine.tasks import records, index
+    if (state / "tasks.db").exists():
+        raise ValueError("Seed legacy bytes before creating a SQLite fixture")
+    state = private_directory(state)
+    root = private_directory(state / "tasks")
+    private_directory(state / "locks")
+    (state / "locks/tasks.lock").touch(mode=0o600, exist_ok=True)
+    value = records.Record.model_validate({key: item for key, item in record.items() if key not in {"_facts", "_decisions"}}).model_dump()
+    raw = records.canonical(value)
+    private_directory(root / value["task_id"])
+    path = root / value["task_id"] / "task.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    catalog = index.load_index(root) if (root / "index.json").exists() else {
+        "format_version": 2, "generation": 0, "coverage": "complete", "next_cursor": None, "tasks": {}}
+    catalog["tasks"][value["task_id"]] = index.structured_metadata(value, raw)
+    catalog["generation"] += 1
+    save_json(root / "index.json", catalog)
+    return value
+
+
+def replace_task_record(state, record):
+    """Seed one explicit historical shape inside a disposable SQLite fixture."""
+    from openmachine.tasks import database, records, store
+    value = {key: item for key, item in record.items() if key not in {"_facts", "_decisions"}}
+    value = records.Record.model_validate(value).model_dump()
+    with database.connect(state, write=True) as connection:
+        identity = value["task_id"]
+        for table in ("operation_scopes", "task_events", "task_updates", "operations", "stage_decisions", "tasks"):
+            connection.execute(f"DELETE FROM {table} WHERE task_id=?", (identity,))
+        store._insert_record(connection, value)
+    return value
+
+
+def write_legacy_checkpoint(state, identity, body, title="Legacy fixture", anchors=None):
+    from openmachine.foundation.state import private_directory, save_json
+    from openmachine.tasks import index
+    if (state / "tasks.db").exists():
+        raise ValueError("Seed legacy bytes before creating a SQLite fixture")
+    state = private_directory(state)
+    root = private_directory(state / "tasks")
+    private_directory(state / "locks")
+    (state / "locks/tasks.lock").touch(mode=0o600, exist_ok=True)
+    private_directory(root / identity)
+    raw = body.encode()
+    (root / identity / "task.md").write_bytes(raw)
+    (root / identity / "task.md").chmod(0o600)
+    catalog = index.load_index(root) if (root / "index.json").exists() else {
+        "format_version": 2, "generation": 0, "coverage": "complete", "next_cursor": None, "tasks": {}}
+    catalog["tasks"][identity] = {"owner": "legacy", "title": title, "anchors": sorted(anchors or []),
+        "revision": 1, "sha256": hashlib.sha256(raw).hexdigest()}
+    catalog["generation"] += 1
+    save_json(root / "index.json", catalog)

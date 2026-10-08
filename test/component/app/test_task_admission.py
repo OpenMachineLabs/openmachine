@@ -4,13 +4,14 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import sqlite3
 import subprocess
 import threading
 import unittest
 from unittest.mock import patch
 import uuid
 from openmachine import tasks
-from openmachine.tasks import store as task_store
+from openmachine.tasks import database, records, store as task_store
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
@@ -43,7 +44,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(len(failures), 1, results)
         self.assertIn(failures[0], {"task_conflict", "resource_busy"})
         current = self.view()["record"]
-        self.assertEqual(current, winners[0]["record"])
+        self.assertEqual(self.app.read_task("structured-one")["record"], winners[0]["record"])
         self.assertEqual(current["operations"], [])
         if current["control"]["owner"]["claim_id"] != owner["claim_id"]:
             self.fault("task_owner_conflict", self.control, "renew", claim_id=owner["claim_id"])
@@ -107,10 +108,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             operation = value["operations"][0]
             operation["state"], operation["result"]["status"] = "unknown", "unknown"
         tasks.update(self.state, "structured-one", old_bug)
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         with lease(self.state / "locks" / f"{args['execution_id']}.lock", create=False):
             self.app.task_admission.reconcile(self.view())
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         repaired = self.app.task_admission.reconcile(self.view())["record"]["operations"][0]
         self.assertEqual(repaired["result"]["status"], "failed")
         self.assertEqual(repaired["id"], original["id"])
@@ -123,21 +124,21 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app.machines, "start_execution", side_effect=Fault("resource_busy", "Fixture.")):
             self.fault("resource_busy", self.app.start_execution, **args)
         self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "unknown")
-        original = self.path.read_bytes()
+        original = self.task_bytes()
         self.app.task_admission.reconcile(self.view())
-        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.task_bytes(), original)
         # An existing partial directory is not absence, even after its lock is free.
         with lease(self.state / "locks" / f"{args['execution_id']}.lock"):
             (self.state / "executions" / args["execution_id"]).mkdir(parents=True)
         self.app.task_admission.reconcile(self.view())
-        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.task_bytes(), original)
 
     def test_control_claim_retry_deadline_and_reads_are_passive(self):
         created = self.accept_plan(claim=False)
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         self.view()
         self.app.find_tasks()
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         args = self.control_arguments("claim", handoff_id=created["record"]["handoff"]["id"])
         claimed = self.app.control_task(**args)
         owner = claimed["record"]["control"]["owner"]
@@ -150,11 +151,13 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             next_claim = self.control("claim", handoff_id=created["record"]["handoff"]["id"])
         self.assertEqual(next_claim["record"]["control"]["epoch"], 2)
         self.assertEqual(next_claim["record"]["handoff"]["id"], created["record"]["handoff"]["id"])
-        self.fault("task_conflict", self.app.control_task, **args)
+        replay = self.app.control_task(**args)
+        self.assertEqual(replay["status"], "unchanged")
+        self.assertEqual(replay["record"]["control"]["owner"], next_claim["record"]["control"]["owner"])
 
     def test_strict_controls_and_context_reject_forged_runtime_facts(self):
         self.accept_plan(claim=False)
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         original = self.control_arguments("claim", handoff_id=self.view()["record"]["handoff"]["id"])
         invalid = [dict(original, expected_revision=True), dict(original, expected_epoch=-1),
             dict(original, transition={**original["transition"], "principal_ref": "forged"}),
@@ -164,7 +167,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         args = self.write_arguments()
         for context in ({**args["task_context"], "principal_ref": "forged"}, {**args["task_context"], "task_revision": True}):
             self.fault("invalid_task_context", self.app.write_workspace_file, **dict(args, task_context=context))
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         self.assertFalse((self.work / "result.txt").exists())
 
     def test_explicit_renew_recovers_same_expired_claim_without_handoff_or_replay(self):
@@ -182,7 +185,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             self.assertEqual(renewed["control"]["epoch"], original["control"]["epoch"])
             self.assertEqual(renewed["plan"], original["plan"])
             self.assertEqual(renewed["operations"], original["operations"])
-            self.assertEqual(renewed["history"][:-1], original["history"])
+            self.assertGreater(renewed["_facts"]["history_count"], original["_facts"]["history_count"])
             self.assertIsNone(renewed["handoff"])
             self.fault("task_effect_unresolved", self.app.write_workspace_file, **self.write_arguments())
             self.fault("task_effect_unresolved", self.control, "record_decision", stage_id="verify",
@@ -197,7 +200,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         now = record["control"]["owner"]["expires_at_ms"] + 1
         with patch.object(task_store.time, "time_ns", return_value=now * 1000000):
             renewed = self.app.control_task(**args)["record"]
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         with patch.object(task_store.time, "time_ns", return_value=(now + 300001) * 1000000):
             self.view()
             self.app.find_tasks()
@@ -205,18 +208,18 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             self.assertEqual((same["status"], same["record"]), ("unchanged", renewed))
             altered = dict(args, transition={"action": "renew", "claim_id": "f" * 32})
             self.fault("task_conflict", self.app.control_task, **altered)
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
 
     def test_renew_requires_exact_control_snapshot_and_retained_claim_identity(self):
         record = self.accept_plan()["record"]
         claim = record["control"]["owner"]["claim_id"]
         args = self.control_arguments("renew", claim_id=claim)
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         for key in ("expected_revision", "expected_plan_revision", "expected_epoch"):
             with self.subTest(guard=key):
                 self.fault("task_conflict", self.app.control_task, **dict(args, **{key: args[key] + 1}))
         self.fault("task_owner_conflict", self.control, "renew", claim_id="f" * 32)
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         self.control("release", reason="Release ends the original claim.")
         self.fault("task_owner_conflict", self.control, "renew", claim_id=claim)
         successor = self.control("claim", handoff_id=self.view()["record"]["handoff"]["id"])["record"]
@@ -242,9 +245,9 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(observed["control_revision"], original["control_revision"])
         self.assertEqual(observed["plan"], original["plan"])
         self.assertEqual(observed["control"]["epoch"], original["control"]["epoch"])
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         self.fault("task_conflict", self.app.control_task, **request)
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         renewed = self.control("renew", claim_id=claim)["record"]
         self.assertEqual(renewed["operations"], observed["operations"])
 
@@ -316,7 +319,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                 expires_at_ms=now + 60000, authority_ref="fixture:fresh-explicit-authority"))["record"]
             self.assertEqual(revised["plan"]["stages"], original["plan"]["stages"])
             self.assertEqual(revised["operations"], original["operations"])
-            self.assertEqual(revised["history"][:-1], original["history"])
+            self.assertGreater(revised["_facts"]["history_count"], original["_facts"]["history_count"])
             self.assertEqual(revised["format"], original["format"])
             self.assertEqual(revised["contract"]["recovery_policy"], "disabled")
             self.assertIsNone(revised["control"]["owner"])
@@ -329,7 +332,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
     def test_expired_contract_reauthorization_rejects_missing_authority_scope_and_policy_changes(self):
         record = self.accept_plan()["record"]
         now = record["contract"]["expires_at_ms"] + 1
-        original = self.path.read_bytes()
+        original = self.task_bytes()
         with patch.object(task_store.time, "time_ns", return_value=now * 1000000):
             missing = self.revised_plan(expires_at_ms=now + 60000)
             self.fault("task_authority_expired", self.control, "revise_plan", **missing)
@@ -344,7 +347,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             self.config.machines["desktop"].workspace_write_enabled = False
             valid = self.revised_plan(expires_at_ms=now + 60000, authority_ref="fixture:fresh-explicit-authority")
             self.fault("workspace_write_disabled", self.control, "revise_plan", **valid)
-        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.task_bytes(), original)
 
     def test_expired_paused_plan_can_be_reauthorized_without_automatic_resume(self):
         record = self.accept_plan()["record"]
@@ -376,11 +379,11 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                             operation["result"]["status"] = "partial"
                             operation["observed_at_ms"] = at_ms
                         tasks.update(self.state, "structured-one", partial)
-                    original = self.path.read_bytes()
+                    original = self.task_bytes()
                     revision = self.revised_plan(expires_at_ms=now + 60000,
                                                  authority_ref="fixture:cannot-reclassify-original-local-work")
                     self.fault("task_effect_unresolved", self.control, "revise_plan", **revision)
-                    self.assertEqual(self.path.read_bytes(), original)
+                    self.assertEqual(self.task_bytes(), original)
 
     def test_file_admission_original_retry_conflict_and_real_completion(self):
         self.accept_plan()
@@ -398,10 +401,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[args["change_id"]], reason="Verified the exact file result.")
         finished = self.control("finish", outcome="completed", acceptance=[{"stage_id": "verify", "operation_id": args["change_id"]}], limitations="Fixture only.")
         self.assertEqual(finished["record"]["terminal"]["outcome"], "completed")
-        snapshot = self.path.read_bytes()
+        snapshot = self.task_bytes()
         self.fault("task_terminal", self.control, "resume", reason="Cannot reactivate history.")
         self.view()
-        self.assertEqual(self.path.read_bytes(), snapshot)
+        self.assertEqual(self.task_bytes(), snapshot)
         self.assertEqual((self.work / "result.txt").read_text(), "original\n")
 
     def test_expired_claim_reclaims_final_handoff_without_repeating_accepted_work(self):
@@ -506,15 +509,14 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(sum((self.work / name).exists() for name in ("one.txt", "two.txt")), 1)
         self.assertEqual(len(self.view()["record"]["operations"]), 1)
 
-    def test_uncertain_admission_fsync_never_dispatches_or_replays(self):
+    def test_uncertain_committed_admission_never_dispatches_or_replays(self):
         self.accept_plan()
         args = self.write_arguments()
-        original = task_store._sync_directory
-        def fail(directory):
-            if directory == self.path.parent:
-                raise OSError("injected directory sync uncertainty")
-            return original(directory)
-        with patch.object(task_store, "_sync_directory", side_effect=fail), patch.object(self.app.machines, "write_workspace_file") as dispatch:
+        original = tasks.update
+        def fail(*values, **options):
+            original(*values, **options)
+            raise Fault("task_write_unverified", "Injected uncertainty after the admission transaction committed.")
+        with patch.object(tasks, "update", side_effect=fail), patch.object(self.app.machines, "write_workspace_file") as dispatch:
             self.fault("task_write_unverified", self.app.write_workspace_file, **args)
             dispatch.assert_not_called()
         record = self.view()["record"]
@@ -524,16 +526,34 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertFalse((self.work / "result.txt").exists())
         self.assertEqual(len(self.view()["record"]["operations"]), 1)
 
+    def test_storage_commit_rejection_prevents_dispatch_and_retains_original_task(self):
+        self.accept_plan()
+        args = self.write_arguments()
+        before = self.task_bytes()
+        for code, fault in ((sqlite3.SQLITE_FULL, "task_storage_full"),
+                            (sqlite3.SQLITE_READONLY, "task_write_unverified")):
+            error = sqlite3.OperationalError("Injected admission commit failure.")
+            error.sqlite_errorcode = code
+            with self.subTest(sqlite_errorcode=code), patch.object(database, "commit", side_effect=error) as commit, \
+                    patch.object(self.app.machines, "write_workspace_file") as dispatch:
+                self.fault(fault, self.app.write_workspace_file, **args)
+                commit.assert_called_once()
+                dispatch.assert_not_called()
+            current = tasks.read(self.state, "structured-one")
+            self.assertEqual(current["facts"]["operation_count"], 0)
+            self.assertIsNone(tasks.operation(self.state, "structured-one", args["change_id"]))
+            self.assertEqual(self.task_bytes(), before)
+        self.assertFalse((self.work / "result.txt").exists())
+
     def test_lost_file_result_publication_recovers_original_change(self):
         self.accept_plan()
         args = self.write_arguments()
-        original = task_store._replace
-        def fail(path, raw):
-            value = json.loads(raw)
-            if path == self.path and value["operations"] and value["operations"][0]["result"] is not None:
+        original = tasks.update
+        def fail(*values, **options):
+            if options.get("observation"):
                 raise OSError("injected result publication failure")
-            return original(path, raw)
-        with patch.object(task_store, "_replace", side_effect=fail):
+            return original(*values, **options)
+        with patch.object(tasks, "update", side_effect=fail):
             self.fault("task_result_unverified", self.app.write_workspace_file, **args)
         self.assertEqual((self.work / "result.txt").read_text(), "original\n")
         domain = self.app.read_workspace_change("desktop", args["change_id"])
@@ -544,19 +564,75 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.app.read_workspace_change("desktop", args["change_id"])["created_at"], domain["created_at"])
         self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "succeeded")
 
-    def test_stale_index_preserves_pause_and_original_evidence(self):
+    def test_stale_foreground_result_cannot_replace_a_newer_historical_outcome(self):
         self.accept_plan()
-        args = self.write_arguments()
-        with patch.object(task_store, "_write_index", side_effect=OSError("index unavailable")), \
+        identity = self.retained_local_operation()
+        original = tasks.read(self.state, "structured-one")["record"]["operations"][0]
+        expected = {identity: records.digest(original)}
+        verified = dict(original["result"], status="succeeded", receipt_sha256="d" * 64)
+        self.app.task_admission._publish("structured-one", [(identity, verified, original["locator"])], expected=expected)
+        self.retained_local_operation("failed")
+        self.assertNotIn(identity, [item["id"] for item in tasks.read(self.state, "structured-one")["record"]["operations"]])
+        before = self.task_bytes()
+        stale = dict(original["result"], status="failed", receipt_sha256="e" * 64)
+        result = self.app.task_admission._publish("structured-one", [(identity, stale, original["locator"])], expected=expected)
+        self.assertEqual(result["status"], "unchanged")
+        self.assertEqual(self.task_bytes(), before)
+        retained = tasks.read(self.state, "structured-one", operation_ids=[identity])["record"]["operations"]
+        self.assertEqual(next(item for item in retained if item["id"] == identity)["result"], verified)
+
+    def test_controls_and_cancel_keep_distinct_ids_for_one_original_execution(self):
+        self.accept_plan()
+        execution_id = self.retained_local_operation()
+        observed = {"execution_id": execution_id, "status": "running", "created_at": 1,
+                    "control": {"seq": 0, "last": None}}
+        def control(**arguments):
+            receipt = {"seq": arguments["expected_control_seq"] + 1, "status": "applied"}
+            observed["control"] = {"seq": receipt["seq"], "last": receipt}
+            return dict(observed, control_result=receipt)
+        def cancel(**arguments):
+            observed.update(status="cancelled", cleanup={"status": "verified"})
+            return dict(observed)
+        requests, operation_ids = [], [execution_id]
+        with patch.object(self.app.machines, "read_execution", side_effect=lambda *args, **kwargs: dict(observed)), \
+                patch.object(self.app.machines, "control_execution", side_effect=control) as controls, \
+                patch.object(self.app.machines, "cancel_execution", side_effect=cancel) as cancellation:
+            for sequence in range(2):
+                identity = uuid.uuid4().hex
+                request = dict(machine="desktop", execution_id=execution_id, expected_control_seq=sequence,
+                               action="interrupt", task_context=self.context_for(identity))
+                self.app.control_execution(**request)
+                requests.append(request)
+                operation_ids.append(identity)
+            cancel_id = uuid.uuid4().hex
+            with patch.object(database.shutil, "disk_usage",
+                              return_value=database.shutil.disk_usage(self.state)._replace(free=0)):
+                self.app.cancel_execution("desktop", execution_id, task_context=self.context_for(cancel_id))
+            operation_ids.append(cancel_id)
+            replay = self.app.control_execution(**requests[0])
+            self.assertFalse(replay["task_operation_replayed"])
+            self.assertEqual(controls.call_count, 2)
+            self.assertEqual(cancellation.call_count, 1)
+        retained = tasks.read(self.state, "structured-one", operation_ids=operation_ids)["record"]["operations"]
+        self.assertEqual([item["id"] for item in retained], operation_ids)
+        keys = {tasks.operation_key(item["locator"]) for item in retained}
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(tasks.operation_binding(self.state, keys.pop())["task_id"], "structured-one")
+
+    def test_failed_admission_commit_preserves_pause_and_original_evidence(self):
+        self.accept_plan()
+        self.app.write_workspace_file(**self.write_arguments())
+        before = self.task_bytes()
+        args = self.write_arguments(path="later.txt")
+        with patch.object(tasks, "update", side_effect=Fault("task_write_unverified", "Admission transaction failed.")), \
                 patch.object(self.app.machines, "write_workspace_file") as dispatch:
-            self.fault("task_index_incomplete", self.app.write_workspace_file, **args)
+            self.fault("task_write_unverified", self.app.write_workspace_file, **args)
             dispatch.assert_not_called()
-        self.assertEqual(self.view()["index_status"], "stale")
-        paused = self.control("pause", reason="Stop remains writable with stale derived metadata.")
+        self.assertEqual(self.task_bytes(), before)
+        paused = self.control("pause", reason="Explicit stop remains available after a failed transaction.")
         self.assertEqual(paused["record"]["control"]["stop_intent"], "pause")
-        self.assertEqual(paused["record"]["operations"][0]["result"]["status"], "failed")
-        self.assertFalse((self.work / "result.txt").exists())
-        self.app.rebuild_task_index()
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"]["operations"][0]["result"]["status"], "succeeded")
+        self.assertFalse((self.work / "later.txt").exists())
         self.assertEqual(self.view()["index_status"], "current")
 
     def test_current_file_drift_blocks_stage_acceptance(self):
@@ -564,10 +640,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         args = self.write_arguments()
         self.app.write_workspace_file(**args)
         (self.work / "result.txt").write_text("independent later modification\n")
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         self.fault("task_evidence_changed", self.control, "record_decision", stage_id="verify", outcome="accepted",
                    evidence=[args["change_id"]], reason="Stale evidence cannot pass.")
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
 
     def test_plan_change_invalidates_dependents_not_independent_acceptance(self):
         from openmachine.tasks import records, transitions
@@ -606,44 +682,44 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.accept_plan()
         args = self.control_arguments("pause", reason="First pause.")
         self.app.control_task(**args)
-        raw = self.path.read_bytes()
+        raw = self.task_bytes()
         changed = {**args, "transition": {"action": "cancel", "reason": "Changed intent."}}
         self.fault("task_conflict", self.app.control_task, **changed)
-        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(self.task_bytes(), raw)
         self.assertEqual(self.app.control_task(**args)["status"], "unchanged")
 
-    def test_capacity_reserves_stop_without_deleting_history(self):
-        from openmachine.tasks import records, transitions
+    def test_long_control_history_keeps_new_work_and_stop_available(self):
         owner = self.accept_plan()["record"]["control"]["owner"]
-        def fill(value, now):
-            while len(value["history"]) < 60:
-                transitions.material(value, now, "decision", "Retained material decision.")
-        tasks.update(self.state, "structured-one", fill)
-        raw = self.path.read_bytes()
-        self.fault("task_capacity", self.control, "renew", claim_id=owner["claim_id"])
-        self.fault("task_capacity", self.control, "release", reason="Cannot consume terminal reserve.")
-        self.assertEqual(self.path.read_bytes(), raw)
+        for _ in range(70):
+            self.control("renew", claim_id=owner["claim_id"])
+        retained = tasks.read(self.state, "structured-one")["facts"]["history_count"]
+        self.assertGreater(retained, 64)
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+        self.control("release", reason="Retained history does not consume continuation capacity.")
         self.control("pause", reason="Capacity must not prevent stop.")
         done = self.control("cancel", reason="No operations remain to cancel.")
         self.assertEqual(done["record"]["control"]["state"], "cancelled")
-        self.assertLessEqual(len(done["record"]["history"]), 64)
-        self.assertEqual(done["record"]["history"][:60], json.loads(raw)["history"])
+        self.assertGreater(tasks.read(self.state, "structured-one")["facts"]["history_count"], retained)
 
-    def test_oversized_record_binding_lookup_is_bounded_and_nonmutating(self):
+    def test_corrupt_database_binding_lookup_is_nonmutating(self):
         self.accept_plan()
-        self.path.write_bytes(b"x" * (tasks.MAX_INDEX + 1))
-        before = self.path.stat()
+        database = self.state / "tasks.db"
+        database.write_bytes(b"x" * (records.MAX_RECORD + 1))
+        before = database.stat()
         locator = {"kind": "change", "target_identity": None, "change_id": "a" * 32}
         self.fault("corrupt_tasks", tasks.operation_binding, self.state, tasks.operation_key(locator))
-        self.assertEqual(self.path.stat().st_mtime_ns, before.st_mtime_ns)
-        self.assertEqual(self.path.stat().st_size, tasks.MAX_INDEX + 1)
+        self.assertEqual(database.stat().st_mtime_ns, before.st_mtime_ns)
+        self.assertEqual(database.stat().st_size, records.MAX_RECORD + 1)
 
     def test_supervised_known_identity_cannot_be_stripped_or_rebound(self):
         self.accept_plan()
         args = self.write_arguments()
-        with patch.object(task_store, "_sync_directory", side_effect=OSError("uncertain admission")):
+        original = tasks.update
+        def fail(*values, **options):
+            original(*values, **options)
+            raise Fault("task_write_unverified", "Injected uncertainty after admission committed.")
+        with patch.object(tasks, "update", side_effect=fail):
             self.fault("task_write_unverified", self.app.write_workspace_file, **args)
-        self.app.rebuild_task_index()
         bare = {key: value for key, value in args.items() if key != "task_context"}
         self.fault("task_context_required", self.app.write_workspace_file, **bare)
         other = task_contract(self.context, "other")
@@ -685,7 +761,8 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(result["status"], "applied")
         self.assertEqual((self.work / "result.txt").read_text(), "edited\n")
         self.assertEqual((self.work / "other.txt").read_text(), "patched\n")
-        self.assertEqual([item["result"]["status"] for item in self.view()["record"]["operations"]], ["succeeded"] * 3)
+        retained = tasks.read(self.state, "structured-one", operation_ids=[first["change_id"], second, third])
+        self.assertEqual([item["result"]["status"] for item in retained["record"]["operations"]], ["succeeded"] * 3)
 
     def test_ambiguous_busy_after_dispatch_is_not_proof_of_no_effect(self):
         self.accept_plan()

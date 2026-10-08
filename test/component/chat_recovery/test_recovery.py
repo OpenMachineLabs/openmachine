@@ -12,7 +12,7 @@ from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine import tasks
 from openmachine.foundation.state import lease, save_json
-from test.support.tasks import task_contract
+from test.support.tasks import task_contract, write_legacy_task
 from test.support.chat_recovery_cases import ChatRecoveryCaseFixture
 
 
@@ -20,16 +20,21 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
     def test_receiver_read_requires_external_correlation_and_preserves_original_receipt(self):
         arguments = self.receiver_fixture()
         path = self.state / "chat_recovery.json"
-        task_before, before = self.path.read_bytes(), path.read_bytes()
+        task_before, before = self.task_bytes(), path.read_bytes()
         plain = self.view()
         self.assertNotIn("response_code", json.dumps(plain))
         payload = self.app.read_task(**arguments)
+        self.assertEqual(payload["read_schema"], 2)
+        self.assertNotIn("_facts", payload["record"])
+        self.assertNotIn("operations", payload["record"])
         self.assertEqual(path.read_bytes(), before)
         response = payload["preparation_read"]
         self.app.chat_recovery.external_activity("read_task", arguments, payload)
         observed = chatgpt.get(self.state, "structured-one").preparation
         self.assertEqual(observed.receiver_read.task_revision, payload["record"]["revision"])
-        self.assertEqual(observed.receiver_read.record_sha256, hashlib.sha256(task_before).hexdigest())
+        canonical = (json.dumps(payload["record"], sort_keys=True, ensure_ascii=False,
+                               separators=(",", ":"), allow_nan=False) + "\n").encode()
+        self.assertEqual(observed.receiver_read.record_sha256, hashlib.sha256(canonical).hexdigest())
         self.assertEqual(observed.status, "reserved")
         self.assertIsNone(observed.ready_at_ms)
         acknowledged = path.read_bytes()
@@ -38,7 +43,31 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         self.app = create_application(self.config, self.state)
         self.assertEqual(self.app.read_task(**arguments)["preparation_read"], response)
         self.assertEqual(path.read_bytes(), acknowledged)
-        self.assertEqual(self.path.read_bytes(), task_before)
+        self.assertEqual(self.task_bytes(), task_before)
+
+    def test_retained_receiver_witness_survives_the_bounded_read_schema(self):
+        arguments = self.receiver_fixture()
+        binding = chatgpt.get(self.state, "structured-one")
+        historical = dict(self.app.read_task("structured-one")["record"], operations=[], history=[{
+            "at_ms": binding.preparation.created_at_ms, "kind": "accepted", "stage_id": None, "operation_id": None,
+            "summary": "Original full-record receiver witness."}])
+        proof = chatgpt.preparation_response(binding, historical)
+        chatgpt.observe_preparation_read(self.state, "structured-one", arguments["preparation_id"],
+                                        binding.revision, proof)
+        current = self.app.read_task(**arguments)
+        self.assertEqual(current["preparation_read"], proof)
+        self.app.chat_recovery.external_activity("read_task", arguments, current)
+        self.assertEqual(chatgpt.get(self.state, "structured-one").preparation.receiver_read.record_sha256,
+                         proof["record_sha256"])
+
+    def test_external_summary_activity_uses_authoritative_current_facts(self):
+        self.create()
+        with patch.object(self.app.chat_recovery, "_observe") as observe:
+            self.app.chat_recovery.external_activity("read_task", {"task_id": "structured-one"},
+                {"record": {"task_id": "structured-one", "revision": 0}})
+        record = observe.call_args.args[0]
+        self.assertEqual(record["revision"], tasks.read(self.state, "structured-one")["record"]["revision"])
+        self.assertIn("progress_ms", record["_facts"])
 
     def test_receiver_rejects_wrong_id_task_response_and_late_disabled_read(self):
         arguments = self.receiver_fixture()
@@ -73,6 +102,60 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         self.fault("task_stopped", self.app.chat_recovery.external_activity, "read_task", arguments, current)
         self.assertIsNone(chatgpt.get(self.state, "structured-one").preparation.receiver_read)
 
+    def test_receiver_publication_keeps_task_stop_stable_until_acknowledgement(self):
+        arguments = self.receiver_fixture()
+        payload = self.app.read_task(**arguments)
+        before = self.task_bytes()
+        entered, release, writer_started, writer_done = (threading.Event() for _ in range(4))
+        receiver_errors, writer_errors = [], []
+        original = chatgpt.observe_preparation_read
+
+        def hold(*args, **kwargs):
+            entered.set()
+            if not release.wait(3):
+                raise AssertionError("The test did not release receiver publication")
+            return original(*args, **kwargs)
+
+        def receive():
+            try:
+                self.app.chat_recovery.external_activity("read_task", arguments, payload)
+            except Exception as error:
+                receiver_errors.append(error)
+
+        def pause():
+            writer_started.set()
+            try:
+                self.control("pause", reason="Stop after the in-progress receiver acknowledgement.")
+            except Exception as error:
+                writer_errors.append(error)
+            finally:
+                writer_done.set()
+
+        receiver, writer = threading.Thread(target=receive), threading.Thread(target=pause)
+        with patch.object(chatgpt, "observe_preparation_read", side_effect=hold):
+            try:
+                receiver.start()
+                self.assertTrue(entered.wait(2))
+                writer.start()
+                self.assertTrue(writer_started.wait(2))
+                writer_done.wait(0.1)
+                self.assertEqual(self.task_bytes(), before)
+            finally:
+                release.set()
+                receiver.join(3)
+                if writer.ident is not None:
+                    writer.join(3)
+        self.assertFalse(receiver.is_alive())
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(receiver_errors, [])
+        if writer_errors:
+            self.assertEqual(len(writer_errors), 1)
+            self.assertIsInstance(writer_errors[0], Fault)
+            self.assertIn(writer_errors[0].code, {"resource_busy", "task_store_busy"})
+            self.control("pause", reason="The prior pause was not admitted while the receiver was locked.")
+        self.assertEqual(self.view()["record"]["control"]["stop_intent"], "pause")
+        self.assertIsNotNone(chatgpt.get(self.state, "structured-one").preparation.receiver_read)
+
     def test_receiver_failed_persistence_cannot_acknowledge_or_accept_readiness(self):
         arguments = self.receiver_fixture()
         payload = self.app.read_task(**arguments)
@@ -89,18 +172,21 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         self.assertEqual(created["status"], "created")
         self.assertIsNone(created["record"]["chat_registration"])
         self.assertEqual(created["chat_recovery"]["blocker"], "chat_recovery_store_unavailable")
-        original = self.path.read_bytes()
+        original = self.task_bytes()
         self.app = create_application(self.config, self.state)
-        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.task_bytes(), original)
         self.assertEqual(self.view()["record"]["operations"], [])
+        with patch.object(self.app.chat_recovery, "register", side_effect=Fault("task_store_busy", "Fixture writer holds Task authority.")):
+            self.app.chat_recovery._discover()
+        self.assertEqual(self.app.chat_recovery._cursor, 0, "A busy registration must not consume its discovery change")
         self.app.chat_recovery._discover()
         registered = self.view()
         identity = registered["record"]["chat_registration"]
         self.assertIsNotNone(identity)
         self.assertEqual(registered["chat_recovery"]["preparation"]["preparation_id"], identity)
-        before = (self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes())
+        before = (self.task_bytes(), (self.state / "chat_recovery.json").read_bytes())
         self.assertEqual(self.create()["status"], "unchanged")
-        self.assertEqual((self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes()), before)
+        self.assertEqual((self.task_bytes(), (self.state / "chat_recovery.json").read_bytes()), before)
 
     def test_registration_ack_gap_retains_original_id_and_budget(self):
         with patch.object(tasks, "update", side_effect=Fault("task_write_unverified", "Injected ack failure")):
@@ -137,12 +223,12 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         with chatgpt._writing(self.state) as store:
             store.bindings.pop("structured-one")  # Simulated loss, not a product repair API.
             chatgpt._save(self.state, store)
-        original = self.path.read_bytes()
+        original = self.task_bytes()
         self.app = create_application(self.config, self.state)
         self.app.chat_recovery._discover()
         self.fault("chat_recovery_registration_missing", self.app.chat_recovery.require_ready, record)
         self.assertEqual(self.view()["chat_recovery"]["state"], "blocked")
-        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.task_bytes(), original)
         self.assertEqual(chatgpt.bindings(self.state), [])
 
     def test_setup_waits_for_recovery_eligibility_and_activity_grace(self):
@@ -265,14 +351,14 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         self.app.chat_recovery.external_activity("read_task", arguments, self.app.read_task(**arguments))
         report = self.preparation_result()
         self.control("pause", reason="Stop before setup completes.")
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         with patch.object(codex, "read", return_value=report), patch.object(self.app.machines, "read_execution",
                 return_value={"status": "succeeded", "cleanup": {"status": "verified"}}):
             result = self.app.chat_recovery.read_preparation("structured-one")
         self.assertEqual(result["chat_recovery"]["preparation"]["status"], "blocked")
         self.assertEqual(result["chat_recovery"]["chat_url"], report["report"]["final_url"])
         self.assertIsNone(result["chat_recovery"]["preparation"]["ready_at_ms"])
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
 
     def test_setup_uncertainty_retains_original_execution_and_never_creates_another_chat(self):
         arguments = self.receiver_fixture()
@@ -372,9 +458,9 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         arguments = ("structured-one", uuid.uuid4().hex, 1, {"action": "enable"})
         self.app.configure_chat_recovery(*arguments)
         self.control("pause", reason="Original enable receipt remains readable.")
-        original = (self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes())
+        original = (self.task_bytes(), (self.state / "chat_recovery.json").read_bytes())
         self.assertEqual(self.app.configure_chat_recovery(*arguments)["binding_revision"], 2)
-        self.assertEqual((self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
+        self.assertEqual((self.task_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
 
     def test_preparation_no_send_retries_keep_one_budget_across_restart(self):
         self.create()
@@ -410,25 +496,30 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
     def test_historical_reads_do_not_enroll_but_explicit_plan_revision_can(self):
         from openmachine.tasks import records
         self.request["contract"]["recovery_policy"] = "disabled"
-        historical = self.create()["record"]
+        historical = records.new_record(tasks.normalize_create(self.request), time.time_ns() // 1000000)
         historical["format"] = 1
         historical.pop("chat_registration")
         historical.pop("control_revision")
         historical.pop("effect_scopes")
         historical["contract"].pop("recovery_policy")
-        self.path.write_bytes(records.canonical(historical))  # Original-format reader fixture.
-        self.app.rebuild_task_index()
-        original = self.path.read_bytes()
-        self.app.chat_recovery._discover()
-        self.assertEqual(self.view()["record"], historical)
-        self.assertEqual(self.path.read_bytes(), original)
+        historical = write_legacy_task(self.state, historical)
+        original = self.task_bytes()
+        self.fault("task_migration_required", self.app.chat_recovery._discover)
+        self.assertEqual({key: value for key, value in self.view()["record"].items() if key != "_facts"}, historical)
+        public = self.app.read_task("structured-one")
+        self.assertEqual(public["record"], historical)
+        self.assertTrue(public["record_complete"])
+        self.assertNotIn("history_ref", public)
+        self.assertNotIn("operations_ref", public)
+        self.assertEqual(self.task_bytes(), original)
         self.assertEqual(chatgpt.bindings(self.state), [])
+        tasks.migrate(self.state)
         self.control("claim", handoff_id=historical["handoff"]["id"])
         contract = dict(historical["contract"], recovery_policy="task_chat")
         enrolled = self.control("revise_plan", contract=contract, stages=self.request["stages"],
             invalidated_stage_ids=["verify"], reason="Explicitly enroll the original historical task.")
         self.assertEqual((enrolled["record"]["task_id"], enrolled["record"]["format"],
-                          enrolled["record"]["plan"]["revision"]), ("structured-one", 4, 2))
+                          enrolled["record"]["plan"]["revision"]), ("structured-one", 3, 2))
         self.assertIsNotNone(enrolled["record"]["chat_registration"])
         self.assertEqual(enrolled["chat_recovery"]["state"], "preparing")
 
@@ -440,20 +531,20 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         with patch.object(codex, "read", return_value=self.delivery_result()):
             self.app._read_chat_recovery_delivery("structured-one")
         delivery = chatgpt.get(self.state, "structured-one").delivery
-        original = (self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes())
+        original = (self.task_bytes(), (self.state / "chat_recovery.json").read_bytes())
         with patch.object(chatgpt, "now_ms", return_value=delivery.sent_at_ms + chatgpt.CONTINUATION_MS):
             recovery = self.view()["chat_recovery"]
         self.assertEqual((recovery["state"], recovery["blocker"]), ("ready", "continuation_not_observed"))
-        self.assertEqual((self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
+        self.assertEqual((self.task_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
 
     def test_ready_projection_reports_current_controller_grant_without_mutation(self):
         self.create()
         self.enable()
-        original = (self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes())
+        original = (self.task_bytes(), (self.state / "chat_recovery.json").read_bytes())
         self.config.machines["desktop"].execution_enabled = False
         recovery = self.view()["chat_recovery"]
         self.assertEqual((recovery["state"], recovery["blocker"]), ("blocked", "execution_disabled"))
-        self.assertEqual((self.path.read_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
+        self.assertEqual((self.task_bytes(), (self.state / "chat_recovery.json").read_bytes()), original)
 
     def test_new_task_default_is_disabled_until_explicit_enable(self):
         request = task_contract(self.context)
@@ -647,7 +738,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
     def _assert_prelaunch_rejection_blocks_delivery(self, code):
         view = self.create()
         self.enable()
-        original_task = self.path.read_bytes()
+        original_task = self.task_bytes()
         recovery_id, execution_id = uuid.uuid4().hex, uuid.uuid4().hex
         deadline = view["record"]["contract"]["expires_at_ms"]
         with patch("time.time_ns", return_value=time.time_ns()) as clock:
@@ -669,7 +760,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
                 start.assert_not_called()
                 read.assert_not_called()
         self.assertEqual(chatgpt.get(self.state, "structured-one").delivery, delivery)
-        self.assertEqual(self.path.read_bytes(), original_task)
+        self.assertEqual(self.task_bytes(), original_task)
 
     def test_prelaunch_task_stop_blocks_delivery(self):
         self._assert_prelaunch_rejection_blocks_delivery("task_stopped")
@@ -700,6 +791,16 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
                     (delivery.recovery_id, delivery.execution_id, delivery.deadline_ms),
                     (recovery_id, identity, deadline))
                 clock.return_value += chatgpt.GRACE_MS * 1000000
+            with patch.object(self.app.chat_recovery, "_task", side_effect=[
+                    (self.view(), False), Fault("task_store_busy", "Task writer holds prelaunch authority.")]), \
+                    patch.object(codex, "start") as start:
+                self.fault("task_store_busy", self.app._start_chat_recovery_delivery,
+                           "structured-one", uuid.uuid4().hex, uuid.uuid4().hex)
+                start.assert_not_called()
+            delivery = chatgpt.get(self.state, "structured-one").delivery
+            self.assertEqual((delivery.status, delivery.attempts, delivery.executions), ("deferred", 0, []))
+            self.assertEqual((delivery.recovery_id, delivery.deadline_ms), (recovery_id, deadline))
+            clock.return_value += chatgpt.GRACE_MS * 1000000
             identity = uuid.uuid4().hex
             with patch.object(self.app.machines, "start_execution",
                               side_effect=Fault("execution_start_unverified", "Original launch is uncertain.")):
@@ -790,14 +891,14 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         recovery = self.app.chat_recovery
         with patch("time.time_ns", return_value=time.time_ns() + 10000000) as clock:
             recovery.start()
-            original = self.path.read_bytes()
+            original = self.task_bytes()
             binding = chatgpt.get(self.state, "structured-one")
             recovery.external_activity("get_capabilities", {"task_id": "structured-one"}, self.app.get_capabilities())
             self.app.read_task("structured-one")
             self.assertEqual(chatgpt.get(self.state, "structured-one"), binding)
             recovery.external_activity("read_task", {}, self.view())
             self.assertGreater(chatgpt.get(self.state, "structured-one").activity_at_ms, binding.activity_at_ms)
-            self.assertEqual(self.path.read_bytes(), original)
+            self.assertEqual(self.task_bytes(), original)
             clock.return_value += chatgpt.GRACE_MS * 1000000 - 1000000
             self.fault("chat_recovery_caller_active", recovery._quiet, chatgpt.get(self.state, "structured-one"))
             clock.return_value += 1000000
@@ -839,7 +940,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         self.wait(self.app.start_execution(**arguments))
         record = self.view()["record"]
         with patch("time.time_ns", return_value=(record["control"]["owner"]["expires_at_ms"] + 1) * 1000000):
-            before = self.path.read_bytes()
+            before = self.task_bytes()
             with patch.object(self.app.task_admission, "_read", return_value={"status": "running"}):
                 self.fault("chat_recovery_work_running", self.app.chat_recovery._task, "structured-one")
             with patch.object(self.app.task_admission, "_read", side_effect=Fault("execution_not_found", "Unknown original receipt.")):
@@ -847,7 +948,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
             with patch.object(self.app.task_admission, "_observation", return_value=(
                     {"status": "partial"}, record["operations"][0]["locator"])):
                 self.assertTrue(self.app.chat_recovery._task("structured-one")[1])
-            self.assertEqual(self.path.read_bytes(), before)
+            self.assertEqual(self.task_bytes(), before)
             self.assertFalse(self.app.chat_recovery._task("structured-one")[1])
         self.control("pause", reason="Explicit human wait.")
         self.fault("task_stopped", self.app.chat_recovery._task, "structured-one")

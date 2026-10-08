@@ -1,8 +1,8 @@
-"""Pure task state transitions and capacity guards; no IO or operation dispatch."""
+"""Pure task state transitions and active-work guards; no IO or dispatch."""
 
 from openmachine.foundation.sanitize import Fault
 from . import effects
-from .records import MAX_ACCEPTANCE, MAX_INTEGER, MAX_RECORD, Operation, _unique, canonical, digest, pending
+from .records import MAX_ACTIVE_OPERATIONS, MAX_INTEGER, Operation, _unique, digest, pending
 
 
 def stage_for(record: dict, identity: str | None = None) -> dict:
@@ -53,35 +53,30 @@ def handoff(record: dict, identity: str, now_ms: int, reason: str) -> None:
         "expires_at_ms": record["contract"]["expires_at_ms"]}
 
 
-def reserve(record: dict, *, operation_limit: int = 62, new_work: bool = True,
-            new_operation: dict | None = None) -> None:
-    """Bound new work while retaining room for original results, decisions and stop."""
-    remaining = sum(stage["state"] != "accepted" for stage in record["plan"]["stages"])
-    if (new_work and (len(canonical(record)) > MAX_ACCEPTANCE or len(record["operations"]) > operation_limit)
-            or len(record["history"]) + remaining + 3 > 64):
-        raise Fault("task_capacity", "Task capacity is reserved for original results and stopping; no new work was admitted.")
-    # Worst-case enrichment of unresolved operations, not synthetic persisted facts.
-    extra = 0
-    for operation in record["operations"]:
-        if effects.unresolved(operation):
-            future = dict(operation, observed_at_ms=MAX_INTEGER, state="observed",
-                result={"status": "cancelled", "receipt_sha256": "f" * 64, "summary": "x" * 256, "log_offset": MAX_INTEGER})
-            if record["format"] >= 4:
-                # Use the longest result discriminator to include unknown and
-                # partial outcomes without persisting any synthetic evidence.
-                future["result"].update(failure_code="x" * 64, effect="effect_verified")
-            if future["locator"]["kind"] == "github":
-                future["locator"] = dict(future["locator"], number=MAX_INTEGER,
-                    parent_number=None if future["locator"]["object_type"] == "review_thread" else MAX_INTEGER)
-            if new_operation is not None and operation["id"] == new_operation["id"]:
-                try:
-                    Operation.model_validate(future)
-                except ValueError as error:
-                    raise Fault("task_capacity", "This new operation cannot retain its bounded future result; no work was dispatched.") from error
-            extra += max(0, len(canonical(future)) - len(canonical(operation)))
-    # Final record, pending decision, handoff, remaining material decisions and evidence references.
-    if len(canonical(record)) + extra + 4096 + (3072 if new_work else 512) + 768 + (remaining + 3) * 384 + 2240 > MAX_RECORD:
-        raise Fault("task_capacity", "The admitted work must leave bounded final-evidence capacity; preserve current history.")
+def reserve(record: dict, *, operation_limit: int = MAX_ACTIVE_OPERATIONS - 2,
+            new_operation: dict) -> None:
+    """Bound concurrent unresolved work and each admitted operation's future result."""
+    # The working set contains every unresolved operation, including this new
+    # one. Retained terminal rows and accumulated events consume no active slots.
+    if sum(effects.unresolved(item) for item in record["operations"]) > operation_limit:
+        raise Fault("task_capacity", "Active work capacity is reserved for original results and stopping; reconcile unresolved work before admitting more.")
+    future = dict(new_operation, observed_at_ms=MAX_INTEGER, state="observed",
+        result={"status": "cancelled", "receipt_sha256": "f" * 64, "summary": "x" * 256, "log_offset": MAX_INTEGER})
+    if record["format"] >= 4:
+        future["result"].update(failure_code="x" * 64, effect="effect_verified")
+    if future["locator"]["kind"] == "github":
+        future["locator"] = dict(future["locator"], number=MAX_INTEGER,
+            parent_number=None if future["locator"]["object_type"] == "review_thread" else MAX_INTEGER)
+    try:
+        Operation.model_validate(future)
+    except ValueError as error:
+        raise Fault("task_capacity", "This new operation cannot retain its bounded future result; no work was dispatched.") from error
+
+
+def stage_has_operations(record: dict, stage_id: str) -> bool:
+    """Include historical operations omitted from the bounded working set."""
+    return bool(record.get("_facts", {}).get("stage_operation_counts", {}).get(stage_id)
+                or any(item["stage_id"] == stage_id for item in record["operations"]))
 
 
 def finish_record(record: dict, outcome: str, acceptance: list[dict], limitations: str, now_ms: int) -> None:
@@ -268,7 +263,7 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                         effects.conflicts(record, item, record, operations[key])
                         for item in outstanding for key in change["evidence"])):
                     raise Fault("task_effect_unresolved", "Acceptance needs independent verified evidence that does not overlap an unresolved original effect.")
-                if (not change["evidence"] and any(item["stage_id"] == stage["id"] for item in record["operations"])):
+                if not change["evidence"] and stage_has_operations(record, stage["id"]):
                     raise Fault("task_evidence_invalid", "An operation-backed stage requires original evidence, not an empty decision.")
                 if any(stage_for(record, key)["state"] != "accepted" for key in stage["depends_on"]):
                     raise Fault("task_stage_conflict", "Dependencies must be accepted before this stage.")
@@ -283,4 +278,3 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             return
     material(record, now_ms, "plan_changed" if action == "revise_plan" else "decision", reason,
              change.get("stage_id"))
-    reserve(record, new_work=action not in {"claim", "renew", "record_decision"})

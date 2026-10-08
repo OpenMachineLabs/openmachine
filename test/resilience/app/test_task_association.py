@@ -4,10 +4,10 @@ import sys
 import unittest
 import uuid
 from openmachine import execution
-from test.support.tasks_cases import StructuredTaskCaseFixture
+from test.support.tasks import TaskFixture
 
 
-class StructuredTaskTests(StructuredTaskCaseFixture, unittest.TestCase):
+class StructuredTaskTests(TaskFixture, unittest.TestCase):
     def test_structured_association_blocks_new_launch_but_original_receipt_wins(self):
         self.create()
         identity = uuid.uuid4().hex

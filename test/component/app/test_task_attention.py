@@ -1,6 +1,8 @@
 """Foreground task attention and bounded wait behavior."""
 
 from copy import deepcopy
+from contextlib import closing
+import sqlite3
 import threading
 import unittest
 from unittest.mock import patch
@@ -18,14 +20,20 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.accept_plan()
         record = self.seed_running()
         identity = record["operations"][0]["id"]
+        tasks.update(self.state, "structured-one", lambda record, now:
+                     record["operations"][0]["result"].update(status="succeeded"))
+        self.seed_running()
+        self.assertNotIn(identity, [item["id"] for item in self.view()["record"]["operations"]])
         self.control("pause", reason="Pause this task only.")
         other = deepcopy(self.request)
         other["task_id"] = "unrelated"
         self.app.create_task(**other)
-        (self.state / "tasks/unrelated/task.json").write_text("unrelated corrupt fixture")
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.execute("UPDATE tasks SET current=? WHERE task_id=?", ("Unrelated corrupt fixture", "unrelated"))
+            connection.commit()
         receipt = {"execution_id": identity, "task_id": "structured-one", "status": "failed",
                    "exit_code": 1, "output": "Original failure output."}
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         with patch.object(self.app.machines, "read_execution", return_value=receipt):
             result = self.app.read_execution("desktop", identity)
         feedback = result.pop("task_feedback")
@@ -34,7 +42,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(feedback["status"], "supervised")
         self.assertEqual(feedback["foreground"]["reason"], "task_stopped")
         self.assertTrue(feedback["foreground"]["stop_foreground"])
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
 
     def test_unbound_execution_never_infers_a_paused_task_from_its_workspace(self):
         self.accept_plan()
@@ -91,7 +99,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
                   dict(self.write_arguments(), expected_workspace_identity="e" * 64)),
                  ("task_scope_denied", self.app.start_execution,
                   dict(self.start_arguments(), cwd=str(self.root)))]
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         for code, operation, arguments in cases:
             with self.subTest(code=code), self.assertRaises(Fault) as caught:
                 operation(**arguments)
@@ -100,7 +108,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
             self.assertEqual(error.evidence["task_id"], "structured-one")
             self.assertEqual(error.evidence["operation_id"], arguments["task_context"]["operation_id"])
             self.assertIn("Keep task_context", error.evidence["resume_prompt"])
-            self.assertEqual(self.path.read_bytes(), before)
+            self.assertEqual(self.task_bytes(), before)
         self.assertFalse((self.work / "result.txt").exists())
         self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
 
@@ -220,6 +228,47 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.assertGreater(changed["wait"]["current_revision"], current["revision"])
         self.assertFalse(changed["foreground"]["stop_foreground"])
 
+    def test_public_summaries_derive_attention_from_internal_operations(self):
+        self.accept_plan()
+        record = self.seed_running()
+        identity = record["operations"][0]["id"]
+        summary = self.app.read_task("structured-one")
+        waited = self.app.wait_task("structured-one", record["revision"], 0)
+        paused = self.app.control_task(**self.control_arguments("pause", reason="Retain the original operation."))
+        for view in (summary, waited, paused):
+            self.assertEqual((view["read_schema"], view["section"]), (2, "summary"))
+            self.assertFalse(view["record_complete"])
+            self.assertNotIn("operations", view["record"])
+            self.assertNotIn("history", view["record"])
+            self.assertNotIn("_facts", view["record"])
+            self.assertNotIn("_decisions", view["record"])
+        self.assertEqual(summary["foreground"]["operation_id"], identity)
+        self.assertTrue(waited["foreground"]["original_work_running"])
+        self.assertEqual(paused["record"]["control"]["stop_intent"], "pause")
+        exact = self.app.read_task("structured-one", section="operations", operation_id=identity)
+        self.assertEqual([operation["id"] for operation in exact["items"]], [identity])
+
+    def test_stage_evidence_references_remain_exact_after_new_decisions(self):
+        self.accept_plan()
+        initial = self.app.read_task("structured-one")["record"]["plan"]["stages"][0]
+        self.assertNotIn("evidence", initial)
+        reference = initial["evidence_ref"]
+        before = self.app.read_task(**reference)
+        self.assertEqual((before["items"][0]["state"], before["items"][0]["evidence"]), ("pending", []))
+        self.seed_running()
+        current = self.app.read_task("structured-one")["record"]["plan"]["stages"][0]
+        self.assertGreater(current["evidence_ref"]["decision_version"], reference["decision_version"])
+        self.assertEqual(self.app.read_task(**reference)["items"], before["items"])
+        self.assertEqual(self.app.read_task(**current["evidence_ref"])["items"][0]["state"], "running")
+        preserved = self.task_bytes()
+        for arguments in ({"stage_id": "verify"}, {"decision_version": 1},
+                          {"stage_id": "verify", "decision_version": True},
+                          {"stage_id": "verify", "decision_version": 1, "section": "summary"},
+                          {"stage_id": "verify", "decision_version": 1, "cursor": "retained"},
+                          {"stage_id": "verify", "decision_version": 1, "operation_id": "a" * 32}):
+            self.fault("invalid_task_read", self.app.read_task, "structured-one", **{"section": "evidence", **arguments})
+        self.assertEqual(self.task_bytes(), preserved)
+
     def test_expired_claim_requires_explicit_renewal_before_new_effect(self):
         accepted = self.accept_plan()["record"]
         original_args = self.write_arguments(path="original.txt")
@@ -231,7 +280,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
             record["control"]["state"] = "planned"
             record["handoff"] = None
         tasks.update(self.state, "structured-one", expire)
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         arguments = self.write_arguments(path="blocked.txt")
         with self.assertRaises(Fault) as raised:
             self.app.write_workspace_file(**arguments)
@@ -246,7 +295,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         wait.assert_not_called()
         self.assertEqual(ready["wait"]["status"], "renewal_required")
         self.assertFalse(ready["foreground"]["stop_foreground"])
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
         retained = self.app.write_workspace_file(**original_args)
         self.assertFalse(retained["task_operation_replayed"])
         self.assertEqual(self.view()["record"]["operations"], original)
@@ -257,7 +306,8 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         arguments["task_context"] = self.context_for(arguments["change_id"])
         self.assertEqual(self.app.write_workspace_file(**arguments)["status"], "applied")
         self.assertEqual((self.work / "blocked.txt").read_text(), "original\n")
-        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+        self.assertEqual(self.view()["facts"]["operation_count"], 2)
+        self.assertEqual(len(self.view()["record"]["operations"]), 1)
 
 
 if __name__ == "__main__":

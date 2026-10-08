@@ -24,6 +24,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
 from . import checks, install, payload, runtime, state as service_state, transition
+from .state import _configuration_digest as _digest
 
 MAX_OPERATIONS = 128
 RETIRE_LIFECYCLE_WAIT_SECONDS = 5.0
@@ -36,15 +37,6 @@ CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "inst
                 "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
 
 
-def _digest(path: Path) -> str:
-    info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
-            or info.st_size > 65536):
-        raise Fault("invalid_service_configuration", "Select an owned regular configuration of at most 64 KiB.")
-    load(path)
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _selection(state: Path) -> str | None:
     if not os.path.lexists(state / "service/service.json"):
         return None
@@ -52,6 +44,40 @@ def _selection(state: Path) -> str | None:
     # Recovery advances independently; policy, configuration and selection do not.
     record.pop("recovery", None)
     return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+
+
+def _activation_basis(record: dict) -> str:
+    # Selection, snapshots and recovery change during the admitted transition;
+    # configuration binding, policy, launcher and readiness probe must not.
+    stable = {key: value for key, value in record.items()
+              if key not in {"current", "previous", "pending", "configurations", "recovery", "management"}}
+    return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
+
+
+def _cutover_selection(state: Path, record: dict) -> dict | None:
+    """Recognize only this maintenance intent after its irreversible Task cutover."""
+    if (record["phase"] not in {"activating", "recovery_required"}
+            or record["request"]["action"] != "update" or record["prepared"] is None):
+        return None
+    proof = (record["outcome"] or {}).get("activation")
+    if not isinstance(proof, dict) or set(proof) != {"from", "previous", "basis_sha256"}:
+        return None
+    target, request = record["prepared"]["identity"], record["request"]
+    selected = service_state._record(state)
+    if (selected["current"] != target or target == proof["from"] or selected["config"] != request["config"]
+            or _activation_basis(selected) != proof["basis_sha256"]
+            or selected.get("configurations", {}).get(target) != request["candidate_sha256"]):
+        return None
+    pending = selected["pending"]
+    if (pending is not None and pending != {"from": proof["from"], "to": target, "previous": proof["previous"]}
+            or pending is None and selected["previous"] != proof["from"]):
+        return None
+    installed = service_state._installed(state, target)
+    if installed.get("payload_sha256") != request["payload_sha256"]:
+        return None
+    if not transition._task_cutover(state, selected, committed=True):
+        return None
+    return selected
 
 
 def _operation_path(state: Path, identity: str) -> Path:
@@ -150,8 +176,16 @@ def read_operation(config_path: Path, state: Path, identity: str) -> dict:
     except (Fault, OSError):
         selection, reason = None, "service_selection_unknown"
     phase = record["phase"]
+    continuable = phase in CONTINUABLE
+    if not continuable and busy is False:
+        try:
+            continuable = _cutover_selection(state, record) is not None
+        except Fault as error:
+            reason = error.code
+        except OSError:
+            reason = "task_storage_unverified"
     status = phase if phase in TERMINAL else "busy" if busy else (
-        "continuation_required" if phase in CONTINUABLE and busy is False else "recovery_required")
+        "continuation_required" if continuable and busy is False else "recovery_required")
     return {"status": status, "operation": record, "owner_busy": busy,
             "selection_sha256": selection, "reason": reason, "observed_at_ms": time.time_ns() // 1000000}
 
@@ -222,7 +256,7 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         record = _read(state, identity)
         if record["request"]["config"] != str(config_path):
             raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
-        if record["phase"] not in CONTINUABLE:
+        if record["phase"] not in CONTINUABLE and _cutover_selection(state, record) is None:
             raise Fault("maintenance_not_continuable", "Preparation or activation may have occurred; read original state without replay.")
         python = sys.executable
         if record["phase"] != "accepted":
@@ -325,10 +359,17 @@ def _inputs_unchanged(state: Path, record: dict) -> Path:
 def run_operation(state: Path, identity: str, lock_fd: int) -> None:
     """One admitted operation; the caller owns the inherited operation flock."""
     record = _read(state, identity)
-    if record["phase"] not in CONTINUABLE:
+    if record["phase"] not in CONTINUABLE | {"activating", "recovery_required"}:
         return
     try:
         request = record["request"]
+        if record["phase"] not in CONTINUABLE:
+            selected = _cutover_selection(state, record)
+            if selected is not None:
+                _bound(Path(request["config"]), state, selected)
+                result = transition._resume_activation(state, selected)
+                _save(state, record, "completed", outcome=result)
+            return
         snapshot = _inputs_unchanged(state, record)
         if record["phase"] == "accepted":
             record = _save(state, record, "retaining")
@@ -364,7 +405,12 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         def before_change():
             nonlocal record
             _inputs_unchanged(state, record)
-            record = _save(state, record, "activating")
+            checkpoint = None
+            if request["action"] == "update":
+                selected = service_state._record(state)
+                checkpoint = {"activation": {"from": selected["current"], "previous": selected["previous"],
+                                               "basis_sha256": _activation_basis(selected)}}
+            record = _save(state, record, "activating", outcome=checkpoint)
         if request["action"] == "install":
             _uninstalled(state)
             result = transition._register(config, state, prepared["identity"], request["workspace"], request["path"],

@@ -5,7 +5,9 @@ import unittest
 from unittest.mock import Mock, patch
 import uuid
 from integrations import github
+from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
+from openmachine.tasks import records
 from test.support.tasks import TaskFixture
 
 
@@ -20,6 +22,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
             "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
         self.app.connections.request = Mock()
+        self.request["contract"]["targets"] = []
         self.request["contract"]["repositories"] = ["Owner/repo"]
         self.accept_plan(tools=["github_issue", "read_task", "control_task"])
         return provider
@@ -32,7 +35,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         result = self.app.github_issue(**args)
         self.assertEqual(result["status"], "write_outcome_unknown")
         self.assertIn("<!-- om-task:structured-one:" + identity + " -->", provider.issue.call_args.kwargs["body"])
-        self.assertNotIn(args["body"], self.path.read_text())
+        self.assertNotIn(args["body"], records.canonical(tasks.read(self.state, "structured-one")).decode())
         provider.reconcile.return_value = {"status": "verified", "receipt": {"id": 71, "number": 7, "updated_at": "fixture"}}
         recovered = self.app.github_issue(**args)
         self.assertFalse(recovered["task_operation_replayed"])
@@ -88,7 +91,36 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         completed = self.control("finish", outcome="completed",
             acceptance=[{"stage_id": "verify", "operation_id": identity}], limitations="")
         self.assertEqual(completed["record"]["terminal"]["outcome"], "completed")
-        self.assertEqual(len(completed["record"]["operations"]), 9)
+        self.assertEqual(tasks.read(self.state, "structured-one")["facts"]["operation_count"], 9)
+
+    def test_long_history_keeps_original_lookup_deduplication_and_acceptance(self):
+        provider = self.github_fixture()
+        provider.issue.return_value = {"status": "verified", "receipt": {"id": 71, "number": 7}}
+        identity = uuid.uuid4().hex
+        first = dict(action="create", repository="Owner/repo", title="Original verified work", body="Fixture.",
+                     task_context=self.context_for(identity))
+        self.app.github_issue(**first)
+        original = tasks.read(self.state, "structured-one")["record"]["operations"][0]
+        provider.issue.side_effect = Fault("github_access_denied", "Known no-effect fixture.", effect="known_no_effect")
+        for _ in range(70):
+            self.fault("github_access_denied", self.app.github_issue,
+                       **dict(first, task_context=self.context_for(uuid.uuid4().hex)))
+        current = tasks.read(self.state, "structured-one")
+        self.assertEqual(current["facts"]["operation_count"], 71)
+        self.assertEqual(len(current["record"]["operations"]), 1)
+        self.assertNotEqual(current["record"]["operations"][0]["id"], identity)
+        calls = provider.issue.call_count
+        replay = self.app.github_issue(**first)
+        self.assertFalse(replay["task_operation_replayed"])
+        self.fault("task_operation_conflict", self.app.github_issue, **dict(first, title="Changed original intent"))
+        self.assertEqual(provider.issue.call_count, calls)
+        self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[identity],
+                     reason="Retain the original verified result beyond the bounded current view.")
+        completed = self.control("finish", outcome="completed",
+            acceptance=[{"stage_id": "verify", "operation_id": identity}], limitations="Synthetic provider only.")
+        self.assertEqual(completed["record"]["terminal"]["outcome"], "completed")
+        retained = tasks.read(self.state, "structured-one", operation_ids=[identity])
+        self.assertEqual(next(item for item in retained["record"]["operations"] if item["id"] == identity), original)
 
     def test_rate_rejection_returns_wait_evidence_without_immediate_provider_read(self):
         provider = self.github_fixture()
@@ -114,7 +146,8 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         provider.reconcile.assert_not_called()
 
     def test_all_provider_entrypoints_reject_stale_context_before_provider_access(self):
-        self.accept_plan()
+        self.request["contract"]["targets"] = []
+        self.accept_plan(tools=["read_task", "control_task"])
         context = self.context_for(uuid.uuid4().hex)
         self.control("pause", reason="Reject all old provider continuations.")
         cases = [(self.app.github_issue, dict(action="create", repository="Owner/repo", title="fixture", body="fixture")),

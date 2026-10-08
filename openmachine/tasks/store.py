@@ -1,4 +1,4 @@
-"""Canonical task publication, bounded derived lookup, and unchanged legacy saves."""
+"""Transactional current Task state and indexed original evidence."""
 
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -7,277 +7,24 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import tempfile
+import sqlite3
 import time
-import uuid
 
-from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.foundation.sanitize import Fault, redact
+from openmachine.foundation.state import lease
+from . import database as db, effects, records
+from .index import (INDEX_PAGE, MAX_CHECKPOINT, metadata as validate_metadata,
+                    private_path, read_checkpoint, read_index, read_structured, task_id)
 
-from . import effects, records
-from .index import (MAX_CHECKPOINT, MAX_INDEX, MAX_TASKS, INDEX_PAGE, catalog_complete, directory_names,
-                    load_index, metadata as validate_metadata, private_path, read_checkpoint, read_index,
-                    read_structured, structured_metadata, task_id)
-
-
-@contextmanager
-def _reading(state: Path):
-    if not state.is_absolute():
-        raise Fault("invalid_state", "Use an absolute private state directory.")
-    root = state / "tasks"
-    try:
-        state.lstat()
-    except FileNotFoundError:
-        yield None
-        return
-    private_path(state, directory=True)
-    try:
-        root.lstat()
-    except FileNotFoundError:
-        if os.path.lexists(state / "locks/tasks.lock"):
-            raise Fault("corrupt_tasks", "The existing task store disappeared; preserve its original history.")
-        yield None
-        return
-    try:
-        private_path(root, directory=True)
-        private_path(state / "locks", directory=True)
-        private_path(state / "locks/tasks.lock")
-        with lease(state / "locks/tasks.lock", shared=True, create=False):
-            yield root
-    except OSError as error:
-        raise Fault("corrupt_tasks", "Existing task state or its lock is unavailable; preserve it.") from error
+HISTORICAL = {"operations", "history", "effect_scopes", "_facts", "_decisions"}
 
 
-@contextmanager
-def _writing(state: Path, *, initialize: bool):
-    if not initialize:
-        with _reading(state) as root:
-            if root is None:
-                raise Fault("tasks_uninitialized", "No task store exists to rebuild.")
-    state = private_directory(state)
-    root = state / "tasks"
-    existing = os.path.lexists(root)
-    if existing:
-        try:
-            private_path(state / "locks", directory=True)
-            private_path(state / "locks/tasks.lock")
-        except OSError as error:
-            raise Fault("corrupt_tasks", "The existing task-store lock is missing; never recreate it over prior history.") from error
-    locks = private_directory(state / "locks")
-    previous_store = os.path.lexists(locks / "tasks.lock")
-    with lease(locks / "tasks.lock", create=not existing):
-        private_path(locks / "tasks.lock")
-        try:
-            root.lstat()
-        except FileNotFoundError:
-            if previous_store:
-                raise Fault("corrupt_tasks", "A prior task store is missing; do not initialize new history.")
-            private_directory(root)
-            save_json(root / "index.json", {"format_version": 1, "generation": 0, "tasks": {}})
-            _sync_directory(locks)
-            _sync_directory(state)
-        private_path(root, directory=True)
-        yield root
-
-
-def _view(root: Path, record: dict, raw: bytes, *, index_status: str | None = None) -> dict:
-    if index_status is None:
-        try:
-            index = load_index(root)
-            complete = catalog_complete(root, index)
-            expected = structured_metadata(record, raw)
-            index_status = "current" if complete and index["tasks"].get(record["task_id"]) == expected else "stale"
-            if index.get("coverage") == "incomplete":
-                index_status = "incomplete"
-        except Fault:
-            index_status = "stale"
-    return {"task_id": record["task_id"], "record": record, "observed_at_ms": time.time_ns() // 1000000,
-            "index_status": index_status,
-            "support": {"structured_records": True, "supervised_admission": True,
+def _observation_support() -> dict:
+    return {"support": {"structured_records": True, "supervised_admission": True,
                         "runtime_recovery": False, "events_delivery": False},
             "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
                 "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
                 "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
-
-
-@contextmanager
-def locked_read(state: Path, identity: str):
-    """Hold a canonical read stable during a short, non-network admission."""
-    task_id(identity)
-    with _reading(state) as root:
-        if root is None:
-            raise Fault("tasks_uninitialized", "This private task store has not been initialized.")
-        if os.path.lexists(root / identity / "task.json"):
-            record, raw = read_structured(root, identity)
-            yield _view(root, record, raw)
-            return
-        index = read_index(root)
-        if index["tasks"].get(identity, {}).get("owner") == "structured":
-            raise Fault("corrupt_tasks", "The canonical record is missing; legacy fallback is forbidden.")
-        item, raw = read_checkpoint(root, index, identity)
-        body = raw.decode("utf-8")
-        yield {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
-                "generation": index["generation"], "resume_authorized": False}
-
-
-def read(state: Path, identity: str) -> dict:
-    with locked_read(state, identity) as view:
-        return view
-
-
-def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
-           expected_revision: int | None = None, last_update: dict | None = None,
-           require_current: bool = False, allow_observations: bool = False,
-           observation: bool = False, upgrade: bool = False) -> dict:
-    """Publish one guarded canonical revision. The callback must not perform IO."""
-    task_id(identity)
-    with _writing(state, initialize=False) as root:
-        original, before = read_structured(root, identity)
-        if last_update is not None and original["last_update"]["id"] == last_update["id"]:
-            if original["last_update"] != last_update:
-                raise Fault("task_conflict", "The retained update ID belongs to a different normalized request.")
-            return {**_view(root, original, before), "status": "unchanged"}
-        compatible_revision = (allow_observations and original["format"] >= 4
-                               and original["control_revision"] <= expected_revision <= original["revision"]) if expected_revision is not None else False
-        if expected_revision is not None and expected_revision != original["revision"] and not compatible_revision:
-            raise Fault("task_conflict", "The original task advanced; read its current revision before another transition.",
-                        {"task_id": identity, "task_revision": original["revision"],
-                         "plan_revision": original["plan"]["revision"], "continuation_epoch": original["control"]["epoch"]})
-        index = None
-        try:
-            index = read_index(root)
-            if index["tasks"].get(identity) != structured_metadata(original, before):
-                raise Fault("task_index_incomplete", "The canonical task and derived index differ; reconcile metadata before new work.")
-        except (OSError, Fault):
-            if require_current:
-                raise
-            index = None
-        value = deepcopy(original)
-        if upgrade and value["format"] == 3:
-            value.update(format=4, control_revision=original["revision"], effect_scopes=[])
-        now_ms = max(time.time_ns() // 1000000, original["updated_at_ms"])
-        transform(value, now_ms)
-        if last_update is not None:
-            value["last_update"] = last_update
-        if value == original:
-            return {**_view(root, original, before), "status": "unchanged"}
-        if upgrade and value["format"] == 3:
-            value.update(format=4, control_revision=original["revision"])
-            value.setdefault("effect_scopes", [])
-        if value["format"] != original["format"] and not (
-                original["format"] == 3 and value["format"] == 4 and upgrade
-                or original["format"] < 3 and value["format"] in {3, 4}
-                and value["contract"].get("recovery_policy") in {"task_chat", "disabled"}
-                and value["plan"]["revision"] == original["plan"]["revision"] + 1):
-            raise Fault("task_identity_conflict", "Only an explicit plan revision may enroll historical task recovery.")
-        if original.get("chat_registration") is not None and value.get("chat_registration") != original["chat_registration"]:
-            raise Fault("task_identity_conflict", "Retain the original recovery registration and its evidence.")
-        for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
-            if value[key] != original[key]:
-                raise Fault("task_identity_conflict", "A transition cannot replace the original task identity or initiating request.")
-        old_witnesses = original.get("effect_scopes", [])
-        if value.get("effect_scopes", [])[:len(old_witnesses)] != old_witnesses:
-            raise Fault("task_identity_conflict", "Original scope evidence is immutable and append-only.")
-        old_operations = {item["id"]: item for item in original["operations"]}
-        if not old_operations.keys() <= {item["id"] for item in value["operations"]}:
-            raise Fault("task_identity_conflict", "Original operation history cannot be removed.")
-        for operation in value["operations"]:
-            old = old_operations.get(operation["id"])
-            if old is None:
-                continue
-            for key in ("stage_id", "plan_revision", "epoch", "request_sha256", "source_sha256", "admitted_at_ms", "effect_scope"):
-                if operation.get(key) != old.get(key):
-                    raise Fault("task_identity_conflict", "Original operation intent and scope cannot be rewritten.")
-            if (old["locator"]["kind"] == "github" and old["result"] is not None and not records.pending(old)
-                    and operation != old):
-                raise Fault("task_identity_conflict", "Verified historical provider evidence cannot follow mutable current state.")
-        value.update(revision=original["revision"] + 1, updated_at_ms=now_ms)
-        if value["format"] >= 4:
-            material = not observation or any(value[key] != original[key] for key in ("contract", "plan", "terminal"))
-            # Observation may publish a result/handoff, but never ownership or a
-            # new authority/control intent under the evidence-only watermark.
-            material |= any(value["control"][key] != original["control"][key]
-                            for key in ("owner", "epoch", "stop_intent", "current_stage_id"))
-            value["control_revision"] = value["revision"] if material else original.get("control_revision", original["revision"])
-        try:
-            value = records.Record.model_validate(value).model_dump()
-            raw = records.canonical(value)
-            if len(raw) > records.MAX_RECORD:
-                raise ValueError("record capacity exceeded")
-        except (ValueError, TypeError, UnicodeError) as error:
-            raise Fault("invalid_task_transition", "The bounded canonical transition is invalid; original task bytes are unchanged.") from error
-        try:
-            _replace(root / identity / "task.json", raw)
-            observed, content = read_structured(root, identity)
-            if observed != value or content != raw:
-                raise Fault("task_write_unverified", "Canonical update readback differs; inspect the same original task.")
-        except OSError as error:
-            raise Fault("task_write_unverified", "Canonical durability was not acknowledged; retain the original update/operation ID and never dispatch on uncertainty.") from error
-        if index is not None:
-            index["tasks"][identity] = structured_metadata(value, raw)
-            index["generation"] += 1
-            try:
-                _write_index(root, index)
-            except (OSError, Fault):
-                index = None
-        return {**_view(root, value, raw, index_status="current" if index is not None else "stale"), "status": "saved"}
-
-
-def _matching_operations(state: Path, predicate) -> list[dict]:
-    """Scan canonical owners with complete bounded index coverage."""
-    generation, offset, found = None, 0, []
-    while True:
-        with _reading(state) as root:
-            if root is None:
-                return []
-            index = read_index(root)
-            if generation is not None and generation != index["generation"]:
-                raise Fault("task_index_changed", "Task identity coverage changed; read original evidence before new work.")
-            generation = index["generation"]
-            identities = sorted(index["tasks"])
-            checked, consumed = 0, 0
-            for identity in identities[offset:offset + INDEX_PAGE]:
-                item = index["tasks"][identity]
-                path = root / identity / "task.json"
-                if not os.path.lexists(path):
-                    if item.get("owner") == "structured":
-                        raise Fault("corrupt_tasks", "The original structured owner is missing; preserve its binding.")
-                    checked += 1
-                    continue
-                size = private_path(path).st_size
-                if size > records.MAX_RECORD:
-                    raise Fault("corrupt_tasks", "A retained canonical task exceeds its record bound; preserve it without dispatch.")
-                if consumed + size > MAX_INDEX:
-                    break
-                record, raw = read_structured(root, identity)
-                consumed += len(raw)
-                checked += 1
-                if item != structured_metadata(record, raw):
-                    raise Fault("task_index_incomplete", "Canonical identity coverage is stale; rebuild before a new effect.")
-                matches = [operation for operation in record["operations"] if predicate(record, operation)]
-                if matches:
-                    found.append({"task_id": identity, "operations": matches})
-            offset += checked
-            if offset == len(identities):
-                return found
-
-
-def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict | None:
-    """Original operation identity is independent from resource conflicts."""
-    found = _matching_operations(state, lambda record, operation:
-        operation_id and operation["id"] == operation_id or operation_key(operation["locator"]) == key)
-    if len(found) > 1:
-        raise Fault("task_operation_conflict", "An original operation is ambiguously bound; preserve both tasks without dispatch.")
-    return found[0] if found else None
-
-
-def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list[dict]:
-    """Native GitHub routes share durable conflicts across task and account IDs."""
-    if proposed["locator"]["kind"] != "github":
-        return []
-    return _matching_operations(state, lambda record, operation:
-        operation["id"] != proposed.get("id") and effects.unresolved(operation)
-        and effects.conflicts(record, operation, proposed_record, proposed))
 
 
 def operation_key(locator: dict) -> tuple:
@@ -290,322 +37,928 @@ def operation_key(locator: dict) -> tuple:
     return kind, locator["target_identity"] or "local", locator["execution_id" if kind == "execution" else "change_id"]
 
 
-def require_legacy(state: Path, identity: str) -> None:
-    """Only used after original execution-ID reconciliation, before a new launch."""
-    if "record" in read(state, identity):
-        raise Fault("supervised_admission_unavailable", "A bare task_id is not supervised authority; supply the current task_context before a new structured-task effect.")
+def _key(locator: dict) -> str:
+    return records.canonical(operation_key(locator)).decode()
 
 
-def _metadata_page(root: Path, index: dict, identities: list[str], limit: int = INDEX_PAGE) -> list[tuple[str, dict]]:
-    page, consumed = [], 0
-    for identity in identities[:limit]:
-        structured = os.path.lexists(root / identity / "task.json")
-        path = root / identity / ("task.json" if structured else "task.md")
-        size = private_path(path).st_size
-        if size > (records.MAX_RECORD if structured else MAX_CHECKPOINT):
-            raise Fault("corrupt_tasks", "A retained task exceeds its record bound.")
-        if consumed + size > MAX_INDEX:
-            break
-        if structured:
-            record, raw = read_structured(root, identity)
-            item = structured_metadata(record, raw)
-        else:
-            item, raw = read_checkpoint(root, index, identity)
-            item = {"owner": "legacy", **item}
-        consumed += len(raw)
-        page.append((identity, item))
-    return page
+def _core(record: dict) -> dict:
+    return {key: value for key, value in record.items() if key not in HISTORICAL}
 
 
-def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "",
-         offset: int = 0, limit: int = 20, expected_generation: int = -1) -> dict:
-    if identity:
-        task_id(identity)
-    wanted = validate_metadata("lookup", anchors or [])["anchors"]
-    if (not isinstance(query, str) or len(query) > 200 or type(offset) is not int or offset < 0
-            or type(limit) is not int or not 1 <= limit <= 50 or type(expected_generation) is not int or expected_generation < -1):
-        raise Fault("invalid_range", "Use a bounded lookup query, nonnegative offset and page size from 1 to 50.")
-    with _reading(state) as root:
-        if root is None:
-            if expected_generation != -1:
-                raise Fault("task_index_changed", "The original task index is no longer available.")
-            return {"status": "uninitialized", "tasks": [], "next_offset": None, "generation": None,
-                    "coverage": "this_store_only", "resume_authorized": False}
-        index = load_index(root)
-        complete = catalog_complete(root, index)
-        if expected_generation != -1 and expected_generation != index["generation"]:
-            raise Fault("task_index_changed", "Task lookup metadata changed between pages; read the current index.")
-        matches = [key for key, value in sorted(index["tasks"].items())
-                   if (not identity or key == identity) and set(wanted) <= set(value["anchors"])
-                   and query.casefold() in (key + " " + value["title"]).casefold()]
-        page = _metadata_page(root, index, matches[offset:], limit)
-        for key, item in page:
-            stored = {"owner": "legacy", **index["tasks"][key]}
-            complete = complete and item == stored
-        total = len(matches)
-        end = offset + len(page)
-        exact = bool(identity or wanted) and not query
-        status = "matched" if exact and total == 1 else "ambiguous" if exact and total > 1 else "candidates"
-        return {"status": status, "tasks": [{"task_id": key, "title": item["title"], "revision": item["revision"]}
-                                            for key, item in page], "total": total,
-                "next_offset": end if end < total else None, "generation": index["generation"],
-                "coverage": "registered_tasks_only" if complete and index["format_version"] == 1 else "complete" if complete else "incomplete",
-                "resume_authorized": False}
+def _decision(connection, identity: str, stage_id: str, version: int) -> dict:
+    row = connection.execute("SELECT payload,sha256 FROM stage_decisions WHERE task_id=? AND stage_id=? AND version=?",
+                             (identity, stage_id, version)).fetchone()
+    if row is None:
+        raise Fault("corrupt_tasks", "A current stage lost its original decision version.")
+    try:
+        value = records.Decision.model_validate(db.decode(row["payload"], row["sha256"])).model_dump()
+        if len(set(value["evidence"])) != len(value["evidence"]):
+            raise ValueError("duplicate decision evidence")
+        missing = connection.execute("""SELECT 1 FROM json_each(?) AS evidence LEFT JOIN operations AS op
+            ON op.task_id=? AND op.id=evidence.value WHERE op.id IS NULL OR op.stage_id<>? LIMIT 1""",
+            (json.dumps(value["evidence"]), identity, stage_id)).fetchone()
+        if missing:
+            raise ValueError("decision evidence lost its original operation")
+        return value
+    except ValueError as error:
+        raise Fault("corrupt_tasks", "A stage decision has invalid original evidence.") from error
 
 
-def observation_page(state: Path, known: dict[str, str]) -> dict:
-    """Read changed canonical candidates, not a second active-task ledger.
+def _current(connection, row) -> tuple[dict, dict]:
+    value = db.decode(row["current"], row["sha256"])
+    versions = {}
+    try:
+        if value["task_id"] != row["task_id"] or value["revision"] != row["revision"]:
+            raise ValueError("current identity or revision differs")
+        for stage in value["plan"]["stages"]:
+            version = stage.pop("decision_version")
+            if type(version) is not int or not 1 <= version <= value["revision"] or "evidence" in stage:
+                raise ValueError("invalid decision version")
+            decision = _decision(connection, row["task_id"], stage["id"], version)
+            if stage["state"] != decision["state"]:
+                raise ValueError("decision state differs")
+            stage["evidence"] = decision["evidence"]
+            versions[stage["id"]] = version
+        return records.Current.model_validate(value).model_dump(), versions
+    except (ValueError, TypeError, KeyError) as error:
+        raise Fault("corrupt_tasks", "Current Task authority or its decision references are invalid.") from error
 
-    The caller retains only advertised metadata hashes. Startup inspects each
-    registered structured record once; unchanged history is never reread on a
-    timer. A stale index is reported, not repaired or taken as complete absence.
-    """
-    if len(known) > MAX_TASKS:
-        raise Fault("task_capacity", "Observation discovery exceeds the bounded task catalog.")
-    with _reading(state) as root:
-        if root is None:
-            return {"entries": [], "identities": [], "generation": None, "complete": True, "has_more": False}
-        index = load_index(root)
-        complete = catalog_complete(root, index)
-        identities = sorted(key for key, item in index["tasks"].items() if item.get("owner") == "structured")
-        changed = [key for key in identities if known.get(key) != index["tasks"][key]["sha256"]]
-        entries, consumed = [], 0
-        for identity in changed[:INDEX_PAGE]:
-            item = index["tasks"][identity]
-            record, error = None, None
+
+def _pack_current(connection, core: dict, prior: dict | None = None) -> dict:
+    """Keep only immutable decision references in the bounded current-state row."""
+    value = deepcopy(core)
+    for stage in value["plan"]["stages"]:
+        decision = {"state": stage["state"], "evidence": stage.pop("evidence")}
+        version = (prior or {}).get(stage["id"])
+        if version is None or _decision(connection, core["task_id"], stage["id"], version) != decision:
+            version = core["revision"]
+            payload, sha = db.encoded(decision)
+            connection.execute("INSERT INTO stage_decisions VALUES (?,?,?,?,?)",
+                               (core["task_id"], stage["id"], version, payload, sha))
+        stage["decision_version"] = version
+    return value
+
+
+def _row(connection, identity: str):
+    row = connection.execute("SELECT * FROM tasks WHERE task_id=?", (identity,)).fetchone()
+    if row is None:
+        raise Fault("task_not_found", "No original Task exists for this ID.")
+    return row
+
+
+def _operation(row) -> dict:
+    value = db.decode(row["payload"], row["sha256"])
+    try:
+        value = records.Operation.model_validate(value).model_dump()
+        locator = value["locator"]
+        indexes = {key: value[key] for key in ("id", "stage_id", "plan_revision", "epoch", "admitted_at_ms", "observed_at_ms")}
+        indexes.update(kind=locator["kind"], machine=locator.get("machine"), target_identity=locator.get("target_identity"),
+                       repository=locator.get("repository", "").casefold() or None, effect_key=_key(locator),
+                       pending=int(records.pending(value)), unresolved=int(effects.unresolved(value)),
+                       outcome=(value["result"] or {}).get("status"),
+                       locator_id=locator.get("execution_id", locator.get("change_id", locator.get("anchor"))))
+        if any(row[key] != item for key, item in indexes.items()):
+            raise ValueError("operation indexes differ")
+        return value
+    except (ValueError, TypeError, KeyError) as error:
+        raise Fault("corrupt_tasks", "An original operation has invalid content or binding indexes.") from error
+
+
+def _selected(connection, identity: str, current: dict, operation_ids=()) -> list[dict]:
+    identities = set(operation_ids)
+    if len(identities) > 256 or any(not isinstance(key, str) or len(key) != 32 for key in identities):
+        raise Fault("invalid_range", "Use a bounded set of original operation IDs.")
+    rows = {row["id"]: row for row in connection.execute(
+        "SELECT * FROM operations WHERE task_id=? AND unresolved=1 ORDER BY ordinal", (identity,))}
+    if len(rows) > records.MAX_ACTIVE_OPERATIONS:
+        raise Fault("corrupt_tasks", "Unresolved task work exceeds its retained active-work budget.")
+    for stage in current["plan"]["stages"]:
+        row = connection.execute("SELECT * FROM operations WHERE task_id=? AND stage_id=? ORDER BY ordinal DESC LIMIT 1",
+                                  (identity, stage["id"])).fetchone()
+        if row is not None:
+            rows[row["id"]] = row
+    for key in identities - rows.keys():
+        row = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, key)).fetchone()
+        if row is not None:
+            rows[key] = row
+    return [_operation(row) for row in sorted(rows.values(), key=lambda row: row["ordinal"])]
+
+
+def _witnesses(connection, identity: str, operations: list[dict]) -> list[dict]:
+    result = []
+    for operation in operations:
+        row = connection.execute("SELECT scope,witness,sha256 FROM operation_scopes WHERE task_id=? AND operation_id=? AND witness IS NOT NULL",
+                                  (identity, operation["id"])).fetchone()
+        if row is not None:
             try:
-                size = private_path(root / identity / "task.json").st_size
-                if size > records.MAX_RECORD:
-                    raise Fault("corrupt_tasks", "Retained canonical evidence exceeds its bound.")
-                if consumed + size > MAX_INDEX:
-                    break
-                consumed += size
+                witness = records.EffectScopeWitness.model_validate(db.decode(row["witness"], row["sha256"])).model_dump()
+                if (witness["operation_id"] != operation["id"] or witness["request_sha256"] != operation["request_sha256"]
+                        or operation.get("effect_scope") is not None or operation["locator"]["kind"] != "github"
+                        or witness["at_ms"] < operation["admitted_at_ms"] or records.canonical(witness["scope"]).decode() != row["scope"]):
+                    raise ValueError("scope witness binding differs")
+                result.append(witness)
+            except (ValueError, TypeError, KeyError) as error:
+                raise Fault("corrupt_tasks", "An effect-scope witness lost its original operation binding.") from error
+    return result
+
+
+def _facts(connection, row, current: dict, operations: list[dict]) -> dict:
+    identity = row["task_id"]
+    unresolved = [item for item in operations if effects.unresolved(item)]
+    pending = [item for item in unresolved if records.pending(item)]
+    admitted = connection.execute("SELECT admitted_at_ms FROM operations WHERE task_id=? ORDER BY admitted_at_ms DESC LIMIT 1", (identity,)).fetchone()
+    observed = connection.execute("SELECT observed_at_ms FROM operations WHERE task_id=? ORDER BY observed_at_ms DESC LIMIT 1", (identity,)).fetchone()
+    progress = max(current["created_at_ms"], admitted[0] if admitted else 0,
+                   (current["terminal"] or {}).get("finished_at_ms", 0))
+    for stage in current["plan"]["stages"]:
+        if stage["state"] == "accepted":
+            event = connection.execute("SELECT at_ms FROM task_events WHERE task_id=? AND kind='decision' AND stage_id=? ORDER BY at_ms DESC LIMIT 1",
+                                        (identity, stage["id"])).fetchone()
+            progress = max(progress, event[0] if event else 0)
+    return {"operation_count": row["operation_count"], "history_count": row["history_count"],
+            "scope_count": row["scope_count"], "stage_operation_counts": json.loads(row["stage_counts"]),
+            "unresolved_count": len(unresolved), "pending_count": len(pending),
+            "running_count": sum((op["result"] or {}).get("status") == "running" for op in pending),
+            "unknown_count": sum(op["state"] == "unknown" or (op["result"] or {}).get("status") == "unknown" for op in unresolved),
+            "partial_count": sum((op["result"] or {}).get("status") == "partial" for op in unresolved),
+            "last_admitted_at_ms": admitted[0] if admitted else None,
+            "last_observed_at_ms": observed[0] if observed else None, "progress_ms": progress}
+
+
+def _view(connection, identity: str, operation_ids=()) -> dict:
+    row = _row(connection, identity)
+    current = db.decode(row["current"], row["sha256"])
+    if row["kind"] == "legacy":
+        body = current["body"]
+        return {"task_id": identity, **current, "body": redact(body), "content_redacted": redact(body) != body,
+                "generation": db.metadata(connection)["generation"], "resume_authorized": False}
+    current, versions = _current(connection, row)
+    if current["task_id"] != identity or current["revision"] != row["revision"]:
+        raise Fault("corrupt_tasks", "Task identity or revision differs from its stored authority.")
+    operations = _selected(connection, identity, current, operation_ids)
+    facts = _facts(connection, row, current, operations)
+    current.update(operations=operations, history=[], effect_scopes=_witnesses(connection, identity, operations), _facts=facts,
+                   _decisions=versions)
+    return {"task_id": identity, "record": current, "facts": facts, "read_schema": 2, "record_complete": False,
+            "observed_at_ms": time.time_ns() // 1000000, "index_status": "current",
+            "generation": db.metadata(connection)["generation"], "sequence": row["change_seq"],
+            **_observation_support()}
+
+
+@contextmanager
+def _legacy_read(state: Path):
+    if not os.path.lexists(state / "tasks"):
+        raise Fault("tasks_uninitialized", "This private Task store has not been initialized.")
+    private_path(state, directory=True)
+    private_path(state / "tasks", directory=True)
+    private_path(state / "locks", directory=True)
+    private_path(state / "locks/tasks.lock")
+    with lease(state / "locks/tasks.lock", shared=True, create=False):
+        if os.path.lexists(state / "tasks.db"):
+            # A prepared database has no authority while the original directory exists.
+            connection = db._open(state, write=False)
+            try:
+                if db.metadata(connection)["active"]:
+                    raise Fault("corrupt_tasks", "Two Task stores claim authority.")
+            finally:
+                connection.close()
+        yield state / "tasks"
+
+
+@contextmanager
+def locked_read(state: Path, identity: str, *, operation_ids=()):
+    task_id(identity)
+    if os.path.lexists(state / "tasks"):
+        with _legacy_read(state) as root:
+            if os.path.lexists(root / identity / "task.json"):
                 record, raw = read_structured(root, identity)
-                complete = complete and item == structured_metadata(record, raw)
-            except (Fault, OSError) as failure:
-                error = failure.code if isinstance(failure, Fault) else "source_unavailable"
-                complete = False
-            entries.append({"task_id": identity, "metadata_sha256": item["sha256"], "record": record, "error": error})
-        return {"entries": entries, "identities": identities, "generation": index["generation"],
-                "complete": complete, "has_more": len(entries) < len(changed)}
+                status, generation = "stale", None
+                try:
+                    index = read_index(root)
+                    generation = index["generation"]
+                    if index["tasks"].get(identity, {}).get("sha256") == hashlib.sha256(raw).hexdigest():
+                        status = "current"
+                except Fault:
+                    pass
+                operations = record["operations"]
+                accepted = {stage["id"] for stage in record["plan"]["stages"] if stage["state"] == "accepted"}
+                progress = max([record["created_at_ms"], (record["terminal"] or {}).get("finished_at_ms", 0)]
+                    + [op["admitted_at_ms"] for op in operations]
+                    + [event["at_ms"] for event in record["history"] if event["kind"] == "decision" and event["stage_id"] in accepted])
+                facts = {"operation_count": len(operations), "history_count": len(record["history"]),
+                    "scope_count": len(record.get("effect_scopes", [])), "progress_ms": progress,
+                    "last_observed_at_ms": max((op["observed_at_ms"] or 0 for op in operations), default=0) or None,
+                    "last_admitted_at_ms": max((op["admitted_at_ms"] for op in operations), default=0) or None,
+                    "unresolved_count": sum(effects.unresolved(op) for op in operations),
+                    "pending_count": sum(records.pending(op) for op in operations),
+                    "running_count": sum((op["result"] or {}).get("status") == "running" for op in operations),
+                    "unknown_count": sum((op["result"] or {}).get("status") == "unknown" for op in operations),
+                    "partial_count": sum((op["result"] or {}).get("status") == "partial" for op in operations),
+                    "stage_operation_counts": {stage["id"]: sum(op["stage_id"] == stage["id"] for op in operations) for stage in record["plan"]["stages"]}}
+                record["_facts"] = facts
+                yield {"task_id": identity, "record": record, "facts": facts, "observed_at_ms": time.time_ns() // 1000000,
+                       "index_status": status, "storage": "legacy", "generation": generation, **_observation_support()}
+            else:
+                index = read_index(root)
+                item, raw = read_checkpoint(root, index, identity)
+                body = raw.decode()
+                yield {"task_id": identity, **item, "body": redact(body), "content_redacted": redact(body) != body,
+                       "generation": index["generation"], "resume_authorized": False}
+        return
+    with db.connect(state, write=True) as connection:
+        if connection is None:
+            raise Fault("tasks_uninitialized", "This private Task store has not been initialized.")
+        yield _view(connection, identity, operation_ids)
 
 
-def _sync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+def read(state: Path, identity: str, *, operation_ids=()) -> dict:
+    task_id(identity)
+    if os.path.lexists(state / "tasks"):
+        with locked_read(state, identity, operation_ids=operation_ids) as view:
+            return view
+    with db.connect(state) as connection:
+        if connection is None:
+            raise Fault("tasks_uninitialized", "This private Task store has not been initialized.")
+        return _view(connection, identity, operation_ids)
 
 
-def _replace(path: Path, raw: bytes) -> None:
-    fd, name = tempfile.mkstemp(prefix=".checkpoint-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(raw)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(name, path)
-        _sync_directory(path.parent)
-    finally:
-        Path(name).unlink(missing_ok=True)
+def operation(state: Path, identity: str, operation_id: str) -> dict | None:
+    with db.connect(state) as connection:
+        if connection is None:
+            return next((op for op in read(state, identity)["record"]["operations"] if op["id"] == operation_id), None)
+        row = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, operation_id)).fetchone()
+        return _operation(row) if row else None
 
 
-def _index_budget(index: dict) -> None:
-    if (len(index["tasks"]) > MAX_TASKS or index["generation"] > records.MAX_INTEGER
-            or len((json.dumps(index, sort_keys=True) + "\n").encode()) > MAX_INDEX):
-        raise Fault("task_index_full", "The bounded task index is full; preserve existing records.")
+def control_update(state: Path, identity: str, update_id: str) -> dict | None:
+    with db.connect(state) as connection:
+        if connection is None:
+            retained = read(state, identity)["record"]["last_update"]
+            return retained if retained["id"] == update_id else None
+        row = connection.execute("SELECT id,request_sha256 FROM task_updates WHERE task_id=? AND id=?", (identity, update_id)).fetchone()
+        return {"id": row[0], "request_sha256": row[1]} if row else None
 
 
-def _version_two(index: dict) -> dict:
-    return {"format_version": 2, "generation": index["generation"],
-            "coverage": index.get("coverage", "complete"), "next_cursor": index.get("next_cursor"),
-            "tasks": {key: {"owner": "legacy", **item} for key, item in index["tasks"].items()}}
+def _validate_operation(operation: dict, current: dict) -> dict:
+    value = records.Operation.model_validate(operation).model_dump()
+    stages = {stage["id"]: stage for stage in current["plan"]["stages"]}
+    locator = value["locator"]
+    if (value["stage_id"] not in stages or value["plan_revision"] > current["plan"]["revision"]
+            or value["epoch"] > current["control"]["epoch"] or not current["created_at_ms"] <= value["admitted_at_ms"] <= current["updated_at_ms"]
+            or value["observed_at_ms"] is not None and value["observed_at_ms"] > current["updated_at_ms"]):
+        raise ValueError("operation authority binding differs")
+    if current["format"] < 4 and (value.get("effect_scope") is not None or any(
+            (value["result"] or {}).get(key) is not None for key in ("effect", "failure_code"))):
+        raise ValueError("format does not permit scoped results")
+    if current["format"] == 1 and locator.get("connection") is not None:
+        raise ValueError("legacy operations cannot acquire native account authority")
+    if value["plan_revision"] == current["plan"]["revision"]:
+        if value["source_sha256"] != stages[value["stage_id"]]["source_sha256"]:
+            raise ValueError("operation source differs")
+        if current["format"] >= 2 and locator["kind"] == "github":
+            binding = next((item for repo, item in current["contract"].get("github_connections", {}).items()
+                            if repo.casefold() == locator["repository"].casefold()), None)
+            if binding is None or locator.get("connection") != binding:
+                raise ValueError("original native account binding differs")
+    return value
 
 
-def _write_index(root: Path, index: dict) -> None:
-    _index_budget(index)
-    save_json(root / "index.json", index)
-    if load_index(root) != index:
-        raise Fault("task_index_write_unverified", "Derived index readback differs; preserve canonical tasks and inspect metadata.")
+def _put_operation(connection, identity: str, operation: dict, ordinal: int) -> None:
+    locator = operation["locator"]
+    payload, sha = db.encoded(operation)
+    connection.execute("""INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(task_id,id) DO UPDATE SET observed_at_ms=excluded.observed_at_ms,pending=excluded.pending,
+      unresolved=excluded.unresolved,outcome=excluded.outcome,payload=excluded.payload,sha256=excluded.sha256,
+      effect_key=excluded.effect_key""", (identity, operation["id"], ordinal, operation["stage_id"],
+        operation["plan_revision"], operation["epoch"], locator["kind"], locator.get("machine"),
+        locator.get("target_identity"), locator.get("repository", "").casefold() or None, _key(locator),
+        operation["admitted_at_ms"], operation["observed_at_ms"], int(records.pending(operation)),
+        int(effects.unresolved(operation)), (operation["result"] or {}).get("status"), payload, sha,
+        locator.get("execution_id", locator.get("change_id", locator.get("anchor")))))
+    if operation.get("effect_scope") is not None:
+        scope, scope_sha = db.encoded(operation["effect_scope"])
+        connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,NULL,?) ON CONFLICT DO NOTHING",
+                           (identity, operation["id"], scope, scope_sha))
 
 
-def _original_create(root: Path | None, request: dict) -> dict | None:
-    if root is None or not os.path.lexists(root / request["task_id"]):
-        return None
-    identity = request["task_id"]
-    if not os.path.lexists(root / identity / "task.json"):
-        read_checkpoint(root, read_index(root), identity)
-        raise Fault("task_conflict", "This ID belongs to legacy history; conversion requires separate approval.")
-    record, raw = read_structured(root, identity)
-    update = {"id": request["update_id"], "request_sha256": records.digest({"method": "create_task", **request})}
-    # Registration alone may publish revision 2 without replacing the original
-    # creation receipt. Later business/control revisions still require read_task.
-    creation_revision = 2 if record.get("chat_registration") is not None else 1
-    if record["last_update"] != update or record["revision"] != creation_revision:
-        raise Fault("task_conflict", "The original task/update ID has different intent or a later revision; read it without replay.")
-    return {**_view(root, record, raw), "status": "unchanged"}
+def _event(connection, identity: str, value: dict, *, update: dict | None = None,
+           snapshot_at: int | None = None) -> None:
+    payload, sha = db.encoded(value)
+    if len(payload.encode()) > records.MAX_EVENT_BYTES:
+        raise ValueError("audit event exceeds its bound")
+    row = connection.execute("UPDATE tasks SET history_count=history_count+1 WHERE task_id=? RETURNING history_count", (identity,)).fetchone()
+    connection.execute("INSERT INTO task_events VALUES (?,?,?,?,?,?,?,?)", (identity, row[0],
+        "snapshot" if snapshot_at is not None else value["kind"], snapshot_at if snapshot_at is not None else value["at_ms"],
+        value.get("stage_id"), value.get("operation_id"), payload, sha))
+    if update is not None:
+        connection.execute("INSERT INTO task_updates VALUES (?,?,?)", (identity, update["id"], update["request_sha256"]))
+
+
+def _insert_record(connection, record: dict, *, sequence: int | None = None) -> None:
+    identity = record["task_id"]
+    core = records.Current.model_validate(_core(record)).model_dump()
+    payload, sha = db.encoded(_pack_current(connection, core))
+    stage_counts = {stage["id"]: 0 for stage in core["plan"]["stages"]}
+    for operation in record["operations"]:
+        stage_counts[operation["stage_id"]] += 1
+    connection.execute("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (identity, "structured", core["revision"],
+        db.bump(connection) if sequence is None else sequence, payload, sha, (identity + " " + core["title"]).casefold(),
+        json.dumps(core["anchors"]), len(record["operations"]), 0, len(record.get("effect_scopes", [])), json.dumps(stage_counts)))
+    for ordinal, operation in enumerate(record["operations"], 1):
+        _put_operation(connection, identity, _validate_operation(operation, core), ordinal)
+    for witness in record.get("effect_scopes", []):
+        payload, sha = db.encoded(witness)
+        scope, _ = db.encoded(witness["scope"])
+        connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, witness["operation_id"], scope, payload, sha))
+    for event in record["history"]:
+        _event(connection, identity, event)
+    connection.execute("INSERT INTO task_updates VALUES (?,?,?)", (identity, record["last_update"]["id"], record["last_update"]["request_sha256"]))
+
+
+def _put_legacy(connection, identity: str, value: dict, *, sequence: int | None = None) -> None:
+    payload, sha = db.encoded(value)
+    connection.execute("""INSERT INTO tasks(task_id,kind,revision,change_seq,current,sha256,title_key,anchors)
+      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET revision=excluded.revision,
+      change_seq=excluded.change_seq,current=excluded.current,sha256=excluded.sha256,title_key=excluded.title_key,anchors=excluded.anchors""",
+      (identity, "legacy", value["revision"], db.bump(connection) if sequence is None else sequence,
+       payload, sha, (identity + " " + value["title"]).casefold(), json.dumps(value["anchors"])))
 
 
 def create(state: Path, identity: str, update_id: str, title: str, anchors: list[str], origin: dict,
            contract: dict, stages: list[dict], *, validate_new: Callable[[dict], None] | None = None) -> dict:
     request = records.normalize_create({"task_id": identity, "update_id": update_id, "title": title,
         "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
-    with _reading(state) as root:
-        original = _original_create(root, request)
-        if original is not None:
-            return original
-    # Preflight size/expiry before initialization; no task lock spans target reads.
+    fingerprint = records.digest({"method": "create_task", **request})
+    try:
+        original = read(state, identity)
+    except Fault as error:
+        if error.code not in {"tasks_uninitialized", "task_not_found"}:
+            raise
+    else:
+        retained = control_update(state, identity, update_id) if "record" in original else None
+        if retained is None or retained["request_sha256"] != fingerprint:
+            raise Fault("task_conflict", "The original Task ID belongs to different retained creation intent.")
+        return {**original, "status": "unchanged"}
     records.new_record(request, time.time_ns() // 1000000)
     prepared = deepcopy(request)
     if validate_new is not None:
         validate_new(prepared)
     record = records.new_record(prepared, time.time_ns() // 1000000)
-    # Resolved authority is saved, but original-ID retries retain caller intent.
-    record["last_update"]["request_sha256"] = records.digest({"method": "create_task", **request})
-    raw = records.canonical(record)
-    with _writing(state, initialize=True) as root:
-        original = _original_create(root, request)
-        if original is not None:
-            return original
-        index = _version_two(read_index(root))
-        index["tasks"][identity] = structured_metadata(record, raw)
-        index["generation"] += 1
-        _index_budget(index)
-        temporary = root / (".record-task-" + uuid.uuid4().hex)
-        try:
-            temporary.mkdir(mode=0o700)
-            _replace(temporary / "task.json", raw)
-            if os.path.lexists(root / identity):
-                raise Fault("task_conflict", "The destination appeared during creation; preserve both records.")
-            os.rename(temporary, root / identity)
-            _sync_directory(root)
-            observed, content = read_structured(root, identity)
-            if observed != record or content != raw:
-                raise Fault("task_write_unverified", "Canonical publication readback differs; inspect the original task.")
-        except OSError as error:
-            raise Fault("task_write_unverified", "Canonical publication has no verified durable acknowledgement; read the original ID, never replace it.") from error
-        # Index failure cannot undo a verified canonical commit or cause another creation.
-        try:
-            _write_index(root, index)
-        except (OSError, Fault):
-            return {**_view(root, record, raw, index_status="stale"), "status": "created"}
-        return {**_view(root, record, raw, index_status="current"), "status": "created"}
+    record["last_update"]["request_sha256"] = fingerprint
+    with db.connect(state, write=True, initialize=True) as connection:
+        if connection.execute("SELECT 1 FROM tasks WHERE task_id=?", (identity,)).fetchone():
+            raise Fault("task_conflict", "An original Task appeared during creation; observe it before another action.")
+        db.admission_space(state)
+        _insert_record(connection, record)
+        view = _view(connection, identity)
+    return {**view, "status": "created"}
 
 
-def rebuild_index(state: Path, expected_generation: int = -1) -> dict:
-    """Explicit maintenance: at most 50 records/2 MiB, no canonical writes or GC."""
-    if type(expected_generation) is not int or not -1 <= expected_generation <= records.MAX_INTEGER:
-        raise Fault("invalid_range", "Supply the observed index generation, or -1 to begin a rebuild.")
-    with _writing(state, initialize=False) as root:
+def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
+           expected_revision: int | None = None, last_update: dict | None = None,
+           allow_observations: bool = False,
+           observation: bool = False, upgrade: bool = False, operation_ids=(), reserve_disk: bool = True) -> dict:
+    """Commit bounded current state, touched rows and audit together; callbacks do no IO."""
+    task_id(identity)
+    with db.connect(state, write=True) as connection:
+        if connection is None:
+            raise Fault("tasks_uninitialized", "This Task store has not been initialized.")
+        view = _view(connection, identity, operation_ids)
+        if "record" not in view:
+            raise Fault("task_conflict", "A structured transition cannot replace a legacy checkpoint.")
+        original = view["record"]
+        if last_update is not None:
+            retained = control_update(state, identity, last_update["id"])
+            if retained is not None:
+                if retained != last_update:
+                    raise Fault("task_conflict", "The retained update ID belongs to different normalized intent.")
+                return {**view, "status": "unchanged"}
+        compatible = (expected_revision is not None and allow_observations and original["format"] >= 4
+                      and original["control_revision"] <= expected_revision <= original["revision"])
+        if expected_revision is not None and expected_revision != original["revision"] and not compatible:
+            raise Fault("task_conflict", "Task authority advanced; read the current revision before another transition.",
+                        {"task_id": identity, "task_revision": original["revision"], "plan_revision": original["plan"]["revision"],
+                         "continuation_epoch": original["control"]["epoch"]})
+        value = deepcopy(original)
+        if upgrade and value["format"] == 3:
+            value.update(format=4, control_revision=original["revision"], effect_scopes=[])
+        now = max(time.time_ns() // 1000000, original["updated_at_ms"])
+        transform(value, now)
+        if last_update is not None:
+            value["last_update"] = last_update
+        if value == original:
+            return {**view, "status": "unchanged"}
+        if value["format"] != original["format"] and not (
+                original["format"] == 3 and value["format"] == 4 and upgrade
+                or original["format"] < 3 and value["format"] in {3, 4}
+                and value["contract"].get("recovery_policy") in {"task_chat", "disabled"}
+                and value["plan"]["revision"] == original["plan"]["revision"] + 1):
+            raise Fault("task_identity_conflict", "Only explicit plan enrollment changes historical Task semantics.")
+        for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
+            if value[key] != original[key]:
+                raise Fault("task_identity_conflict", "Original task identity and initiating request are immutable.")
+        if original.get("chat_registration") is not None and value.get("chat_registration") != original["chat_registration"]:
+            raise Fault("task_identity_conflict", "Retain the original recovery registration.")
+        value.update(revision=original["revision"] + 1, updated_at_ms=now)
+        if value["format"] >= 4:
+            material = not observation or any(value[key] != original[key] for key in ("contract", "plan", "terminal"))
+            material |= any(value["control"][key] != original["control"][key] for key in ("owner", "epoch", "stop_intent", "current_stage_id"))
+            value["control_revision"] = value["revision"] if material else original.get("control_revision", original["revision"])
         try:
-            original = load_index(root)
-        except Fault as error:
-            if error.code != "corrupt_tasks" or expected_generation != -1:
-                raise
-            # A missing/corrupt derived file is recoverable only without legacy gaps.
-            if os.path.lexists(root / "index.json"):
-                private_path(root / "index.json")
-            original = None
-        index = _version_two(original) if original is not None else {
-            "format_version": 2, "generation": time.time_ns() // 1000,
-            "coverage": "complete", "next_cursor": None, "tasks": {}}
-        if expected_generation != -1 and expected_generation != index["generation"]:
-            raise Fault("task_index_changed", "Index generation changed; inspect the current rebuild cursor.")
-        if index["coverage"] == "incomplete" and expected_generation == -1:
-            raise Fault("task_index_changed", "An existing rebuild needs its observed generation; do not restart its episode.")
-        names = directory_names(root)
-        if original is None and not names:
-            raise Fault("corrupt_tasks", "Missing metadata and no canonical records cannot prove empty history; do not initialize over it.")
-        catalog_complete(root, index, names)
-        cursor = index["next_cursor"] if index["coverage"] == "incomplete" else None
-        if cursor is not None and (cursor not in names or any(key <= cursor and key not in index["tasks"] for key in names)):
-            raise Fault("corrupt_tasks", "The published rebuild prefix changed; preserve it for reconciliation.")
-        remaining = [key for key in names if cursor is None or key > cursor]
-        page = _metadata_page(root, index, remaining)
-        for key, item in page:
-            index["tasks"][key] = item
-        done = len(page) == len(remaining)
-        index.update(generation=index["generation"] + 1, coverage="complete" if done else "incomplete",
-                     next_cursor=None if done else page[-1][0])
-        _index_budget(index)
-        try:
-            _write_index(root, index)
-        except OSError as error:
-            raise Fault("task_index_write_unverified", "Index publication was not acknowledged; read its original generation before continuing.") from error
-        return {"status": "current" if done else "incomplete", "generation": index["generation"],
-                "coverage": index["coverage"], "next_cursor": index["next_cursor"], "records_checked": len(page)}
+            core = records.Current.model_validate(_core(value)).model_dump()
+            prior_row = _row(connection, identity)
+            prior = db.decode(prior_row["current"], prior_row["sha256"])
+            if not connection.execute("SELECT 1 FROM task_events WHERE task_id=? AND kind='snapshot' LIMIT 1", (identity,)).fetchone():
+                _event(connection, identity, prior, snapshot_at=now)
+            old_operations = {item["id"]: item for item in original["operations"]}
+            selected = {item["id"]: item for item in value["operations"]}
+            if len(selected) != len(value["operations"]) or not old_operations.keys() <= selected.keys():
+                raise ValueError("original selected operations cannot be removed or duplicated")
+            count = original["_facts"]["operation_count"]
+            stages = dict(original["_facts"]["stage_operation_counts"])
+            for item in value["operations"]:
+                old = old_operations.get(item["id"])
+                if item == old:
+                    continue
+                item = _validate_operation(item, core)
+                if old is not None:
+                    for key in ("id", "stage_id", "plan_revision", "epoch", "request_sha256", "source_sha256", "admitted_at_ms", "effect_scope"):
+                        if old.get(key) != item.get(key):
+                            raise Fault("task_identity_conflict", "Original operation intent and scope are immutable.")
+                    changed_locator = {key for key in old["locator"].keys() | item["locator"].keys()
+                                       if old["locator"].get(key) != item["locator"].get(key)}
+                    enrichable = {key for key in ("number", "parent_number") if old["locator"].get(key) is None} if old["locator"]["kind"] == "github" else set()
+                    if not changed_locator <= enrichable or operation_key(old["locator"]) != operation_key(item["locator"]):
+                        raise Fault("task_identity_conflict", "Original operation locator identity is immutable.")
+                    if old["locator"]["kind"] == "github" and old["result"] is not None and not records.pending(old):
+                        raise Fault("task_identity_conflict", "Verified provider evidence is immutable.")
+                    ordinal = connection.execute("SELECT ordinal FROM operations WHERE task_id=? AND id=?", (identity, item["id"])).fetchone()[0]
+                else:
+                    binding = operation_binding(state, operation_key(item["locator"]), item["id"])
+                    if binding is not None:
+                        if binding["task_id"] != identity or any(op["id"] == item["id"] for op in binding["operations"]):
+                            raise Fault("task_operation_conflict", "Original operation identity is already bound.")
+                    conflicts = effect_conflicts(state, value, item)
+                    if conflicts:
+                        raise Fault("task_effect_unresolved", "An overlapping original effect is unresolved.", {"conflicts": conflicts})
+                    if reserve_disk:
+                        db.admission_space(state)
+                    count += 1
+                    ordinal = count
+                    stages[item["stage_id"]] = stages.get(item["stage_id"], 0) + 1
+                _put_operation(connection, identity, item, ordinal)
+                _event(connection, identity, {"kind": "operation_admitted" if old is None else "operation_observed", "at_ms": now,
+                    "stage_id": item["stage_id"], "operation_id": item["id"],
+                    "operation": item if old is None else {key: item[key] for key in ("id", "state", "observed_at_ms", "result", "locator")}})
+            if connection.execute("SELECT count(*) FROM operations WHERE task_id=? AND unresolved=1", (identity,)).fetchone()[0] > records.MAX_ACTIVE_OPERATIONS:
+                raise Fault("task_capacity", "Retain active-work capacity for original results and stopping.")
+            old_witnesses = {item["operation_id"]: item for item in original.get("effect_scopes", [])}
+            new_witnesses = {item["operation_id"]: item for item in value.get("effect_scopes", [])}
+            if not old_witnesses.keys() <= new_witnesses.keys() or any(new_witnesses[key] != item for key, item in old_witnesses.items()):
+                raise Fault("task_identity_conflict", "Original scope witnesses are immutable.")
+            for key in new_witnesses.keys() - old_witnesses.keys():
+                witness = records.EffectScopeWitness.model_validate(new_witnesses[key]).model_dump()
+                op = operation(state, identity, key)
+                if (op is None or op["locator"]["kind"] != "github" or op.get("effect_scope") is not None
+                        or op["request_sha256"] != witness["request_sha256"] or not op["admitted_at_ms"] <= witness["at_ms"] <= now):
+                    raise ValueError("scope witness does not bind original intent")
+                payload, sha = db.encoded(witness)
+                connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, key, db.encoded(witness["scope"])[0], payload, sha))
+                _event(connection, identity, {"kind": "scope_bound", "at_ms": now, "operation_id": key, "witness": witness})
+            for stage in core["plan"]["stages"]:
+                if stage not in original["plan"]["stages"]:
+                    for key in stage["evidence"]:
+                        op = operation(state, identity, key)
+                        if op is None or op["stage_id"] != stage["id"]:
+                            raise ValueError("stage evidence lost its original operation")
+            for item in (core["terminal"] or {}).get("acceptance", []):
+                if item["operation_id"] is not None:
+                    op = operation(state, identity, item["operation_id"])
+                    if op is None or op["stage_id"] != item["stage_id"]:
+                        raise ValueError("terminal evidence differs")
+            if core["terminal"] is not None and connection.execute("SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 LIMIT 1", (identity,)).fetchone():
+                raise Fault("task_effect_unresolved", "Original live, partial or unknown effects prevent retirement.")
+            for event in value["history"]:
+                records.History.model_validate(event)
+                if not core["created_at_ms"] <= event["at_ms"] <= now:
+                    raise ValueError("material event time differs")
+                _event(connection, identity, event)
+            packed = _pack_current(connection, core, original["_decisions"])
+            changes = {key: item for key, item in packed.items() if key not in {"revision", "updated_at_ms", "control_revision", "last_update"} and item != prior.get(key)}
+            if "plan" in changes and core["plan"]["revision"] == original["plan"]["revision"]:
+                changes["plan"] = {"revision": core["plan"]["revision"], "decisions": [
+                    {key: stage[key] for key in ("id", "state", "decision_version")}
+                    for stage in packed["plan"]["stages"] if stage not in prior["plan"]["stages"]]}
+            if changes or last_update is not None:
+                _event(connection, identity, {"kind": "control" if last_update else "state_changed", "at_ms": now, "changes": changes}, update=last_update)
+            payload, sha = db.encoded(packed)
+            connection.execute("UPDATE tasks SET revision=?,change_seq=?,current=?,sha256=?,operation_count=?,scope_count=scope_count+?,stage_counts=? WHERE task_id=?",
+                (core["revision"], db.bump(connection), payload, sha, count, len(new_witnesses) - len(old_witnesses), json.dumps(stages), identity))
+            result = _view(connection, identity, operation_ids)
+        except (ValueError, TypeError, KeyError, sqlite3.IntegrityError) as error:
+            raise Fault("invalid_task_transition", "The transaction violates current Task or original evidence constraints; no new effect was admitted.") from error
+    return {**result, "status": "saved"}
 
 
-def check_state(state: Path) -> dict:
-    """Actual reader proof, including terminal-only stores; never repairs an index."""
-    count, structured, generation, offset, version, present = 0, 0, None, 0, None, False
-    formats_present = set()
-    while True:
-        with _reading(state) as root:
-            if root is None:
-                if present:
-                    raise Fault("corrupt_tasks", "The original task store disappeared during compatibility validation.")
-                break
-            present = True
-            index = read_index(root)
-            if generation is not None and index["generation"] != generation:
-                raise Fault("task_index_changed", "Task history changed during candidate validation.")
-            generation, version = index["generation"], index["format_version"]
-            identities = sorted(index["tasks"])
-            page = _metadata_page(root, index, identities[offset:])
-            for key, item in page:
-                if item != {"owner": "legacy", **index["tasks"][key]}:
-                    raise Fault("task_index_incomplete", "Canonical records and lookup metadata differ; rebuild before a service transition.")
-                structured += item["owner"] == "structured"
-                if item["owner"] == "structured":
-                    record, _ = read_structured(root, key)
-                    formats_present.add(record["format"])
-            count += len(page)
-            offset += len(page)
-            if offset == len(identities):
-                break
-    return {"task_store_present": present, "task_records": count, "structured_task_records": structured,
-            "structured_task_read_formats": list(records.READ_FORMATS),
-            "structured_task_formats_present": sorted(formats_present), "task_index_format": version,
-            "task_index_generation": generation, "task_index_coverage": "complete"}
+def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict | None:
+    with db.connect(state) as connection:
+        if connection is None:
+            if os.path.lexists(state / "tasks"):
+                raise Fault("task_migration_required", "Migrate retained Task bindings before new effects.")
+            return None
+        encoded_key = records.canonical(key).decode()
+        owners = connection.execute("SELECT DISTINCT task_id FROM operations WHERE effect_key=? OR id=? LIMIT 2",
+                                    (encoded_key, operation_id)).fetchall()
+        if len(owners) > 1:
+            raise Fault("task_operation_conflict", "An original effect is ambiguously bound across Tasks.")
+        if not owners:
+            return None
+        identity = owners[0][0]
+        first = connection.execute("SELECT * FROM operations WHERE task_id=? AND effect_key=? ORDER BY ordinal LIMIT 1",
+                                   (identity, encoded_key)).fetchone()
+        exact = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, operation_id)).fetchone()
+        rows = {row["id"]: row for row in (first, exact) if row is not None}
+        return {"task_id": identity, "operations": [_operation(row) for row in rows.values()]}
+
+
+def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list[dict]:
+    if proposed["locator"]["kind"] != "github":
+        return []
+    with db.connect(state) as connection:
+        if connection is None:
+            if os.path.lexists(state / "tasks"):
+                raise Fault("task_migration_required", "Migrate retained conflict authority before new effects.")
+            return []
+        rows = connection.execute("SELECT * FROM operations WHERE repository=? AND unresolved=1",
+                                  (proposed["locator"]["repository"].casefold(),))
+        for row in rows:
+            if row["id"] == proposed.get("id"):
+                continue
+            item = _operation(row)
+            scope = {"effect_scopes": _witnesses(connection, row["task_id"], [item])}
+            if effects.conflicts(scope, item, proposed_record, proposed):
+                return [{"task_id": row["task_id"], "operations": [item]}]
+        return []
+
+
+def require_legacy(state: Path, identity: str) -> None:
+    if "record" in read(state, identity):
+        raise Fault("supervised_admission_unavailable", "Supply current task_context for structured work; a bare task_id is not authority.")
+
+
+def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "", offset: int = 0,
+         limit: int = 20, expected_generation: int = -1) -> dict:
+    if identity:
+        task_id(identity)
+    wanted = validate_metadata("lookup", anchors or [])["anchors"]
+    if (not isinstance(query, str) or len(query) > 200 or type(offset) is not int or offset < 0
+            or type(limit) is not int or not 1 <= limit <= 50 or type(expected_generation) is not int or expected_generation < -1):
+        raise Fault("invalid_range", "Use a bounded query, nonnegative offset and page size from 1 to 50.")
+    with db.connect(state) as connection:
+        if connection is None:
+            if os.path.lexists(state / "tasks"):
+                with _legacy_read(state) as root:
+                    index = read_index(root)
+                    matches = [{"task_id": key, "title": item["title"], "revision": item["revision"]}
+                        for key, item in sorted(index["tasks"].items()) if (not identity or key == identity)
+                        and set(wanted) <= set(item["anchors"]) and query.casefold() in (key + " " + item["title"]).casefold()]
+                    generation = index["generation"]
+                    total, page = len(matches), matches[offset:offset+limit]
+            else:
+                if expected_generation != -1:
+                    raise Fault("task_index_changed", "The original Task database is unavailable.")
+                return {"status": "uninitialized", "tasks": [], "next_offset": None, "generation": None,
+                        "coverage": "this_store_only", "resume_authorized": False}
+        else:
+            generation = db.metadata(connection)["generation"]
+            clauses, arguments = [], []
+            if identity:
+                clauses.append("task_id=?")
+                arguments.append(identity)
+            if query:
+                clauses.append("instr(title_key,?)>0")
+                arguments.append(query.casefold())
+            for anchor in wanted:
+                clauses.append("EXISTS(SELECT 1 FROM json_each(tasks.anchors) WHERE value=?)")
+                arguments.append(anchor)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            total = connection.execute("SELECT count(*) FROM tasks" + where, arguments).fetchone()[0]
+            rows = connection.execute("SELECT task_id,current,sha256,revision FROM tasks" + where + " ORDER BY task_id LIMIT ? OFFSET ?", [*arguments, limit, offset])
+            page = [{"task_id": row["task_id"], "title": db.decode(row["current"], row["sha256"])["title"], "revision": row["revision"]} for row in rows]
+        if expected_generation != -1 and generation != expected_generation:
+            raise Fault("task_index_changed", "Task lookup changed between pages; use its current generation.")
+        exact = bool(identity or wanted) and not query
+        return {"status": "matched" if exact and total == 1 else "ambiguous" if exact and total > 1 else "candidates",
+                "tasks": page, "total": total, "next_offset": offset + len(page) if offset + len(page) < total else None,
+                "generation": generation, "coverage": "complete", "resume_authorized": False}
+
+
+def observation_page(state: Path, cursor: int = 0, limit: int = INDEX_PAGE) -> dict:
+    if type(cursor) is not int or cursor < 0 or not 1 <= limit <= INDEX_PAGE:
+        raise Fault("invalid_range", "Use an observation sequence and a bounded page.")
+    with db.connect(state) as connection:
+        if connection is None:
+            if os.path.lexists(state / "tasks"):
+                raise Fault("task_migration_required", "Migrate legacy Task discovery before running the new observer.")
+            return {"entries": [], "cursor": cursor, "generation": None, "has_more": False, "complete": True}
+        rows = connection.execute("SELECT task_id,change_seq FROM tasks WHERE kind='structured' AND change_seq>? ORDER BY change_seq LIMIT ?", (cursor, limit + 1)).fetchall()
+        entries = []
+        for row in rows[:limit]:
+            try:
+                record, error = _view(connection, row["task_id"])["record"], None
+            except Fault as fault:
+                record, error = None, fault.code
+            entries.append({"task_id": row["task_id"], "sequence": row["change_seq"], "change_seq": row["change_seq"], "record": record, "error": error})
+        return {"entries": entries, "cursor": entries[-1]["sequence"] if entries else cursor,
+                "generation": db.metadata(connection)["generation"], "has_more": len(rows) > limit, "complete": True}
+
+
+def has_event(state: Path, identity: str, kind: str, since: int) -> bool:
+    with db.connect(state) as connection:
+        if connection is None:
+            return any(event["kind"] == kind and event["at_ms"] >= since for event in read(state, identity)["record"]["history"])
+        return connection.execute("SELECT 1 FROM task_events WHERE task_id=? AND kind=? AND at_ms>=? LIMIT 1", (identity, kind, since)).fetchone() is not None
+
+
+def first_admission(state: Path, identity: str, epoch: int, since: int) -> int | None:
+    with db.connect(state) as connection:
+        if connection is None:
+            return min((op["admitted_at_ms"] for op in read(state, identity)["record"]["operations"]
+                        if op["epoch"] == epoch and op["admitted_at_ms"] >= since), default=None)
+        row = connection.execute("SELECT admitted_at_ms FROM operations WHERE task_id=? AND epoch=? AND admitted_at_ms>=? ORDER BY admitted_at_ms LIMIT 1", (identity, epoch, since)).fetchone()
+        return row[0] if row else None
+
+
+def locator_matches(state: Path, identity: str, locator: dict) -> bool:
+    with db.connect(state) as connection:
+        if connection is None:
+            return any(all(op["locator"].get(key) == value for key, value in locator.items())
+                       for op in read(state, identity)["record"]["operations"])
+        rows = connection.execute("SELECT payload,sha256 FROM operations WHERE task_id=? AND machine=? AND locator_id=?",
+                                  (identity, locator.get("machine"), locator.get("execution_id", locator.get("change_id"))))
+        return any(all(db.decode(row["payload"], row["sha256"])["locator"].get(key) == value for key, value in locator.items()) for row in rows)
+
+
+def references_target(state: Path, machine: str, target_identity: str) -> bool:
+    with db.connect(state) as connection:
+        if connection is None:
+            if not os.path.lexists(state / "tasks"):
+                return False
+            with _legacy_read(state) as root:
+                for identity, item in read_index(root)["tasks"].items():
+                    if item.get("owner") == "structured":
+                        record, _ = read_structured(root, identity)
+                        if any(target["machine"] == machine for target in record["contract"]["targets"]) or any(
+                                op["locator"].get("machine") == machine or target_identity and op["locator"].get("target_identity") == target_identity for op in record["operations"]):
+                            return True
+                return False
+        if connection.execute("SELECT 1 FROM operations WHERE machine=? OR target_identity=? LIMIT 1", (machine, target_identity or "")).fetchone():
+            return True
+        rows = connection.execute("SELECT current,sha256 FROM tasks WHERE kind='structured'")
+        return any(any(item["machine"] == machine for item in db.decode(row["current"], row["sha256"])["contract"]["targets"]) for row in rows)
+
+
+def activation_blockers(state: Path):
+    with db.connect(state) as connection:
+        if connection is None:
+            if not os.path.lexists(state / "tasks"):
+                return
+            with _legacy_read(state) as root:
+                for identity, item in read_index(root)["tasks"].items():
+                    if item.get("owner") == "structured":
+                        record, _ = read_structured(root, identity)
+                        for op in record["operations"]:
+                            if effects.unresolved(op):
+                                yield op
+            return
+        for row in connection.execute("SELECT * FROM operations WHERE unresolved=1"):
+            yield _operation(row)
 
 
 def save(state: Path, identity: str, expected_revision: int, title: str, body: str, anchors: list[str]) -> dict:
     task_id(identity)
-    metadata = validate_metadata(title, anchors)
+    meta = validate_metadata(title, anchors)
+    raw = body.encode()
     if type(expected_revision) is not int or expected_revision < 0:
         raise Fault("invalid_revision", "Supply the observed nonnegative checkpoint revision; zero means new.")
-    raw = body.encode("utf-8")
     if not raw.strip() or len(raw) > MAX_CHECKPOINT or b"\0" in raw or redact(body) != body:
-        raise Fault("invalid_checkpoint", "Supply a nonempty checkpoint up to 32 KiB, without credentials or NUL bytes.")
-    if expected_revision and not (state / "tasks").exists():
-        raise Fault("corrupt_tasks", "The original task store is missing; do not initialize new history.")
-    with _writing(state, initialize=True) as root:
-        index = read_index(root)
-        revision, previous = 0, None
-        if identity in index["tasks"]:
-            item, previous = read_checkpoint(root, index, identity)
-            metadata = validate_metadata(metadata["title"], sorted(set(item["anchors"]) | set(metadata["anchors"])))
-            revision = item["revision"]
-            if raw == previous and metadata == {key: item[key] for key in ("title", "anchors")}:
+        raise Fault("invalid_checkpoint", "Use a nonempty checkpoint of at most 32 KiB without credentials or NUL bytes.")
+    with db.connect(state, write=True, initialize=expected_revision == 0) as connection:
+        if connection is None:
+            raise Fault("corrupt_tasks", "The original checkpoint store is missing.")
+        row = connection.execute("SELECT * FROM tasks WHERE task_id=?", (identity,)).fetchone()
+        revision = 0
+        if row is not None:
+            if row["kind"] != "legacy":
+                raise Fault("task_conflict", "Legacy save cannot convert structured authority.")
+            old = db.decode(row["current"], row["sha256"])
+            revision = old["revision"]
+            meta = validate_metadata(meta["title"], sorted(set(old["anchors"]) | set(meta["anchors"])))
+            if body == old["body"] and meta == {key: old[key] for key in ("title", "anchors")}:
                 if expected_revision not in (revision, revision - 1):
-                    raise Fault("task_conflict", "This retry does not match the last checkpoint revision.")
-                return {"task_id": identity, **item, "generation": index["generation"], "status": "unchanged"}
+                    raise Fault("task_conflict", "This retry differs from the retained checkpoint revision.")
+                return {**_view(connection, identity), "status": "unchanged"}
         if expected_revision != revision:
-            raise Fault("task_conflict", "A newer checkpoint exists; read it before updating progress.")
-        item = {**metadata, "revision": revision + 1, "sha256": hashlib.sha256(raw).hexdigest()}
-        index["tasks"][identity] = ({"owner": "legacy", **item} if index["format_version"] == 2 else item)
-        index["generation"] += 1
-        _index_budget(index)
-        directory = private_directory(root / identity)
-        try:
-            _replace(directory / "task.md", raw)
-            save_json(root / "index.json", index)
-            actual = read_index(root)
-            observed, content = read_checkpoint(root, actual, identity)
-            if observed != item or content != raw:
-                raise Fault("task_write_unverified", "Checkpoint readback did not match; inspect the original task.")
-        except OSError as error:
-            raise Fault("task_write_unverified", "The save has no verified durable receipt; read the original task before retrying.") from error
-        return {"task_id": identity, **item, "generation": index["generation"], "status": "saved"}
+            raise Fault("task_conflict", "Read the current checkpoint revision before replacing it.")
+        if row is None:
+            db.admission_space(state)
+        value = {**meta, "revision": revision + 1, "sha256": hashlib.sha256(raw).hexdigest(),
+                 "body": body, "content_redacted": False}
+        _put_legacy(connection, identity, value)
+        result = _view(connection, identity)
+    return {**result, "status": "saved"}
+
+
+def present(view: dict) -> dict:
+    """Public v2 current-state snapshot; historical rows are explicit separate pages."""
+    if "record" not in view:
+        return {**view, "read_schema": 2, "section": "summary", "complete": True, "has_more": False}
+    record = view["record"]
+    facts = view.get("facts", record.get("_facts", {}))
+    counts = {name: facts.get(name, len(record.get(field, []))) for name, field in (
+        ("operation_count", "operations"), ("history_count", "history"), ("scope_count", "effect_scopes"))}
+    counts.update({name: facts.get(name, 0) for name in ("pending_count", "unresolved_count", "unknown_count", "partial_count")})
+    result = {key: value for key, value in view.items() if key != "facts"}
+    if view.get("storage") == "legacy":
+        result.update(record={key: value for key, value in record.items() if key not in {"_facts", "_decisions"}},
+                      read_schema=2, section="summary", counts=counts, current_record_complete=True,
+                      record_complete=True, complete=True, has_more=False)
+        return result
+    current = deepcopy(_core(record))
+    for stage in current["plan"]["stages"]:
+        if stage["id"] in record.get("_decisions", {}):
+            stage.pop("evidence")
+            stage["evidence_ref"] = {"task_id": record["task_id"], "section": "evidence", "stage_id": stage["id"],
+                                     "decision_version": record["_decisions"][stage["id"]]}
+    result.update(record=current, read_schema=2, section="summary", counts=counts,
+                  current_record_complete=True, record_complete=False, complete=True, has_more=False,
+                  history_ref={"task_id": record["task_id"], "section": "history"},
+                  operations_ref={"task_id": record["task_id"], "section": "operations"},
+                  unresolved_operation_ids=[op["id"] for op in record["operations"] if effects.unresolved(op)])
+    return result
+
+
+def public_read(state: Path, identity: str, *, section: str = "summary", cursor: str = "", limit: int = 20,
+                operation_id: str = "", expected_revision: int = -1, stage_id: str = "", decision_version: int = 0) -> dict:
+    import base64
+    if (section not in {"summary", "operations", "history", "evidence"} or type(limit) is not int
+            or not 1 <= limit <= records.MAX_PAGE_ITEMS or not isinstance(cursor, str) or len(cursor) > 1024
+            or operation_id and (len(operation_id) != 32 or any(c not in "0123456789abcdef" for c in operation_id))):
+        raise Fault("invalid_task_read", "Use a bounded Task section, cursor and exact original operation ID.")
+    if stage_id or decision_version:
+        if (section != "evidence" or cursor or operation_id or not stage_id
+                or type(decision_version) is not int or not 1 <= decision_version <= records.MAX_INTEGER):
+            raise Fault("invalid_task_read", "An exact stage decision requires its stage and immutable version on the evidence section.")
+        task_id(stage_id)
+    if section == "summary":
+        if cursor or operation_id:
+            raise Fault("invalid_task_read", "Summary reads do not select historical cursors or operations.")
+        return present(read(state, identity))
+    if operation_id and (section != "operations" or cursor):
+        raise Fault("invalid_task_read", "Exact original operation lookup uses the operations section without a cursor.")
+    with db.connect(state) as connection:
+        if connection is None:
+            raise Fault("task_migration_required", "Legacy history remains readable through its original summary until managed migration.")
+        row = _row(connection, identity)
+        if row["kind"] != "structured":
+            raise Fault("task_legacy", "A Markdown checkpoint has no supervised operation ledger.")
+        if expected_revision != -1 and expected_revision != row["revision"]:
+            raise Fault("task_conflict", "Task state changed before its evidence page; refresh the current snapshot.")
+        owner = db.metadata(connection)
+        if stage_id:
+            if not connection.execute("SELECT 1 FROM stage_decisions WHERE task_id=? AND stage_id=? AND version=?",
+                                      (identity, stage_id, decision_version)).fetchone():
+                raise Fault("task_evidence_not_found", "No retained decision exists for this stage and version.")
+            decision = _decision(connection, identity, stage_id, decision_version)
+            return {"task_id": identity, "read_schema": 2, "section": "evidence", "task_revision": row["revision"],
+                    "generation": owner["generation"], "complete": True, "has_more": False, "next_cursor": None,
+                    "items": [{"kind": "stage_decision", "stage_id": stage_id, "decision_version": decision_version, **decision}]}
+        ceiling = row["operation_count"] if section == "operations" else row["history_count"]
+        after = 0
+        if cursor:
+            try:
+                token = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+                if (set(token) != {"store", "task", "section", "after", "ceiling", "revision"}
+                        or (token["store"], token["task"], token["section"]) != (owner["identity"], identity, section)
+                        or type(token["after"]) is not int or type(token["ceiling"]) is not int
+                        or not 0 <= token["after"] <= token["ceiling"] <= ceiling):
+                    raise ValueError("cursor identity differs")
+                if section == "operations" and token["revision"] != row["revision"]:
+                    raise Fault("task_conflict", "Mutable operation evidence changed between pages; refresh its revision.")
+                after, ceiling = token["after"], token["ceiling"]
+            except (ValueError, TypeError, KeyError) as error:
+                raise Fault("invalid_task_read", "The evidence cursor does not match this Task, section and watermark.") from error
+        if section == "operations":
+            clause, args = ("id=?", [operation_id]) if operation_id else ("ordinal>? AND ordinal<=?", [after, ceiling])
+            rows = connection.execute("SELECT * FROM operations WHERE task_id=? AND " + clause + " ORDER BY ordinal LIMIT ?", [identity, *args, limit + 1]).fetchall()
+            decode = lambda item: {"sequence": item["ordinal"], **_operation(item)}
+            sequence = "ordinal"
+        else:
+            selected = " AND kind NOT IN ('operation_admitted','operation_observed')" if section == "evidence" else ""
+            rows = connection.execute("SELECT * FROM task_events WHERE task_id=? AND seq>? AND seq<=?" + selected + " ORDER BY seq LIMIT ?", (identity, after, ceiling, limit + 1)).fetchall()
+            decode = lambda item: {"sequence": item["seq"], "kind": item["kind"], "at_ms": item["at_ms"], **db.decode(item["payload"], item["sha256"])}
+            sequence = "seq"
+        items, size = [], 0
+        for item in rows[:limit]:
+            value = decode(item)
+            length = len(item["payload"].encode())
+            if size + length > records.MAX_PAGE_BYTES:
+                if not items:
+                    raise Fault("corrupt_tasks", "An evidence item exceeds its supported page bound; preserve its original bytes.")
+                break
+            items.append(value)
+            size += length
+            after = item[sequence]
+        more = len(rows) > len(items)
+        token = {"store": owner["identity"], "task": identity, "section": section, "after": after,
+                 "ceiling": ceiling, "revision": row["revision"]}
+        next_cursor = base64.urlsafe_b64encode(records.canonical(token)).decode().rstrip("=") if more else None
+        return {"task_id": identity, "read_schema": 2, "section": section, "items": items,
+                "task_revision": row["revision"], "generation": owner["generation"], "watermark": ceiling,
+                "complete": not more, "has_more": more, "next_cursor": next_cursor}
+
+
+def check_state(state: Path) -> dict:
+    """Explicit compatibility proof scans retained rows; ordinary reads never do."""
+    storage = db.storage_state(state)
+    count, structured, formats, index_format = 0, 0, set(), None
+    if storage["kind"] == "legacy":
+        with _legacy_read(state) as root:
+            index = read_index(root)
+            index_format = index["format_version"]
+            for identity, item in index["tasks"].items():
+                if item.get("owner") == "structured":
+                    record, raw = read_structured(root, identity)
+                    if item["sha256"] != hashlib.sha256(raw).hexdigest():
+                        raise Fault("task_index_incomplete", "Legacy metadata differs from canonical Task evidence.")
+                    formats.add(record["format"])
+                    structured += 1
+                else:
+                    read_checkpoint(root, index, identity)
+                count += 1
+    elif storage["kind"] == "sqlite":
+        with db.connect(state, maintenance=True) as connection:
+            storage["generation"] = db.metadata(connection)["generation"]
+            if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok" or connection.execute("PRAGMA foreign_key_check").fetchone():
+                raise Fault("corrupt_tasks", "The authoritative Task database failed its integrity check.")
+            for row in connection.execute("SELECT * FROM tasks ORDER BY task_id"):
+                count += 1
+                value = db.decode(row["current"], row["sha256"])
+                if row["kind"] == "legacy":
+                    if hashlib.sha256(value["body"].encode()).hexdigest() != value["sha256"]:
+                        raise Fault("corrupt_tasks", "A legacy checkpoint differs from its original body hash.")
+                    continue
+                core, _ = _current(connection, row)
+                formats.add(core["format"])
+                structured += 1
+                stage_counts = {stage["id"]: 0 for stage in core["plan"]["stages"]}
+                operations = 0
+                for item in connection.execute("SELECT * FROM operations WHERE task_id=? ORDER BY ordinal", (row["task_id"],)):
+                    op = _validate_operation(_operation(item), core)
+                    operations += 1
+                    if item["ordinal"] != operations:
+                        raise Fault("corrupt_tasks", "An original operation ordinal is missing.")
+                    stage_counts[op["stage_id"]] += 1
+                    scope = connection.execute("SELECT * FROM operation_scopes WHERE task_id=? AND operation_id=?", (row["task_id"], op["id"])).fetchone()
+                    if op.get("effect_scope") is not None:
+                        if scope is None or scope["witness"] is not None or db.decode(scope["scope"], scope["sha256"]) != op["effect_scope"]:
+                            raise Fault("corrupt_tasks", "An original declared scope differs from its conflict index.")
+                    elif scope is not None:
+                        _witnesses(connection, row["task_id"], [op])
+                events = 0
+                for item in connection.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY seq", (row["task_id"],)):
+                    event = db.decode(item["payload"], item["sha256"])
+                    if item["kind"] != "snapshot" and any(event.get(key) != item[key] for key in ("kind", "at_ms", "stage_id", "operation_id")):
+                        raise Fault("corrupt_tasks", "Audit lookup columns differ from their retained event.")
+                    if item["kind"] == "snapshot" and event.get("task_id") != row["task_id"]:
+                        raise Fault("corrupt_tasks", "The initial authority snapshot belongs to another Task.")
+                    events += 1
+                    if item["seq"] != events:
+                        raise Fault("corrupt_tasks", "An original audit event is missing.")
+                if operations != row["operation_count"] or events != row["history_count"] or stage_counts != json.loads(row["stage_counts"]):
+                    raise Fault("corrupt_tasks", "Task counts do not cover the retained authority.")
+                witnesses = connection.execute("SELECT count(*) FROM operation_scopes WHERE task_id=? AND witness IS NOT NULL", (row["task_id"],)).fetchone()[0]
+                if witnesses != row["scope_count"] or connection.execute("SELECT count(*) FROM operations WHERE task_id=? AND unresolved=1", (row["task_id"],)).fetchone()[0] > records.MAX_ACTIVE_OPERATIONS:
+                    raise Fault("corrupt_tasks", "Scope or active-work counts differ from retained authority.")
+                for decision in connection.execute("SELECT stage_id,version FROM stage_decisions WHERE task_id=?", (row["task_id"],)):
+                    if not 1 <= decision["version"] <= core["revision"]:
+                        raise Fault("corrupt_tasks", "A decision version exceeds its Task revision.")
+                    _decision(connection, row["task_id"], decision["stage_id"], decision["version"])
+                last = connection.execute("SELECT request_sha256 FROM task_updates WHERE task_id=? AND id=?", (row["task_id"], core["last_update"]["id"])).fetchone()
+                if last is None or last[0] != core["last_update"]["request_sha256"]:
+                    raise Fault("corrupt_tasks", "The last control lost its retained request fingerprint.")
+    return {"task_store_present": storage["kind"] != "absent", "task_records": count,
+            "structured_task_records": structured, "structured_task_read_formats": list(records.READ_FORMATS),
+            "structured_task_formats_present": sorted(formats), "task_index_format": index_format,
+            "task_index_generation": storage["generation"], "task_index_coverage": "complete", "task_storage": storage}
+
+
+def rebuild_index(state: Path, expected_generation: int = -1) -> dict:
+    """Retain the maintenance entry; SQLite indexes commit with their authority."""
+    info = check_state(state)
+    if expected_generation != -1 and info["task_index_generation"] != expected_generation:
+        raise Fault("task_index_changed", "The original Task generation changed.")
+    if info["task_storage"]["kind"] == "legacy":
+        raise Fault("task_migration_required", "Use managed migration for a verified legacy store; do not create a second active index.")
+    return {"status": "current", "generation": info["task_index_generation"], "coverage": "complete",
+            "next_cursor": None, "records_checked": info["task_records"]}

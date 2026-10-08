@@ -2,6 +2,8 @@
 
 import unittest
 import uuid
+from openmachine import tasks
+from openmachine.tasks import records
 from test.support.mcp import MCPFixture
 
 
@@ -27,8 +29,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         # dispatch, result serialization and durable receiver observation.
         bootstrap = "from openmachine.app.chat_recovery import ChatRecovery\nChatRecovery.tick = lambda self: None"
         self.launch(bootstrap=bootstrap)
-        task_path = self.state / "tasks" / identity / "task.json"
-        before = task_path.read_bytes()
+        before = records.canonical(tasks.read(self.state, identity)["record"])
         for version in ("2025-11-25", "2026-07-28"):
             async with self.wire_client(version) as client:
                 for invalid in ("bad", True, "a" * 31):
@@ -47,7 +48,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(observed.receiver_read.task_revision, proof["task_revision"])
                 self.assertEqual(observed.receiver_read.record_sha256, proof["record_sha256"])
                 self.assertIsNone(observed.ready_at_ms)
-                self.assertEqual(task_path.read_bytes(), before)
+                self.assertEqual(records.canonical(tasks.read(self.state, identity)["record"]), before)
         self.stop(self.processes[-1])
         self.launch(bootstrap=bootstrap + "\nfrom integrations import chatgpt\n"
             "def unavailable(*args, **kwargs): raise OSError('Injected receiver store failure')\n"

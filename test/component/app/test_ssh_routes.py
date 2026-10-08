@@ -61,7 +61,7 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
                 app.start_execution("build-machine", **arguments)
             self.assertEqual(caught.exception.code, "supervised_admission_unavailable")
             self.assertEqual([json.loads(call.args[1])["operation"] for call in exchange.call_args_list], ["read_execution"])
-        (state / "tasks/structured-one/task.json").write_text("Uncertain original task")
+        (state / "tasks.db").write_text("Uncertain original task")
         with patch.object(client, "_exchange", side_effect=[self.response({"status": "succeeded"}),
                 self.response({"status": "succeeded"})]) as exchange:
             self.assertEqual(app.start_execution("build-machine", **arguments)["status"], "succeeded")

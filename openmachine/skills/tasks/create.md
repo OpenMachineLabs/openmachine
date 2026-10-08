@@ -2,15 +2,15 @@
 
 [Domain guide](SKILL.md)
 
-## One original record
+## One original task
 
 A task is a logical outcome that can reference several commands or file changes.
 Task progress is controller-owned; operations keep their authoritative receipts:
 
 ```text
-<state-dir>/tasks/index.json          # bounded lookup and integrity metadata
-<state-dir>/tasks/<task-id>/task.json # structured record for new task identities
-<state-dir>/tasks/<task-id>/task.md   # legacy checkpoint, never both for one ID
+<state-dir>/tasks.db         # current state, original operations and audit
+<state-dir>/tasks.db-wal     # SQLite write-ahead log when present
+<state-dir>/locks/tasks.lock # stable maintenance and old-writer fence
 ```
 
 For new multi-stage work needing continuity, derive the smallest contract and
@@ -40,11 +40,13 @@ The newline matters; an empty selection hashes `[]\n`. Hash source objects, not
 only digest strings or referenced file bytes. Never invent hashes or omit bindings
 to silence a validation error.
 
-Records are at most 64 KiB, with creation limited to 48 KiB to reserve evidence
-capacity. A complete fsynced directory publishes before derived index refresh.
-A committed canonical record remains readable when the index is stale. A lost
-durability acknowledgement is uncertain; retain the original task/update IDs and
-observe them, rather than allocating replacement work. No arbitrary overwrite API.
+Creation remains bounded to 48 KiB; current authority is bounded to 64 KiB and
+holds immutable stage-decision references. Operations and audit grow independently,
+without a task-lifetime byte or entry limit. Single stored entities and page data
+remain bounded to 64 KiB. SQLite WAL transactions with full synchronization commit
+admission and conflict indexes before domain dispatch. A lost acknowledgement is
+uncertain: retain and read the original task/update/operation IDs. Never manufacture
+a replacement task or erase history to obtain capacity. No arbitrary overwrite API.
 
 ## Choose targets and recovery policy
 

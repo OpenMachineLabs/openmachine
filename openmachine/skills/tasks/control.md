@@ -5,7 +5,7 @@
 Read the original record before each control change. Supply its current task and
 plan revisions, continuation epoch and one saved update ID. Control transitions
 retain exact revision CAS; a stale response needs readback and an eligibility
-check. Repeating the identical last update observes history rather than renewing it.
+check. Repeating any retained identical update ID observes history rather than renewing it.
 
 ## Select the transition guide
 
@@ -21,7 +21,11 @@ check. Repeating the identical last update observes history rather than renewing
 Application persists normalized intent before dispatch, then releases the task
 lock before domain IO. Each domain retains source, sequence, permission and lease
 checks. Per-effect locks span bounded dispatch, not a command's lifetime. Capacity
-reserves space/slots for original results, stopping and completion. One unresolved
+reserves active-work slots: 62 for normal work, 63 for execution controls, and
+64 for cancellation. Completed history does not consume these slots. Low disk
+space rejects new work before dispatch; original observations and cancellation
+retain their commit paths. SQLite cannot guarantee writes on a physically full
+disk. One unresolved
 mutation blocks conflicting work; original commands still allow authorized controls.
 A new PR has no number yet: its creation scope identifies the operation type and
 source/target branches, so numbered historical PR writes and different creation

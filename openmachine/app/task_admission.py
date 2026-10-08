@@ -77,14 +77,19 @@ class TaskAdmission:
 
     def control(self, request: dict) -> dict:
         request = records.normalize_control(request)
-        view = tasks.read(self.app.state, request["task_id"])
+        change = request["transition"]
+        action = change["action"]
+        selected = change.get("evidence", []) if action == "record_decision" else [
+            item["operation_id"] for item in change.get("acceptance", []) if item["operation_id"]]
+        operation_ids = [change["operation_id"]] if action == "bind_effect_scope" else selected
+        view = tasks.read(self.app.state, request["task_id"], operation_ids=operation_ids)
         if "record" not in view:
             raise Fault("task_legacy", "Legacy checkpoints are history; conversion is not a control transition.")
         record = view["record"]
         update = {"id": request["update_id"], "request_sha256": records.digest(
             {"method": "control_task", "principal": self.principal, **request})}
-        action = request["transition"]["action"]
-        if record["last_update"]["id"] != update["id"]:
+        retained = tasks.control_update(self.app.state, request["task_id"], update["id"])
+        if retained is None:
             transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
             if action not in {"pause", "cancel", "release"}:
                 contract = request["transition"].get("contract", record["contract"])
@@ -98,8 +103,6 @@ class TaskAdmission:
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)
                 transitions.guards(view["record"], request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
-                selected = request["transition"].get("evidence", []) if action == "record_decision" else [
-                    item["operation_id"] for item in request["transition"].get("acceptance", []) if item["operation_id"]]
                 for identity in selected:
                     operation = next((item for item in view["record"]["operations"] if item["id"] == identity), None)
                     if operation is None:
@@ -109,12 +112,12 @@ class TaskAdmission:
                     if current != operation["result"]:
                         raise Fault("task_evidence_changed", "Selected evidence changed; reconcile its original result before accepting it.")
         scope = self._scope_witness(record, request) if (
-            action == "bind_effect_scope" and record["last_update"]["id"] != update["id"]) else None
+            action == "bind_effect_scope" and retained is None) else None
         view = tasks.update(self.app.state, request["task_id"],
             lambda value, now: self._bind_scope(value, request, scope, now) if action == "bind_effect_scope"
                 else transitions.apply_control(value, request, self.principal, now),
             expected_revision=request["expected_revision"], last_update=update,
-            require_current=action not in {"pause", "cancel"}, upgrade=True)
+            upgrade=True, operation_ids=operation_ids)
         if action == "cancel" and view["record"]["terminal"] is None:
             view = self._cancel_owned(view, request["update_id"])
         return view
@@ -152,7 +155,6 @@ class TaskAdmission:
             "request_sha256": operation["request_sha256"], "scope": scope,
             "principal_ref": self.principal, "at_ms": now_ms})
         transitions.material(record, now_ms, "decision", request["transition"]["reason"], operation_id=operation_id)
-        transitions.reserve(record)
 
     def _cancel_owned(self, view: dict, update_id: str) -> dict:
         # Stop was committed first. Only original task-owned command identities
@@ -316,7 +318,10 @@ class TaskAdmission:
                 return self._dispatch(method, arguments)
             if context is None:
                 return self._legacy(method, arguments, locator)
-            view = tasks.read(self.app.state, context["task_id"])
+            operation_ids = [context["operation_id"]]
+            if method in {"control_execution", "cancel_execution"}:
+                operation_ids.append(locator["execution_id"])
+            view = tasks.read(self.app.state, context["task_id"], operation_ids=operation_ids)
             if "record" not in view:
                 raise Fault("task_legacy", "A legacy checkpoint cannot acquire supervision through task_context.")
             record = view["record"]
@@ -325,9 +330,10 @@ class TaskAdmission:
                 if (tasks.operation_key(operation["locator"]) != key or operation["locator"].get("control_seq") != locator.get("control_seq")
                         or operation["request_sha256"] != self._fingerprint(method, arguments, operation)):
                     raise Fault("task_operation_conflict", "The original operation ID belongs to different intent; do not replace or replay it.")
+                expected = {operation["id"]: records.digest(operation)}
                 observed = self._read(operation, arguments)
                 result, enriched = self._observation(operation, observed)
-                current = self._publish(record["task_id"], [(operation["id"], result, enriched)])
+                current = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
                 return {**observed, "task": _reference(current), "task_operation_replayed": False}
             transitions.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)
             if method != "cancel_execution":
@@ -363,21 +369,14 @@ class TaskAdmission:
                 "epoch": record["control"]["epoch"], "request_sha256": "", "source_sha256": stage["source_sha256"],
                 "locator": locator, "admitted_at_ms": 0, "state": "admitted", "observed_at_ms": None, "result": None}
             operation["request_sha256"] = self._fingerprint(method, arguments, operation)
-            if method in GITHUB_METHODS:
-                if record["format"] >= 3:
-                    operation["effect_scope"] = effects.github_scope(method, arguments)
-                conflicts = tasks.effect_conflicts(self.app.state, record, operation)
-                if conflicts:
-                    raise Fault("task_effect_unresolved", "Only overlapping unresolved GitHub resources block this intent.",
-                                {"operations": [{"task_id": item["task_id"], "operation_ids": [op["id"] for op in item["operations"]]}
-                                                for item in conflicts]})
+            if method in GITHUB_METHODS and record["format"] >= 3:
+                operation["effect_scope"] = effects.github_scope(method, arguments)
             admitted = tasks.update(self.app.state, record["task_id"],
                 lambda value, now: self._admit(value, operation, context, method, now),
-                expected_revision=context["task_revision"], require_current=method != "cancel_execution",
-                allow_observations=True, upgrade=True)
-            if admitted["index_status"] != "current" and method != "cancel_execution":
-                self._publish(record["task_id"], [(operation["id"], _receipt("failed", summary="Not dispatched: derived task index publication failed."), locator)])
-                raise Fault("task_index_incomplete", "Intent was retained but not dispatched; rebuild derived metadata before new work.")
+                expected_revision=context["task_revision"],
+                allow_observations=True, upgrade=True, operation_ids=operation_ids, reserve_disk=method != "cancel_execution")
+            operation = next(item for item in admitted["record"]["operations"] if item["id"] == context["operation_id"])
+            expected = {operation["id"]: records.digest(operation)}
             try:
                 observed = self._dispatch(method, arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
@@ -406,10 +405,10 @@ class TaskAdmission:
                     if no_effect and result["status"] == "failed":
                         phase = "known_no_effect"
                     result = dict(result, failure_code=code, effect=phase)
-                self._publish(record["task_id"], [(operation["id"], result, enriched)])
+                self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
                 raise
             result, enriched = self._observation(operation, observed)
-            current = self._publish(record["task_id"], [(operation["id"], result, enriched)])
+            current = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
             return {**observed, "task": _reference(current)}
 
     def _scope(self, record: dict, method: str, arguments: dict, locator: dict) -> None:
@@ -521,11 +520,8 @@ class TaskAdmission:
             stage["state"] = "running"
             record["control"].update(state="running", pending_decision=None)
             record["handoff"] = None
-        if stopping:
-            if len(record["operations"]) > 64 or len(records.canonical(record)) > records.MAX_RECORD - 6144:
-                raise Fault("task_capacity", "Use the original-ID cancellation route; no room remains for another associated intent.")
-        else:
-            transitions.reserve(record, operation_limit=63 if method == "control_execution" else 62, new_operation=operation)
+        limit = records.MAX_ACTIVE_OPERATIONS - (0 if stopping else 1 if method == "control_execution" else 2)
+        transitions.reserve(record, operation_limit=limit, new_operation=operation)
 
     def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False, cancelled=None) -> dict:
         locator = operation["locator"]
@@ -631,10 +627,11 @@ class TaskAdmission:
         record = view["record"]
         if record["terminal"] is not None:
             return view
-        changes = []
+        changes, expected = [], {}
         for operation in record["operations"]:
             if not records.pending(operation):
                 continue
+            expected[operation["id"]] = records.digest(operation)
             try:
                 observed = self._read(operation)
             except Fault as error:
@@ -650,9 +647,10 @@ class TaskAdmission:
                 continue
             result, locator = self._observation(operation, observed)
             changes.append((operation["id"], result, locator))
-        return self._publish(record["task_id"], changes) if changes else view
+        return self._publish(record["task_id"], changes,
+            operation_ids=[item["id"] for item in record["operations"]], expected=expected) if changes else view
 
-    def apply_observations(self, record: dict, now_ms: int, observations: list[tuple[str, dict, dict]]) -> None:
+    def apply_observations(self, record: dict, now_ms: int, observations: list[tuple[str, dict, dict]], *, expected=None) -> None:
         """Pure result/handoff transition shared with the revision-checked observer."""
         if record["terminal"] is not None:
             return
@@ -661,6 +659,10 @@ class TaskAdmission:
             operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
             if operation is None or tasks.operation_key(operation["locator"]) != tasks.operation_key(locator):
                 raise Fault("task_operation_conflict", "Original observation binding changed; preserve its domain receipt.")
+            if expected is not None and expected.get(operation_id) != records.digest(operation):
+                # The original receipt was read outside the transaction. A
+                # newer observation owns the current row; this stale read is inert.
+                continue
             if operation["result"] == result and operation["locator"] == locator:
                 continue
             if operation["locator"]["kind"] == "github" and operation["result"] is not None and not records.pending(operation):
@@ -691,9 +693,11 @@ class TaskAdmission:
                 transitions.handoff(record, decisive["id"], now_ms,
                                 "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
 
-    def _publish(self, identity: str, observations: list[tuple[str, dict, dict]]) -> dict:
+    def _publish(self, identity: str, observations: list[tuple[str, dict, dict]], *, operation_ids=(), expected=None) -> dict:
         try:
-            view = tasks.update(self.app.state, identity, lambda value, now: self.apply_observations(value, now, observations), observation=True)
+            view = tasks.update(self.app.state, identity,
+                lambda value, now: self.apply_observations(value, now, observations, expected=expected), observation=True,
+                operation_ids=[*operation_ids, *(item[0] for item in observations)])
         except (Fault, OSError) as error:
             raise Fault("task_result_unverified", "Original domain work may have finished, but task evidence publication was not verified. Read the same task and original operation; do not repeat its effect.",
                         {"task_id": identity, "operation_ids": [item[0] for item in observations]}) from error

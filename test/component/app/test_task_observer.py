@@ -1,12 +1,10 @@
 """Tests for app behavior at the component layer."""
 
-import json
 import time
 import unittest
 from unittest.mock import patch
 import uuid
 from openmachine import tasks
-from openmachine.tasks import store as task_store
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import task_contract
@@ -16,15 +14,15 @@ from test.support.task_observer_cases import TaskObserverCaseFixture
 class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_construction_reads_and_discovery_never_start_or_initialize_an_observer(self):
         self.assertFalse(self.state.exists())
-        self.assertEqual(tasks.observation_page(self.state, {})["entries"], [])
+        self.assertEqual(tasks.observation_page(self.state)["entries"], [])
         self.assertFalse(self.state.exists())
         self.assertIsNone(self.app.task_observer._thread)
         self.accept_plan()
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         for _ in range(3):
             result = self.view()
             self.app.find_tasks()
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
         self.assertTrue(result["support"]["local_result_observation"])
         self.assertEqual(result["observations"][0]["state"], "unknown")
         self.assertFalse((self.state / "locks/task-observer.lock").exists())
@@ -36,12 +34,12 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_lost_file_result_is_collected_from_the_original_change_only(self):
         self.accept_plan()
         args = self.write_arguments()
-        original = task_store._replace
-        def fail_result(path, raw):
-            if path.name == "task.json" and any(item["result"] is not None for item in json.loads(raw)["operations"]):
+        original = tasks.update
+        def fail_result(*arguments, **keywords):
+            if keywords.get("observation"):
                 raise OSError("Disposable lost result publication")
-            return original(path, raw)
-        with patch.object(task_store, "_replace", side_effect=fail_result):
+            return original(*arguments, **keywords)
+        with patch.object(tasks, "update", side_effect=fail_result):
             self.fault("task_result_unverified", self.app.write_workspace_file, **args)
         receipt = self.app.read_workspace_change("desktop", args["change_id"])
         with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No repeated change")), self.app.task_observer.running():
@@ -54,6 +52,10 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         identity = self.seed()[0]
         observer = self.app.task_observer
         attempts = []
+        def recovery_events():
+            return [event for event in tasks.public_read(self.state, identity, section="history")["items"]
+                    if event["kind"] == "recovery"]
+        self.assertEqual(recovery_events(), [])
         def unavailable(operation):
             recovery = self.raw(identity)["recovery"]
             attempts.append(None if recovery is None else recovery["attempts"])
@@ -62,6 +64,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             with observer.running():
                 self.until(lambda: self.raw(identity)["recovery"])
             first = self.raw(identity)["recovery"]
+            self.assertEqual(len(recovery_events()), 1)
             record = self.app.read_task(identity)["record"]
             paused = self.app.control_task(task_id=identity, expected_revision=record["revision"], expected_plan_revision=1,
                 expected_epoch=0, update_id=uuid.uuid4().hex, transition={"action": "pause", "reason": "Keep the observation budget."})["record"]
@@ -75,12 +78,29 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             self.assertGreater(record["recovery"]["next_attempt_ms"] - record["updated_at_ms"], 29000)
             self.assertEqual(record["control"]["state"], "paused")
             self.assertIsNone(record["handoff"])
-            self.assertEqual(sum(item["kind"] == "recovery" for item in record["history"]), 1)
-            snapshot = self.path.parent.parent / identity / "task.json"
-            before = snapshot.read_bytes()
+            self.assertEqual(len(recovery_events()), 1)
+            before = self.task_bytes(identity)
             with observer.running():
                 time.sleep(0.15)
-            self.assertEqual(snapshot.read_bytes(), before)
+            self.assertEqual(self.task_bytes(identity), before)
+
+    def test_busy_publication_retries_only_the_original_receipt(self):
+        identity = self.seed()[0]
+        original = tasks.update
+        blocked = []
+        def busy(*args, **kwargs):
+            if kwargs.get("observation") and not blocked:
+                blocked.append(True)
+                raise Fault("task_store_busy", "Fixture writer holds Task authority.")
+            return original(*args, **kwargs)
+        with (patch.object(tasks, "update", side_effect=busy),
+                patch.object(self.app.task_admission, "_read", side_effect=self.fixture_result) as read,
+                patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("Never repeat original work")),
+                self.app.task_observer.running()):
+            self.until(lambda: (self.raw(identity)["operations"][0]["result"] or {}).get("status") == "succeeded")
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual({call.args[0]["id"] for call in read.call_args_list}, {"0" * 31 + "1"})
+        self.assertEqual(self.raw(identity)["_facts"]["operation_count"], 1)
 
     def test_exhausted_and_permission_episodes_do_not_restart_reads(self):
         identity = self.seed()[0]
@@ -169,45 +189,42 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             observer.stop()
 
     def test_no_remote_or_provider_observation_and_changed_local_route_is_blocked(self):
-        identities = self.seed(3)
-        def remote(record, now):
-            record["operations"][0]["locator"]["target_identity"] = "a" * 64
-        def provider(record, now):
-            binding = {"connection_id": "c" * 32, "account_id": 1, "authorization_revision": 1}
-            record["contract"]["repositories"] = ["Example/repo"]
-            record["contract"]["github_connections"] = {"Example/repo": binding}
-            record["operations"][0]["locator"] = {"kind": "github", "repository": "Example/repo", "object_type": "issue",
-                "number": 1, "parent_number": None, "anchor": "fixture-observation", "connection": binding}
-        tasks.update(self.state, identities[0], remote)
-        tasks.update(self.state, identities[1], provider)
+        def configure(record, index):
+            if index == 0:
+                record["operations"][0]["locator"]["target_identity"] = "a" * 64
+            elif index == 1:
+                binding = {"connection_id": "c" * 32, "account_id": 1, "authorization_revision": 1}
+                record["contract"]["repositories"] = ["Example/repo"]
+                record["contract"]["github_connections"] = {"Example/repo": binding}
+                record["operations"][0]["locator"] = {"kind": "github", "repository": "Example/repo", "object_type": "issue",
+                    "number": 1, "parent_number": None, "anchor": "fixture-observation", "connection": binding}
+        identities = self.seed(3, configure=configure)
         del self.config.machines["desktop"]
         with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("No alternate route")) as read, self.app.task_observer.running():
             self.until(lambda: self.raw(identities[2])["recovery"])
             time.sleep(0.2)
             read.assert_not_called()
-            self.assertEqual(set(self.app.task_observer._known), set(identities))
+            self.assertGreater(self.app.task_observer._cursor, 0)
         self.assertIsNone(self.raw(identities[0])["recovery"])
         self.assertIsNone(self.raw(identities[1])["recovery"])
         self.assertTrue(self.raw(identities[2])["recovery"]["reason_code"].startswith("blocked_"))
 
-    def test_discovery_pages_do_not_reread_unchanged_history_and_report_stale_index(self):
+    def test_discovery_pages_only_return_committed_changes_without_history(self):
         for index in range(55):
             self.app.create_task(**task_contract(self.context, f"history-{index:03}"))
-        first = tasks.observation_page(self.state, {})
+        first = tasks.observation_page(self.state)
         self.assertEqual(len(first["entries"]), 50)
         self.assertTrue(first["has_more"])
-        known = {item["task_id"]: item["metadata_sha256"] for item in first["entries"]}
-        second = tasks.observation_page(self.state, known)
+        second = tasks.observation_page(self.state, first["cursor"])
         self.assertEqual(len(second["entries"]), 5)
-        known.update({item["task_id"]: item["metadata_sha256"] for item in second["entries"]})
-        with patch.object(task_store, "read_structured", side_effect=AssertionError("Do not poll history")):
-            self.assertEqual(tasks.observation_page(self.state, known)["entries"], [])
-        with patch.object(task_store, "_write_index", side_effect=OSError("Stale derived index")):
-            tasks.update(self.state, "history-000", lambda record, now: record["control"].update(pending_decision="Fixture pending decision."))
-        observed = tasks.observation_page(self.state, {})
-        self.assertFalse(observed["complete"])
+        self.assertFalse(second["has_more"])
+        self.assertTrue(all(item["record"]["history"] == [] for item in first["entries"] + second["entries"]))
+        self.assertEqual(tasks.observation_page(self.state, second["cursor"])["entries"], [])
+        tasks.update(self.state, "history-000", lambda record, now: record["control"].update(pending_decision="Fixture pending decision."))
+        observed = tasks.observation_page(self.state, second["cursor"])
+        self.assertEqual([item["task_id"] for item in observed["entries"]], ["history-000"])
         self.assertEqual(observed["entries"][0]["record"]["control"]["pending_decision"], "Fixture pending decision.")
-        self.assertEqual(tasks.read(self.state, "history-000")["index_status"], "stale")
+        self.assertGreater(observed["cursor"], second["cursor"])
 
     def test_service_admission_blocks_publication_but_not_original_reads(self):
         import threading
@@ -255,7 +272,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         try:
             with patch.object(self.app.task_admission, "_read", side_effect=slow), observer.running():
                 self.until(lambda: len(observer._snapshot["active"]) == 32)
-                self.until(lambda: observer._snapshot["errors"].get(identities[-1]) == "task_observer_capacity")
+                self.until(lambda: self.app.read_task(identities[-1])["observations"][1]["blocker"] == "task_observer_capacity")
                 self.assertLessEqual(len(observer._reads), 4)
                 self.assertEqual(self.app.read_task(identities[-1])["observations"][1]["blocker"], "task_observer_capacity")
                 release.set()
@@ -269,20 +286,15 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             release.set()
             observer.stop()
 
-    def test_corrupt_discovery_reads_still_charge_the_aggregate_byte_budget(self):
-        for index in range(35):
-            identity = f"corrupt-{index:03}"
-            self.app.create_task(**task_contract(self.context, identity))
-        for path in (self.state / "tasks").glob("corrupt-*/task.json"):
-            path.write_bytes(b"x" * tasks.MAX_RECORD)
-        # Invalid retained bytes are intentional fixture corruption. They must
-        # not bypass the 2 MiB budget, be repaired, or be treated as missing work.
-        page = tasks.observation_page(self.state, {})
-        self.assertEqual(len(page["entries"]), 32)
-        self.assertTrue(page["has_more"])
-        self.assertFalse(page["complete"])
-        self.assertTrue(all(item["error"] is not None for item in page["entries"]))
-        self.assertEqual((self.state / "tasks/corrupt-000/task.json").read_bytes(), b"x" * tasks.MAX_RECORD)
+    def test_corrupt_database_discovery_never_repairs_or_discards_retained_work(self):
+        self.create()
+        path = self.state / "tasks.db"
+        path.write_bytes(b"not a SQLite task ledger")
+        before = path.read_bytes()
+        with self.assertRaises(Fault):
+            tasks.observation_page(self.state)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.app.task_observer._cursor, 0)
 
     def test_stopped_observer_does_not_advertise_a_live_retry_timer(self):
         identity = self.seed()[0]
@@ -333,9 +345,9 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         identity = self.seed()[0]
         before = self.raw(identity)
         with patch.object(self.app.task_admission, "_read", side_effect=self.fixture_result) as read:
-            with patch.object(task_store, "_replace", side_effect=Fault("task_capacity", "Disposable publication blocker.")):
+            with patch.object(tasks, "update", side_effect=Fault("task_storage_full", "Disposable publication blocker.")):
                 with self.app.task_observer.running():
-                    self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity) == "task_capacity")
+                    self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity) == "task_storage_full")
                     time.sleep(0.3)
                     self.assertEqual(read.call_count, 1)
                     self.assertNotIn(identity, self.app.task_observer._snapshot["active"])

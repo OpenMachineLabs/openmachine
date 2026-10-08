@@ -22,6 +22,15 @@ unrelated command as the task. Continue canonical records through `control_task`
 legacy Markdown remains on the [save path](maintenance.md#legacy-checkpoints).
 Changed inputs invalidate affected results without erasing valid evidence.
 
+`read_task` schema 2 defaults to the complete current authority summary, with
+counts and explicit history/operation references. `record_complete: false` means
+history is separate, not absent. Use `section: operations` with the original
+`operation_id`, or page `operations`, `history` and `evidence` using returned cursors
+(default 20, maximum 50 entries). Follow a stage's `evidence_ref` to its immutable
+decision version. Operation pages require an unchanged task revision; history
+cursors keep their original watermark. Never infer no unknowns from one page.
+Migration-era legacy summaries remain complete original bounded records.
+
 ## Claim, renew and release
 
 Read the current record, claim its eligible handoff, and carry this context on
@@ -59,7 +68,7 @@ operation cleared the handoff. Renewal keeps the claim ID, epoch, plan and origi
 operations. Its new expiry is no later than 300 seconds from the control update or
 the task authority expiry. Reading, observing and retrying the identical last
 update never extend a claim. Explicit renewals retain material history and remain
-subject to the record's finite capacity; they are not an unlimited keepalive.
+subject to authority expiry and storage availability; they are not an automatic keepalive.
 
 Before and after long external operations or CI waits, and immediately before
 submitting a review, merging or another critical effect, read the current task.

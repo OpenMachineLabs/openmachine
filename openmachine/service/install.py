@@ -146,7 +146,7 @@ def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote:
             deadline = time.monotonic() + 15
             while not (test_state / "mcp.sock").exists():
                 if process.poll() is not None or time.monotonic() >= deadline:
-                    raise Fault("candidate_unready", "The candidate did not create its private MCP listener; the active service is untouched.")
+                    raise Fault("candidate_unready", "The candidate did not create its private MCP listener; readiness remains unverified.")
                 time.sleep(0.05)
             checks.probe_service(test_state, Path(record["config"]), record["probe"], installed["version"], process.pid,
                           expected_contract=installed["state_contract"], check_remote=check_remote)

@@ -5,7 +5,7 @@ import sys
 import unittest
 from unittest.mock import call, patch
 import zipfile
-from openmachine import service
+from openmachine import service, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -18,6 +18,74 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def ledger_activation_fixture(self):
+        self.enterContext(patch.object(service_runtime, "socket_alive", return_value=False))
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service_state._json(path) | {"state_contract": 18})
+        return self.activation_mocks()
+
+    def test_task_cutover_follows_gate_and_controller_stop_before_start(self):
+        _, stop, start = self.ledger_activation_fixture()
+        events = []
+        stop.side_effect = lambda state: events.append("stop")
+        start.side_effect = lambda state, record: events.append("start") or {"status": "ready"}
+        def migrate(state):
+            self.assertEqual(service_state._record(state)["pending"], {"from": self.a, "to": self.b, "previous": None})
+            events.append("migrate")
+        with patch.object(tasks, "migrate", side_effect=migrate), \
+                patch.object(service_checks, "activation_safe", side_effect=lambda state: events.append("gate")):
+            result = service_transition._activate(self.state, self.record, self.b, require_safe=True)
+        self.assertEqual(events, ["gate", "stop", "migrate", "start"])
+        self.assertEqual(result["current"], self.b)
+        self.assertIsNone(service_state._record(self.state)["pending"])
+
+    def test_task_migration_before_cutover_failure_restores_original_selection(self):
+        _, stop, start = self.ledger_activation_fixture()
+        with patch.object(tasks, "migrate", side_effect=Fault("task_storage_full", "fixture")), \
+                patch.object(tasks, "storage_state", return_value={"kind": "legacy", "fenced": False}), \
+                patch.object(service_runtime, "_sync_definition"):
+            self.assert_fault("activation_failed_restored", lambda: service_transition._activate(self.state, self.record, self.b))
+        self.assertEqual(service_state._record(self.state), self.record)
+        self.assertEqual(stop.call_count, 2)
+        self.assertEqual([item.args[1]["current"] for item in start.call_args_list], [self.a])
+
+    def test_fenced_task_migration_and_start_failures_never_restore_old_writer(self):
+        verify, stop, start = self.ledger_activation_fixture()
+        for active in (False, True):
+            with self.subTest(active=active):
+                self.save(self.record)
+                verify.reset_mock()
+                stop.reset_mock()
+                start.reset_mock()
+                start.side_effect = Fault("service_unready", "fixture")
+                storage = {"kind": "sqlite", "fenced": True, "active": active}
+                with patch.object(tasks, "migrate", side_effect=None if active else OSError("cutover acknowledgement lost")), \
+                        patch.object(tasks, "storage_state", return_value=storage):
+                    self.assert_fault("task_activation_pending", lambda: service_transition._activate(self.state, self.record, self.b))
+                observed = service_state._record(self.state)
+                self.assertEqual((observed["current"], observed["pending"]),
+                                 (self.b, {"from": self.a, "to": self.b, "previous": None}))
+                self.assert_fault("activation_pending", lambda: service.guard_writes(self.state))
+                stop.assert_called_once()
+                verify.assert_called_once()
+                self.assertEqual(start.call_count, int(active))
+
+    def test_explicit_task_cutover_resume_preserves_deliberate_stop(self):
+        record = self.policy_fixture()
+        _, stop, start = self.ledger_activation_fixture()
+        digest = service_state._snapshot_configuration(self.state, self.config)
+        selected = record | {"current": self.b, "configurations": {self.a: digest, self.b: digest},
+                             "pending": {"from": self.a, "to": self.b, "previous": None}}
+        self.save(selected)
+        with patch.object(tasks, "storage_state", return_value={"kind": "sqlite", "active": True, "fenced": True}), \
+                patch.object(tasks, "migrate"), patch.object(service_checks, "activation_safe"), \
+                patch.object(service_runtime, "_sync_definition"):
+            result = service_transition._resume_activation(self.state, selected)
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(service_state._record(self.state)["policy"], record["policy"])
+        stop.assert_called_once()
+        start.assert_not_called()
+
     def test_first_upgrade_preserves_old_state_until_readiness_and_restores_on_failure(self):
         self.activation_mocks()
         path = self.state / "service/versions" / self.b / "installation.json"

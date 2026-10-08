@@ -83,11 +83,7 @@ def fail_observation(record: dict, started: int, now: int, code: str, connection
         recovery = {"episode_id": records.digest([record["task_id"], started, category])[:32],
             "category": category, "started_at_ms": started, "deadline_ms": deadline,
             "attempts": 1, "next_attempt_ms": deadline, "reason_code": code, "connection_ref": None}
-        remaining = sum(stage["state"] != "accepted" for stage in record["plan"]["stages"])
-        if len(record["history"]) + remaining + 3 < 64:
-            transitions.material(record, now, "recovery", f"Original receipt observation failed: {code}; original work retained.")
-        else:
-            code = "task_capacity"
+        transitions.material(record, now, "recovery", f"Original receipt observation failed: {code}; original work retained.")
         record["recovery"] = recovery
     if connection is not None:
         recovery.update(connection)
@@ -151,7 +147,7 @@ def project(view: dict, snapshot: dict, ssh_supported: bool) -> dict:
     observations = list(view["observations"])
     observations.append({"kind": "runtime", "state": state, "source": "ssh_task_observer" if ssh else "local_task_observer",
         "observed_at_ms": snapshot["observed_at_ms"],
-        "last_progress_at_ms": max((item["observed_at_ms"] or 0 for item in record["operations"]), default=0) or None,
+        "last_progress_at_ms": record["_facts"]["last_observed_at_ms"] or None,
         "next_attempt_at_ms": next_attempt,
         "blocker": blocker})
     if connection is not None:

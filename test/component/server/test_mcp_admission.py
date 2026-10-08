@@ -1,18 +1,68 @@
 """component server test_mcp_admission behavior."""
 
 import asyncio
+from contextlib import nullcontext
+import json
 from pathlib import Path
 import tempfile
 import time
 import threading
 import unittest
 from unittest.mock import Mock, patch
+import httpx2 as httpx
 from mcp.server.mcpserver.exceptions import ToolError
 from openmachine import server
 from openmachine.config import Settings
 
 
 class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_task_pages_preserve_values_and_bound_the_complete_wire_result(self):
+        with tempfile.TemporaryDirectory(prefix="om-task-wire-", dir="/tmp") as directory:
+            root = Path(directory)
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+                                              "workspaces": {"work": {"machine": "local", "root": str(root)}}})
+            application = Mock()
+            payload = {"task_id": "wire-bound", "read_schema": 2, "section": "history",
+                       "items": [{"summary": 'Quoted "text" \u2603' * 2000}]}
+            application.read_task.return_value = payload
+            with patch.object(server, "create_application", return_value=application):
+                mcp = server.create_server(config, root / "state")
+            arguments = {"task_id": "wire-bound", "section": "history", "limit": 1}
+            result = await mcp.call_tool("read_task", arguments)
+            self.assertFalse(result.is_error)
+            self.assertEqual(result.structured_content, payload)
+            self.assertEqual(json.loads(result.content[0].text), payload)
+            self.assertLess(len(json.dumps(result.model_dump(mode="json", by_alias=True)).encode()),
+                            server.MAX_TASK_RESULT_BYTES)
+            # Modern HTTP escapes non-ASCII twice across text and structured
+            # content; a valid maximum data item must still be retrievable.
+            application.connections.running.return_value = nullcontext()
+            application.task_observer.running.return_value = nullcontext()
+            large = {"summary": "\u00e9" * (32 * 1024 - 16)}
+            self.assertLessEqual(len(server.tasks.records.canonical(large)), server.tasks.MAX_PAGE_BYTES)
+            application.read_task.return_value = {**payload, "items": [large]}
+            asgi = mcp.streamable_http_app(json_response=True)
+            async with asgi.router.lifespan_context(asgi):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=asgi), base_url="http://127.0.0.1:8000") as client:
+                    response = await client.post("/mcp", headers={
+                        "accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2026-07-28",
+                        "MCP-Method": "tools/call", "MCP-Name": "read_task"}, json={
+                        "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                            "name": "read_task", "arguments": arguments, "_meta": {
+                                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                                "io.modelcontextprotocol/clientCapabilities": {}}}})
+            self.assertEqual(response.status_code, 200, response.text)
+            wire = response.json()["result"]
+            self.assertFalse(wire["isError"])
+            self.assertEqual(wire["structuredContent"]["items"], [large])
+            self.assertEqual(json.loads(wire["content"][0]["text"]), wire["structuredContent"])
+            self.assertLess(len(response.content), server.MAX_TASK_RESULT_BYTES)
+            application.read_task.return_value = {**payload, "items": [{"summary": "x" * server.MAX_TASK_RESULT_BYTES}]}
+            result = await mcp.call_tool("read_task", arguments)
+            self.assertTrue(result.is_error)
+            self.assertEqual(result.structured_content["task_id"], "wire-bound")
+            self.assertEqual(result.structured_content["error"]["code"], "task_response_limit")
+
     async def test_waiter_cap_and_cancelled_await_retain_the_actual_thread_slot(self):
         with tempfile.TemporaryDirectory(prefix="om-read-limit-", dir="/tmp") as directory:
             root = Path(directory)

@@ -21,7 +21,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         result = self.wait(app.start_execution(*args, task_id="task-one"))
         self.assertEqual((result["status"], result["task_id"]), ("succeeded", "task-one"))
         self.assertEqual(execution.list_records(self.config, self.state, "desktop")["executions"][0]["task_id"], "task-one")
-        (self.state / "tasks/index.json").write_text("unavailable task metadata fixture")
+        (self.state / "tasks.db").write_text("unavailable task authority fixture")
         self.assertEqual(app.start_execution(*args, task_id="task-one")["status"], "succeeded")
         self.fault("execution_conflict", app.start_execution, "desktop", identity, str(self.work),
                    [sys.executable, "-c", "print('changed')"], task_id="task-one")
