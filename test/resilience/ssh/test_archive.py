@@ -30,7 +30,7 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
                               "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
                               "openmachine/workspace/files.py", "openmachine/workspace/change_records.py",
-                              "openmachine/workspace/preparation.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/foundation/__init__.py",
+                              "openmachine/workspace/preparation.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/workspace/worktrees.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
                               "openmachine/foundation/sanitize.py"})
         # -S removes third-party site packages; the remote entry must still import.
