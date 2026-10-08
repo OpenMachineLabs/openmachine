@@ -720,17 +720,17 @@ def references_target(state: Path, machine: str, target_identity: str) -> bool:
 
 
 def activation_blockers(state: Path):
+    if os.path.lexists(state / "tasks"):
+        with _legacy_read(state) as root:
+            for identity, item in read_index(root)["tasks"].items():
+                if item.get("owner") == "structured":
+                    record, _ = read_structured(root, identity)
+                    for op in record["operations"]:
+                        if effects.unresolved(op):
+                            yield op
+        return
     with db.connect(state) as connection:
         if connection is None:
-            if not os.path.lexists(state / "tasks"):
-                return
-            with _legacy_read(state) as root:
-                for identity, item in read_index(root)["tasks"].items():
-                    if item.get("owner") == "structured":
-                        record, _ = read_structured(root, identity)
-                        for op in record["operations"]:
-                            if effects.unresolved(op):
-                                yield op
             return
         for row in connection.execute("SELECT * FROM operations WHERE unresolved=1"):
             yield _operation(row)

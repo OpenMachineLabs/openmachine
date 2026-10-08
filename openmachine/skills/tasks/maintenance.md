@@ -24,7 +24,10 @@ normalized evidence, then archives the old directory under the stable lock befor
 activating SQLite. The import manifest uses POSIX path-string order, including
 prefix-related task IDs such as `task-one` and `task-one-c1`. A corrected candidate
 can reprepare an unfenced failed import from the still-authoritative legacy bytes.
-The retained lock prevents old binaries from recreating their JSON store. Once fenced, a failed start retains the same candidate and activation
+Activation preflight reads that original store while the imported database is
+inactive, so newly recorded unresolved work still blocks activation. Conflicting
+active stores remain invalid. The retained lock prevents old binaries from
+recreating their JSON store. Once fenced, a failed start retains the same candidate and activation
 intent; continue that original maintenance operation instead of rolling back to
 an old writer. Original paused/unknown state never becomes execution permission.
 
