@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, private_directory
+from openmachine.foundation.state import private_directory
 from . import database as db, records, store
 from .index import MAX_INDEX, private_path, read_bytes, read_checkpoint, read_index, read_structured, structured_metadata
 
@@ -68,17 +68,7 @@ def migrate(state: Path) -> dict:
         raise Fault("invalid_state", "Use an absolute private state directory.")
     private_directory(state)
     legacy = state / "tasks"
-    prior = os.path.lexists(state / "locks/tasks.lock")
-    retained = os.path.lexists(state / "tasks.db") or os.path.lexists(legacy)
-    if retained and not prior:
-        raise Fault("corrupt_tasks", "The established Task lock is missing; never create a replacement ownership inode.")
-    if not retained and prior:
-        raise Fault("corrupt_tasks", "The prior Task authority is missing; migration cannot create empty history.")
-    if prior:
-        private_path(state / "locks", directory=True)
-        private_path(state / "locks/tasks.lock")
-    locks = private_directory(state / "locks")
-    with lease(locks / "tasks.lock", create=not prior):
+    with db.initialization_lock(state):
         if not os.path.lexists(state / "tasks.db"):
             if os.path.lexists(legacy):
                 private_path(legacy, directory=True)
@@ -88,7 +78,6 @@ def migrate(state: Path) -> dict:
                     import_digest=records.digest(manifest), generation=index["generation"])
             else:
                 db.create_database(state, active=False)
-            db.sync_directory(locks)
         connection = db._open(state, write=True)
         try:
             owner = db.metadata(connection)

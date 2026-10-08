@@ -124,6 +124,22 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.view()["record"], created)
         self.fault("invalid_task_contract", self.create, {**self.request, "task_id": "blank-title", "title": " "})
 
+    def test_revised_plan_counts_new_stages_before_their_first_operation(self):
+        self.request = task_contract()
+        created = self.create()["record"]
+        self.control("claim", handoff_id=created["handoff"]["id"])
+        def retain(record, now):
+            record["operations"].append(self.operation_fixture(record, now, 1))
+        retained = tasks.update(self.state, "structured-one", retain)["record"]
+        definition = deepcopy(self.request["stages"][0])
+        revised = self.control("revise_plan", contract=retained["contract"],
+            stages=[definition, dict(definition, id="review", depends_on=["verify"])],
+            invalidated_stage_ids=[], reason="Add an explicitly planned review stage.")["record"]
+        self.assertEqual(tasks.check_state(self.state)["structured_task_records"], 1)
+        self.assertEqual(revised["plan"]["revision"], 2)
+        self.assertEqual(revised["_facts"]["stage_operation_counts"], {"verify": 1, "review": 0})
+        self.assertEqual(tasks.operation(self.state, "structured-one", f"{1:032x}"), retained["operations"][0])
+
     def test_missing_established_lock_is_not_recreated_by_rebuild(self):
         self.create()
         raw = self.path.read_bytes()

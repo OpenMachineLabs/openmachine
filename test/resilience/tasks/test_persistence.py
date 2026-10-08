@@ -5,7 +5,9 @@ import subprocess
 import sys
 import unittest
 from openmachine import tasks
-from test.support.tasks import ContinuityFixture, task_contract
+from openmachine.foundation.sanitize import Fault
+from openmachine.tasks import database
+from test.support.tasks import ContinuityFixture, task_contract, write_legacy_checkpoint
 
 
 class StructuredTaskTests(ContinuityFixture, unittest.TestCase):
@@ -104,6 +106,86 @@ print(json.dumps(result))
                         self.assertEqual(sum(event["kind"] == "operation_admitted" for event in events), 1)
                     self.assertEqual(tasks.check_state(state)["task_records"], 1)
                     self.assertFalse((state / "executions").exists())
+
+    def test_interrupted_initialization_resumes_without_replacing_original_authority(self):
+        code = '''import json,os,sys
+from pathlib import Path
+from openmachine import tasks
+from openmachine.tasks import database
+state=Path(sys.argv[1]); point,entry=sys.argv[2:4]
+request=json.load(sys.stdin)
+commit,link,rename,write,truncate=database.commit,os.link,os.rename,os.write,os.ftruncate
+def interrupt_commit(connection):
+    if point=="schema_before": os._exit(91)
+    commit(connection)
+    if point=="schema_after": os._exit(91)
+def interrupt_link(source,target,**kwargs):
+    link(source,target,**kwargs)
+    if point=="lock_linked" and Path(target)==state/"locks/tasks.lock": os._exit(91)
+def interrupt_rename(source,target):
+    rename(source,target)
+    if point=="published" and Path(target)==state/"tasks.db": os._exit(91)
+def interrupt_write(fd,data):
+    if point=="prepared_partial" and data==database.INITIALIZING:
+        write(fd,data[:5]); os._exit(91)
+    return write(fd,data)
+def interrupt_truncate(fd,size):
+    truncate(fd,size)
+    if point=="marker_cleared" and size==0: os._exit(91)
+database.commit=interrupt_commit
+os.link,os.rename,os.write,os.ftruncate=interrupt_link,interrupt_rename,interrupt_write,interrupt_truncate
+if entry=="create":
+    identity=request.pop("task_id")
+    tasks.create(state,identity,**request)
+else:
+    tasks.migrate(state)
+'''
+        for entry in ("create", "migrate", "legacy"):
+            points = ("schema_before", "schema_after", "published")
+            if entry != "legacy":
+                points += ("prepared_partial", "lock_linked", "marker_cleared")
+            for point in points:
+                with self.subTest(entry=entry, point=point):
+                    state = self.root / ("initialize-" + entry + "-" + point)
+                    originals = {}
+                    if entry == "legacy":
+                        write_legacy_checkpoint(state, "legacy-one", "Retain original migration bytes.\n")
+                        originals = {p.relative_to(state / "tasks"): p.read_bytes()
+                                     for p in (state / "tasks").rglob("*") if p.is_file()}
+                    result = subprocess.run([sys.executable, "-I", "-c", code, str(state), point, entry],
+                        input=json.dumps(self.request), capture_output=True, text=True, timeout=15)
+                    self.assertEqual(result.returncode, 91, result.stderr)
+                    lock = state / "locks/tasks.lock"
+                    original = lock.stat() if lock.exists() else None
+                    marker = lock.read_bytes() if original else None
+                    if point == "lock_linked":
+                        self.assertEqual(original.st_nlink, 2)
+                    if point in {"schema_before", "schema_after", "prepared_partial", "lock_linked"}:
+                        self.assertFalse((state / "tasks.db").exists())
+                    tasks.storage_state(state)
+                    if original:
+                        self.assertEqual(lock.read_bytes(), marker)
+                        self.assertEqual(lock.stat().st_nlink, original.st_nlink)
+                    if point == "published" and entry != "legacy":
+                        with self.assertRaises(Fault) as caught:
+                            with database.connect(state, write=True):
+                                self.fail("Pending initialization admitted a write")
+                        self.assertEqual(caught.exception.code, "task_activation_pending")
+                    retry = subprocess.run([sys.executable, "-I", "-c", code, str(state), "retry", entry],
+                        input=json.dumps(self.request), capture_output=True, text=True, timeout=15)
+                    self.assertEqual(retry.returncode, 0, retry.stderr)
+                    retained = lock.stat()
+                    if original:
+                        self.assertEqual((retained.st_dev, retained.st_ino), (original.st_dev, original.st_ino))
+                    self.assertEqual((retained.st_nlink, lock.read_bytes()), (1, b""))
+                    self.assertEqual(tasks.check_state(state)["task_records"], int(entry != "migrate"))
+                    self.assertFalse((state / "tasks").exists())
+                    self.assertFalse((state / "executions").exists())
+                    if originals:
+                        archives = list(state.glob("tasks-legacy-*"))
+                        self.assertEqual(len(archives), 1)
+                        self.assertEqual({p.relative_to(archives[0]): p.read_bytes()
+                                          for p in archives[0].rglob("*") if p.is_file()}, originals)
 
     def test_two_processes_cannot_commit_different_controls_at_one_revision(self):
         request = dict(self.request)

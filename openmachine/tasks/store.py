@@ -475,7 +475,8 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             if len(selected) != len(value["operations"]) or not old_operations.keys() <= selected.keys():
                 raise ValueError("original selected operations cannot be removed or duplicated")
             count = original["_facts"]["operation_count"]
-            stages = dict(original["_facts"]["stage_operation_counts"])
+            stages = {stage["id"]: original["_facts"]["stage_operation_counts"].get(stage["id"], 0)
+                      for stage in core["plan"]["stages"]}
             for item in value["operations"]:
                 old = old_operations.get(item["id"])
                 if item == old:

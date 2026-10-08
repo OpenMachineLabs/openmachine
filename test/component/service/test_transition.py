@@ -14,6 +14,7 @@ from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
+from openmachine.tasks import database as task_database
 from test.support.service_cases import ServiceCaseFixture
 
 
@@ -85,6 +86,36 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_state._record(self.state)["policy"], record["policy"])
         stop.assert_called_once()
         start.assert_not_called()
+
+    def test_fresh_initialization_failure_resumes_original_selection_and_lock(self):
+        _, stop, start = self.ledger_activation_fixture()
+        with patch.object(task_database, "commit", side_effect=OSError("private schema commit interrupted")):
+            self.assert_fault("task_activation_pending", lambda: service_transition._activate(
+                self.state, self.record, self.b))
+        selected = service_state._record(self.state)
+        self.assertEqual((selected["current"], selected["pending"]),
+                         (self.b, {"from": self.a, "to": self.b, "previous": None}))
+        lock = self.state / "locks/tasks.lock"
+        original = lock.stat()
+        self.assertFalse((self.state / "tasks.db").exists())
+        storage = tasks.storage_state(self.state)
+        self.assertEqual((storage["kind"], storage["active"], storage["fenced"]), ("absent", False, True))
+        self.assertTrue(service_transition._task_cutover(self.state, selected))
+        self.assertFalse(service_transition._task_cutover(self.state, selected | {"pending": None}, committed=True))
+        stop.assert_called_once()
+        start.assert_not_called()
+
+        with patch.object(service_checks, "activation_safe"):
+            result = service_transition._resume_activation(self.state, selected)
+        self.assertEqual((result["current"], result["previous"]), (self.b, self.a))
+        self.assertIsNone(service_state._record(self.state)["pending"])
+        retained = lock.stat()
+        self.assertEqual((retained.st_dev, retained.st_ino), (original.st_dev, original.st_ino))
+        self.assertEqual(lock.read_bytes(), b"")
+        self.assertTrue(tasks.storage_state(self.state)["active"])
+        self.assertFalse((self.state / "tasks").exists())
+        self.assertEqual(stop.call_count, 2)
+        self.assertEqual([item.args[1]["current"] for item in start.call_args_list], [self.b])
 
     def test_first_upgrade_preserves_old_state_until_readiness_and_restores_on_failure(self):
         self.activation_mocks()

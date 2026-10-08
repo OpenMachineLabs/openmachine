@@ -128,8 +128,9 @@ def _task_cutover(state: Path, record: dict, *, committed: bool = False) -> bool
         return False
     service_state._saved_configuration(state, digest)
     storage = tasks.storage_state(state)
-    return (storage["kind"] == "sqlite" and storage["fenced"] and not storage.get("restore_required", False)
-            and (pending is not None or storage["active"]))
+    return (storage["fenced"] and not storage.get("restore_required", False)
+            and (storage["kind"] == "sqlite" and (pending is not None or storage["active"])
+                 or storage["kind"] == "absent" and pending is not None and storage["active"] is False))
 
 
 def _resume_activation(state: Path, record: dict) -> dict:
