@@ -316,6 +316,13 @@ they do not represent a local worker to stop or replay. Historical workspace
 operations are nonblocking only when their exact retained task result names a
 pre-admission validation failure that cannot have allocated a change receipt.
 
+An unknown Chat receiver-preparation outcome also remains unchanged across a
+compatible update when its exact machine/execution has a terminal format-4-or-newer
+receipt with verified native cleanup and no unresolved control. This is not proof
+of message delivery or receiver readiness and never retries preparation. Reserved
+preparations, missing/mismatched receipts, unverified cleanup and unresolved Chat
+deliveries still defer activation, including disabled or expired recovery bindings.
+
 These CLI/reader tests are separate from native GUI startup permission, signed
 product installation/update and real ChatGPT-route acceptance. Management adds
 no daemon, HTTP service, transport or release feed.
