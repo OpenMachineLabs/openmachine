@@ -215,6 +215,7 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
 
 def activation_safe(state: Path) -> None:
     """Conservative product admission under lifecycle.lock; no receipt repair."""
+    settled_executions = set()
     root = state / "executions"
     if root.exists():
         for directory in root.iterdir():
@@ -223,6 +224,8 @@ def activation_safe(state: Path) -> None:
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
                 raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+            if record.get("format_version", 1) >= 4 and record["cleanup"]["status"] == "verified":
+                settled_executions.add((record["request"]["machine"], directory.name))
     known = {}
     while True:
         page = tasks.observation_page(state, known)
@@ -241,7 +244,11 @@ def activation_safe(state: Path) -> None:
     from integrations.chatgpt import bindings
     workspace.check_change_state(state, require_idle=True)
     connections_state(state, require_idle=True)
-    if any((item.preparation is not None and item.preparation.status in {"reserved", "outcome_unknown"})
+    # A terminal preparation can retain an unknown browser outcome after native
+    # cleanup. Compatible activation preserves that uncertainty and never retries it.
+    if any((item.preparation is not None and (item.preparation.status == "reserved"
+                or item.preparation.status == "outcome_unknown"
+                and (item.machine, item.preparation.execution_id) not in settled_executions))
            or (item.delivery is not None and item.delivery.status in {"reserved", "outcome_unknown"}
                and item.delivery.continuation_at_ms is None) for item in bindings(state)):
         raise Fault("activation_deferred", "An original Chat recovery delivery is active or unresolved; preserve its delivery and budget.")
