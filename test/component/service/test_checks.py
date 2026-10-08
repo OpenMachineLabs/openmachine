@@ -289,28 +289,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 stop.assert_not_called()
         self.assertEqual((self.state / "ssh-recovery.json").read_bytes(), before)
 
-    def test_retained_chat_recovery_requires_actual_reader_before_service_stop(self):
-        from integrations import chatgpt
-        chatgpt.register_preparation(self.state, task_id="structured-one", preparation_id="a" * 32,
-            acknowledged=False, controller_sha256="b" * 64,
-            machine="local", workspace="project", workspace_identity="c" * 64,
-            authority_ref="fixture:authority", authority_sha256="d" * 64,
-            expires_at_ms=chatgpt.now_ms() + 3600000)
-        before = (self.state / "chat_recovery.json").read_bytes()
-        proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (18, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 18), proof)
-        for delta in ({"state_contract": 14}, {"chat_recovery_present": False},
-                      {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
-                      {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):
-            with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(
-                    service_checks, "_run", return_value=subprocess.CompletedProcess(
-                        [], 0, json.dumps(proof | delta), "")), patch.object(service_runtime, "_stop") as stop:
-                self.assert_fault("incompatible_state", lambda: service_transition._activate(
-                    self.state, self.record, self.b))
-                stop.assert_not_called()
-        self.assertEqual((self.state / "chat_recovery.json").read_bytes(), before)
-
     def test_incompatible_receipt_never_becomes_empty_history(self):
         directory = private_directory(self.state / "executions" / ("c" * 32))
         save_json(directory / "record.json", {"status": "running", "format_version": 999})
@@ -414,81 +392,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(service_checks,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(current),"")):
             service_checks._candidate_state(Path(sys.executable),self.config,self.state)
         self.assertEqual([path.read_bytes() for path in records],before)
-
-    def test_product_activation_preserves_settled_unknown_preparation(self):
-        from integrations import chatgpt
-        identity = "e" * 32
-        directory = private_directory(self.state / "executions" / identity)
-        receipt = {"format_version": 4, "version": "0.2.11", "status": "succeeded",
-                   "exit_code": 0, "created_at": 1, "finished_at": 2,
-                   "log_truncated": False, "output_incomplete": False, "context": {},
-                   "request": {"machine": "local", "cwd": str(self.root), "argv": ["browser"],
-                               "expected_head_sha": "", "timeout_seconds": 5, "termination_grace_seconds": 5},
-                   "io_mode": "pipe", "command": {"spawned": True, "exited": True,
-                       "started_at": 1, "exited_at": 2, "exit_signal": None},
-                   "stop": {"reason": None, "requested_at": None, "grace_seconds": 5, "force_used": False},
-                   "cleanup": {"containment": "posix_session", "status": "verified", "error": None}}
-        path = directory / "record.json"
-        save_json(path, receipt)
-        binding = chatgpt.register_preparation(self.state, task_id="historical", preparation_id="a" * 32,
-            acknowledged=False, controller_sha256="b" * 64, machine="local", workspace="project",
-            workspace_identity="c" * 64, authority_ref="fixture:authority", authority_sha256="d" * 64,
-            expires_at_ms=chatgpt.now_ms() + 3600000)
-        chatgpt.reserve_preparation(self.state, binding.task_id, "a" * 32, binding.revision, identity)
-        chatgpt.mark_preparation(self.state, binding.task_id, identity, "outcome_unknown", "preparation_unverified",
-                                "https://chatgpt.com/c/11111111-2222-4333-8444-555555555555")
-        recovery = self.state / "chat_recovery.json"
-        original = recovery.read_bytes()
-        lock = self.state / "locks/chat-recovery.lock"
-        lock_inode = lock.stat().st_ino
-        # Unknown remains unknown: both successful and cancelled native work can
-        # finish cleanup without establishing what happened in the browser.
-        for status, code, reason in (("succeeded", 0, None), ("cancelled", -15, "cancel")):
-            with self.subTest(status=status):
-                candidate = receipt | {"status": status, "exit_code": code,
-                    "command": receipt["command"] | {"exit_signal": 15 if code < 0 else None},
-                    "stop": receipt["stop"] | {"reason": reason, "requested_at": 1 if reason else None}}
-                save_json(path, candidate)
-                before = path.read_bytes()
-                service_checks.activation_safe(self.state)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertEqual(recovery.read_bytes(), original)
-                self.assertEqual(lock.stat().st_ino, lock_inode)
-        save_json(path, receipt)
-        _, reused = chatgpt.reserve_preparation(self.state, binding.task_id, "a" * 32, binding.revision, "f" * 32)
-        self.assertTrue(reused)
-        self.assertEqual(recovery.read_bytes(), original)
-
-        for candidate in (
-                receipt | {"status": "running", "finished_at": None},
-                receipt | {"status": "failed", "exit_code": 1,
-                           "cleanup": receipt["cleanup"] | {"status": "pending"}},
-                receipt | {"format_version": 1},
-                receipt | {"request": receipt["request"] | {"machine": "other"}},
-                receipt | {"control": {"last": {"status": "outcome_unknown"}}}):
-            with self.subTest(candidate=candidate):
-                save_json(path, candidate)
-                self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
-        save_json(path, receipt)
-        directory.rename(self.state / "retained-execution")
-        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
-        (self.state / "retained-execution").rename(directory)
-        path.write_text("{}")
-        self.assert_fault("corrupt_state", lambda: service_checks.activation_safe(self.state))
-        save_json(path, receipt)
-
-        value = json.loads(original)
-        value["bindings"][binding.task_id]["preparation"]["status"] = "reserved"
-        save_json(recovery, value)
-        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
-        recovery.write_bytes(original)
-        chatgpt.reserve_delivery(self.state, task_id=binding.task_id, authority_sha256="d" * 64,
-            handoff_id="1" * 32, recovery_id="2" * 32, execution_id=identity,
-            deadline_ms=chatgpt.now_ms() + 3600000, progress_at_ms=0, binding_revision=binding.revision)
-        chatgpt.mark_delivery(self.state, binding.task_id, identity, "outcome_unknown", "delivery_unverified")
-        before = recovery.read_bytes()
-        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
-        self.assertEqual(recovery.read_bytes(), before)
 
     def test_unfenced_activation_reads_new_legacy_operations_and_rejects_dual_authority(self):
         record = self.legacy_task_fixture()["record"]

@@ -5,13 +5,9 @@
 On this page:
 
 - [Locate the original work](#locate-the-original-work)
+- [Original-result observation](#original-result-observation)
 - [Claim, renew and release](#claim-renew-and-release)
 - [Bounded foreground waiting](#bounded-foreground-waiting)
-
-If a fixed setup message supplies `preparation_id`, this is a read-only receiver
-verification, not ordinary continuation: call `read_task` with that original ID,
-report `preparation_read.receipt` exactly and end the turn without claiming or
-executing. Follow [recovery setup](recovery.md#chat-continuation).
 
 ## Locate the original work
 
@@ -30,6 +26,13 @@ history is separate, not absent. Use `section: operations` with the original
 decision version. Operation pages require an unchanged task revision; history
 cursors keep their original watermark. Never infer no unknowns from one page.
 Migration-era legacy summaries remain complete original bounded records.
+
+## Original-result observation
+
+The service observer collects previously admitted local and SSH command, control,
+cancel and change receipts without a connected Chat client. Bounded observation
+faults and retry budgets appear in read_task. Results and handoffs are observed,
+never replayed, automatically accepted or used to authorize new effects.
 
 ## Claim, renew and release
 
@@ -104,8 +107,7 @@ in the current Chat turn, not an automatic renewal or a new execution:
 Honor `foreground.stop_foreground=true` and `task_attention_required` as mandatory
 end-of-turn boundaries. Pause/cancel, expired task authority, changed ownership,
 unverified execution and platform/provider refusals are not lease recovery.
-Renewal never resets command timeouts, foreground wait limits or observation and
-Chat recovery budgets. Do not repeat renewal to hide an unchanged blocker or
+Renewal never resets command timeouts, foreground wait limits or observation budgets. Do not repeat renewal to hide an unchanged blocker or
 extend work without progress. Neither renewal nor reattachment replays an effect.
 
 Claim and renewal check the configured machine/workspace, current readable context,
@@ -154,8 +156,8 @@ claim continuation, start another effect or hide the result in a progress update
 For `task_attention_required`, read the task once if needed to present current
 facts, then end the turn. Report the concise reason, whether original work may
 still be running, and the returned resume prompt. This foreground mechanism is
-not Desktop notification or task-owned Chat recovery, and it cannot inject a message
-into a Chat that has already disconnected.
+not Desktop notification, and it cannot inject a message into a Chat
+that has already disconnected.
 
 Every persisted observation advances `revision` only when its content changes.
 Format 4 also records the last material `control_revision`. Business admission can

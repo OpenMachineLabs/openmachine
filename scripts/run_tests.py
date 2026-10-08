@@ -326,7 +326,9 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                     for helper, tests in manifest["support"].items():
                         if helper.startswith(prefix):
                             consumers.update(set(tests) & all_tests)
-            required_paths.setdefault(path, set()).update(consumers)
+            # A fully retired test package has no surviving behavior to select.
+            if consumers or any(name.startswith(prefix) for name in files):
+                required_paths.setdefault(path, set()).update(consumers)
             add(consumers, f"test package: {path}")
         if not known:
             if old is None and path.startswith("test/") and path not in files:

@@ -178,8 +178,6 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             if (contract["expires_at_ms"] <= now_ms
                     or not set(contract["authority_refs"]) - set(record["contract"]["authority_refs"])):
                 raise Fault("task_authority_expired", "Explicit reauthorization needs a future expiry and a new supplied authority reference.")
-            if contract.get("recovery_policy") != record["contract"].get("recovery_policy"):
-                raise Fault("task_plan_conflict", "Reauthorization preserves the existing recovery policy; change recovery only with explicit enrollment or controls.")
         else:
             require_owner(record, principal, now_ms)
         if action == "release":
@@ -232,9 +230,6 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                            if stage["id"] in old else "pending", evidence=[] if stage["id"] in affected or stage["id"] not in old
                            else old[stage["id"]]["evidence"]) for stage in definitions]
             record["contract"] = change["contract"]
-            if record["format"] < 3 and change["contract"].get("recovery_policy") is not None:
-                record["format"] = 3
-                record["chat_registration"] = None
             record["plan"] = {"revision": record["plan"]["revision"] + 1, "stages": stages}
             paused = control["stop_intent"] == "pause"
             decision = control["pending_decision"] if paused or outstanding else None

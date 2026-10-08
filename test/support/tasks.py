@@ -24,7 +24,7 @@ def task_contract(context=None, identity="structured-one"):
         "contract": {"objective": "Verify retained work.", "scope": "Disposable fixture only.", "exclusions": "No production effects.",
             "acceptance": "Read the same canonical record.", "stop_condition": "Stop after verification.",
             "authority_refs": ["fixture:consent"], "targets": targets, "repositories": [], "tools": ["read_task"],
-            "sources": [], "recovery_policy": "disabled",
+            "sources": [],
             "expires_at_ms": time.time_ns() // 1000000 + 3600000},
         "stages": [{"id": "verify", "depends_on": [], "result": "Retained record", "verification": "Exact readback",
                     "source_refs": [], "source_sha256": hashlib.sha256(b"[]\n").hexdigest()}]}
@@ -89,7 +89,7 @@ class TaskFixture(ContinuityFixture):
 
     def view(self):
         view = self.app._task_view("structured-one")
-        return self.app.chat_recovery.project(view) if self.app.chat_recovery is not None else view
+        return view
 
     def task_bytes(self, task_id="structured-one"):
         return tasks.records.canonical(tasks.read(self.state, task_id)["record"])

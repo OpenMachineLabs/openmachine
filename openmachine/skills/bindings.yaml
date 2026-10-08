@@ -18,7 +18,6 @@ wait_task: {skill: om.tasks, path: continue.md}
 save_task: {skill: om.tasks, path: continue.md}
 create_task: {skill: om.tasks, path: create.md}
 control_task: {skill: om.tasks, path: control.md}
-configure_chat_recovery: {skill: om.tasks, path: recovery.md}
 list_integrations: {skill: om.github, path: connections.md}
 connect_integration: {skill: om.github, path: connections.md}
 read_integration_login: {skill: om.github, path: connections.md}

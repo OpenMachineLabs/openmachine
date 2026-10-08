@@ -106,7 +106,7 @@ Retained copies and previous environments are not moved, overwritten, or garbage
 collected. Incomplete preparation remains a diagnostic failure, not permission to
 repeat installation into the same directory. Matching completed identities are
 reused. Artifact checks and compatible activation remain separate; user workloads,
-configuration, native connections, task/Chat recovery, and their budgets are not
+configuration, native connections, task observation and its budgets are not
 migrated or reset. Read-only payload permissions prevent ordinary cache writes,
 not tampering by the same native account.
 

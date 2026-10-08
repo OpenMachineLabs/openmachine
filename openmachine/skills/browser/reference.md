@@ -46,4 +46,4 @@ Give the child a self-contained goal, permitted actions, visible acceptance and
 controller-owned tab context, without credentials or unrelated private data. Review
 its actual report, matching final native snapshot and `pending_action`. An explicitly
 authorized follow-up uses a new operation ID under the same parent task and exact
-tab context. Task-owned recovery uses [its own guarded route](../tasks/recovery.md).
+tab context.

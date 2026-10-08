@@ -92,25 +92,6 @@ class SkillSources(BaseModel):
         return list(dict.fromkeys(values))
 
 
-class ChatRecoveryConfig(BaseModel):
-    """One operator-selected existing browser route, not provider credentials."""
-    model_config = ConfigDict(extra="forbid", strict=True)
-    workspace: Name
-    connection: str = Field(min_length=1, max_length=200)
-    browser_account: str | None = Field(default=None, min_length=1, max_length=200)
-    browser_workspace: str = Field(min_length=1, max_length=200)
-    model: str = Field(min_length=1, max_length=200)
-
-    @field_validator("connection", "browser_account", "browser_workspace", "model")
-    @classmethod
-    def visible_label(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
-            raise ValueError("recovery labels must be explicit single-line selections")
-        return value
-
-
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
@@ -118,16 +99,11 @@ class Settings(BaseModel):
     workspaces: dict[Name, Workspace] = Field(default_factory=dict)
     github: GitHubConfig | None = None
     skills: SkillSources = Field(default_factory=SkillSources)
-    chat_recovery: ChatRecoveryConfig | None = None
 
     @model_validator(mode="after")
     def configured_machines(self):
         if not self.machines or any(w.machine not in self.machines for w in self.workspaces.values()):
             raise ValueError("workspaces must refer to configured machines")
-        if self.chat_recovery is not None:
-            controller = self.workspaces.get(self.chat_recovery.workspace)
-            if controller is None or self.machines[controller.machine].transport != "local":
-                raise ValueError("recovery requires one configured local controller workspace")
         return self
 
     def machine(self, name: str, *, write: bool = False) -> Machine:
@@ -141,8 +117,6 @@ class Settings(BaseModel):
     def configuration_sha256(self) -> str:
         # Null is the inherited legacy grant, not a change to old config identity.
         value = self.model_dump()
-        if value["chat_recovery"] is None:
-            del value["chat_recovery"]  # Keep existing configuration identities stable.
         for machine in value["machines"].values():
             if machine["workspace_write_enabled"] is None:
                 del machine["workspace_write_enabled"]
@@ -169,7 +143,7 @@ def load(path: Path) -> Settings:
 
 
 def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
-               workspace_writes: bool = False, chat_recovery: dict | None = None,
+               workspace_writes: bool = False,
                verify_existing: bool = False) -> dict:
     """One first-run writer shared by init and management; never adopt or overwrite."""
     if any(type(value) is not bool for value in (commands, workspace_writes, verify_existing)):
@@ -181,18 +155,10 @@ def initialize(path: Path, workspace: Path | None = None, *, commands: bool = Fa
         if not workspace.is_absolute() or not workspace.is_dir():
             raise Fault("invalid_workspace", "The workspace must be an existing absolute directory.")
         text += '\n[workspaces.project]\nmachine = "local"\nroot = ' + json.dumps(str(workspace.resolve()), ensure_ascii=False) + '\n'
-    if chat_recovery is not None:
-        try:
-            profile = ChatRecoveryConfig.model_validate(chat_recovery)
-        except ValidationError as error:
-            raise Fault("invalid_config", "Select every recovery profile field explicitly.") from error
-        text += '\n[chat_recovery]\n' + ''.join(
-            f'{key} = {json.dumps(value, ensure_ascii=False)}\n'
-            for key, value in profile.model_dump(exclude_none=True).items())
     try:
         expected = Settings.model_validate(tomllib.loads(text))
     except (ValidationError, tomllib.TOMLDecodeError) as error:
-        raise Fault("invalid_config", "First-run settings must contain a valid local workspace and recovery profile.") from error
+        raise Fault("invalid_config", "First-run settings must contain a valid local workspace.") from error
     if verify_existing:
         metadata = path.lstat()
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_uid != os.getuid()

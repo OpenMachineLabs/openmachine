@@ -70,10 +70,3 @@ a bounded immutable scope witness; it neither dispatches nor proves non-executio
 Missing proof leaves conservative uncertainty. Read the full
 [scope and historical-evidence rules](../github/reference.md#scoped-uncertainty-and-historical-evidence)
 before this transition or continuation around an unresolved GitHub effect.
-
-## Recovery policy changes
-
-The separate `configure_chat_recovery` tool accepts only explicit enable/disable
-intent, not a URL,
-replacement controller or retry-budget reset. Follow [Recovery](recovery.md) for
-its independent readiness, original identities and no-replay rules.

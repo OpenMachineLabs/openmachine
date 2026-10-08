@@ -1,6 +1,6 @@
 # Service operations
 
-[Domain guide](SKILL.md) | [Task recovery](../tasks/recovery.md)
+[Domain guide](SKILL.md)
 
 On this page:
 
@@ -97,12 +97,6 @@ recovery, retired Events archive and connection record, even terminal-only histo
 integrations. Native connection format 2 needs the contract-11 reader; old-only
 format-1 connection state retains its exact hash for supported prior readers.
 Metadata checks do not read or print credential values and do not prove live OAuth.
-Task-owned preparation requires task/Chat recovery format 3 and state-contract-15
-readers. Recovery format 2 needs contract 13; old-only format 1 retains its original
-reader fingerprint. A reader that ignores recovery cannot replace a healthy service,
-even when recovery is disabled. The TaskObserver applies a fresh ten-minute
-continuation grace after restart without renewing preparation or delivery budgets.
-See [task continuity](../tasks/recovery.md#chat-continuation) for the single recovery route.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
@@ -226,19 +220,6 @@ Core registers only retained Python/entry/environment paths, never donor App
 paths. First-run configuration is local-only; later grant changes use the existing
 explicit configuration workflow and candidate snapshots.
 
-Desktop first use consumes the additive `configure:chat_recovery` capability.
-`manage configure` accepts `--recovery-connection`, `--browser-account`,
-`--browser-workspace` and `--recovery-model` together. The legacy
-`--browser-account` label is accepted for compatibility but is not a current
-recovery identity or routing guard. These options populate the existing
-recovery profile for the selected `project` workspace. These are explicit visible
-labels, never credentials or the originating Chat URL. Partial/invalid selections
-fail before creating the file. Command and file-write grants stay independent and
-default off; supplying a recovery profile grants neither. Configuration remains
-create-only: this cannot change an installed profile, bypass activation admission,
-install a connection, log in, or establish task-recovery readiness. Compatible
-signed-in Codex/browser setup and real receiver evidence remain separate.
-
 After a lost first-run configuration reply, `configure --verify-existing` with
 the original inputs only reads and verifies an exact private owned configuration.
 It never creates, overwrites or repairs a file, and rejects changed grants or
@@ -316,8 +297,8 @@ Explicit compatible rollback can reconcile the native selection but does not
 fabricate the missing original operation outcome or unblock uncertain history.
 
 Product activation conservatively defers active/unresolved execution, task,
-workspace-write, native-login or Chat-delivery work and busy lifecycle admission. Original
-workers, target archives, receipts and local/SSH/Chat recovery budgets are never
+workspace-write, native-login or busy lifecycle admission. Original
+workers, target archives, receipts and local/SSH observation budgets are never
 cancelled or reset to pass a gate. A deferred operation does not auto-activate when
 work becomes idle. Configuration or policy drift rejects continuation rather than
 rebasing the accepted request. Incomplete preparation is retained; no immutable
@@ -327,13 +308,6 @@ Retained unknown GitHub outcomes stay unknown across compatible local activation
 they do not represent a local worker to stop or replay. Historical workspace
 operations are nonblocking only when their exact retained task result names a
 pre-admission validation failure that cannot have allocated a change receipt.
-
-An unknown Chat receiver-preparation outcome also remains unchanged across a
-compatible update when its exact machine/execution has a terminal format-4-or-newer
-receipt with verified native cleanup and no unresolved control. This is not proof
-of message delivery or receiver readiness and never retries preparation. Reserved
-preparations, missing/mismatched receipts, unverified cleanup and unresolved Chat
-deliveries still defer activation, including disabled or expired recovery bindings.
 
 These CLI/reader tests are separate from native GUI startup permission, signed
 product installation/update and real ChatGPT-route acceptance. Management adds
