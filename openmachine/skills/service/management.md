@@ -1,6 +1,16 @@
 # Service operations
 
-[Overview](../README.md) | [Operations](operations.md) | [Tasks](tasks.md)
+[Domain guide](SKILL.md) | [Task recovery](../tasks/recovery.md)
+
+On this page:
+
+- [Legacy wheel-based installation and control](#legacy-wheel-based-installation-and-control)
+- [Exact updates and compatible rollback](#exact-updates-and-compatible-rollback)
+- [Bounded runtime recovery](#bounded-runtime-recovery)
+- [Diagnose without replay](#diagnose-without-replay)
+- [Product management](#product-management)
+- [Policy and old-Core limits](#policy-and-old-core-limits)
+- [Original maintenance operations](#original-maintenance-operations)
 
 Use [product management](#product-management) for management-capable installations.
 It owns persistent Stop, login preference and original install/update operations.
@@ -92,7 +102,7 @@ readers. Recovery format 2 needs contract 13; old-only format 1 retains its orig
 reader fingerprint. A reader that ignores recovery cannot replace a healthy service,
 even when recovery is disabled. The TaskObserver applies a fresh ten-minute
 continuation grace after restart without renewing preparation or delivery budgets.
-See [task continuity](tasks.md#chat-continuation) for the single recovery route.
+See [task continuity](../tasks/recovery.md#chat-continuation) for the single recovery route.
 An old reader that ignores a directory cannot pass. Formats 1/2 and large retained
 workspace ranges may block downgrade; `0.1.0a6` and earlier are not managed rollback
 targets. No history is rewritten or deleted to permit a transition.
@@ -218,7 +228,9 @@ explicit configuration workflow and candidate snapshots.
 
 Desktop first use consumes the additive `configure:chat_recovery` capability.
 `manage configure` accepts `--recovery-connection`, `--browser-account`,
-`--browser-workspace` and `--recovery-model` together. They populate the existing
+`--browser-workspace` and `--recovery-model` together. The legacy
+`--browser-account` label is accepted for compatibility but is not a current
+recovery identity or routing guard. These options populate the existing
 recovery profile for the selected `project` workspace. These are explicit visible
 labels, never credentials or the originating Chat URL. Partial/invalid selections
 fail before creating the file. Command and file-write grants stay independent and

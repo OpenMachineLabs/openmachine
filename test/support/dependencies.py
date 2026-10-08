@@ -23,7 +23,7 @@ class DependencyFixture(object):
             "openmachine.tasks.effects": ("openmachine.tasks.records",),
             "openmachine.tasks.transitions": ("openmachine.tasks.records", "openmachine.tasks.effects", "openmachine.foundation.*"),
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
-            "openmachine.skills": ("openmachine.foundation.*",),
+            "openmachine.skills.*": ("openmachine.skills.*", "openmachine.foundation.*", "yaml"),
             "openmachine.service": ("openmachine.service.state", "openmachine.service.checks",
                                     "openmachine.service.install", "openmachine.service.runtime", "openmachine.service.transition"),
             "openmachine.service.__main__": ("openmachine.service.checks", "openmachine.foundation.*"),
@@ -59,7 +59,7 @@ class DependencyFixture(object):
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
                                       "integrations.github", "integrations.github.connection", "integrations.github.auth", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.connections", "integrations.codex", "integrations.chatgpt"),
             "openmachine.server": ("openmachine", "openmachine.app", "openmachine.bootstrap", "openmachine.config",
-                                   "openmachine.service", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
+                                   "openmachine.service", "openmachine.skills", "openmachine.tasks", "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             # The CLI owns serve/worker-bundle dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
                                 "openmachine.bootstrap", "openmachine.server", "openmachine.service", "openmachine.service.maintenance",

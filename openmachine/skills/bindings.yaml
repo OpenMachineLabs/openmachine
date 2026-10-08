@@ -1,0 +1,35 @@
+get_capabilities: {skill: om.overview}
+inspect_skills: {skill: om.overview}
+inspect_workspace: {skill: om.workspace}
+create_worktree: {skill: om.workspace, path: worktrees.md}
+read_workspace_file: {skill: om.workspace, path: files.md}
+write_workspace_file: {skill: om.workspace, path: files.md}
+edit_workspace_file: {skill: om.workspace, path: files.md}
+apply_workspace_patch: {skill: om.workspace, path: files.md}
+read_workspace_change: {skill: om.workspace, path: files.md}
+start_execution: {skill: om.execution}
+read_execution: {skill: om.execution, path: terminal.md}
+list_executions: {skill: om.execution}
+cancel_execution: {skill: om.execution, path: terminal.md}
+control_execution: {skill: om.execution, path: terminal.md}
+find_tasks: {skill: om.tasks, path: continue.md}
+read_task: {skill: om.tasks, path: continue.md}
+wait_task: {skill: om.tasks, path: continue.md}
+save_task: {skill: om.tasks, path: continue.md}
+create_task: {skill: om.tasks, path: create.md}
+control_task: {skill: om.tasks, path: control.md}
+configure_chat_recovery: {skill: om.tasks, path: recovery.md}
+list_integrations: {skill: om.github, path: connections.md}
+connect_integration: {skill: om.github, path: connections.md}
+read_integration_login: {skill: om.github, path: connections.md}
+cancel_integration_login: {skill: om.github, path: connections.md}
+disconnect_integration: {skill: om.github, path: connections.md}
+start_codex_task: {skill: om.browser, path: reference.md}
+read_codex_task: {skill: om.browser, path: reference.md}
+github_read: {skill: om.github, path: reference.md}
+github_issue: {skill: om.github, path: reference.md}
+github_pull_request: {skill: om.github, path: reference.md}
+github_comment: {skill: om.github, path: reference.md}
+github_review: {skill: om.github, path: reference.md}
+github_review_thread: {skill: om.github, path: reference.md}
+github_merge: {skill: om.github, path: reference.md}

@@ -1,5 +1,12 @@
 # Packaged runtime
 
+On this page:
+
+- [One payload, one installer](#one-payload-one-installer)
+- [Produce the payload](#produce-the-payload)
+- [Prepare without activating](#prepare-without-activating)
+- [Validation boundary](#validation-boundary)
+
 Core provides an offline runtime preparation path. Preparation does not register
 or start a service, change its selected version, or alter persistent startup policy.
 The existing wheel/requirements lifecycle commands remain supported.
@@ -105,7 +112,7 @@ not tampering by the same native account.
 
 ## Validation boundary
 
-Focused integrity/installer tests live in `test/unit/test_payload.py` alongside
+Focused integrity/installer tests live in `test/component/service/test_payload.py` alongside
 existing lifecycle tests. Native acceptance must additionally build the real
 payload, prepare outside the checkout with package-index/network access denied,
 exercise installed CLI/MCP file readiness and portable Git, and verify retained
@@ -115,7 +122,7 @@ configuration/state/workspace, never an active service or production job.
 Preparation evidence does not establish GUI onboarding, persistent-stop behavior,
 signed distribution, automatic updates, or plugin availability.
 
-Managed product installation/update now uses [management contract 1](service.md#product-management),
+Managed product installation/update now uses [management contract 1](management.md#product-management),
 which records the original operation before independent preparation and invokes
 the verified incoming implementation from retained paths. `prepare-runtime` remains
 a preparation-only primitive; it neither selects a service nor creates update consent.

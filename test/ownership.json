@@ -9,6 +9,7 @@
         "test/component/app/test_task_observer.py",
         "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
+        "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/tasks/test_schema.py",
         "test/resilience/chat_recovery/test_foreground.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
@@ -385,13 +386,44 @@
       ]
     },
     "skills": {
-      "boundary_tests": [],
+      "boundary_tests": [
+        "test/component/bootstrap/test_composition.py",
+        "test/contract/mcp/server/test_catalog.py"
+      ],
       "sources": [
-        "openmachine/skills.py",
-        "skills/openmachine/SKILL.md",
-        "skills/openmachine/worktrees.md"
+        "openmachine/skills/README.md",
+        "openmachine/skills/__init__.py",
+        "openmachine/skills/bindings.yaml",
+        "openmachine/skills/browser/SKILL.md",
+        "openmachine/skills/browser/reference.md",
+        "openmachine/skills/catalog.py",
+        "openmachine/skills/execution/SKILL.md",
+        "openmachine/skills/execution/terminal.md",
+        "openmachine/skills/github/SKILL.md",
+        "openmachine/skills/github/connections.md",
+        "openmachine/skills/github/reference.md",
+        "openmachine/skills/guidance.py",
+        "openmachine/skills/overview/SKILL.md",
+        "openmachine/skills/overview/development.md",
+        "openmachine/skills/overview/setup.md",
+        "openmachine/skills/reader.py",
+        "openmachine/skills/service/SKILL.md",
+        "openmachine/skills/service/management.md",
+        "openmachine/skills/service/runtime-payload.md",
+        "openmachine/skills/service/ssh.md",
+        "openmachine/skills/tasks/SKILL.md",
+        "openmachine/skills/tasks/continue.md",
+        "openmachine/skills/tasks/control.md",
+        "openmachine/skills/tasks/create.md",
+        "openmachine/skills/tasks/maintenance.md",
+        "openmachine/skills/tasks/recovery.md",
+        "openmachine/skills/tasks/verify.md",
+        "openmachine/skills/workspace/SKILL.md",
+        "openmachine/skills/workspace/files.md",
+        "openmachine/skills/workspace/worktrees.md"
       ],
       "tests": [
+        "test/component/skills/test_packaging.py",
         "test/component/skills/test_resources.py"
       ]
     },

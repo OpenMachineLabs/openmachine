@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from test.support.repository import RepositoryFixture
 
@@ -80,15 +81,23 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(any("environment" in stage for stage in result["stages"]))
 
     def test_bundled_skill_change_selects_installed_resource_coverage(self):
-        for full in (False, True):
-            with self.subTest(full=full), patch.object(
-                    runner, "changed_paths", return_value={"skills/openmachine/SKILL.md"}):
-                plan = runner.make_plan(ROOT, "HEAD", full=full)
-                self.assertTrue(plan["runtime_required"])
-                self.assertEqual(plan["environment"], "wheel")
-                self.assertIn("test/component/skills/test_resources.py", self.product_tests(plan))
-                if not full:
-                    self.assertEqual(self.product_tests(plan), {"test/component/skills/test_resources.py"})
+        for path in ("openmachine/skills/overview/SKILL.md", "openmachine/skills/bindings.yaml",
+                     "openmachine/skills/guidance.py"):
+            for full in (False, True):
+                with self.subTest(path=path, full=full), patch.object(runner, "changed_paths", return_value={path}):
+                    plan = runner.make_plan(ROOT, "HEAD", full=full)
+                    self.assertTrue(plan["runtime_required"])
+                    self.assertEqual(plan["environment"], "wheel")
+                    expected = {"test/component/skills/test_resources.py", "test/component/skills/test_packaging.py",
+                                "test/component/bootstrap/test_composition.py", "test/contract/mcp/server/test_catalog.py"}
+                    self.assertTrue(expected <= self.product_tests(plan))
+                    if not full:
+                        self.assertEqual(self.product_tests(plan), expected)
+
+    def test_unowned_canonical_skill_resources_are_rejected(self):
+        self.write("openmachine/skills/new-guide.md", "A new shipped guide.\n")
+        with self.assertRaisesRegex(ValueError, "without an explicit owner"):
+            runner.make_plan(self.root, self.base, full=True)
 
     def test_repository_fixture_change_does_not_require_product_installation(self):
         self.manifest["support"]["test/support/wire.py"] = ["test/repository/test_rules.py"]
@@ -296,6 +305,43 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
                 result = subprocess.run([sys.executable, "-I", "-c", code],
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class SkillPackageParity(unittest.TestCase):
+    def test_payload_parity_rejects_missing_changed_extra_and_retired_resources(self):
+        with tempfile.TemporaryDirectory(prefix="om-skill-package-") as directory:
+            root = Path(directory)
+            package = root / "openmachine/skills"
+            (package / "overview").mkdir(parents=True)
+            for path, content in (("__init__.py", b""), ("bindings.yaml", b"{}\n"),
+                                  ("overview/SKILL.md", b"Canonical guide.\n")):
+                (package / path).write_bytes(content)
+            expected = runner.skill_sources(root)
+            archive = root / "candidate.whl"
+
+            def write(payload):
+                with zipfile.ZipFile(archive, "w") as wheel:
+                    for path, content in payload.items():
+                        wheel.writestr(path, content)
+
+            write(expected)
+            runner.verify_skill_payloads(root, archive, archive)
+            malformed = [
+                {key: value for key, value in expected.items() if not key.endswith("SKILL.md")},
+                {**expected, "openmachine/skills/overview/SKILL.md": b"Stale guide.\n"},
+                {**expected, "openmachine/skills/extra.md": b"Unexpected guide.\n"},
+                {**expected, "openmachine/_skills/SKILL.md": b"Old duplicate.\n"},
+            ]
+            for payload in malformed:
+                with self.subTest(paths=list(payload)):
+                    write(payload)
+                    with self.assertRaisesRegex(ValueError, "Skill (package differs|resources)"):
+                        runner.verify_skill_payloads(root, archive)
+            write(expected)
+            with zipfile.ZipFile(archive, "a") as wheel, self.assertWarns(UserWarning):
+                wheel.writestr("openmachine/skills/bindings.yaml", b"{}\n")
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                runner.verify_skill_payloads(root, archive)
 
 
 if __name__ == "__main__":

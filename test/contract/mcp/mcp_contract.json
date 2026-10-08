@@ -87,6 +87,12 @@
       "approval": "Current maintainer request on 2026-10-08 authorizes on-demand worktree isolation in OM and a directly implemented PR.",
       "base_commit": "31c1da2d98c81fe081cab562547a829f6f01e4aa",
       "change": "Add explicit create_worktree, registered worktree discovery and optional per-call/TaskTarget worktree selection. Preserve prior defaults and omit empty selectors from canonical task history; real installed MCP discovery verifies all schemas and annotations."
+    },
+    {
+      "approval": "Current maintainer explicitly approved publishing Spec 105 and implementing the complete modular Skills change in one PR.",
+      "base_commit": "c6df296b34318ed2b27f5a6230819d9dfa195a2e",
+      "change": "Add only the optional bounded tool selector to inspect_skills. Existing argument order, defaults, tool names and annotations remain unchanged. Expectations are independently authored from Spec 105 and checked against real installed MCP discovery; descriptions add canonical exact guide routes.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/105"
     }
   ],
   "baseline": {
@@ -3166,6 +3172,12 @@
           "skill": {
             "default": "",
             "title": "Skill",
+            "type": "string"
+          },
+          "tool": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Tool",
             "type": "string"
           }
         },

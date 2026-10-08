@@ -19,7 +19,7 @@ root = "/absolute/path/to/your/project"
 # read_owners = []
 # write_owners = []
 # attribution = true # Default on; false stops new automatic Created/Posted footers.
-# Existing attribution is preserved on edits. See docs/operations.md#attribution.
+# Existing attribution is preserved on edits. See openmachine/skills/github/reference.md#attribution.
 
 # Optional explicit Skill sources; the empty default does not scan user accounts.
 [skills]
