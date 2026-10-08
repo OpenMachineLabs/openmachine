@@ -63,4 +63,3 @@ There is no automatic cleanup. Remove a tree through ordinary authorized native
 Git execution only after verifying no current users, task references, dirty files
 or unpreserved commits need it. Do not infer deletion permission from task completion,
 use force removal, or prune another task's work as part of creating this one.
-
