@@ -14,9 +14,13 @@ def github_scope(method: str, arguments: dict) -> dict:
     if kind in {"issue", "pull_request"}:
         if action == "create":
             scope.update(number=None, fields=["create"])
-            if kind == "issue" or arguments.get("head") and arguments.get("base"):
-                scope["creation_key"] = records.digest([kind] + (
-                    [arguments["head"], arguments["base"]] if kind == "pull_request" else []))
+            if kind == "issue":
+                scope["creation_key"] = records.digest([kind])
+            elif arguments.get("head") and arguments.get("base"):
+                owner, colon, branch = arguments["head"].partition(":")
+                if not colon:
+                    owner, branch = arguments["repository"].split("/", 1)[0], owner
+                scope["creation_key"] = records.digest([kind, owner.casefold(), branch, arguments["base"]])
         elif action == "update":
             scope["fields"] = sorted(key for key in ("title", "body", "state", "labels", "assignees")
                                      if arguments.get(key) is not None) or ["*"]

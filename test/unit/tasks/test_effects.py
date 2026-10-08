@@ -24,7 +24,7 @@ class EffectScopeTests(unittest.TestCase):
     def creation(self, kind="pull_request", head="topic", base="main"):
         operation = self.operation("github_" + kind)
         operation["locator"]["number"] = None
-        args = {"action": "create", "number": 0}
+        args = {"action": "create", "number": 0, "repository": "Owner/repo"}
         if kind == "pull_request":
             args.update(head=head, base=base)
         operation["effect_scope"] = effects.github_scope("github_" + kind, args)
@@ -48,6 +48,11 @@ class EffectScopeTests(unittest.TestCase):
         self.assertTrue(self.conflict(creating, duplicate))
         self.assertFalse(self.conflict(creating, self.creation(head="another")))
         self.assertFalse(self.conflict(creating, self.creation(base="release")))
+        self.assertTrue(self.conflict(creating, self.creation(head="Owner:topic")))
+        self.assertTrue(self.conflict(creating, self.creation(head="OWNER:topic")))
+        self.assertTrue(self.conflict(self.creation(head="Fork:topic"), self.creation(head="fork:topic")))
+        self.assertFalse(self.conflict(creating, self.creation(head="Fork:topic")))
+        self.assertFalse(self.conflict(creating, self.creation(head="Owner:Topic")))
         self.assertFalse(self.conflict(creating, self.creation(kind="issue")))
         self.assertTrue(self.conflict(self.creation(kind="issue"), self.creation(kind="issue")))
         self.assertNotIn("creation_key", self.operation("github_pull_request")["effect_scope"])

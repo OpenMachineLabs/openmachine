@@ -139,8 +139,9 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
     def test_unverified_pr_creation_excludes_duplicates_not_unrelated_branches(self):
         self.app.github_pull_request(action="create", repository="Owner/repo", title="Original", body="Original",
             head="topic", base="main", task_context=self.context_for(uuid.uuid4().hex))
-        self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
-                   title="Duplicate", body="Different title", head="topic", base="main")
+        for head in ("topic", "Owner:topic", "OWNER:topic"):
+            self.fault("task_effect_unresolved", self.app.github_pull_request, action="create", repository="Owner/repo",
+                       title="Duplicate", body="Different title", head=head, base="main")
         created = self.app.github_pull_request(action="create", repository="Owner/repo", title="Independent",
             body="Independent", head="another", base="main")
         self.assertEqual(created["status"], "write_outcome_unknown")
