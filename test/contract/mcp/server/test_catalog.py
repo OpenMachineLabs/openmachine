@@ -67,6 +67,9 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 skill = await session.call_tool("inspect_skills", {"action": "read"})
                 self.assertFalse(skill.is_error)
                 self.assertIn("Operate Open Machine", skill.structured_content["text"])
+                reference = await session.call_tool("inspect_skills", {"action": "read", "path": "worktrees.md"})
+                self.assertFalse(reference.is_error)
+                self.assertIn("Choose and reuse a worktree", reference.structured_content["text"])
 
     async def test_migration_protocols_preserve_all_four_catalogs(self):
         from importlib.metadata import version

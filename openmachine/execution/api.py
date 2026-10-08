@@ -159,7 +159,26 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
         if isinstance(error, OSError):
             raise Fault("execution_unavailable", "Read the original worktree execution; its outcome is unverified.",
                         effect="effect_unknown") from error
+        if error.effect is None:
+            raise Fault(error.code, str(error), error.evidence, effect="effect_unknown") from error
         raise
+
+
+def _creation_parent_roots(config: "Settings", machine: str, destination: Path) -> list[str]:
+    """Reserve existing non-Git grant scopes without serializing sibling creates."""
+    roots = set()
+    for item in config.workspaces.values():
+        if item.machine != machine:
+            continue
+        try:
+            root = Path(item.root).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if destination.is_relative_to(root):
+            roots.add(str(root))
+    if not roots:
+        raise Fault("path_denied", "The destination must stay inside an existing configured root.")
+    return sorted(roots)
 
 
 def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
@@ -188,6 +207,8 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                     raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
             if validate_new is not None:
                 validate_new()  # Only new admissions need controller reference validation.
+            if creation_plan is not None:
+                worktrees.ensure_local_objects(working)
             observed = context(working)
             if observed["git_status"] == "unavailable":
                 raise Fault("context_unavailable", "Git context could not be checked; do not bypass workspace coordination.")
@@ -200,6 +221,12 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                 observed.update(workspace_lock_root=creation_plan["destination"], creation_plan=creation_plan)
             key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
             owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            if creation_plan is not None:
+                for root in _creation_parent_roots(config, machine, Path(creation_plan["destination"])):
+                    digest = hashlib.sha256(root.encode()).hexdigest()
+                    # Block existing container writers from either side; distinct
+                    # creations can share this reservation for their own lifetime.
+                    owned.append(leases.enter_context(lease(locks / f"workspace-{digest}.lock", shared=True)))
             for name in request["resource_keys"]:
                 digest = hashlib.sha256(name.encode()).hexdigest()
                 owned.append(leases.enter_context(lease(locks / f"resource-{digest}.lock")))

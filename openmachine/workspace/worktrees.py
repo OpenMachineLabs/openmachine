@@ -47,7 +47,16 @@ def _root(config, machine: str, workspace: str) -> Path:
     return root
 
 
+def ensure_local_objects(root: Path) -> None:
+    """Reject automatic object retrieval before any Git object inspection."""
+    names, code, clipped = capture(root, ["config", "--null", "--name-only", "--get-regexp",
+        r"^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$"])
+    if clipped or code not in (0, 1) or names:
+        raise Fault("git_config_unavailable", "Partial or promisor repositories are unsupported for bounded worktree operations; no objects were fetched.")
+
+
 def _repository(root: Path) -> dict:
+    ensure_local_objects(root)
     observed = context(root)
     if observed["git_status"] != "observed" or observed["worktree"] != str(root):
         raise Fault("git_unavailable", "Worktree selection requires a configured Git top-level directory.")
@@ -89,6 +98,7 @@ def _authorized(config, machine: str, path: Path) -> bool:
 
 def _creation_destination(path: Path) -> Path:
     target = _canonical(path, missing=True)
+    ensure_local_objects(target.parent)
     parent = context(target.parent)
     if parent["git_status"] == "unavailable":
         raise Fault("context_unavailable", "The destination parent must be verifiably outside any Git worktree.")

@@ -388,7 +388,8 @@
       "boundary_tests": [],
       "sources": [
         "openmachine/skills.py",
-        "skills/openmachine/SKILL.md"
+        "skills/openmachine/SKILL.md",
+        "skills/openmachine/worktrees.md"
       ],
       "tests": [
         "test/component/skills/test_resources.py"

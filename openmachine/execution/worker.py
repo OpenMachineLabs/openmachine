@@ -153,6 +153,8 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
             if not any(line.endswith("/" + record["scope_unit"]) for line in groups):
                 raise Fault("scope_mismatch", "The remote worker did not enter its owned user scope.")
             scope_owned = True
+        if creation_plan is not None:
+            worktrees.ensure_local_objects(Path(request["cwd"]))
         record.update(status="preparing", context=record["context"] | context(Path(request["cwd"])))
         if not _publish(directory, record):
             raise Fault("receipt_io_failed", "Preparation could not be persisted.")

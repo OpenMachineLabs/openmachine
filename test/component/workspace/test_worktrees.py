@@ -3,6 +3,7 @@
 from copy import deepcopy
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import unittest
 import uuid
@@ -216,6 +217,64 @@ class WorktreeTests(WorkspaceFixture, unittest.TestCase):
         self.fault("git_config_unavailable", lambda: self.plan())
         self.assertFalse(self.target.exists())
         self.assertFalse(sentinel.exists())
+
+    def test_creation_rejects_each_automatic_fetch_marker_before_source_selection(self):
+        self.grant()
+        identity = context(self.work)["workspace_identity"]
+        for key, value in (("extensions.partialClone", "origin"), ("remote.fixture.promisor", "false"),
+                           ("remote.fixture.partialCloneFilter", "blob:none")):
+            with self.subTest(key=key):
+                self.git("config", key, value)
+                try:
+                    for selected in ("", str(self.work)):
+                        self.fault("git_config_unavailable", lambda selected=selected: worktrees.prepare_creation(
+                            self.config, "local", "project", str(self.target), "HEAD", "isolated-task", identity, selected))
+                    self.assertIs(worktrees.select(self.config, "local", "project"), self.config)
+                    self.assertFalse(self.target.exists())
+                finally:
+                    self.git("config", "--unset", key)
+
+    def test_missing_promisor_head_cannot_fetch_during_creation_or_explicit_selection(self):
+        self.grant()
+        self.git("config", "uploadpack.allowFilter", "true")
+        partial = self.root / "partial-clone"
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "clone", "--quiet", "--filter=blob:none",
+                        "--no-checkout", self.work.as_uri(), str(partial)], check=True, capture_output=True)
+        missing = subprocess.check_output(["git", "-C", str(partial), "rev-list", "--objects", "--missing=print", "HEAD"])
+        self.assertIn(b"?", missing, "The local fixture must retain a missing promised object.")
+        identity = context(partial)["workspace_identity"]
+        self.assertIsNotNone(identity)
+        sentinel = self.root / "upload-pack-ran"
+        upload_pack = self.root / "observe-upload-pack.sh"
+        upload_pack.write_text("#!/bin/sh\nprintf attempted > " + shlex.quote(str(sentinel)) +
+                               '\nexec git-upload-pack "$@"\n')
+        upload_pack.chmod(0o700)
+        subprocess.run(["git", "-C", str(partial), "config", "remote.origin.uploadpack", shlex.quote(str(upload_pack))],
+                       check=True, capture_output=True)
+        self.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                 "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--allow-empty", "-m", "Missing promised head")
+        # Updating this fixture ref directly avoids validating (and fetching) its
+        # missing commit before the operation under test.
+        (partial / ".git/refs/heads/main").write_text(self.git("rev-parse", "HEAD") + "\n")
+        objects = partial / ".git/objects"
+        before = {str(path.relative_to(objects)): path.read_bytes() for path in objects.rglob("*") if path.is_file()}
+        config = deepcopy(self.config)
+        config.workspaces["project"].root = str(partial)
+        for selected in ("", str(partial)):
+            with self.subTest(selected=bool(selected)):
+                self.fault("git_config_unavailable", lambda selected=selected: worktrees.prepare_creation(
+                    config, "local", "project", str(self.target), "HEAD", "isolated-task", identity, selected))
+        self.fault("git_config_unavailable", lambda: worktrees.resolve_root(config, "local", "project", str(partial)))
+        self.assertFalse(sentinel.exists())
+        self.assertFalse(self.target.exists())
+        self.assertEqual(before, {str(path.relative_to(objects)): path.read_bytes() for path in objects.rglob("*") if path.is_file()})
+
+    def test_prelaunch_rejects_new_promisor_configuration_without_invalidating_the_receipt(self):
+        plan = self.plan()
+        self.git("config", "remote.later.promisor", "true")
+        self.fault("git_config_unavailable", lambda: worktrees.validate_creation(plan))
+        worktrees.validate_creation_plan(plan)
+        self.assertFalse(self.target.exists())
 
     def test_retained_plan_cannot_replace_fixed_git_command_or_locks(self):
         plan = self.plan()

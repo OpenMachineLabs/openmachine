@@ -143,6 +143,20 @@ class WorktreeAdmissionTests(TaskFixture, unittest.TestCase):
             dispatch.assert_not_called()
         self.assertEqual(self.view()["record"]["operations"], [])
 
+    def test_creation_rejects_promisor_source_before_file_or_object_context(self):
+        self.accept_plan(tools=["read_task", "control_task", "create_worktree"])
+        arguments = self.create_arguments()
+        self.git("config", "remote.fixture.promisor", "true")
+        with self.creation_owner() as (dispatch, receipts), \
+                patch.object(self.app.machines, "read_workspace_file", side_effect=AssertionError("Unexpected file preflight.")) as file_read, \
+                patch("openmachine.workspace.worktrees.context", side_effect=AssertionError("Unexpected object inspection.")) as object_context:
+            self.fault("git_config_unavailable", self.app.create_worktree, **arguments)
+            file_read.assert_not_called()
+            object_context.assert_not_called()
+            dispatch.assert_not_called()
+        self.assertEqual(self.view()["record"]["operations"], [])
+        self.assertFalse((self.trees / "created").exists())
+
     def test_start_execution_authority_does_not_implicitly_grant_creation(self):
         self.accept_plan()
         with self.creation_owner() as (dispatch, receipts):
@@ -212,3 +226,20 @@ class WorktreeAdmissionTests(TaskFixture, unittest.TestCase):
             dispatch.assert_called_once()
             self.assertEqual(self.view()["record"]["operations"], [original])
         self.assertEqual(original["result"]["status"], "unknown")
+
+    def test_creation_error_code_without_owner_phase_cannot_prove_no_effect(self):
+        self.accept_plan(tools=["read_task", "control_task", "create_worktree"])
+        with self.creation_owner() as (dispatch, receipts):
+            # A post-dispatch read fault or SSH response may retain this code
+            # without a phase marker, while the original receipt is unavailable.
+            dispatch.side_effect = Fault("context_mismatch", "The original creation receipt could not be verified.")
+            arguments = self.create_arguments()
+            self.fault("context_mismatch", self.app.create_worktree, **arguments)
+            original = deepcopy(self.view()["record"]["operations"][0])
+            self.assertEqual(original["result"]["status"], "unknown")
+            self.assertEqual(original["result"]["effect"], "effect_unknown")
+            self.assertEqual(original["result"]["failure_code"], "context_mismatch")
+            self.fault("execution_not_found", self.app.create_worktree, **arguments)
+            self.fault("task_effect_unresolved", self.app.create_worktree, **self.create_arguments())
+            dispatch.assert_called_once()
+            self.assertEqual(self.view()["record"]["operations"], [original])

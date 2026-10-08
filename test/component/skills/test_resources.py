@@ -7,6 +7,24 @@ from test.support.continuity_cases import ContinuityCaseFixture
 
 
 class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
+    def test_bundled_worktree_reference_is_packaged_listed_and_readable(self):
+        main = skills.inspect(self.config, "read")
+        self.assertIn("(worktrees.md)", main["text"])
+        listed = skills.inspect(self.config, "files", limit=1)
+        self.assertEqual(listed["entries"][0]["name"], "SKILL.md")
+        next_page = skills.inspect(self.config, "files", offset=listed["next_offset"],
+                                  expected_snapshot=listed["snapshot"])
+        self.assertEqual(next_page["entries"], [{"name": "worktrees.md", "directory": False, "symlink": False}])
+        reference = skills.inspect(self.config, "read", path="worktrees.md")
+        self.assertIn("Choose and reuse a worktree", reference["text"])
+        self.assertIn("create_worktree", reference["text"])
+        self.assertEqual(reference["path"], "worktrees.md")
+        self.fault("source_changed", skills.inspect, self.config, "read", path="worktrees.md",
+                   expected_snapshot=main["snapshot"])
+        for path in ("../worktrees.md", "/worktrees.md", "missing.md"):
+            with self.subTest(path=path):
+                self.fault("path_denied", skills.inspect, self.config, "read", path=path)
+
     def test_skills_are_explicit_live_and_directory_links_are_deduplicated(self):
         self.assertEqual(self.config.skills.roots, [])
         _, selected = self.skill_fixture()

@@ -370,7 +370,10 @@ class TaskAdmission:
             except (Fault, OSError) as error:
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
                 owner_effect = getattr(error, "effect", None)
-                no_effect = owner_effect == "known_no_effect" or (owner_effect is None and method not in GITHUB_METHODS
+                # Creation errors may arrive after dispatch or without an SSH
+                # phase marker; their code alone cannot prove a pre-effect failure.
+                no_effect = owner_effect == "known_no_effect" or (owner_effect is None
+                    and method not in GITHUB_METHODS | {"create_worktree"}
                     and (code in NO_EFFECT or method in FILE_METHODS and code in PRE_EFFECT_REQUEST_FAILURES))
                 if method in GITHUB_METHODS:
                     # Preserve the owner's dispatch boundary. A matching current
@@ -445,8 +448,12 @@ class TaskAdmission:
                     arguments["workspace_name"] != name or arguments.get("worktree", "") != selection):
                 continue
             selected_arguments = {"worktree": selection} if selection else {}
-            observed = self.app.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1,
-                                                             line_count=1, **selected_arguments)["context"]
+            if method == "create_worktree":
+                observed = self.app.machines.inspect_workspace(machine, name, "worktrees",
+                                                                **selected_arguments)["context"]
+            else:
+                observed = self.app.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1,
+                                                                 line_count=1, **selected_arguments)["context"]
             if method == "start_execution":
                 cwd, root = PurePosixPath(arguments["cwd"]), PurePosixPath(observed["cwd"])
                 if ".." in cwd.parts or not cwd.is_relative_to(root):

@@ -130,10 +130,14 @@ destinations are preserved. The bounded
 command disables hooks, fsmonitor, submodule recursion, sparse checkout and up to
 eight configured external filter drivers. Conditional Git includes are rejected
 because a new tree can activate different executable filters. This operation does
-not change Git configuration to resolve that limitation.
+not change Git configuration to resolve that limitation. Bounded worktree operations
+also reject partial/promisor repositories before object inspection, preventing
+Git from implicitly fetching missing objects.
 
 The runtime locks the destination and a common-Git resource, so a busy source file
-lock does not prevent isolation. Ordinary commands and file writes retain their
+lock does not prevent isolation. It holds shared reservations on the destination's
+configured parent scopes, excluding their active writers while allowing separate
+creations to share a container. Ordinary commands and file writes retain their
 existing worktree locks and permissions. Source identity, destination parent and
 fixed base are rechecked before launch; success additionally verifies the registered
 result and returns `context.created_worktree`. This coordinates OM operations,
@@ -535,7 +539,9 @@ duplicated sources deduplicate by identity, not name, and resource links cannot
 escape the selected directory. Useful dotfiles remain visible; credentials are
 excluded. Discovery scans at most 2,000 entries and reports skipped/inaccessible
 sources. Follow hashes, snapshots and paging; incomplete discovery is not absence.
-An empty read selector returns the single bundled `SKILL.md`. User edits are live
+An empty read selector returns the bundled `SKILL.md`. Use `action=files` for its
+packaged resources and `action=read, path="worktrees.md"` for the detailed Worktree
+workflow. Only the listed bundled files are exposed. User edits are live
 on the next read; changing configured roots follows service restart. Instructions
 never confer grants, install tools or execute embedded resources automatically.
 

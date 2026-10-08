@@ -109,7 +109,7 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
             with self.assertRaises(Fault) as caught:
                 self.create(execution_id=identity, new_branch="different")
             self.assertEqual(caught.exception.code, "execution_conflict")
-            self.assertIsNone(caught.exception.effect)
+            self.assertEqual(caught.exception.effect, "effect_unknown")
         finally:
             moved.rename(self.work)
         self.assertEqual(self.receipt_path(identity).read_bytes(), original)
@@ -127,7 +127,7 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         try:
             with patch.object(api, "read_record", side_effect=disappear), self.assertRaises(Fault) as caught:
                 self.create(execution_id=result["execution_id"])
-            self.assertNotEqual(caught.exception.effect, "known_no_effect")
+            self.assertEqual(caught.exception.effect, "effect_unknown")
             self.assertTrue(Path(self.arguments()["destination"]).is_dir())
         finally:
             if preserved.exists():
@@ -141,12 +141,12 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         def disappear(*_args, **_kwargs):
             self.until(identity, lambda item: item["status"] in TERMINAL)
             directory.rename(preserved)
-            raise Fault("execution_not_found", "The dispatched receipt is no longer available.")
+            raise Fault("context_mismatch", "The dispatched receipt can no longer be verified.")
 
         try:
             with patch.object(api, "read", side_effect=disappear), self.assertRaises(Fault) as caught:
                 self.create(execution_id=identity)
-            self.assertNotEqual(caught.exception.effect, "known_no_effect")
+            self.assertEqual(caught.exception.effect, "effect_unknown")
             self.assertTrue(Path(self.arguments()["destination"]).is_dir())
         finally:
             if preserved.exists():
@@ -195,6 +195,43 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         self.assertEqual(rejected[0].effect, "known_no_effect")
         self.assertEqual(self.finish(accepted[0])["status"], "succeeded")
         self.assertEqual(self.git("worktree", "list", "--porcelain").count("worktree "), 2)
+
+    def test_destination_container_writer_blocks_creation_before_admission(self):
+        busy = self.start('import time; print("container-owned", flush=True); time.sleep(3)', cwd=self.destinations)
+        self.until(busy["execution_id"], lambda item: "container-owned" in item["output"])
+        identity = uuid.uuid4().hex
+        try:
+            with self.assertRaises(Fault) as caught:
+                self.create(execution_id=identity)
+            self.assertEqual(caught.exception.code, "resource_busy")
+            self.assertEqual(caught.exception.effect, "known_no_effect")
+            self.assertFalse(self.receipt_path(identity).parent.exists())
+            self.assertFalse(Path(self.arguments()["destination"]).exists())
+        finally:
+            execution.cancel(self.config, self.state, "local", busy["execution_id"])
+            self.finish(busy)
+
+    def test_creation_worker_holds_shared_container_reservation_until_cleanup(self):
+        gate = self.root / "release-creation"
+        setup = ('import time\nfrom pathlib import Path\noriginal=w.worktrees.validate_creation\n'
+                 'def delayed(plan):\n    original(plan)\n    deadline=time.monotonic()+5\n'
+                 f'    while not Path({str(gate)!r}).exists() and time.monotonic()<deadline:\n        time.sleep(0.01)\n'
+                 'w.worktrees.validate_creation=delayed')
+        with self.injected_worker(setup):
+            pending = self.create()
+        try:
+            self.until(pending["execution_id"], lambda item: item["status"] == "preparing")
+            with self.assertRaises(Fault) as caught:
+                self.start('print("must remain excluded")', cwd=self.destinations)
+            self.assertEqual(caught.exception.code, "resource_busy")
+            shared = self.finish(self.start('print("shared container observation")', cwd=self.destinations,
+                                            workspace_access="shared"))
+            self.assertEqual(shared["status"], "succeeded")
+        finally:
+            gate.write_text("release\n")
+        self.assertEqual(self.finish(pending)["status"], "succeeded")
+        self.assertEqual(self.finish(self.start('print("container released")', cwd=self.destinations))["status"],
+                         "succeeded")
 
     def test_prelaunch_destination_race_preserves_new_contents_and_original_failed_receipt(self):
         destination = Path(self.arguments()["destination"])

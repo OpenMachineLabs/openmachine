@@ -7,5 +7,4 @@ from .changes import apply_patch, bound_result, edit_text_file, read_change, wri
 from .git import MAX_CAPTURE
 from .inspect import MAX_MATCHES, MAX_SCAN_BYTES, inspect
 from .patch import LANGUAGE as PATCH_LANGUAGE, MAX_HUNKS, MAX_PATHS
-from .worktrees import (list_worktrees, normalize_creation, prepare_creation, resolve_root,
-                        select as select_worktree, validate_creation, validate_creation_plan, verify_creation)
+from .worktrees import select as select_worktree
