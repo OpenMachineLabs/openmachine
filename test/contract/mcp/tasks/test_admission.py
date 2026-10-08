@@ -1,8 +1,8 @@
 """contract mcp tasks test_admission behavior."""
 
+import sys
 import unittest
 import uuid
-import sys
 from mcp import Client
 from test.support.mcp import MCPFixture
 
@@ -36,6 +36,13 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         "task_context": {"task_id": task_id, "task_revision": claimed["revision"],
                             "plan_revision": 1, "continuation_epoch": claimed["control"]["epoch"],
                             "operation_id": execution_id}}
+                    rejected = await client.call_tool("start_execution", dict(arguments, cwd=str(self.root)))
+                    self.assertTrue(rejected.is_error)
+                    self.assertEqual(rejected.structured_content["error"]["code"], "task_scope_denied")
+                    self.assertEqual(rejected.structured_content["task_id"], task_id)
+                    self.assertIn("Keep task_context", rejected.structured_content["resume_prompt"])
+                    execution_id = uuid.uuid4().hex
+                    arguments["execution_id"] = arguments["task_context"]["operation_id"] = execution_id
                     started = await call("start_execution", arguments)
                     self.assertEqual(started["task_feedback"]["status"], "supervised")
                     original = await self.execution_until(client, {"machine": "desktop", "execution_id": execution_id},

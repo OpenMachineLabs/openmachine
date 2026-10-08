@@ -56,8 +56,9 @@ Independent calls remain supported. If work was meant to continue a structured
 task but feedback is unbound, preserve the receipt and reconcile the original
 task before the next effect. Do not rerun completed work to fill missing history,
 infer ownership from a shared directory, or attach a receipt retroactively.
-Honor a verified `foreground.stop_foreground` under the
-[bounded waiting rules](../tasks/continue.md#bounded-foreground-waiting).
+When continuing that task, honor its verified `foreground.stop_foreground`
+under the [bounded waiting rules](../tasks/continue.md#bounded-foreground-waiting).
+Inspecting another task's historical receipt does not stop unrelated work.
 
 ### Observation and terminal controls
 
