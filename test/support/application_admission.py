@@ -94,7 +94,10 @@ class ApplicationAdmissionFixture(object):
                 dispatch.side_effect = admitted
                 with patch.object(sys, "prefix", str(service_state._runtime(self.state, self.a))), \
                         patch.object(application, "lease", wraps=lease) as admission:
-                    self.assertEqual(operation(*arguments), {"dispatched": True})
+                    response = {"dispatched": True}
+                    if name == "start_execution":
+                        response["task_feedback"] = {"status": "unbound"}
+                    self.assertEqual(operation(*arguments), response)
                     admission.assert_called_once_with(self.state / "locks/lifecycle.lock", shared=True)
                 prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
                 self.assertEqual(dispatch.call_count, 1)

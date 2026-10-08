@@ -229,7 +229,8 @@ class Application:
                          expected_workspace_identity=expected_workspace_identity, task_id="",
                          **({"worktree": worktree} if worktree else {}))
         with self._admit():
-            return self.task_admission.run("create_worktree", arguments, task_context)
+            result = self.task_admission.run("create_worktree", arguments, task_context)
+        return self._execution_task_feedback(machine, result)
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
                    limit: int = 20, expected_generation: int = -1) -> dict:
@@ -403,14 +404,40 @@ class Application:
                         termination_grace_seconds: float | None = None, tty: bool = False,
                         terminal_size: dict | None = None, task_context: dict | None = None) -> dict:
         with self._admit():
-            return self.task_admission.run("start_execution", dict(machine=machine, execution_id=execution_id,
+            result = self.task_admission.run("start_execution", dict(machine=machine, execution_id=execution_id,
                 cwd=cwd, argv=argv, timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
                 workspace_access=workspace_access, resource_keys=resource_keys, task_id=task_id,
                 termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size), task_context)
+        return self._execution_task_feedback(machine, result)
+
+    def _execution_task_feedback(self, machine: str, result: dict) -> dict:
+        """Annotate an original receipt without changing its outcome or task history."""
+        identity = result.get("task_id", "")
+        feedback = {"status": "unbound"}
+        if identity:
+            feedback = {"status": "legacy", "task_id": identity}
+            try:
+                view = self._task_view(identity)
+                if "record" in view:
+                    target = self.config.machine(machine).ssh_identity or None
+                    if not any(item["id"] == result["execution_id"] and item["locator"]["kind"] == "execution"
+                               and item["locator"]["execution_id"] == result["execution_id"]
+                               and item["locator"]["target_identity"] == target
+                               for item in view["record"]["operations"]):
+                        raise Fault("task_operation_conflict", "The receipt is not an admitted execution of this task.")
+                    feedback = {"status": "supervised", "task_id": identity,
+                                "task_revision": view["record"]["revision"], "foreground": view["foreground"]}
+            except (Fault, OSError) as error:
+                feedback = {"status": "unavailable", "task_id": identity,
+                            "error_code": error.code if isinstance(error, Fault) else "source_unavailable",
+                            "resume_prompt": f"Read Open Machine task {identity} and this original execution before continuing. "
+                                             "Task status is unavailable; do not replay or reassign the execution."}
+        return {**result, "task_feedback": feedback}
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0, max_bytes: int = 65536,
                        wait_seconds: float = 0, *, cancelled: threading.Event | None = None) -> dict:
-        return self.machines.read_execution(machine, execution_id, offset, max_bytes, wait_seconds, cancelled=cancelled)
+        result = self.machines.read_execution(machine, execution_id, offset, max_bytes, wait_seconds, cancelled=cancelled)
+        return self._execution_task_feedback(machine, result)
 
     def list_executions(self, machine: str, cursor: str = "", limit: int = 20) -> dict:
         return self.machines.list_executions(machine, cursor, limit)
