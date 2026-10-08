@@ -2,20 +2,19 @@
 
 An open-source runtime for AI to operate your machines.
 
-## v0.2.13
+## v0.2.14
 
-This release adds bounded foreground task waits with explicit attention and resume
-guidance, plus native GitHub review-thread resolution and reopening. Scoped effect
-guards let independent work proceed while preserving original uncertain outcomes;
-PR creation conflicts now follow the source and target branches. Known pre-effect
-failures retain their evidence and bounded rate-limit hints without replaying work.
+This release adds on-demand Git worktree discovery, guarded creation and explicit
+selection for workspace tools. Worktree isolation remains a task decision; creation
+pins a local base commit and preserves the original checkout and dirty files.
+Original execution receipts retain creation outcomes without implicit retries.
 
-Managed updates can explicitly retire verified deferred pre-activation operations.
-Compatible activation no longer treats retained external uncertainty or proven
-no-effect history as active local work. Historical uncertain Chat preparations
-remain unchanged and permit activation only when their exact original executions
-are terminal with verified cleanup and no unresolved control. See the detailed
-[service safety checks](docs/service.md#exact-updates-and-compatible-rollback).
+Expired continuation claims now return `renewal_required` without forcing the
+current Chat turn to end. New effects remain blocked until the caller explicitly
+renews the same retained claim. Operating guidance covers lease checks around long
+external work and bounded recovery from observation-only revision conflicts.
+Pause, cancellation, authority expiry, uncertain work and foreground wait limits
+retain their existing stop behavior.
 
 Runtime GitHub requests now require native GitHub App connections. Historical
 `gh` task and connection records remain readable, but their retired backend cannot
@@ -23,11 +22,12 @@ execute or reconcile requests; new native work requires separate authorization.
 
 Enabled recovery remains bounded by readiness, original receipts, finite retries
 and pre-dispatch revalidation. Offline hosts, missing login, human decisions and
-uncertain or exhausted delivery remain stop conditions. State contract 16, SSH
-protocol 6 and execution format 5 are compatibility contracts, not release versions.
+uncertain or exhausted delivery remain stop conditions. State contract 17, SSH
+protocol 7 and worktree execution format 6 are compatibility contracts, not release
+versions; ordinary format-5 and historical execution receipts remain readable.
 See [task operations](docs/tasks.md) and [tool contracts](docs/operations.md).
 
-Version `0.2.13` is an initial-development release, not a stable 1.x API promise.
+Version `0.2.14` is an initial-development release, not a stable 1.x API promise.
 Build from its exact tag; later `main` commits may be unreleased. Inspect installed
 capabilities separately: a source checkout or release does not update an installation.
 
@@ -42,12 +42,12 @@ Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.13 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.14 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.13-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.14-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
