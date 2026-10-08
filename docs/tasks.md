@@ -131,6 +131,26 @@ the task authority expiry. Reading, observing and retrying the identical last
 update never extend a claim. Explicit renewals retain material history and remain
 subject to the record's finite capacity; they are not an unlimited keepalive.
 
+Before and after long external operations or CI waits, and immediately before
+submitting a review, merging or another critical effect, read the current task.
+Compare `control.owner.expires_at_ms` with the returned `observed_at_ms`, allowing
+time for the next bounded step and its readback. GitHub activity and progress
+updates do not extend the lease. During long external waits, recheck between
+bounded observations.
+
+If time may be insufficient, renew the same retained claim before expiry using
+the current task/plan revisions and epoch. Carry the returned record's context
+into subsequent effects. A stale control snapshot requires another task read and
+an eligibility check, not a retry with stale values. Renewal does not extend the
+task's authority or authorize a background keepalive.
+
+Check foreground state and renewal eligibility first. Honor
+`foreground.stop_foreground=true` and `task_attention_required` as the existing
+end-of-turn boundaries; do not renew or claim to suppress them. Stop intent,
+expired task authority, changed ownership and platform/provider refusals remain
+binding. The ability to renew an expired retained claim does not override these
+boundaries or permit replaying an original effect.
+
 Claim and renewal check the configured machine/workspace, current readable context,
 mutation grants and repository account authority, while allowing the accepted
 branch identity or HEAD to be historical. They acquire continuation ownership
