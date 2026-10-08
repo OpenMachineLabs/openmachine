@@ -21,8 +21,10 @@ unsafe paths and corrupt evidence fail closed.
 Managed service activation stops the controller before importing old task formats
 1–4 and Markdown. The migration validates all original bytes and IDs, commits
 normalized evidence, then archives the old directory under the stable lock before
-activating SQLite. The retained lock prevents old binaries from recreating their
-JSON store. Once fenced, a failed start retains the same candidate and activation
+activating SQLite. The import manifest uses POSIX path-string order, including
+prefix-related task IDs such as `task-one` and `task-one-c1`. A corrected candidate
+can reprepare an unfenced failed import from the still-authoritative legacy bytes.
+The retained lock prevents old binaries from recreating their JSON store. Once fenced, a failed start retains the same candidate and activation
 intent; continue that original maintenance operation instead of rolling back to
 an old writer. Original paused/unknown state never becomes execution permission.
 
