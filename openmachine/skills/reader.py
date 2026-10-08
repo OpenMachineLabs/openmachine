@@ -17,8 +17,11 @@ def bundled_root() -> Path:
 
 def resource(root: Path, path: str, *, bundled: bool = False) -> bytes:
     parts = file_parts(path)
-    with file_parent(root, parts) as parent:
-        raw, _ = file_bytes(parent, parts[-1])
+    try:
+        with file_parent(root, parts) as parent:
+            raw, _ = file_bytes(parent, parts[-1])
+    except FileNotFoundError:
+        raw = None
     if raw is None:
         if bundled:
             raise Fault("path_denied", "Select a bundled Skill resource from its files listing.")

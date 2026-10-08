@@ -38,7 +38,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         self.assertEqual(reference, skills.inspect(self.config, "read", skills.BUNDLED, "worktrees.md"))
         self.fault("source_changed", skills.inspect, self.config, "read", path="worktrees.md",
                    expected_snapshot=main["snapshot"])
-        for path in ("../worktrees.md", "/worktrees.md", "missing.md"):
+        for path in ("../worktrees.md", "/worktrees.md", "missing.md", "missing/file.md"):
             with self.subTest(path=path):
                 self.fault("path_denied", skills.inspect, self.config, "read", path=path)
 
@@ -78,6 +78,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         for path in ("../outside.md", ".env", "escape.md"):
             with self.subTest(path=path), self.assertRaises((Fault, OSError)):
                 skills.inspect(self.config, "read", source, path)
+        self.fault("skill_unavailable", skills.inspect, self.config, "read", source, "missing/file.md")
 
     def test_builtin_metadata_generates_catalog_and_default_navigation(self):
         listed = skills.inspect(self.config)
