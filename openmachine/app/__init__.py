@@ -237,7 +237,7 @@ class Application:
             if "record" not in view:
                 raise Fault("task_legacy", "Foreground waiting requires a structured task record.")
             record, foreground = view["record"], view["foreground"]
-            if foreground["status"] in {"attention_required", "ready", "terminal"}:
+            if foreground["status"] in {"attention_required", "renewal_required", "ready", "terminal"}:
                 wait_status = foreground["status"]
                 break
             if record["revision"] != expected_revision:

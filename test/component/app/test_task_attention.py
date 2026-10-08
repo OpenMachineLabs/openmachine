@@ -1,5 +1,6 @@
 """Foreground task attention and bounded wait behavior."""
 
+from copy import deepcopy
 import threading
 import unittest
 from unittest.mock import patch
@@ -46,10 +47,22 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         tasks.update(self.state, "structured-one", lambda value, now: value["control"].update(
             owner={"principal_ref": "native-uid:501", "claim_id": "d" * 32, "expires_at_ms": expiry},
             state="planned"))
-        lost = task_attention.project(tasks.read(self.state, "structured-one"),
+        expired = task_attention.project(tasks.read(self.state, "structured-one"),
                                       timestamp=expiry + 1)["foreground"]
-        self.assertEqual((lost["status"], lost["reason"]),
-                         ("attention_required", "continuation_lost"))
+        self.assertEqual((expired["status"], expired["reason"], expired["stop_foreground"]),
+                         ("renewal_required", "continuation_expired", False))
+
+    def test_stop_and_authority_expiry_are_not_recoverable_lease_expiry(self):
+        original = self.accept_plan()["record"]
+        for stop, reason in (("pause", "task_stopped"), ("cancel", "task_stopped"),
+                             ("none", "task_authority_expired")):
+            with self.subTest(stop=stop):
+                record = deepcopy(original)
+                record["control"]["stop_intent"] = stop
+                timestamp = record["contract"]["expires_at_ms"]
+                foreground = task_attention.project({"record": record}, timestamp=timestamp)["foreground"]
+                self.assertEqual((foreground["status"], foreground["reason"], foreground["stop_foreground"]),
+                                 ("attention_required", reason, True))
 
     def test_silent_verified_execution_keeps_running_but_blocked_observation_stops(self):
         self.accept_plan()
@@ -61,6 +74,11 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         running = task_attention.project({"record": record, "observations": [observing]},
                                          timestamp=timestamp)["foreground"]
         self.assertEqual((running["status"], running["stop_foreground"]), ("running", False))
+        timestamp = record["control"]["owner"]["expires_at_ms"] + 1
+        expired = task_attention.project({"record": record, "observations": [observing]},
+                                         timestamp=timestamp)["foreground"]
+        self.assertEqual((expired["status"], expired["stop_foreground"], expired["original_work_running"]),
+                         ("renewal_required", False, True))
         blocked = dict(observing, state="blocked", blocker="observer_heartbeat_stale")
         attention = task_attention.project({"record": record, "observations": [blocked]},
                                            timestamp=timestamp)["foreground"]
@@ -111,22 +129,44 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.assertGreater(changed["wait"]["current_revision"], current["revision"])
         self.assertFalse(changed["foreground"]["stop_foreground"])
 
-    def test_attention_blocks_new_effect_but_keeps_reads_available(self):
+    def test_expired_claim_requires_explicit_renewal_before_new_effect(self):
         accepted = self.accept_plan()["record"]
+        original_args = self.write_arguments(path="original.txt")
+        self.app.write_workspace_file(**original_args)
+        original = self.view()["record"]["operations"]
         expiry = accepted["updated_at_ms"]
         def expire(record, now):
             record["control"]["owner"]["expires_at_ms"] = expiry
             record["control"]["state"] = "planned"
             record["handoff"] = None
         tasks.update(self.state, "structured-one", expire)
+        before = self.path.read_bytes()
         arguments = self.write_arguments(path="blocked.txt")
         with self.assertRaises(Fault) as raised:
             self.app.write_workspace_file(**arguments)
-        self.assertEqual(raised.exception.code, "task_attention_required")
-        self.assertEqual(raised.exception.evidence["foreground"]["reason"], "continuation_lost")
+        self.assertEqual(raised.exception.code, "task_renewal_required")
+        self.assertEqual(raised.exception.effect, "known_no_effect")
+        self.assertFalse(raised.exception.evidence["foreground"]["stop_foreground"])
         self.assertFalse((self.work / "blocked.txt").exists())
-        self.assertEqual(self.view()["record"]["operations"], [])
-        self.assertEqual(self.app.read_task("structured-one")["foreground"]["reason"], "continuation_lost")
+        self.assertEqual(self.view()["record"]["operations"], original)
+        record = self.view()["record"]
+        with patch.object(self.app.task_observer, "wait") as wait:
+            ready = self.app.wait_task("structured-one", record["revision"], 30)
+        wait.assert_not_called()
+        self.assertEqual(ready["wait"]["status"], "renewal_required")
+        self.assertFalse(ready["foreground"]["stop_foreground"])
+        self.assertEqual(self.path.read_bytes(), before)
+        retained = self.app.write_workspace_file(**original_args)
+        self.assertFalse(retained["task_operation_replayed"])
+        self.assertEqual(self.view()["record"]["operations"], original)
+        renewed = self.control("renew", claim_id=record["control"]["owner"]["claim_id"])["record"]
+        self.assertEqual(renewed["control"]["epoch"], record["control"]["epoch"])
+        self.assertEqual(renewed["operations"], original)
+        self.fault("task_conflict", self.app.write_workspace_file, **arguments)
+        arguments["task_context"] = self.context_for(arguments["change_id"])
+        self.assertEqual(self.app.write_workspace_file(**arguments)["status"], "applied")
+        self.assertEqual((self.work / "blocked.txt").read_text(), "original\n")
+        self.assertEqual(len(self.view()["record"]["operations"]), 2)
 
 
 if __name__ == "__main__":
