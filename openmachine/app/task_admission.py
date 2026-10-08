@@ -13,7 +13,7 @@ from openmachine.tasks import effects, records, transitions
 from . import task_attention
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
-GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"}
+GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"}
 METHODS = FILE_METHODS | GITHUB_METHODS | {"start_execution", "control_execution", "cancel_execution"}
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
@@ -196,7 +196,8 @@ class TaskAdmission:
             number = arguments.get("comment_id" if kind == "comment" else "review_id" if kind == "review" else "number", 0)
             return {"kind": "github", "repository": arguments["repository"], "object_type": kind,
                     "number": number or None, "parent_number": arguments.get("number") or None if kind in {"comment", "review"} else None,
-                    "anchor": anchor}
+                    "anchor": anchor, **({"thread_id": arguments["thread_id"],
+                    "expected_head_sha": arguments["expected_head_sha"]} if kind == "review_thread" else {})}
         target = self.app.config.machine(arguments["machine"])
         if method in FILE_METHODS:
             if not arguments.get("change_id"):

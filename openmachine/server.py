@@ -144,7 +144,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         # The new contract forbids extra fields before SDK argument filtering.
         guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
-                   "github_pull_request", "github_comment", "github_review", "github_merge",
+                   "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
                    "cancel_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
@@ -520,6 +520,17 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                           expected_fields: dict | None = None) -> CallToolResult:
             """Submit an exact-HEAD review summary after reading the complete relevant diff and discussions, or update its body. Missing gate evidence rejects creation; known failures can still be reviewed. Self-review must use COMMENT and is not independent approval. On update, expected_fields contains only the observed body value; this is a sequential precondition, not atomic CAS. Uncertain writes require original-review readback, never blind retry."""
             return _reply(lambda: application.github_review(action, repository, body, number, review_id, expected_head_sha, event, _task_context(task_context), connection_id=connection_id, expected_fields=expected_fields))
+
+        @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
+        def github_review_thread(action: Literal["resolve", "unresolve"], repository: str,
+                                 number: Annotated[int, Field(ge=1)],
+                                 thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")],
+                                 expected_head_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")],
+                                 expected_base_sha: str = "",
+                                 task_context: tasks.TaskContext | None = None,
+                                 connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+            """Resolve or unresolve one verified review thread on the specified PR and exact HEAD. Verify its membership, state and account before and after mutation; never replay uncertain results."""
+            return _reply(lambda: application.github_review_thread(action, repository, number, thread_id, expected_head_sha, expected_base_sha, _task_context(task_context), connection_id=connection_id))
 
         @mcp.tool(annotations=GITHUB_WRITE, structured_output=False)
         def github_merge(repository: str, number: Annotated[int, Field(ge=1)],

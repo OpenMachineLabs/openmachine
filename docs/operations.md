@@ -28,6 +28,7 @@
 | `github_pull_request` | Conditional on `[github]`; create/update an enabled Pull Request or mark an observed Draft PR ready for review, with Created via attribution on eligible new artifacts. |
 | `github_comment` | Conditional on `[github]`; create/update a top-level Issue/PR comment with Posted via attribution on eligible new posts. |
 | `github_review` | Submit an exact-HEAD summary after complete gate observation, or update its body; self-review is COMMENT, not independent approval. |
+| `github_review_thread` | Resolve/unresolve one PR review thread by its observed GitHub thread ID, scoped to an exact PR HEAD with state readback. |
 | `github_merge` | Explicit current-HEAD merge after complete checks/discussions and clean native policy; verify the actual destination commit. |
 | `control_task` | Current task/plan revisions and epoch, original update ID and a typed claim/release/pause/resume/cancel/plan/decision/finish transition. |
 
@@ -363,6 +364,14 @@ operation does not atomically pin or approve a commit. A successful readback mus
 still match the observed HEAD, PR node and actor and show an open, non-Draft PR.
 Changed or unavailable readback remains unverified, even if the transition already
 occurred; reconcile the original destination without replaying the write.
+
+For a review conversation, first read `github_read(action="threads")` and inspect
+its finding. `github_review_thread(action="resolve"|"unresolve", repository,
+number, thread_id, expected_head_sha, expected_base_sha)` requires the PR to
+remain open, verifies thread membership and the opposite current state, then
+uses GitHub's specific GraphQL mutation. The resulting state, PR HEAD and actor
+are checked again. An uncertain response is not safe to retry automatically;
+original task evidence must be reconciled instead. This does not waive any review.
 
 Review complete evidence before an exact-head review and authorized merge.
 The gate allows at most 1,000 check/review/thread records per family, chooses latest

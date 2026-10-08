@@ -71,7 +71,8 @@ def reserve(record: dict, *, operation_limit: int = 62, new_work: bool = True,
                 # partial outcomes without persisting any synthetic evidence.
                 future["result"].update(failure_code="x" * 64, effect="effect_verified")
             if future["locator"]["kind"] == "github":
-                future["locator"] = dict(future["locator"], number=MAX_INTEGER, parent_number=MAX_INTEGER)
+                future["locator"] = dict(future["locator"], number=MAX_INTEGER,
+                    parent_number=None if future["locator"]["object_type"] == "review_thread" else MAX_INTEGER)
             if new_operation is not None and operation["id"] == new_operation["id"]:
                 try:
                     Operation.model_validate(future)

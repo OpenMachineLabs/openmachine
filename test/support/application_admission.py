@@ -64,6 +64,7 @@ class ApplicationAdmissionFixture(object):
             ("github_pull_request", pull, app.github, "pull_request"),
             ("github_comment", ("create", "example/project", "Body", 1, 0, ""), app.github, "comment"),
             ("github_review", ("create", "example/project", "Body", 1, 0, "f" * 40, "COMMENT"), app.github, "review"),
+            ("github_review_thread", ("resolve", "example/project", 1, "PRRT_fixture", "f" * 40, "e" * 40), app.github, "review_thread"),
             ("github_merge", ("example/project", 1, "f" * 40, "e" * 40, "squash", "Title", "Body"), app.github, "merge"),
         ]
         cases = [case for case in cases if case[0] in names]
