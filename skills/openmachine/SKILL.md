@@ -99,6 +99,15 @@ below; every continuation still reads and claims the original task safely.
    patches may create only explicitly requested destination parents.
 5. For structured work, hold a current explicit claim before new effects and pass the
    observed task/plan revisions, epoch and original operation ID in `task_context`.
+   Before and after long external operations or CI waits, and immediately before
+   submitting a review, merging or another critical effect, read the current task
+   and compare `control.owner.expires_at_ms` with `observed_at_ms`. Allow time for
+   the next bounded step and readback; renew the same retained claim if needed
+   using the latest task/plan revisions and epoch, then use the returned context.
+   Re-read and reassess a stale control snapshot. Recheck between bounded external
+   observations, without a background keepalive. Honor `foreground.stop_foreground`
+   and `task_attention_required` first; renewal never overrides those end-of-turn
+   boundaries, stop intent, authority expiry, changed ownership or platform refusal.
    Admission records the intent; do not also call `save_task`. Commands/file writes
    use their execution/change ID as operation ID; control/cancel use separate IDs.
    Legacy commands may retain `task_id` and a sanitized intent in their checkpoint.
