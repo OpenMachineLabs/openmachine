@@ -55,6 +55,12 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     paused = await call("read_execution", {"machine": "desktop", "execution_id": execution_id})
                     for key in ("status", "exit_code", "output", "created_at"):
                         self.assertEqual(paused[key], original[key])
+                    if paused["task_feedback"]["status"] == "unavailable":
+                        self.assertEqual(paused["task_feedback"]["error_code"], "resource_busy")
+                        paused = await self.execution_until(client,
+                            {"machine": "desktop", "execution_id": execution_id},
+                            lambda value: value["task_feedback"]["status"] != "unavailable")
+                    self.assertEqual(paused["task_feedback"]["status"], "supervised", paused["task_feedback"])
                     self.assertEqual(paused["task_feedback"]["foreground"]["reason"], "task_stopped")
 
                     independent = {key: value for key, value in arguments.items() if key != "task_context"}

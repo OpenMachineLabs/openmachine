@@ -110,8 +110,8 @@ change invalidates all retained stages; original operations stay historical but
 cannot serve as current-plan `record_decision` evidence. Follow the exact
 [plan revision rules](control.md#admission-and-outstanding-effects).
 
-A supervised operation rejected with `context_mismatch` or `task_scope_denied`
-includes its task ID, operation ID and a recovery prompt. The error and authority
+Task-scope preflight rejections with `context_mismatch` or `task_scope_denied`
+include the task ID, operation ID and a recovery prompt. The error and authority
 checks are unchanged. Inspect the actual intended target and reconcile the
 original task; do not omit `task_context`, choose another task by directory or
 create a replacement task to avoid the rejection. A prompt is guidance, not
