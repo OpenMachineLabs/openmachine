@@ -15,7 +15,7 @@ Choose a stable harmless file in a configured local workspace for readiness.
 Do not run manual `serve` on the same state as a managed service.
 
 ```sh
-.venv/bin/openmachine service install --wheel "$PWD/dist/openmachine-0.2.11-py3-none-any.whl" --requirements "$PWD/requirements.lock" --probe-workspace project --probe-path AGENTS.md
+.venv/bin/openmachine service install --wheel "$PWD/dist/openmachine-0.2.13-py3-none-any.whl" --requirements "$PWD/requirements.lock" --probe-workspace project --probe-path AGENTS.md
 .venv/bin/openmachine service start
 .venv/bin/openmachine service status
 .venv/bin/openmachine doctor --service
