@@ -120,12 +120,30 @@ into subsequent effects. A stale control snapshot requires another task read and
 an eligibility check, not a retry with stale values. Renewal does not extend the
 task's authority or authorize a background keepalive.
 
-Check foreground state and renewal eligibility first. Honor
-`foreground.stop_foreground=true` and `task_attention_required` as the existing
-end-of-turn boundaries; do not renew or claim to suppress them. Stop intent,
-expired task authority, changed ownership and platform/provider refusals remain
-binding. The ability to renew an expired retained claim does not override these
-boundaries or permit replaying an original effect.
+Lease expiry alone returns `foreground.status=renewal_required`, reason
+`continuation_expired` and `stop_foreground=false`. A new effect is still rejected
+with `task_renewal_required` and no admission. This permits one bounded recovery
+in the current Chat turn, not an automatic renewal or a new execution:
+
+1. Read the current task and original operation results. Match the caller's
+   retained claim ID, native principal, plan and epoch; do not adopt a different
+   claim merely because it uses the same native account. Reconcile unknown or
+   partial results under their existing effect exclusions.
+2. If authority and grants remain valid and no hard foreground stop applies,
+   explicitly renew that same claim with the observed revisions and a new update
+   ID. Use the returned context before new effects. A read grants no permission.
+3. Only a confirmed no-effect `task_conflict` caused by observation-only revision
+   drift permits one fresh read and one corrected renewal: the original claim,
+   plan, epoch and format-4 `control_revision` must still match. Never relax CAS.
+   A second conflict or another blocker ends this recovery attempt. A missing
+   reply instead requires original update readback, not a new renewal ID.
+
+Honor `foreground.stop_foreground=true` and `task_attention_required` as mandatory
+end-of-turn boundaries. Pause/cancel, expired task authority, changed ownership,
+unverified execution and platform/provider refusals are not lease recovery.
+Renewal never resets command timeouts, foreground wait limits or observation and
+Chat recovery budgets. Do not repeat renewal to hide an unchanged blocker or
+extend work without progress. Neither renewal nor reattachment replays an effect.
 
 Claim and renewal check the configured machine/workspace, current readable context,
 mutation grants and repository account authority, while allowing the accepted
@@ -264,16 +282,20 @@ IDs remain visible. Finish still blocks every original unresolved effect.
 
 `wait_task` performs one read-only foreground wait for a structured task. It accepts
 an observed task revision and waits at most 30 seconds for a task revision, ready
-handoff, terminal result or derived attention condition. Expiry returns
+handoff, required renewal, terminal result or derived attention condition.
+`renewal_required` returns immediately for the guarded same-turn flow above;
+it grants neither new effects nor a second wait for that operation in this turn. Wait expiry returns
 `foreground.status=wait_expired`, `stop_foreground=true`, whether original work is
 still running, and a bounded resume prompt. It never extends an execution timeout,
 claims continuation, dispatches another effect or cancels original work.
 
-Attention distinguishes an unconsumed handoff after its two-minute grace, an
-expired continuation without verified original work, and a pending execution whose
-observer is stopped, stale or blocked. Silent output alone is not failure: a
+Hard attention distinguishes a stopped task, expired task authority, an unconsumed
+handoff without a retained claim after its two-minute grace, and a pending execution
+whose observer is stopped, stale or blocked. Claim expiry alone requires renewal
+even when an original command remains active. Silent output alone is not failure: a
 verifiably observed command remains running until its own timeout or result. New
-business effects for an attention task fail with `task_attention_required`; passive
+business effects for an attention task fail with `task_attention_required` or the
+existing `task_stopped`/`task_authority_expired` code; passive
 reads and original-ID cancellation remain available. A later caller reads the same
 record and receipts, then claims an eligible handoff before new work.
 

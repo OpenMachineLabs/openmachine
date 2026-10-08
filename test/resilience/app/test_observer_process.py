@@ -5,11 +5,44 @@ import unittest
 from unittest.mock import patch
 import uuid
 from openmachine.tasks import store as task_store
+from openmachine import tasks
 from openmachine.bootstrap import create_application
 from test.support.task_observer_cases import TaskObserverCaseFixture
 
 
 class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
+    def test_expired_claim_preserves_live_command_and_renews_after_result(self):
+        args, started = self.owned()
+        observer = self.app.task_observer
+        with observer.running():
+            self.until(lambda: observer._snapshot["last"].get("structured-one"))
+            tasks.update(self.state, "structured-one", lambda value, now:
+                         value["control"]["owner"].update(expires_at_ms=now - 1))
+            expired = self.view()
+            owner = expired["record"]["control"]["owner"]
+            self.assertEqual(expired["foreground"]["status"], "renewal_required")
+            self.assertFalse(expired["foreground"]["stop_foreground"])
+            live = self.app.read_execution("desktop", args["execution_id"])
+            self.assertEqual(live["status"], "running")
+            self.assertIsNone(live["stop"]["reason"])
+            # The caller performs no renewal while the original worker finishes.
+            with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No background effects")):
+                (self.work / "release").touch()
+                self.until(lambda: (self.raw()["operations"][0]["result"] or {}).get("status") == "succeeded")
+                completed = self.view()
+                self.assertEqual(completed["record"]["control"]["owner"], owner)
+                self.assertEqual(completed["foreground"]["status"], "renewal_required")
+                self.assertFalse(completed["foreground"]["stop_foreground"])
+                renewed = self.control("renew", claim_id=owner["claim_id"])["record"]
+                self.assertEqual(renewed["operations"], completed["record"]["operations"])
+                self.assertEqual(renewed["control"]["epoch"], completed["record"]["control"]["epoch"])
+        self.assertEqual(self.wait(started)["status"], "succeeded")
+        retained = self.app.start_execution(**args)
+        self.assertFalse(retained["task_operation_replayed"])
+        self.assertEqual((self.work / "counter").read_text(), "1")
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+
     def test_absent_caller_result_and_handoff_publish_without_replaying_or_accepting(self):
         args, started = self.owned()
         archive = self.state / "events.json"

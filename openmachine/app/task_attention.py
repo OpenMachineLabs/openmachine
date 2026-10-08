@@ -7,7 +7,7 @@ from openmachine.tasks import records
 HANDOFF_GRACE_MS = 120000
 MAX_WAIT_SECONDS = 30.0
 WAIT_SLICE_SECONDS = 0.25
-ATTENTION_REASONS = ("continuation_lost", "execution_unverified", "handoff_unconsumed")
+ATTENTION_REASONS = ("task_stopped", "task_authority_expired", "execution_unverified", "handoff_unconsumed")
 _UNVERIFIED_RUNTIME = {"blocked", "stale", "stopped", "stopping"}
 
 
@@ -23,8 +23,9 @@ def _runtime(view: dict) -> dict | None:
 def _resume_prompt(record: dict) -> str:
     identity = record["task_id"]
     return (f"Continue Open Machine task {identity}. Read the current task, foreground state, handoff, "
-            "and original operation results first. If an eligible handoff exists, claim it before new effects; "
-            "otherwise report the blocker. Do not replay completed, failed, partial, or unknown operations.")
+            "and original operation results first. Renew only your retained claim when eligible, or claim an "
+            "eligible handoff under current guards before new effects. If neither is eligible, "
+            "report the blocker. Do not replay completed, failed, partial, or unknown operations.")
 
 
 def _operation(record: dict, pending: list[dict]) -> dict | None:
@@ -56,6 +57,15 @@ def _foreground(view: dict, timestamp: int) -> dict:
                 "age_ms": max(0, timestamp - terminal["finished_at_ms"]),
                 "original_work_running": False, "stop_foreground": True}
 
+    if control["stop_intent"] != "none" or timestamp >= record["contract"]["expires_at_ms"]:
+        stopped = control["stop_intent"] != "none"
+        since = record["updated_at_ms"] if stopped else record["contract"]["expires_at_ms"]
+        return {**common, "status": "attention_required",
+                "reason": "task_stopped" if stopped else "task_authority_expired",
+                "summary": "The task is paused or cancelling." if stopped else "The task authority expired.",
+                "since_ms": since, "age_ms": max(0, timestamp - since),
+                "original_work_running": None if pending else False, "stop_foreground": True}
+
     if local_pending and runtime_state in _UNVERIFIED_RUNTIME:
         since = (runtime or {}).get("observed_at_ms") or operation["admitted_at_ms"]
         blocker = (runtime or {}).get("blocker") or "original operation state is unverified"
@@ -66,12 +76,14 @@ def _foreground(view: dict, timestamp: int) -> dict:
 
     owner_expired = owner is not None and owner["expires_at_ms"] <= timestamp
     reliable_original = bool(local_pending) and runtime_state not in _UNVERIFIED_RUNTIME | {"idle", "retired"}
-    if owner_expired and not reliable_original:
+    if owner_expired:
         since = owner["expires_at_ms"]
-        return {**common, "status": "attention_required", "reason": "continuation_lost",
-                "summary": "The foreground continuation claim expired without verified ongoing original work.",
+        return {**common, "status": "renewal_required", "reason": "continuation_expired",
+                "summary": "The continuation claim expired. Read original results and explicitly renew only the same "
+                           "retained claim under current guards before new effects; this alone does not end the Chat turn.",
                 "since_ms": since, "age_ms": max(0, timestamp - since),
-                "original_work_running": False if not pending else None, "stop_foreground": True}
+                "original_work_running": True if reliable_original else None if pending else False,
+                "stop_foreground": False}
 
     owner_live = owner is not None and owner["expires_at_ms"] > timestamp
     if handoff is not None and not owner_live and timestamp - handoff["created_at_ms"] >= HANDOFF_GRACE_MS:

@@ -66,8 +66,11 @@ class TaskAdmission:
     def _require_foreground_clear(self, view: dict) -> None:
         projected = task_attention.project(self.app.task_observer.project(view))
         foreground = projected.get("foreground", {})
-        if foreground.get("status") == "attention_required":
-            raise Fault("task_attention_required", foreground["summary"],
+        if foreground.get("status") in {"attention_required", "renewal_required"}:
+            code = "task_renewal_required" if foreground["status"] == "renewal_required" else "task_attention_required"
+            if foreground["reason"] in {"task_stopped", "task_authority_expired"}:
+                code = foreground["reason"]
+            raise Fault(code, foreground["summary"],
                         {"task_id": projected["record"]["task_id"], "foreground": foreground},
                         effect="known_no_effect")
 
