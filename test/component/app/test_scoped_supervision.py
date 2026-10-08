@@ -19,7 +19,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
-            read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
+            read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}, "base": {"ref": "main"}}}),
             reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
         for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge"):
             setattr(self.provider, name, Mock(return_value={"status": "write_outcome_unknown"}))

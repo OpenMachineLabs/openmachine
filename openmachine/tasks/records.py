@@ -232,6 +232,13 @@ class ChangeLocator(Model):
     change_id: ID
 
 
+class GitHubMergeBinding(Model):
+    head_sha: Head
+    base_ref: Annotated[Text256, Field(min_length=1)]
+    commit_title_sha256: SHA | None
+    commit_message_sha256: SHA | None
+
+
 class GitHubLocator(Model):
     kind: Literal["github"]
     repository: Repository
@@ -242,9 +249,12 @@ class GitHubLocator(Model):
     thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")] | None = None
     expected_head_sha: Head | None = None
     connection: GitHubBinding | None = None
+    merge: GitHubMergeBinding | None = None
 
     @model_validator(mode="after")
-    def thread_binding(self):
+    def effect_binding(self):
+        if self.merge is not None and (self.object_type != "merge" or self.number is None or self.parent_number is not None):
+            raise ValueError("merge evidence requires an original pull request")
         if self.object_type == "review_thread":
             if self.thread_id is None or self.expected_head_sha is None or self.number is None or self.parent_number is not None:
                 raise ValueError("review thread locators require a PR number, thread ID and exact HEAD")
@@ -255,7 +265,7 @@ class GitHubLocator(Model):
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
-        for key in ("connection", "thread_id", "expected_head_sha"):
+        for key in ("connection", "thread_id", "expected_head_sha", "merge"):
             if value[key] is None:
                 value.pop(key)
         return value

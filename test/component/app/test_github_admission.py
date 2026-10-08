@@ -1,17 +1,83 @@
 """Tests for app behavior at the component layer."""
 
 from types import SimpleNamespace
+import copy
 import unittest
 from unittest.mock import Mock, patch
 import uuid
 from integrations import github
 from openmachine import tasks
+from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import records
 from test.support.tasks import TaskFixture
+from test.support.github_cases import BASE, HEAD, MERGE, REPO, ROOT, TREE, GitHubCaseFixture, settings
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_lost_merge_response_is_reconciled_after_restart_without_original_arguments(self):
+        fixture = GitHubCaseFixture()
+        fixture.setUp()
+        fixture.metadata["permissions"] = {"push": True}
+        self.config = self.config.model_copy(update={"github": settings().github})
+        self.app = create_application(self.config, self.state)
+        binding = {"connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}
+        identity = uuid.uuid4().hex
+        title, body = "Original merge title", "Original private merge body"
+
+        def response(method, endpoint, payload=None):
+            if method == "PUT":
+                retained = tasks.read(self.state, "structured-one", operation_ids=[identity])["record"]["operations"][0]
+                self.assertEqual(retained["locator"]["merge"]["head_sha"], HEAD)
+                self.assertEqual(retained["locator"]["merge"]["base_ref"], "main")
+                self.assertNotIn(body, records.canonical(retained).decode())
+                fixture.pr.update(state="closed", merged=True, merge_commit_sha=MERGE)
+                raise Fault("github_response_unknown", "Synthetic lost response after merge.")
+            values = {f"{ROOT}/commits/{MERGE}": {"sha": MERGE, "commit": {"message": title + "\n\n" + body}},
+                      f"{ROOT}/branches/main": {"commit": {"sha": TREE}},
+                      f"{ROOT}/compare/{MERGE}...{TREE}": {"status": "ahead", "merge_base_commit": {"sha": MERGE}}}
+            return copy.deepcopy(values[endpoint]) if endpoint in values else fixture.response(method, endpoint, payload)
+
+        transport = Mock(side_effect=response)
+        def connect(app):
+            app.github = github
+            app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: binding))
+            app.connections.request = Mock(return_value=transport)
+        connect(self.app)
+        self.request["contract"].update(targets=[], repositories=[REPO])
+        self.accept_plan(tools=["github_merge", "read_task", "control_task"])
+        arguments = dict(repository=REPO, number=2, expected_head_sha=HEAD, expected_base_sha=BASE,
+                         commit_title=title, commit_message=body, task_context=self.context_for(identity))
+        with patch.dict(fixture.pr, base={"sha": BASE}):
+            self.fault("github_evidence_unavailable", self.app.github_merge, **arguments)
+            self.assertEqual(self.view()["record"]["operations"], [])
+        result = self.app.github_merge(**arguments)
+        self.assertEqual(result["status"], "merge_outcome_unknown")
+        original = self.view()["record"]["operations"][0]
+        self.assertEqual(original["result"]["effect"], "effect_unknown")
+        self.app = create_application(self.config, self.state)
+        connect(self.app)
+        # Passive reads do not mutate history. Explicit acceptance observes the
+        # original destination; a fresh revision is then required for the decision.
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        decision = dict(stage_id="verify", outcome="accepted", evidence=[identity], reason="Verified original merge.")
+        with patch.dict(fixture.pr, state="open", merged=False):
+            self.fault("task_evidence_invalid", self.control, "record_decision", **decision)
+            self.fault("task_effect_unresolved", self.app.github_merge,
+                       **dict(arguments, task_context=self.context_for(uuid.uuid4().hex)))
+            self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.fault("task_conflict", self.control, "record_decision", **decision)
+        verified = self.view()["record"]["operations"][0]
+        self.assertEqual(verified["result"]["status"], "succeeded")
+        for key in ("id", "request_sha256", "locator", "admitted_at_ms"):
+            self.assertEqual(verified[key], original[key])
+        self.control("record_decision", **decision)
+        completed = self.control("finish", outcome="completed",
+            acceptance=[{"stage_id": "verify", "operation_id": identity}], limitations="Synthetic GitHub transport.")
+        self.assertEqual(completed["record"]["terminal"]["outcome"], "completed")
+        self.assertEqual(sum(call.args[0] == "PUT" for call in transport.call_args_list), 1)
+        self.fault("task_operation_conflict", self.app.github_merge, **dict(arguments, commit_message="Different intent"))
+
     def github_fixture(self):
         provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
