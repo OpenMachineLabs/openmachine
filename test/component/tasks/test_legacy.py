@@ -279,6 +279,23 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
             row = connection.execute("SELECT current,sha256 FROM tasks WHERE task_id='task-one'").fetchone()
             self.assertEqual(database.decode(row["current"], row["sha256"])["body"], "Original checkpoint.\n")
 
+    def test_migration_preserves_tasks_with_prefix_related_ids(self):
+        bodies = {"task-one": "Original checkpoint.\n", "task-one-c1": "Related checkpoint.\n"}
+        for identity, body in bodies.items():
+            write_legacy_checkpoint(self.state, identity, body)
+        root = self.state / "tasks"
+        original = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+        active = tasks.migrate(self.state)
+
+        self.assertEqual((active["kind"], active["active"], active["fenced"]), ("sqlite", True, True))
+        archive = next(self.state.glob("tasks-legacy-*"))
+        self.assertEqual({path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}, original)
+        for identity, body in bodies.items():
+            self.assertEqual(tasks.read(self.state, identity)["body"], body)
+        self.assertEqual(tasks.check_state(self.state)["task_records"], 2)
+        self.assertEqual(tasks.migrate(self.state), active)
+
     def test_migration_preserves_all_semantic_formats_and_large_paused_history(self):
         now = time.time_ns() // 1000000
         originals = {}

@@ -14,7 +14,7 @@ from .index import MAX_INDEX, private_path, read_bytes, read_checkpoint, read_in
 
 def _manifest(root: Path) -> list[tuple[str, str, int]]:
     result = []
-    for path in sorted(root.rglob("*")):
+    for path in sorted(root.rglob("*"), key=lambda path: path.as_posix()):
         if path.is_dir() and not path.is_symlink():
             private_path(path, directory=True)
             continue

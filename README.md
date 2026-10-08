@@ -4,7 +4,7 @@ An open-source runtime for an existing Chat to operate your machines. Chat contr
 the work; OM provides explicit workspace, command, task, GitHub and browser tools
 with bounded reads and original operation receipts.
 
-Version `0.2.15` is an initial-development release. Build from its exact tag;
+Version `0.2.16` is an initial-development release. Build from its exact tag;
 current `main` may contain unreleased work. A source checkout does not update an
 installed runtime or a client's tool catalog.
 
@@ -14,12 +14,12 @@ Use Python 3.12+ and Git on macOS or Linux. Build with the release's pinned
 requirements, then choose an existing disposable workspace:
 
 ```sh
-git clone --branch v0.2.15 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.16 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.15-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.16-py3-none-any.whl
 .venv/bin/openmachine init --workspace /absolute/path/to/disposable-project
 .venv/bin/openmachine doctor
 .venv/bin/openmachine serve
