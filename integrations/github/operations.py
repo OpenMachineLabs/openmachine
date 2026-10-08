@@ -710,6 +710,8 @@ def merge(settings: Settings, repository: str, number: int, expected_head_sha: s
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
         if method not in {"squash", "merge", "rebase"}:
             raise Fault("invalid_github_request", "Select squash, merge or rebase; queues and auto-merge are not implemented.")
+        if method == "rebase" and (commit_title or commit_message):
+            raise Fault("invalid_github_request", "Rebase preserves source commit messages; omit custom merge title and message.")
         gate = evidence.merge_gate(repository, number, expected_head_sha, expected_base_sha, transport=transport)
         if expected_base_ref and gate["base_ref"] != expected_base_ref:
             raise Fault("github_candidate_changed", "The original merge destination changed; no merge was submitted.")

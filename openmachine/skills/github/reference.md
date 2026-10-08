@@ -84,6 +84,9 @@ arguments. Later commits on the destination are allowed when the actual merge
 commit remains its ancestor. Changed HEAD, destination, supplied text or unavailable
 ancestry evidence leaves the original outcome unresolved. No request is resent.
 This verifies the requested destination outcome, not which client caused it.
+Rebase merges preserve individual source commit messages. Custom `commit_title`
+or `commit_message` with `method="rebase"` is rejected before mutation; omit them
+instead of expecting a generated merge message.
 
 Passive `read_task` and the local execution observer do not reconcile GitHub.
 An explicit `control_task` stage decision observes outstanding original results;

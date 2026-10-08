@@ -197,6 +197,14 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual((caught.exception.code, caught.exception.effect), ("github_candidate_changed", "known_no_effect"))
         self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
 
+    def test_rebase_rejects_custom_merge_text_without_dispatch(self):
+        for text in ({"commit_title": "Custom title"}, {"commit_message": "Custom body"},
+                     {"commit_title": "Custom title", "commit_message": "Custom body"}):
+            with self.subTest(text=text), self.assertRaises(Fault) as caught:
+                github.merge(settings(), REPO, 2, HEAD, method="rebase", **text, transport=self.transport)
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("invalid_github_request", "known_no_effect"))
+        self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
+
     def test_attribution_has_only_the_two_fixed_footer_literals(self):
         self.assertEqual(operations.ATTRIBUTION_URL, "https://github.com/OpenMachineLabs/openmachine")
         self.assertEqual(operations.CREATED_FOOTER, CREATED)
@@ -962,7 +970,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         def merging(method, endpoint, payload=None):
             if method == "PUT":
                 self.assertEqual(endpoint, f"{ROOT}/pulls/2/merge")
-                self.assertEqual(payload, {"sha": HEAD, "merge_method": "squash"})
+                self.assertEqual(payload, {"sha": HEAD, "merge_method": merge_method})
                 writes.append(payload)
                 self.pr.update(merged=True, merge_commit_sha=MERGE, state="closed")
                 return {"merged": True, "sha": MERGE}
@@ -973,11 +981,14 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             if endpoint == f"{ROOT}/compare/{MERGE}...{MERGE}":
                 return {"status": "identical", "merge_base_commit": {"sha": MERGE}}
             return self.response(method, endpoint, payload)
-        with patch.object(self, "transport", side_effect=merging):
-            result = github.merge(settings(), REPO, 2, HEAD, BASE, transport=self.transport)
-        self.assertEqual(result["status"], "merged_verified")
-        self.assertEqual(result["merge_commit_sha"], MERGE)
-        self.assertEqual(len(writes), 1)
+        for merge_method in ("squash", "merge", "rebase"):
+            self.pr.update(state="open", merged=False)
+            writes.clear()
+            with self.subTest(method=merge_method), patch.object(self, "transport", side_effect=merging):
+                result = github.merge(settings(), REPO, 2, HEAD, BASE, method=merge_method, transport=self.transport)
+            self.assertEqual(result["status"], "merged_verified")
+            self.assertEqual(result["merge_commit_sha"], MERGE)
+            self.assertEqual(len(writes), 1)
 
     def test_merge_unknown_and_unverified_are_not_success(self):
         for behavior, expected in (("timeout", "merge_outcome_unknown"), ("wrong_destination", "merge_unverified")):
