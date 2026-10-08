@@ -211,17 +211,29 @@ class ChangeLocator(Model):
 class GitHubLocator(Model):
     kind: Literal["github"]
     repository: Repository
-    object_type: Literal["issue", "pull_request", "comment", "review", "merge"]
+    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge"]
     number: Revision | None
     parent_number: Revision | None
     anchor: Annotated[Text128, Field(min_length=1)]
+    thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")] | None = None
+    expected_head_sha: Head | None = None
     connection: GitHubBinding | None = None
+
+    @model_validator(mode="after")
+    def thread_binding(self):
+        if self.object_type == "review_thread":
+            if self.thread_id is None or self.expected_head_sha is None or self.number is None or self.parent_number is not None:
+                raise ValueError("review thread locators require a PR number, thread ID and exact HEAD")
+        elif self.thread_id is not None or self.expected_head_sha is not None:
+            raise ValueError("thread-only fields cannot decorate other GitHub locators")
+        return self
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
-        if self.connection is None:
-            value.pop("connection", None)
+        for key in ("connection", "thread_id", "expected_head_sha"):
+            if value[key] is None:
+                value.pop(key)
         return value
 
 
@@ -229,7 +241,7 @@ class GitHubEffectScope(Model):
     resource: Literal["object", "comment", "review"]
     number: Revision | None
     parent_number: Revision | None
-    fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "create"]], Field(min_length=1, max_length=5)]
+    fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "threads", "create"]], Field(min_length=1, max_length=5)]
 
     @model_validator(mode="after")
     def canonical_fields(self):
@@ -524,7 +536,7 @@ class Renew(Model):
 class BindEffectScope(Model):
     action: Literal["bind_effect_scope"]
     operation_id: ID
-    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_merge"]
+    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"]
     arguments: dict[str, object]
     reason: Annotated[Text512, Field(min_length=1)]
 

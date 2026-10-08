@@ -21,6 +21,16 @@ class EffectScopeTests(unittest.TestCase):
         self.assertEqual(left, effects.conflicts({}, second, {}, first))
         return left
 
+    def test_review_thread_blocks_merge_but_not_unrelated_metadata(self):
+        thread = self.operation("github_review_thread", thread_id="PRRT_fixture")
+        self.assertEqual(thread["effect_scope"]["fields"], ["threads"])
+        self.assertTrue(self.conflict(thread, self.operation("github_merge")))
+        self.assertFalse(self.conflict(thread, self.operation("github_pull_request", labels=[])))
+        self.assertFalse(self.conflict(thread, self.operation("github_pull_request", body="unrelated")))
+        another = self.operation("github_merge")
+        another["locator"]["number"] = another["effect_scope"]["number"] = 8
+        self.assertFalse(self.conflict(thread, another))
+
     def test_shared_issue_metadata_alias_and_disjoint_fields(self):
         label = self.operation("github_pull_request", labels=[])
         for field, expected in (("labels", True), ("assignees", False), ("body", False),

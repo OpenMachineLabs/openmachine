@@ -21,14 +21,14 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
             reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
-        for name in ("issue", "pull_request", "comment", "review", "merge"):
+        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge"):
             setattr(self.provider, name, Mock(return_value={"status": "write_outcome_unknown"}))
         self.app.github = self.provider
         self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
             "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
         self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
-        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_merge",
+        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                                "write_workspace_file", "start_execution", "read_task", "control_task"])
 
     def update_pr(self, **values):
@@ -47,6 +47,25 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             update_id=uuid.uuid4().hex, transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
         return {"task_id": "second-task", "task_revision": claimed["revision"], "plan_revision": claimed["plan"]["revision"],
                 "continuation_epoch": claimed["control"]["epoch"], "operation_id": uuid.uuid4().hex}
+
+    def test_review_thread_unknown_keeps_precise_identity_and_blocks_merge(self):
+        op_id = uuid.uuid4().hex
+        args = dict(action="resolve", repository="Owner/repo", number=7,
+                    thread_id="PRRT_fixture", expected_head_sha="e" * 40,
+                    task_context=self.context_for(op_id))
+        self.assertEqual(self.app.github_review_thread(**args)["status"], "write_outcome_unknown")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        self.assertEqual(original["effect_scope"]["fields"], ["threads"])
+        self.assertEqual((original["locator"]["thread_id"], original["locator"]["expected_head_sha"]),
+                         ("PRRT_fixture", "e" * 40))
+        replay = self.app.github_review_thread(**args)
+        self.assertFalse(replay["task_operation_replayed"])
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+        self.assertEqual(original, self.view()["record"]["operations"][0])
+        self.fault("task_effect_unresolved", self.app.github_merge, repository="Owner/repo",
+                   number=7, expected_head_sha="e" * 40,
+                   task_context=self.context_for(uuid.uuid4().hex))
+        self.provider.merge.assert_not_called()
 
     def test_explicit_no_effect_dominates_matching_snapshot_and_retains_failure(self):
         self.provider.pull_request.side_effect = Fault("github_object_changed", "Preflight rejection.", effect="known_no_effect")
