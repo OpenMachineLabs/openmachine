@@ -115,6 +115,35 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         self.assertEqual(self.receipt_path(identity).read_bytes(), original)
         self.assertEqual(self.git("worktree", "list", "--porcelain").count("worktree "), 2)
 
+    def test_disabled_creation_allocates_nothing_but_original_id_remains_readable(self):
+        created = self.finish(self.create())
+        identity = created["execution_id"]
+        receipt = self.receipt_path(identity).read_bytes()
+        before_locks = {item.name for item in (self.state / "locks").iterdir()}
+        self.config.machines["local"].execution_enabled = False
+
+        for state in (self.root / "absent-state", self.state):
+            new_id = uuid.uuid4().hex
+            with self.assertRaises(Fault) as caught:
+                execution.create_worktree(self.config, state, "local", execution_id=new_id,
+                                          **self.arguments())
+            self.assertEqual((caught.exception.code, caught.exception.effect),
+                             ("execution_disabled", "known_no_effect"))
+            self.assertFalse((state / "executions" / new_id).exists())
+            self.assertFalse((state / "locks" / f"{new_id}.lock").exists())
+        self.assertFalse((self.root / "absent-state").exists())
+        self.assertEqual({item.name for item in (self.state / "locks").iterdir()}, before_locks)
+
+        with patch.object(api, "private_directory", side_effect=AssertionError("Original reads allocate no state")):
+            recovered = self.create(execution_id=identity)
+            with self.assertRaises(Fault) as changed:
+                self.create(execution_id=identity, new_branch="another-branch")
+        self.assertEqual((recovered["status"], recovered["execution_id"]), ("succeeded", identity))
+        self.assertEqual((changed.exception.code, changed.exception.effect),
+                         ("execution_conflict", "effect_unknown"))
+        self.assertEqual(self.receipt_path(identity).read_bytes(), receipt)
+        self.assertEqual({item.name for item in (self.state / "locks").iterdir()}, before_locks)
+
     def test_disappearing_original_receipt_is_never_reclassified_as_no_effect(self):
         result = self.finish(self.create())
         directory = self.receipt_path(result["execution_id"]).parent

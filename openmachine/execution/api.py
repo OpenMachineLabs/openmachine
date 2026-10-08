@@ -121,20 +121,31 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
             raise Fault("invalid_task_id", "Supply the original bounded task ID, or leave the reference empty.")
         intent = {"workspace": workspace_name, **worktrees.normalize_creation(
             destination, base_ref, new_branch, expected_workspace_identity, worktree)}
-        if config.machine(machine).transport != "local":
+        target = config.machine(machine)
+        if target.transport != "local":
             raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
+
+        def original_result():
+            original = read_record(directory)["request"]
+            if (original.get("worktree_creation") != intent or original["machine"] != machine
+                    or original.get("task_id", "") != task_id):
+                raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
+            # Resolve no mutable repository, ref or destination on an original-ID retry.
+            return read(config, state, machine, execution_id)
+
+        if not target.execution_enabled and (directory.exists() or directory.is_symlink()):
+            # Retained receipts remain readable without allocating new launch state.
+            before_admission = False
+            return original_result()
+        # Check the grant before creating any state or ID lock for a fresh request.
+        config.machine(machine, write=True)
         state = private_directory(state)
         private_directory(state / "executions")
         locks = private_directory(state / "locks")
         with lease(locks / f"{execution_id}.lock"):
             if directory.exists() or directory.is_symlink():
                 before_admission = False
-                original = read_record(directory)["request"]
-                if (original.get("worktree_creation") != intent or original["machine"] != machine
-                        or original.get("task_id", "") != task_id):
-                    raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
-                # Resolve no mutable repository, ref or destination on an original-ID retry.
-                return read(config, state, machine, execution_id)
+                return original_result()
             config.machine(machine, write=True)
             if validate_new is not None:
                 validate_new()
