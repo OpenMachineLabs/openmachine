@@ -146,7 +146,7 @@ class TaskAdmission:
         transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
         transitions.require_owner(record, self.principal, now_ms)
         if record["format"] < 3:
-            raise Fault("task_scope_denied", "Explicitly revise historical account and recovery authority before scope enrollment.")
+            raise Fault("task_scope_denied", "Explicitly revise historical account authority before scope enrollment.")
         operation_id = request["transition"]["operation_id"]
         if any(item["operation_id"] == operation_id for item in record.get("effect_scopes", [])):
             raise Fault("task_operation_conflict", "The original request already has immutable scope evidence.")

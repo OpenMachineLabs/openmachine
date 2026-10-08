@@ -53,7 +53,7 @@ it does not verify a ChatGPT user's identity or create a native grant. Current
 targets, exact workspace identity/HEAD and repository account grants are checked.
 A live foreign owner must release first. Cancellation and terminal history cannot
 be reopened; an expired paused task stays paused, with no new owner or handoff,
-until a separate explicit resume. Reauthorization preserves the recovery policy.
+until a separate explicit resume.
 
 Outstanding local and SSH effects, including partial results, block plan replacement. Unresolved
 GitHub effects may survive a revision only with unchanged repositories and original
@@ -70,10 +70,3 @@ a bounded immutable scope witness; it neither dispatches nor proves non-executio
 Missing proof leaves conservative uncertainty. Read the full
 [scope and historical-evidence rules](../github/reference.md#scoped-uncertainty-and-historical-evidence)
 before this transition or continuation around an unresolved GitHub effect.
-
-## Recovery policy changes
-
-The separate `configure_chat_recovery` tool accepts only explicit enable/disable
-intent, not a URL,
-replacement controller or retry-budget reset. Follow [Recovery](recovery.md) for
-its independent readiness, original identities and no-replay rules.

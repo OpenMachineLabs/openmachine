@@ -38,7 +38,7 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), **_chat_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
@@ -46,11 +46,6 @@ def check_state(config_path: Path, state: Path) -> dict:
 
 def _connections_state(state: Path) -> dict:
     from integrations.connections import check_state
-    return check_state(state)
-
-
-def _chat_recovery_state(state: Path) -> dict:
-    from integrations.chatgpt import check_state
     return check_state(state)
 
 
@@ -203,7 +198,6 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
 
 def activation_safe(state: Path) -> None:
     """Conservative product admission under lifecycle.lock; no receipt repair."""
-    settled_executions = set()
     root = state / "executions"
     if root.exists():
         for directory in root.iterdir():
@@ -212,8 +206,6 @@ def activation_safe(state: Path) -> None:
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
                 raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
-            if record.get("format_version", 1) >= 4 and record["cleanup"]["status"] == "verified":
-                settled_executions.add((record["request"]["machine"], directory.name))
     try:
         blocked = any(_task_operation_blocks_activation(operation) for operation in tasks.activation_blockers(state))
     except Fault as error:
@@ -223,17 +215,8 @@ def activation_safe(state: Path) -> None:
     # The owning readers validate their records before classifying in-flight
     # writes or authentication. No service-owned copy of either schema exists.
     from integrations.connections import check_state as connections_state
-    from integrations.chatgpt import bindings
     workspace.check_change_state(state, require_idle=True)
     connections_state(state, require_idle=True)
-    # A terminal preparation can retain an unknown browser outcome after native
-    # cleanup. Compatible activation preserves that uncertainty and never retries it.
-    if any((item.preparation is not None and (item.preparation.status == "reserved"
-                or item.preparation.status == "outcome_unknown"
-                and (item.machine, item.preparation.execution_id) not in settled_executions))
-           or (item.delivery is not None and item.delivery.status in {"reserved", "outcome_unknown"}
-               and item.delivery.continuation_at_ms is None) for item in bindings(state)):
-        raise Fault("activation_deferred", "An original Chat recovery delivery is active or unresolved; preserve its delivery and budget.")
 
 
 def _change_support(value: dict) -> set[int]:
@@ -281,12 +264,6 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
         if connections["connections_present"] and (value["state_contract"] < required_connection_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")
-        chat_recovery = _chat_recovery_state(state)
-        required_recovery_contract = (15 if chat_recovery["chat_recovery_format"] >= 3 else
-                                      13 if chat_recovery["chat_recovery_format"] == 2 else 12)
-        if chat_recovery["chat_recovery_present"] and (value["state_contract"] < required_recovery_contract or any(
-                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in chat_recovery.items())):
-            raise ValueError("candidate ignores retained Chat recovery authority or delivery identity")
         events = _events_state(state)
         if events["events_present"] and (value["state_contract"] < 9 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):

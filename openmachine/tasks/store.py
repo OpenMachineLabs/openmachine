@@ -448,17 +448,11 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             value["last_update"] = last_update
         if value == original:
             return {**view, "status": "unchanged"}
-        if value["format"] != original["format"] and not (
-                original["format"] == 3 and value["format"] == 4 and upgrade
-                or original["format"] < 3 and value["format"] in {3, 4}
-                and value["contract"].get("recovery_policy") in {"task_chat", "disabled"}
-                and value["plan"]["revision"] == original["plan"]["revision"] + 1):
-            raise Fault("task_identity_conflict", "Only explicit plan enrollment changes historical Task semantics.")
+        if value["format"] != original["format"] and not (original["format"] == 3 and value["format"] == 4 and upgrade):
+            raise Fault("task_identity_conflict", "Unsupported Task record format transition.")
         for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
             if value[key] != original[key]:
                 raise Fault("task_identity_conflict", "Original task identity and initiating request are immutable.")
-        if original.get("chat_registration") is not None and value.get("chat_registration") != original["chat_registration"]:
-            raise Fault("task_identity_conflict", "Retain the original recovery registration.")
         value.update(revision=original["revision"] + 1, updated_at_ms=now)
         if value["format"] >= 4:
             material = not observation or any(value[key] != original[key] for key in ("contract", "plan", "terminal"))

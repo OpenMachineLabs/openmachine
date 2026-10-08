@@ -17,5 +17,4 @@ login, account switching and permission confirmation are separate authority.
 Use `read_codex_task` to inspect the actual report, final native page evidence and
 pending action before accepting a stage. Exit zero alone is insufficient. Missing
 bridge/login, confirmation or uncertain side effects remain blockers. Cancellation
-is not rollback. Task-owned automatic continuation has its separate explicit
-[recovery guide](../tasks/recovery.md); a generic browser subtask does not wake Chat.
+is not rollback. A generic browser subtask does not wake Chat.

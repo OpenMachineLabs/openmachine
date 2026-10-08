@@ -48,17 +48,15 @@ admission and conflict indexes before domain dispatch. A lost acknowledgement is
 uncertain: retain and read the original task/update/operation IDs. Never manufacture
 a replacement task or erase history to obtain capacity. No arbitrary overwrite API.
 
-## Choose targets and recovery policy
+## Choose targets
 
 Read [worktree selection](../workspace/worktrees.md) before allocating or selecting
 an optional worktree. Read [GitHub account binding](../github/connections.md#github-account-binding)
 for native connection identity. These records identify scope; they do not reserve
 a checkout for the task's lifetime or grant new permissions.
 
-New tasks default to `recovery_policy: disabled`. Select `task_chat` only for the
-user's explicit recovery intent; task length is not consent. Read the
-[recovery guide](recovery.md) before enabling it. Retain necessary instructions and
-readable inputs within the bounded contract: hashes cannot restore missing attachments.
+Retain necessary instructions and readable inputs within the bounded contract;
+hashes cannot restore missing attachments.
 
 If required structured tools are absent, do not install them, claim legacy coverage,
 or begin required supervised work without a valid record. Correct rejected contract

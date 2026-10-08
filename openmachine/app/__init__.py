@@ -17,7 +17,6 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
 from . import task_attention
-from .chat_recovery import ChatRecovery
 from .machines import Machines
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
@@ -31,19 +30,17 @@ MAX_TASK_RESULT_BYTES = 512 * 1024
 
 class Application:
     def __init__(self, config: Settings, state: Path, machines: Machines, github: ModuleType | None,
-                 connections=None, codex=None, chatgpt=None):
+                 connections=None, codex=None):
         self.config = config
         self.state = state
         self.machines = machines
         self.github = github
         self.connections = connections
         self.codex = codex
-        self.chatgpt = chatgpt
         if connections is not None:
             connections.admit = self._admit
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
-        self.chat_recovery = ChatRecovery(self) if chatgpt is not None else None
 
     @contextmanager
     def _admit(self) -> Iterator[None]:
@@ -128,7 +125,6 @@ class Application:
                             "native_login": bool(self.config.github and self.connections.native.CLIENT_ID),
                             "login_cancellation": True},
             "codex": self.codex.capabilities(self.config) if self.codex is not None else None,
-            "chat_recovery": self.chat_recovery.capabilities() if self.chat_recovery is not None else None,
             "transport": "private_unix_socket",
             "execution": {"receipt_format": execution.FORMAT, "worktree_receipt_format": execution.CREATION_FORMAT,
                           "io_modes": ["pipe", "pty"], "controls": sorted(execution.CONTROL_ACTIONS),
@@ -246,7 +242,7 @@ class Application:
         view = self.task_observer.project(tasks.read(self.state, task_id, operation_ids=operation_ids))
         return task_attention.project(view, wait_expired=wait_expired)
 
-    def read_task(self, task_id: str, preparation_id: str | None = None, *,
+    def read_task(self, task_id: str, *,
                   section: Literal["summary", "operations", "history", "evidence"] = "summary",
                   cursor: str = "", limit: int = 20, operation_id: str = "",
                   stage_id: str = "", decision_version: int = 0) -> dict:
@@ -257,21 +253,13 @@ class Application:
                 or bool(stage_id) != bool(decision_version)
                 or (stage_id and (section != "evidence" or cursor or operation_id))):
             raise Fault("invalid_task_read", "Exact stage evidence requires its stage ID and decision version in the evidence section.")
-        if preparation_id is not None and (section != "summary" or cursor or operation_id or stage_id):
-            raise Fault("invalid_task_read", "A receiver preparation read requires the current summary.")
         view = self._task_view(task_id)
-        if preparation_id is not None:
-            if self.chat_recovery is None:
-                raise Fault("chat_recovery_unavailable", "No receiver preparation is available.")
-            return self.chat_recovery.preparation_read(view, preparation_id)
-        if self.chat_recovery is not None:
-            view = self.chat_recovery.project(view)
         if section == "summary" and not cursor and not operation_id:
             return tasks.present(view)
         page = tasks.public_read(self.state, task_id, section=section, cursor=cursor, limit=limit,
             operation_id=operation_id, stage_id=stage_id, decision_version=decision_version,
             expected_revision=view.get("record", {}).get("revision", -1))
-        return {**page, **{key: view[key] for key in ("foreground", "observations", "support", "chat_recovery") if key in view}}
+        return {**page, **{key: view[key] for key in ("foreground", "observations", "support") if key in view}}
 
     def wait_task(self, task_id: str, expected_revision: int, wait_seconds: float = MAX_TASK_WAIT,
                   *, cancelled: threading.Event | None = None) -> dict:
@@ -304,7 +292,7 @@ class Application:
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         view = {**view, "wait": {"status": wait_status, "expected_revision": expected_revision,
             "current_revision": view["record"]["revision"], "elapsed_ms": elapsed}}
-        return tasks.present(self.chat_recovery.project(view) if self.chat_recovery is not None else view)
+        return tasks.present(view)
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
                   anchors: list[str] | None = None) -> dict:
@@ -318,17 +306,8 @@ class Application:
             update_id=update_id, transition=transition))
         with self._admit():
             view = self.task_admission.control(request)
-        if self.chat_recovery is not None:
-            view = (self.chat_recovery.created(view) if transition["action"] == "revise_plan"
-                    else self.chat_recovery.project(view))
         self.task_observer.notify()
         return tasks.present(view)
-
-    def configure_chat_recovery(self, task_id: str, update_id: str,
-                                expected_revision: int, change: dict) -> dict:
-        if self.chat_recovery is None:
-            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
-        return self.chat_recovery.configure(task_id, update_id, expected_revision, change)
 
     def _validate_task_scope(self, request: dict, *, bind_new: bool = False, check_head: bool = True,
                              check_identity: bool = True) -> None:
@@ -336,7 +315,7 @@ class Application:
         tools = set(contract["tools"])
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
-                 "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "configure_chat_recovery", "start_execution", "read_execution",
+                 "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
@@ -390,8 +369,6 @@ class Application:
         with self._admit():
             view = tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
                                 validate_new=lambda request: self._validate_task_scope(request, bind_new=True))
-        if self.chat_recovery is not None:
-            view = self.chat_recovery.created(view)
         self.task_observer.notify()
         return tasks.present(view)
 
@@ -411,16 +388,6 @@ class Application:
         if self.codex is None:
             raise Fault("codex_unavailable", "The Codex adapter is not assembled in this runtime.")
         return self.codex.read(self.config, self.state, self.read_execution, machine, execution_id)
-
-    def _start_chat_recovery_delivery(self, task_id: str, recovery_id: str, execution_id: str) -> dict:
-        if self.chat_recovery is None:
-            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
-        return self.chat_recovery.start_delivery(task_id, recovery_id, execution_id)
-
-    def _read_chat_recovery_delivery(self, task_id: str) -> dict:
-        if self.chat_recovery is None:
-            raise Fault("chat_recovery_unavailable", "The Chat recovery adapter is not assembled in this runtime.")
-        return self.chat_recovery.read_delivery(task_id)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
                         timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",

@@ -67,18 +67,6 @@
       "change": "Add only start_codex_task/read_codex_task with browser-only scope. Expected fields are authored from the approved design; existing tool schemas and annotations are unchanged."
     },
     {
-      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/68#issuecomment-5970576144",
-      "base_commit": "e26c636122caceb19e8b91677663c3d0dbf40d3d",
-      "change": "PR 1 adds only configure_chat_recovery as the public default-on same-Chat binding/disable operation. Automatic scheduling and a public delivery/debug tool remain absent; unrelated schemas and annotations stay unchanged. Expectations are authored from the approved contract and checked against installed discovery.",
-      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/68"
-    },
-    {
-      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/76#issuecomment-5983667384",
-      "base_commit": "3b0039b48d6151d7e2e21db6b2fca6bdb9c1a6be",
-      "change": "Spec 76 adds optional task recovery_policy and correlated read_task preparation_id, replaces the URL-binding recovery input with an action-only override and marks its preparation scheduling as open-world. Expectations are authored from the approved contract; tool names and all unrelated schemas/annotations stay exact.",
-      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/76"
-    },
-    {
       "approval": "Current maintainer explicitly authorizes the 2026-10-07 supervision friction audit, scoped fixes, reviewed candidate bootstrap if necessary, and normal protected merges.",
       "base_commit": "340fecf63fa678a12ad3bc6b566fd03f8a1fcb3b",
       "change": "Add optional expected_fields to four GitHub writers and explicit renew/bind_effect_scope task controls. Expectations are independently authored from the reviewed interface; all existing tools, arguments, annotations and baseline provenance remain exact."
@@ -99,6 +87,12 @@
       "base_commit": "07d242782c48735f7e6cc09a1e47002bdd3e1269",
       "change": "Task ledger read schema v2 adds section, bounded cursor and limit, exact original operation_id, and paired stage_id/decision_version evidence lookup to read_task. Existing tool names, required inputs and annotations remain unchanged. Expectations are authored from the approved contract, not copied from candidate discovery.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/108"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/114#classification",
+      "base_commit": "8b282087c38fb16496638ba7dfaf2615fecf20c0",
+      "change": "Remove the Chat recovery MCP operation, creation policy and receiver-read input. Preserve all unrelated tool contracts.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/114"
     }
   ],
   "baseline": {
@@ -376,69 +370,6 @@
           "login_id"
         ],
         "title": "cancel_integration_loginArguments",
-        "type": "object"
-      }
-    },
-    "configure_chat_recovery": {
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "inputSchema": {
-        "$defs": {
-          "RecoveryChange": {
-            "additionalProperties": false,
-            "properties": {
-              "action": {
-                "enum": [
-                  "enable",
-                  "disable"
-                ],
-                "title": "Action",
-                "type": "string"
-              }
-            },
-            "required": [
-              "action"
-            ],
-            "title": "RecoveryChange",
-            "type": "object"
-          }
-        },
-        "properties": {
-          "change": {
-            "$ref": "#/$defs/RecoveryChange"
-          },
-          "expected_revision": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Expected Revision",
-            "type": "integer"
-          },
-          "task_id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
-            "title": "Task Id",
-            "type": "string"
-          },
-          "update_id": {
-            "maxLength": 32,
-            "minLength": 32,
-            "pattern": "^[0-9a-f]{32}$",
-            "title": "Update Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task_id",
-          "update_id",
-          "expected_revision",
-          "change"
-        ],
-        "title": "configure_chat_recoveryArguments",
         "type": "object"
       }
     },
@@ -791,22 +722,6 @@
                 "maxLength": 1024,
                 "title": "Objective",
                 "type": "string"
-              },
-              "recovery_policy": {
-                "anyOf": [
-                  {
-                    "enum": [
-                      "task_chat",
-                      "disabled"
-                    ],
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Recovery Policy"
               },
               "repositories": {
                 "items": {
@@ -1374,22 +1289,6 @@
                 "maxLength": 1024,
                 "title": "Objective",
                 "type": "string"
-              },
-              "recovery_policy": {
-                "anyOf": [
-                  {
-                    "enum": [
-                      "task_chat",
-                      "disabled"
-                    ],
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "default": null,
-                "title": "Recovery Policy"
               },
               "repositories": {
                 "items": {
@@ -3463,19 +3362,6 @@
             "pattern": "^(?:[0-9a-f]{32})?$",
             "title": "Operation Id",
             "type": "string"
-          },
-          "preparation_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{32}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Preparation Id"
           },
           "section": {
             "default": "summary",

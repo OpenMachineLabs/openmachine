@@ -312,8 +312,6 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
             if version < 4:
                 record.pop("control_revision")
                 record.pop("effect_scopes")
-            if version < 3:
-                record["contract"].pop("recovery_policy")
             if version == 4:
                 record.update(revision=217, control_revision=217, handoff=None)
                 record["control"].update(state="paused", stop_intent="pause", current_stage_id="verify")

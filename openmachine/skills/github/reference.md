@@ -171,10 +171,10 @@ installation authority, then refresh the client's tool catalog. Do not drop
 
 Read the original task and destination before continuing. Resume only under
 existing user authority, claim the same task, and retain its original operation ID.
-For format 3, a valid control upgrades the record without replacing its operations.
-Older native-account records require an explicit plan revision retaining their
-bindings and declaring a recovery policy before scope enrollment; retired gh history cannot
-be transferred to a native account. Supply the exact complete normalized original
+A format-3 record may upgrade through an authorized control without replacing its
+original operations. Format-1/2 records cannot enroll historical effect scope;
+retain their original receipts and uncertainties. Retired gh history cannot be
+transferred to a native account. Supply the exact complete normalized original
 arguments to `bind_effect_scope`; if they are unavailable, retain the conservative
 scope. To reconcile the outcome, call the original GitHub method with those same
 arguments and operation ID: this path reads the destination and never dispatches

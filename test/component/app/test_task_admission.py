@@ -321,7 +321,6 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             self.assertEqual(revised["operations"], original["operations"])
             self.assertGreater(revised["_facts"]["history_count"], original["_facts"]["history_count"])
             self.assertEqual(revised["format"], original["format"])
-            self.assertEqual(revised["contract"]["recovery_policy"], "disabled")
             self.assertIsNone(revised["control"]["owner"])
             self.control("claim", handoff_id=revised["handoff"]["id"])
             done = self.control("finish", **finish)["record"]
@@ -329,7 +328,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(done["operations"], original["operations"])
         self.assertEqual((self.work / "result.txt").read_text(), "original\n")
 
-    def test_expired_contract_reauthorization_rejects_missing_authority_scope_and_policy_changes(self):
+    def test_expired_contract_reauthorization_rejects_missing_authority_and_scope(self):
         record = self.accept_plan()["record"]
         now = record["contract"]["expires_at_ms"] + 1
         original = self.task_bytes()
@@ -341,9 +340,6 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             wrong_scope = self.revised_plan(expires_at_ms=now + 60000, authority_ref="fixture:fresh-explicit-authority")
             wrong_scope["contract"]["targets"][0]["workspace_identity"] = "0" * 64
             self.fault("context_mismatch", self.control, "revise_plan", **wrong_scope)
-            recovery = self.revised_plan(expires_at_ms=now + 60000, authority_ref="fixture:fresh-explicit-authority")
-            recovery["contract"]["recovery_policy"] = "task_chat"
-            self.fault("task_plan_conflict", self.control, "revise_plan", **recovery)
             self.config.machines["desktop"].workspace_write_enabled = False
             valid = self.revised_plan(expires_at_ms=now + 60000, authority_ref="fixture:fresh-explicit-authority")
             self.fault("workspace_write_disabled", self.control, "revise_plan", **valid)

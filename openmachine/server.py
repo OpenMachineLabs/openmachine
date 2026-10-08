@@ -55,11 +55,6 @@ class TerminalSize(BaseModel):
     cols: Annotated[int, Field(strict=True, ge=1, le=1000)]
 
 
-class RecoveryChange(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    action: Literal["enable", "disable"]
-
-
 GitHubNames = Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=100)]
 
 
@@ -148,7 +143,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if validator is None or not validator.is_valid({} if arguments is None else arguments):
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "configure_chat_recovery", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
+        guarded = {"read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
                    "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -162,22 +157,6 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         if (isinstance(response, dict) and response.get("isError") is True
                 and response.get("structuredContent") is None):
             return invalid
-        if (isinstance(response, dict) and not response.get("isError")
-                and isinstance(response.get("structuredContent"), dict)
-                and application.chat_recovery is not None):
-            try:
-                await asyncio.to_thread(application.chat_recovery.external_activity,
-                                        params["name"], arguments or {}, response["structuredContent"])
-            except (Fault, OSError) as error:
-                # A correlated read is not acknowledged until its evidence is
-                # durable. Ordinary business effects retain their existing hook.
-                code = error.code if isinstance(error, Fault) else "chat_recovery_store_unavailable"
-                response = _result({"error": {"code": code,
-                    "message": "Receiver evidence was not acknowledged; retain the original preparation."}}, True).model_dump(
-                        mode="json", by_alias=True, exclude_none=True, exclude={"result_type"})
-                if ctx.protocol_version == "2026-07-28":
-                    response.update(resultType="complete", _meta={
-                        "io.modelcontextprotocol/serverInfo": {"name": mcp.name, "version": mcp.version}})
         return response
 
     mcp = MCPServer(
@@ -328,7 +307,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                     title: Annotated[str, Field(min_length=1, max_length=200)],
                     anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
                     stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
-        """Create an authorized structured task; preserve readable instructions and inputs with correctly hashed stage sources. Recovery defaults disabled: task_chat requires explicit user authorization and returned readiness/blockers must be checked. Preserve task/update IDs after uncertainty; committed creation is not receiver readiness or business permission. Explicit claim/current task_context remain required. Never convert legacy history or supply runtime facts."""
+        """Create an authorized structured task; preserve readable instructions and inputs with correctly hashed stage sources. Preserve task/update IDs after uncertainty; committed creation is not business permission. Explicit claim/current task_context remain required. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
                       contract.model_dump(), [stage.model_dump() for stage in stages]), task_output=True)
 
@@ -339,19 +318,10 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                            expected_epoch: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
                            update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                            transition: tasks.Transition) -> CallToolResult:
-        """Control the original task using exact task/plan/epoch revisions; retain update_id after uncertainty. Renew the original claim_id/principal/epoch. Expired authority requires a revised contract with fresh evidence. bind_effect_scope needs original normalized arguments and never resolves an unknown effect. Claims grant no permission. Pause blocks new admission; cancellation preserves admitted/unknown effects. Finish requires action, outcome, acceptance references to accepted original evidence and limitations. Inspect returned state/recovery blockers."""
+        """Control the original task using exact task/plan/epoch revisions; retain update_id after uncertainty. Renew the original claim_id/principal/epoch. Expired authority requires a revised contract with fresh evidence. bind_effect_scope needs original normalized arguments and never resolves an unknown effect. Claims grant no permission. Pause blocks new admission; cancellation preserves admitted/unknown effects. Finish requires action, outcome, acceptance references to accepted original evidence and limitations. Inspect returned state and observation blockers."""
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
             expected_plan_revision, expected_epoch, update_id, transition.model_dump()), task_output=True)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
-
-    @guided_tool(annotations=WRITE)
-    def configure_chat_recovery(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
-                                update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
-                                expected_revision: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
-                                change: RecoveryChange) -> CallToolResult:
-        """Enable/disable task recovery under its original authority; callers cannot select a URL or account. Preserve update_id and observed recovery revision after uncertainty. Recovery neither grants business authority nor resets budgets/retries uncertain messages. Disable retains evidence and does not cancel admitted commands. Historical unbound tasks need explicit guarded plan enrollment."""
-        return _reply(lambda: application.configure_chat_recovery(
-            task_id, update_id, expected_revision, change.model_dump()), task_output=True)
 
     @guided_tool(annotations=READ)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],
@@ -362,16 +332,15 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation), task_output=True)
 
     @guided_tool(annotations=READ)
-    def read_task(task_id: str, preparation_id: Annotated[str | None,
-                  Field(pattern=r"^[0-9a-f]{32}$")] = None,
+    def read_task(task_id: str,
                   section: Literal["summary", "operations", "history", "evidence"] = "summary",
                   cursor: Annotated[str, Field(max_length=1024)] = "",
                   limit: Annotated[int, Field(strict=True, ge=1, le=50)] = 20,
                   operation_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                   stage_id: Annotated[str, Field(max_length=64, pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$")] = "",
                   decision_version: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)] = 0) -> CallToolResult:
-        """Read schema v2 current state or a bounded operations/history/evidence page. Summary omits cumulative history; follow complete/has_more, cursor and revision watermarks. Use the exact original operation_id, or an evidence_ref's stage_id and decision_version together on evidence without cursor/operation_id. Reads never initialize, repair, claim or execute work. Optional preparation_id requires summary and correlates receiver evidence only after a successful external MCP read; it grants no business authority or terminal reactivation."""
-        return _reply(lambda: application.read_task(task_id, preparation_id, section=section,
+        """Read schema v2 current state or a bounded operations/history/evidence page. Summary omits cumulative history; follow complete/has_more, cursor and revision watermarks. Use the exact original operation_id, or an evidence_ref's stage_id and decision_version together on evidence without cursor/operation_id. Reads never initialize, repair, claim or execute work."""
+        return _reply(lambda: application.read_task(task_id, section=section,
                       cursor=cursor, limit=limit, operation_id=operation_id,
                       stage_id=stage_id, decision_version=decision_version), task_output=True)
 

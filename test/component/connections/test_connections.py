@@ -467,8 +467,6 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             if operation["result"] is not None:
                 operation["result"].pop("failure_code", None)
                 operation["result"].pop("effect", None)
-        old.pop("chat_registration")
-        old["contract"].pop("recovery_policy")
         old = replace_task_record(self.state, old)
         raw = self.task_bytes()
         self.assertEqual(old["format"], 1)
@@ -506,8 +504,6 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             if operation["result"] is not None:
                 operation["result"].pop("failure_code", None)
                 operation["result"].pop("effect", None)
-        old.pop("chat_registration")
-        old["contract"].pop("recovery_policy")
         # Seed retained pre-native authority, including its original receipt.
         binding = dict(connection_id="e" * 32, account_id=1, authorization_revision=1)
         old["contract"]["github_connections"]["Example/repo"] = binding
@@ -573,8 +569,6 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             if operation["result"] is not None:
                 operation["result"].pop("failure_code", None)
                 operation["result"].pop("effect", None)
-        old.pop("chat_registration")
-        old["contract"].pop("recovery_policy")
         old["contract"].pop("github_connections")
         old["operations"][0]["locator"].pop("connection")
         replace_task_record(self.state, old)

@@ -17,7 +17,7 @@ class TaskTransitionTests(unittest.TestCase):
                 "exclusions": "No runtime or provider effects.", "acceptance": "Preserve original evidence.",
                 "stop_condition": "Stop at the transition boundary.", "authority_refs": ["fixture:authority"],
                 "targets": [], "repositories": ["Owner/repo"], "tools": ["read_task", "github_pull_request"],
-                "sources": [], "recovery_policy": "disabled", "expires_at_ms": 1000000,
+                "sources": [], "expires_at_ms": 1000000,
                 "github_connections": {"Owner/repo": {"connection_id": "d" * 32,
                     "account_id": 1, "authorization_revision": 1}}},
             "stages": [{"id": "verify", "depends_on": [], "result": "Retained original outcome",
@@ -71,9 +71,6 @@ class TaskTransitionTests(unittest.TestCase):
             if version < 4:
                 record.pop("control_revision")
                 record.pop("effect_scopes")
-            if version < 3:
-                record.pop("chat_registration")
-                record["contract"].pop("recovery_policy")
             if version == 1:
                 record["contract"].pop("github_connections")
             records.Record.model_validate(record)
@@ -226,7 +223,6 @@ class TaskTransitionTests(unittest.TestCase):
         self.assertEqual(record["contract"]["github_connections"], original["contract"]["github_connections"])
         self.assertEqual(record["control"]["pending_decision"], original["control"]["pending_decision"])
         self.assertEqual(record["handoff"]["reason"], "decision_required")
-        self.assertEqual(record["contract"]["recovery_policy"], "disabled")
         self.assertIsNone(record["control"]["owner"])
 
     def test_unresolved_effect_only_pins_its_own_repository_binding(self):

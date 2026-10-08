@@ -11,7 +11,6 @@
         "test/component/server/test_mcp_workspace.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/tasks/test_schema.py",
-        "test/resilience/chat_recovery/test_foreground.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/resilience/tasks/test_mcp_restart.py"
       ],
@@ -49,22 +48,6 @@
         "test/component/bootstrap/test_composition.py"
       ]
     },
-    "chat_recovery": {
-      "boundary_tests": [
-        "test/component/service/test_checks.py",
-        "test/contract/mcp/server/test_transport.py"
-      ],
-      "sources": [
-        "integrations/chatgpt.py",
-        "openmachine/app/chat_recovery.py"
-      ],
-      "tests": [
-        "test/component/chat_recovery/test_recovery.py",
-        "test/contract/mcp/chat_recovery/test_activity.py",
-        "test/contract/mcp/chat_recovery/test_receiver.py",
-        "test/resilience/chat_recovery/test_foreground.py"
-      ]
-    },
     "cli": {
       "boundary_tests": [
         "test/resilience/service_checks/test_mcp_readiness.py",
@@ -80,9 +63,7 @@
       ]
     },
     "codex": {
-      "boundary_tests": [
-        "test/component/chat_recovery/test_recovery.py"
-      ],
+      "boundary_tests": [],
       "sources": [
         "integrations/codex.py"
       ],
@@ -259,8 +240,6 @@
     },
     "server": {
       "boundary_tests": [
-        "test/contract/mcp/chat_recovery/test_activity.py",
-        "test/contract/mcp/chat_recovery/test_receiver.py",
         "test/contract/mcp/execution/test_schema.py",
         "test/contract/mcp/github/test_scope.py",
         "test/contract/mcp/ssh/test_discovery.py",
@@ -416,7 +395,6 @@
         "openmachine/skills/tasks/control.md",
         "openmachine/skills/tasks/create.md",
         "openmachine/skills/tasks/maintenance.md",
-        "openmachine/skills/tasks/recovery.md",
         "openmachine/skills/tasks/verify.md",
         "openmachine/skills/workspace/SKILL.md",
         "openmachine/skills/workspace/files.md",
@@ -459,7 +437,6 @@
         "test/component/app/test_task_dispatch.py",
         "test/component/app/test_workspace_dispatch.py",
         "test/resilience/app/test_mcp_workflows.py",
-        "test/resilience/chat_recovery/test_foreground.py",
         "test/resilience/tasks/test_mcp_restart.py"
       ],
       "sources": [
@@ -489,9 +466,7 @@
       ]
     },
     "task_observer": {
-      "boundary_tests": [
-        "test/component/chat_recovery/test_recovery.py"
-      ],
+      "boundary_tests": [],
       "sources": [
         "openmachine/app/task_observation.py",
         "openmachine/app/task_observer.py"
@@ -592,10 +567,6 @@
       "test/component/app/test_task_dispatch.py",
       "test/component/app/test_workspace_dispatch.py"
     ],
-    "test/support/chat_recovery_cases.py": [
-      "test/component/chat_recovery/test_recovery.py",
-      "test/resilience/chat_recovery/test_foreground.py"
-    ],
     "test/support/codex_cases.py": [
       "test/component/codex/test_discovery.py",
       "test/resilience/codex/test_delegation.py"
@@ -635,8 +606,6 @@
     ],
     "test/support/mcp.py": [
       "test/component/server/test_mcp_workspace.py",
-      "test/contract/mcp/chat_recovery/test_activity.py",
-      "test/contract/mcp/chat_recovery/test_receiver.py",
       "test/contract/mcp/execution/test_schema.py",
       "test/contract/mcp/github/test_scope.py",
       "test/contract/mcp/server/test_catalog.py",
@@ -716,7 +685,6 @@
       "test/component/app/test_task_attention.py",
       "test/component/app/test_task_observer.py",
       "test/component/app/test_worktree_admission.py",
-      "test/component/chat_recovery/test_recovery.py",
       "test/component/codex/test_discovery.py",
       "test/component/connections/test_connections.py",
       "test/component/service/test_checks.py",
@@ -729,7 +697,6 @@
       "test/resilience/app/test_observer_process.py",
       "test/resilience/app/test_task_association.py",
       "test/resilience/app/test_task_execution.py",
-      "test/resilience/chat_recovery/test_foreground.py",
       "test/resilience/codex/test_delegation.py",
       "test/resilience/tasks/test_persistence.py",
       "test/resilience/workspace/test_legacy_lock.py"

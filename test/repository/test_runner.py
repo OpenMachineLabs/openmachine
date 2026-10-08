@@ -51,6 +51,16 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.write("openmachine/github.py", "VALUE = 3\n")
         self.assertIn("test/resilience/execution/test_process.py", runner.make_plan(self.root, self.base)["tests"])
 
+    def test_removing_empty_test_package_needs_no_nonexistent_behavior(self):
+        path = "test/component/retired/__init__.py"
+        self.write(path, "")
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD")
+        (self.root / path).unlink()
+        plan = runner.make_plan(self.root, self.base)
+        self.assertFalse(plan["runtime_required"])
+        self.assertFalse(self.product_tests(plan))
+
     def test_documentation_runs_repository_checks_without_an_environment(self):
         self.write("README.md", "# Updated documentation\n")
         plan = runner.make_plan(self.root, self.base)
