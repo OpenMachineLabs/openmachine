@@ -1,4 +1,4 @@
-"""Pure continuation, evidence selection and retained-capacity decisions."""
+"""Pure continuation, evidence selection and bounded active-work decisions."""
 
 from copy import deepcopy
 import unittest
@@ -121,6 +121,43 @@ class TaskTransitionTests(unittest.TestCase):
                      limitations="The unchanged accepted stage retained its original result.")
         self.assertEqual(record["terminal"]["outcome"], "completed")
         self.assertEqual(record["operations"], [operation])
+
+    def test_large_retained_decisions_allow_current_stage_acceptance_and_finish(self):
+        record = self.record()
+        record["handoff"] = None
+        for key in ("scope", "exclusions", "acceptance", "stop_condition"):
+            record["contract"][key] = key + "x" * (1024 - len(key))
+        record["contract"]["authority_refs"] = [str(index) + "a" * 511 for index in range(8)]
+        record["contract"]["sources"] = [{"locator": "s" * 510 + f"{index:02}", "sha256": "a" * 64}
+                                          for index in range(16)]
+        record["origin"].update(request_ref="r" * 1024, objective="o" * 1024)
+        stage = record["plan"]["stages"][0]
+        record["plan"]["stages"] = [dict(stage, id=f"stage-{index:02}", result="r" * 512,
+            verification="v" * 512, state="accepted", evidence=[f"{index * 64 + number:032x}" for number in range(1, 65)])
+            for index in range(16)]
+        acceptance = []
+        for stage in record["plan"]["stages"]:
+            acceptance.append({"stage_id": stage["id"], "operation_id": stage["evidence"][0]})
+            # Retained decisions carry all references; the working set needs
+            # only the exact selected originals, not their full lifetime history.
+            for identity in stage["evidence"] if stage["id"] == "stage-15" else stage["evidence"][:1]:
+                operation = self.operation(record, identity, local=True)
+                operation["stage_id"] = stage["id"]
+                record["operations"].append(operation)
+        selected = record["plan"]["stages"][-1]["evidence"]
+        record["plan"]["stages"][-1].update(state="pending", evidence=[])
+        record["control"]["current_stage_id"] = "stage-15"
+        record["_facts"] = {"operation_count": 1024, "stage_operation_counts": {
+            stage["id"]: 64 for stage in record["plan"]["stages"]}}
+        original = deepcopy(record["operations"])
+        self.control(record, "record_decision", stage_id="stage-15", outcome="accepted", evidence=selected,
+                     reason="Keep every original reference outside the bounded current row.")
+        self.control(record, "finish", outcome="completed", acceptance=acceptance, limitations="Synthetic retained decisions.")
+        core = {key: value for key, value in record.items() if key in records.Current.model_fields}
+        self.assertGreater(len(records.canonical(core)), records.MAX_RECORD)
+        records.Current.model_validate(core)
+        self.assertEqual(record["terminal"]["outcome"], "completed")
+        self.assertEqual(record["operations"], original)
 
     def test_acceptance_uses_selected_resource_conflicts_and_keeps_unrelated_unknown_work(self):
         cases = [(7, ["body"], 8, ["body"], True), (7, ["body"], 7, ["title"], True),
@@ -255,7 +292,7 @@ class TaskTransitionTests(unittest.TestCase):
         self.control(terminal, "cancel", reason="There are no unresolved effects.")
         self.fault("task_terminal", self.control, terminal, "revise_plan", now_ms=now, **self.revision(terminal, now))
 
-    def test_new_operation_capacity_includes_failure_and_effect_result_fields(self):
+    def test_long_operation_metadata_can_retain_failure_and_effect_result_fields(self):
         record = self.record()
         operation = self.operation(record, "3" * 32, fields=["assignees", "body", "labels", "state", "title"])
         operation.update(state="admitted", observed_at_ms=None, result=None)
@@ -272,11 +309,45 @@ class TaskTransitionTests(unittest.TestCase):
         record["operations"] = [records.Operation.model_validate(operation).model_dump()]
         records.Record.model_validate(record)
         before = records.canonical(record)
-        self.fault("task_capacity", transitions.reserve, record, new_operation=record["operations"][0])
+        transitions.reserve(record, new_operation=record["operations"][0])
         self.assertEqual(records.canonical(record), before)
-        # A retained historical operation does not lose ownership eligibility
-        # solely because a new admission now reserves a larger future result.
-        transitions.reserve(record, new_work=False)
+
+    def test_lifetime_counts_do_not_limit_new_work_or_explicit_stop(self):
+        record = self.record()
+        record["_facts"] = {"operation_count": 100000, "history_count": 100000,
+                            "stage_operation_counts": {"verify": 100000}}
+        operation = self.operation(record, "3" * 32, local=True)
+        record["operations"] = [operation]
+        new_operation = self.operation(record, "4" * 32, local=True)
+        new_operation.update(state="admitted", observed_at_ms=None, result=None)
+        record["operations"].append(new_operation)
+        transitions.reserve(record, new_operation=new_operation)
+        self.control(record, "renew", claim_id=record["control"]["owner"]["claim_id"])
+        self.control(record, "pause", reason="History size does not prevent explicit stopping.")
+        self.assertEqual(record["control"]["stop_intent"], "pause")
+        self.assertEqual(record["operations"], [operation, new_operation])
+
+    def test_active_budget_keeps_control_and_cancellation_slots(self):
+        record = self.record()
+        record["operations"] = [self.operation(record, f"{number:032x}", status="unknown", local=True)
+                                for number in range(1, records.MAX_ACTIVE_OPERATIONS + 1)]
+        newest = record["operations"][-1]
+        newest.update(state="admitted", observed_at_ms=None, result=None)
+        self.fault("task_capacity", transitions.reserve, record, new_operation=newest)
+        self.fault("task_capacity", transitions.reserve, record,
+                   operation_limit=records.MAX_ACTIVE_OPERATIONS - 1, new_operation=newest)
+        transitions.reserve(record, operation_limit=records.MAX_ACTIVE_OPERATIONS, new_operation=newest)
+        record["operations"].insert(0, self.operation(record, "f" * 32, local=True))
+        transitions.reserve(record, operation_limit=records.MAX_ACTIVE_OPERATIONS, new_operation=newest)
+        self.control(record, "pause", reason="All active slots remain available for original observation.")
+        self.assertEqual(record["control"]["stop_intent"], "pause")
+
+    def test_historical_stage_operations_cannot_be_accepted_with_empty_evidence(self):
+        record = self.record()
+        record["_facts"] = {"stage_operation_counts": {"verify": 100000}}
+        self.assertEqual(record["operations"], [])
+        self.fault("task_evidence_invalid", self.control, record, "record_decision", stage_id="verify",
+                   outcome="accepted", evidence=[], reason="Historical operation evidence is still required.")
 
     def test_normal_new_operation_can_retain_the_largest_owner_result_fields(self):
         record = self.record()
@@ -288,7 +359,7 @@ class TaskTransitionTests(unittest.TestCase):
             result={"status": "cancelled", "receipt_sha256": "f" * 64, "summary": "x" * 256,
                     "log_offset": records.MAX_INTEGER, "failure_code": "x" * 64, "effect": "effect_unknown"})
         records.Operation.model_validate(operation)
-        self.assertLessEqual(len(records.canonical(operation)), 1536)
+        self.assertLessEqual(len(records.canonical(operation)), records.MAX_OPERATION)
 
 
 if __name__ == "__main__":

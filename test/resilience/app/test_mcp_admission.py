@@ -6,6 +6,7 @@ import time
 import unittest
 import uuid
 from mcp import Client
+from openmachine import tasks
 from openmachine.execution.records import TERMINAL
 from test.support.mcp import MCPFixture
 
@@ -19,7 +20,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             result_path = "result-" + mode + ".txt"
             async with Client(self.client(), mode=mode, cache=None) as client:
                 async def call(name, arguments):
-                    if name == "read_task":
+                    if name == "read_task" and set(arguments) == {"task_id"}:
                         return await self.observer_task_view(client, arguments["task_id"])
                     result = await client.call_tool(name, arguments)
                     self.assertFalse(result.is_error, result.structured_content)
@@ -55,6 +56,9 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                    reason="Verified original change and current file contents.")
                 accepted_edit = (await call("control_task", decision))["record"]
                 self.assertEqual((await call("control_task", decision))["record"], accepted_edit)
+                edit_page = await call("read_task", {"task_id": identity, "section": "operations", "operation_id": change_id})
+                self.assertTrue(edit_page["complete"])
+                self.assertEqual([item["id"] for item in edit_page["items"]], [change_id])
                 handover = (await call("control_task", control(accepted_edit, "release", reason="Hand over before verification.")))["record"]
             self.stop(self.processes[-1])
             self.launch()
@@ -112,7 +116,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 accepted = (await call("control_task", control(record, "record_decision", stage_id="verify", outcome="accepted",
                     evidence=[execution_id], reason="Verified the original zero exit and single counter increment.")))["record"]
                 self.assertEqual(accepted["plan"]["stages"][0], accepted_edit["plan"]["stages"][0])
-                self.assertEqual(accepted["operations"][0], accepted_edit["operations"][0])
+                retained_edit = await call("read_task", {"task_id": identity, "section": "operations", "operation_id": change_id})
+                self.assertEqual(retained_edit["items"], edit_page["items"])
                 self.assertTrue(all(stage["state"] == "accepted" for stage in accepted["plan"]["stages"]))
                 self.assertIsNone(accepted["terminal"])
                 final_handover = (await call("control_task", control(accepted, "release", reason="Hand over final acceptance.")))["record"]
@@ -128,10 +133,15 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final["terminal"]["outcome"], "completed")
                 self.assertIsNone(final["handoff"])
                 self.assertIsNone(final["control"]["owner"])
-                self.assertEqual([item["id"] for item in final["operations"]], [change_id, execution_id])
+                operations = await call("read_task", {"task_id": identity, "section": "operations"})
+                self.assertTrue(operations["complete"])
+                self.assertEqual([item["id"] for item in operations["items"]], [change_id, execution_id])
+                for stage, operation_id in zip(final["plan"]["stages"], (change_id, execution_id), strict=True):
+                    evidence = await call("read_task", stage["evidence_ref"])
+                    self.assertTrue(evidence["complete"])
+                    self.assertEqual(evidence["items"][0]["evidence"], [operation_id])
                 self.assertEqual(counter.read_text(), "1")
-                path = self.state / "tasks" / identity / "task.json"
-                retained = path.read_bytes()
+                retained = tasks.read(self.state, identity, operation_ids=(change_id, execution_id))["record"]
                 found = await call("find_tasks", {"task_id": identity})
                 self.assertEqual(found["status"], "matched")
                 view = await call("read_task", {"task_id": identity})
@@ -139,4 +149,4 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 runtime = next(item for item in view["observations"] if item["kind"] == "runtime")
                 self.assertEqual(runtime["state"], "retired")
                 self.assertIsNone(runtime["next_attempt_at_ms"])
-                self.assertEqual(path.read_bytes(), retained)
+                self.assertEqual(tasks.read(self.state, identity, operation_ids=(change_id, execution_id))["record"], retained)

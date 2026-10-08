@@ -22,13 +22,7 @@ def _authority(record: dict) -> str:
 
 
 def _progress(record: dict) -> int:
-    accepted = {stage["id"] for stage in record["plan"]["stages"] if stage["state"] == "accepted"}
-    times = [record["created_at_ms"], *(item["admitted_at_ms"] for item in record["operations"])]
-    times.extend(item["at_ms"] for item in record["history"]
-                 if item["kind"] == "decision" and item["stage_id"] in accepted)
-    if record["terminal"] is not None:
-        times.append(record["terminal"]["finished_at_ms"])
-    return max(times)
+    return record["_facts"]["progress_ms"]
 
 
 class ChatRecovery:
@@ -40,7 +34,7 @@ class ChatRecovery:
         self._not_before = 0
         self._next_tick = 0
         self._blockers: dict[str, str] = {}
-        self._known: dict[str, str] = {}
+        self._cursor = 0
         self._failure = None
 
     @property
@@ -52,7 +46,7 @@ class ChatRecovery:
             raise Fault("chat_recovery_busy", "The original recovery reader must exit before replacement.")
         self._not_before = chatgpt.now_ms() + chatgpt.GRACE_MS
         self._next_tick = 0
-        self._known.clear()
+        self._cursor = 0
         self._stop.clear()
 
     def stop(self) -> None:
@@ -81,12 +75,12 @@ class ChatRecovery:
         if delivery and delivery.continuation_at_ms is None and _progress(record) > (
                 delivery.progress_at_ms if delivery.progress_at_ms is not None else delivery.created_at_ms):
             claim_epoch = epoch if claimed else delivery.claim_epoch
-            intents = [item["admitted_at_ms"] for item in record["operations"]
-                       if item["epoch"] == claim_epoch and item["admitted_at_ms"] >= delivery.created_at_ms]
+            first = (tasks.first_admission(self.app.state, record["task_id"], claim_epoch,
+                                          delivery.created_at_ms) if claim_epoch is not None else None)
             after_claim = delivery.claim_at_ms is not None and _progress(record) >= delivery.claim_at_ms
-            attributed = bool(intents) or after_claim and (claimed or (claim_epoch is not None
+            attributed = first is not None or after_claim and (claimed or (claim_epoch is not None
                 and record["terminal"] is not None and record["control"]["epoch"] == claim_epoch + 1))
-            progress = (min(intents) if intents else _progress(record), "recovery" if attributed else "manual")
+            progress = (first if first is not None else _progress(record), "recovery" if attributed else "manual")
         if activity or epoch is not None or progress is not None:
             with self.app._admit():
                 chatgpt.observe(self.app.state, record["task_id"], activity=activity,
@@ -105,14 +99,13 @@ class ChatRecovery:
             if identity:
                 binding = chatgpt.get(self.app.state, identity)
                 if binding:
-                    self._observe(record or tasks.read(self.app.state, identity)["record"], binding, activity=True)
+                    self._observe(tasks.read(self.app.state, identity)["record"], binding, activity=True)
             elif name in {"read_execution", "read_workspace_change", "read_codex_task"}:
                 key = "change_id" if name == "read_workspace_change" else "execution_id"
                 for binding in chatgpt.bindings(self.app.state):
-                    record = tasks.read(self.app.state, binding.task_id)["record"]
-                    if any(item["locator"].get(key) == arguments.get(key)
-                           and item["locator"]["machine"] == arguments.get("machine") for item in record["operations"]):
-                        self._observe(record, binding, activity=True)
+                    if tasks.locator_matches(self.app.state, binding.task_id,
+                                             {key: arguments.get(key), "machine": arguments.get("machine")}):
+                        self._observe(tasks.read(self.app.state, binding.task_id)["record"], binding, activity=True)
                         break
         except Exception as error:
             # Do not turn an already-completed business effect into an apparent
@@ -201,7 +194,7 @@ class ChatRecovery:
             value["chat_registration"] = identity
         with self.app._admit():
             saved = tasks.update(self.app.state, record["task_id"], acknowledge,
-                                 expected_revision=revision, require_current=True)
+                                 expected_revision=revision)
         return {**saved, "status": view.get("status", saved["status"])}
 
     def created(self, view: dict) -> dict:
@@ -215,26 +208,22 @@ class ChatRecovery:
         return self.project(view)
 
     def _discover(self) -> None:
-        page = tasks.observation_page(self.app.state, self._known)
-        self._known = {key: value for key, value in self._known.items() if key in page["identities"]}
-        self._blockers = {key: value for key, value in self._blockers.items() if key in page["identities"]}
-        if not page["complete"]:
-            self._failure = "task_index_incomplete"
+        page = tasks.observation_page(self.app.state, self._cursor)
         for entry in page["entries"]:
             identity, record = entry["task_id"], entry["record"]
             if entry["error"]:
                 self._blockers[identity] = entry["error"]
-                continue
+                break
             try:
                 if record is not None and record["contract"].get("recovery_policy") is not None and record["terminal"] is None:
                     self.register(tasks.read(self.app.state, identity))
-                self._known[identity] = entry["metadata_sha256"]
                 self._blockers.pop(identity, None)
             except (Fault, OSError) as error:
                 code = observation.error_code(error)
                 self._blockers[identity] = code
-                if code not in {"resource_busy", "task_conflict", "chat_recovery_capacity", "chat_recovery_store_unavailable"}:
-                    self._known[identity] = entry["metadata_sha256"]
+                if code in {"resource_busy", "task_store_busy", "task_conflict", "chat_recovery_capacity", "chat_recovery_store_unavailable"}:
+                    break
+            self._cursor = entry["change_seq"]
 
     def require_ready(self, record: dict) -> None:
         if record["contract"].get("recovery_policy") is None:
@@ -277,7 +266,8 @@ class ChatRecovery:
             raise Fault("task_legacy", "Legacy checkpoints cannot prove receiver readiness.")
         record = view["record"]
         binding = self._preparation_binding(record, preparation_id)
-        return {**self.project(view), "preparation_read": chatgpt.preparation_response(binding, record)}
+        public = tasks.present(self.project(view))
+        return {**public, "preparation_read": chatgpt.preparation_response(binding, public["record"])}
 
     def _observe_preparation(self, arguments: dict, payload: dict) -> None:
         identity, preparation_id = arguments.get("task_id"), arguments["preparation_id"]
@@ -510,7 +500,7 @@ class ChatRecovery:
         if owner is not None and owner["expires_at_ms"] > now:
             raise Fault("chat_recovery_caller_active",
                         "An unexpired continuation claim already owns this task; do not send a recovery message.")
-        reconciliation_only = False
+        reconciliation_only = record.get("_facts", {}).get("partial_count", 0) > 0
         if record["recovery"] and observation.blocked(record["recovery"], now):
             raise Fault("chat_recovery_original_blocked", "The original observation budget or identity guard blocks recovery.")
         for operation in record["operations"]:
@@ -630,8 +620,7 @@ class ChatRecovery:
                     record = current["record"]
                     self._active(record)
                     self._registered(record, binding)
-                    if any(item["kind"] == "stopped" and item["at_ms"] >= binding.preparation.created_at_ms
-                           for item in record["history"]):
+                    if tasks.has_event(self.app.state, task_id, "stopped", binding.preparation.created_at_ms):
                         raise Fault("task_stopped", "Setup crossed a task stop; preserve its evidence.")
                 except Fault as error:
                     observed, reason = "blocked", error.code
@@ -663,6 +652,7 @@ class ChatRecovery:
                     [chatgpt.ORIGIN], "browser", "chrome", timeout, "", None)
         except Fault as error:
             unsent = not launch_attempted or error.code == "execution_disabled"
+            busy = error.code in {"resource_busy", "task_store_busy"}
             if error.code == "resource_busy" and launch_attempted:
                 try:
                     with lease(self.app.state / "locks" / f"{execution_id}.lock", create=False):
@@ -673,9 +663,9 @@ class ChatRecovery:
                 with self.app._admit():
                     if preparation:
                         chatgpt.mark_preparation(self.app.state, binding.task_id, execution_id,
-                            "deferred" if error.code == "resource_busy" else "blocked",
-                            "prelaunch_rejection" if error.code == "resource_busy" else error.code)
-                    elif error.code == "resource_busy":
+                            "deferred" if busy else "blocked",
+                            "prelaunch_rejection" if busy else error.code)
+                    elif busy:
                         chatgpt.release_reservation(self.app.state, binding.task_id, execution_id)
                     else:
                         chatgpt.mark_delivery(self.app.state, binding.task_id, execution_id, "blocked", error.code)

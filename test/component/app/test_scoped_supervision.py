@@ -12,7 +12,7 @@ from integrations import github
 from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import records
-from test.support.tasks import TaskFixture, task_contract
+from test.support.tasks import TaskFixture, replace_task_record, task_contract
 
 
 class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
@@ -37,6 +37,18 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
 
     def verified(self, number=7):
         return {"status": "verified", "receipt": {"id": 71, "number": number, "updated_at": "original"}}
+
+    def historical_record(self):
+        record = deepcopy(self.view()["record"])
+        self.assertEqual(len(record["operations"]), record["_facts"]["operation_count"])
+        record.pop("_facts")
+        record.pop("_decisions", None)
+        return record
+
+    def proof_result(self, request):
+        result = self.app.control_task(**request)
+        return {**result, **tasks.read(self.state, result["task_id"],
+                                      operation_ids=[request["transition"]["operation_id"]])}
 
     def second_task(self):
         request = task_contract(self.context, "second-task")
@@ -153,7 +165,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.provider.pull_request.return_value = self.verified()
         self.app.github_pull_request(action="update", repository="Owner/repo", number=7, body="Independent.",
                                      task_context=context)
-        self.assertEqual(len(self.app.read_task("second-task")["record"]["operations"]), 1)
+        self.assertEqual(len(tasks.read(self.state, "second-task")["record"]["operations"]), 1)
 
     def test_unverified_pr_creation_excludes_duplicates_not_unrelated_branches(self):
         self.app.github_pull_request(action="create", repository="Owner/repo", title="Original", body="Original",
@@ -209,7 +221,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
             self.update_pr(labels=["bug"], assignees=["person"])
             original_arguments = deepcopy(fingerprint.call_args.args[1])
-        historical = self.view()["record"]
+        historical = self.historical_record()
         historical["format"] = 3
         historical.pop("control_revision")
         historical.pop("effect_scopes")
@@ -217,8 +229,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         historical["operations"][0]["result"].pop("effect", None)
         historical["operations"][0]["result"].pop("failure_code", None)
         # A complete old-format reader fixture, not a production recovery path.
-        self.path.write_bytes(records.canonical(historical))
-        self.app.rebuild_task_index()
+        replace_task_record(self.state, historical)
         original = deepcopy(self.view()["record"]["operations"][0])
         self.fault("task_effect_unresolved", self.update_pr, body="Not yet scoped.")
         wrong = deepcopy(original_arguments)
@@ -232,7 +243,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             (dict(original_arguments, body=7), "invalid_task_control"),
             (dict(original_arguments, body={"text": "Invalid body type."}), "invalid_task_control"),
             (dict(original_arguments, body="x" * 60000), "invalid_github_request")]
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         reconciliations = self.provider.reconcile.call_count
         for arguments, code in malformed:
             with self.subTest(arguments=list(arguments), code=code):
@@ -240,22 +251,22 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                 self.fault(code, self.control, "bind_effect_scope", operation_id=original["id"],
                            method="github_pull_request", arguments=arguments, reason="Reject malformed original arguments.")
                 self.assertEqual(arguments, unchanged)
-                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.task_bytes(), before)
                 self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertEqual(self.provider.pull_request.call_count, 1)
         self.assertEqual(self.provider.reconcile.call_count, reconciliations)
         proof = self.control_arguments("bind_effect_scope", operation_id=original["id"], method="github_pull_request",
                                        arguments=original_arguments, reason="Exact retained request scope; outcome remains unknown.")
-        bound = self.app.control_task(**proof)["record"]
+        bound = self.proof_result(proof)["record"]
         self.assertEqual(bound["format"], 4)
         self.assertEqual(bound["operations"][0], original)
         self.assertEqual(bound["effect_scopes"][0]["scope"]["fields"], ["assignees", "labels"])
-        self.assertEqual(self.app.control_task(**proof)["record"], bound)
+        self.assertEqual(self.proof_result(proof)["record"], bound)
         self.fault("task_effect_unresolved", self.update_pr, labels=[])
         self.provider.pull_request.return_value = self.verified()
         self.update_pr(body="Now independent.")
         self.assertEqual(self.view()["record"]["operations"][0], original)
-        self.assertNotIn("arguments", json.loads(self.path.read_bytes())["effect_scopes"][0])
+        self.assertNotIn("arguments", json.loads(self.task_bytes())["effect_scopes"][0])
 
     def test_plan_revision_cannot_hide_an_account_switch_behind_repository_aliases(self):
         self.update_pr(body="Original unknown body.")
@@ -265,7 +276,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         other = dict(binding, connection_id="e" * 32, account_id=2)
         definitions = [{key: value for key, value in stage.items() if key not in {"state", "evidence"}}
                        for stage in record["plan"]["stages"]]
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         for aliases in ([("Owner/repo", other), ("owner/repo", binding)],
                         [("Owner/repo", binding), ("owner/repo", other)]):
             with self.subTest(first_binding=aliases[0][1]):
@@ -274,7 +285,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                 self.fault("task_effect_unresolved", self.control, "revise_plan", contract=contract,
                     stages=definitions, invalidated_stage_ids=["verify"],
                     reason="An alias cannot substitute another account for unresolved work.")
-                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.task_bytes(), before)
                 self.assertEqual(self.provider.pull_request.call_count, 1)
 
         contract["github_connections"] = {key: deepcopy(binding) for key in contract["repositories"]}
@@ -295,7 +306,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
             self.fault("github_response_unknown", self.update_pr, body="Original PR body.")
             arguments = deepcopy(fingerprint.call_args.args[1])
-        historical = self.view()["record"]
+        historical = self.historical_record()
         historical["format"] = 3
         historical.pop("control_revision")
         historical.pop("effect_scopes")
@@ -304,8 +315,7 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         operation["result"].pop("effect", None)
         operation["result"].pop("failure_code", None)
         records.Record.model_validate(historical)
-        self.path.write_bytes(records.canonical(historical))
-        self.app.rebuild_task_index()
+        replace_task_record(self.state, historical)
         original = deepcopy(operation)
         self.control("pause", reason="Retain the original unknown request.")
         self.control("resume", reason="Continue explicitly authorized independent work.")
@@ -321,8 +331,8 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             proof = self.control_arguments("bind_effect_scope", operation_id=original["id"],
                 method="github_pull_request", arguments=arguments,
                 reason="Bind exact original intent while an unrelated local HEAD has changed.")
-            bound = self.app.control_task(**proof)["record"]
-            self.assertEqual(self.app.control_task(**proof)["record"], bound)
+            bound = self.proof_result(proof)["record"]
+            self.assertEqual(self.proof_result(proof)["record"], bound)
             self.fault("context_mismatch", self.app.write_workspace_file, **self.write_arguments())
         self.assertEqual(bound["effect_scopes"][0]["scope"]["fields"], ["body"])
         self.assertEqual(bound["operations"][0], original)
@@ -368,14 +378,15 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             acceptance=[{"stage_id": stage["id"], "operation_id": stage["evidence"][0]}
                         for stage in self.view()["record"]["plan"]["stages"]], limitations="")["record"]
         self.assertEqual(final["terminal"]["outcome"], "completed")
-        self.assertEqual(final["operations"][0]["request_sha256"], original["request_sha256"])
-        self.assertEqual(final["effect_scopes"], bound["effect_scopes"])
+        retained = tasks.read(self.state, "structured-one", operation_ids=[original["id"]])["record"]
+        self.assertEqual(next(item for item in retained["operations"] if item["id"] == original["id"])["request_sha256"], original["request_sha256"])
+        self.assertEqual(retained["effect_scopes"], bound["effect_scopes"])
 
     def test_matching_malformed_historical_scope_proof_has_a_bounded_error(self):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
             self.update_pr(labels=["bug"])
             original_arguments = deepcopy(fingerprint.call_args.args[1])
-        historical = self.view()["record"]
+        historical = self.historical_record()
         operation = historical["operations"][0]
         operation.pop("effect_scope")
         context = {"task_id": historical["task_id"], "operation_id": operation["id"]}
@@ -387,13 +398,12 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
                 # exact fingerprint guard; no real historical record is changed.
                 normalized = self.app.task_admission._normalize("github_pull_request", arguments, context)
                 operation["request_sha256"] = self.app.task_admission._fingerprint("github_pull_request", normalized, operation)
-                self.path.write_bytes(records.canonical(historical))
-                self.app.rebuild_task_index()
-                before = self.path.read_bytes()
+                replace_task_record(self.state, historical)
+                before = self.task_bytes()
                 original = deepcopy(operation)
                 self.fault("invalid_task_control", self.control, "bind_effect_scope", operation_id=operation["id"],
                            method="github_pull_request", arguments=arguments, reason="Reject a malformed retained proof.")
-                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.task_bytes(), before)
                 self.assertEqual(self.view()["record"]["operations"][0], original)
         self.assertEqual(self.provider.pull_request.call_count, 1)
         self.provider.reconcile.assert_not_called()
@@ -402,19 +412,18 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app.task_admission, "_fingerprint", wraps=self.app.task_admission._fingerprint) as fingerprint:
             self.update_pr(labels=["bug"])
             original_arguments = deepcopy(fingerprint.call_args.args[1])
-        historical = self.view()["record"]
+        historical = self.historical_record()
         historical["format"] = 3
         historical.pop("control_revision")
         historical.pop("effect_scopes")
         historical["operations"][0].pop("effect_scope")
         historical["operations"][0]["result"].pop("effect", None)
         historical["operations"][0]["result"].pop("failure_code", None)
-        self.path.write_bytes(records.canonical(historical))
-        self.app.rebuild_task_index()
+        replace_task_record(self.state, historical)
         operation_id = historical["operations"][0]["id"]
         proof = self.control_arguments("bind_effect_scope", operation_id=operation_id, method="github_pull_request",
                                        arguments=original_arguments, reason="Retain exact historical scope evidence.")
-        bound = self.app.control_task(**proof)["record"]
+        bound = self.proof_result(proof)["record"]
         self.provider.reconcile.return_value = self.verified()
         resolved = self.app.task_admission.reconcile(self.view())["record"]
         self.assertEqual(resolved["operations"][0]["result"]["status"], "succeeded")
@@ -422,15 +431,15 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(resolved["last_update"], bound["last_update"])
         self.provider.reconcile.assert_called_once()
         self.provider.reconcile.reset_mock()
-        before = self.path.read_bytes()
-        retry = self.app.control_task(**proof)
+        before = self.task_bytes()
+        retry = self.proof_result(proof)
         self.assertEqual((retry["status"], retry["record"]), ("unchanged", resolved))
         changed = deepcopy(proof)
         changed["transition"]["arguments"]["labels"] = ["different"]
         self.fault("task_conflict", self.app.control_task, **changed)
         self.fault("task_evidence_invalid", self.control, "bind_effect_scope", operation_id=operation_id,
                    method="github_pull_request", arguments=original_arguments, reason="A resolved original cannot acquire new scope.")
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
         self.provider.reconcile.assert_not_called()
         self.assertEqual(self.provider.pull_request.call_count, 1)
 

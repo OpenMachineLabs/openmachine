@@ -26,6 +26,7 @@ MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
 MAX_SOURCE = workspace.MAX_SOURCE
 bound_workspace_result = workspace.bound_result
 MAX_TASK_WAIT = task_attention.MAX_WAIT_SECONDS
+MAX_TASK_RESULT_BYTES = 512 * 1024
 
 
 class Application:
@@ -109,7 +110,9 @@ class Application:
             "skill_navigation": {"entry": skills.for_tool("get_capabilities"),
                                  "tool": "inspect_skills", "selector": "tool"},
             "tasks": {"structured_records": True, "record_read_formats": list(tasks.READ_FORMATS),
-                      "index_format": 2, "supervised_admission": True, "runtime_recovery": False,
+                      "storage": "sqlite", "read_schema": 2,
+                      "read_sections": ["summary", "operations", "history", "evidence"],
+                      "supervised_admission": True, "runtime_recovery": False,
                       "events_delivery": False,
                       "foreground_wait": {"max_seconds": task_attention.MAX_WAIT_SECONDS,
                           "handoff_grace_seconds": task_attention.HANDOFF_GRACE_MS // 1000,
@@ -158,8 +161,11 @@ class Application:
                        "search_bytes": workspace.MAX_SCAN_BYTES, "search_matches": workspace.MAX_MATCHES,
                        "text_file_bytes": workspace.MAX_SOURCE, "text_page_bytes": TEXT_PAGE,
                        "skill_text_file_bytes": MAX_TEXT_FILE,
-                       "checkpoint_bytes": tasks.MAX_CHECKPOINT, "task_index_bytes": tasks.MAX_INDEX,
-                       "task_record_bytes": tasks.MAX_RECORD, "task_acceptance_bytes": tasks.MAX_ACCEPTANCE},
+                       "checkpoint_bytes": tasks.MAX_CHECKPOINT,
+                       "task_operation_bytes": tasks.MAX_OPERATION_BYTES, "task_event_bytes": tasks.MAX_EVENT_BYTES,
+                       "task_page_bytes": tasks.MAX_PAGE_BYTES, "task_page_entries": tasks.MAX_PAGE_ITEMS,
+                       "task_active_operations": tasks.MAX_ACTIVE_OPERATIONS,
+                       "task_result_bytes": MAX_TASK_RESULT_BYTES},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         }
 
@@ -236,17 +242,36 @@ class Application:
                    limit: int = 20, expected_generation: int = -1) -> dict:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
 
-    def _task_view(self, task_id: str, *, wait_expired: bool = False) -> dict:
-        view = self.task_observer.project(tasks.read(self.state, task_id))
+    def _task_view(self, task_id: str, *, wait_expired: bool = False, operation_ids: tuple[str, ...] = ()) -> dict:
+        view = self.task_observer.project(tasks.read(self.state, task_id, operation_ids=operation_ids))
         return task_attention.project(view, wait_expired=wait_expired)
 
-    def read_task(self, task_id: str, preparation_id: str | None = None) -> dict:
+    def read_task(self, task_id: str, preparation_id: str | None = None, *,
+                  section: Literal["summary", "operations", "history", "evidence"] = "summary",
+                  cursor: str = "", limit: int = 20, operation_id: str = "",
+                  stage_id: str = "", decision_version: int = 0) -> dict:
+        if (section not in {"summary", "operations", "history", "evidence"}
+                or type(limit) is not int or not 1 <= limit <= tasks.MAX_PAGE_ITEMS):
+            raise Fault("invalid_task_read", "Use a supported section and a 1..50 entry limit.")
+        if (type(decision_version) is not int or not 0 <= decision_version <= 9007199254740991
+                or bool(stage_id) != bool(decision_version)
+                or (stage_id and (section != "evidence" or cursor or operation_id))):
+            raise Fault("invalid_task_read", "Exact stage evidence requires its stage ID and decision version in the evidence section.")
+        if preparation_id is not None and (section != "summary" or cursor or operation_id or stage_id):
+            raise Fault("invalid_task_read", "A receiver preparation read requires the current summary.")
         view = self._task_view(task_id)
         if preparation_id is not None:
             if self.chat_recovery is None:
                 raise Fault("chat_recovery_unavailable", "No receiver preparation is available.")
             return self.chat_recovery.preparation_read(view, preparation_id)
-        return self.chat_recovery.project(view) if self.chat_recovery is not None else view
+        if self.chat_recovery is not None:
+            view = self.chat_recovery.project(view)
+        if section == "summary" and not cursor and not operation_id:
+            return tasks.present(view)
+        page = tasks.public_read(self.state, task_id, section=section, cursor=cursor, limit=limit,
+            operation_id=operation_id, stage_id=stage_id, decision_version=decision_version,
+            expected_revision=view.get("record", {}).get("revision", -1))
+        return {**page, **{key: view[key] for key in ("foreground", "observations", "support", "chat_recovery") if key in view}}
 
     def wait_task(self, task_id: str, expected_revision: int, wait_seconds: float = MAX_TASK_WAIT,
                   *, cancelled: threading.Event | None = None) -> dict:
@@ -279,7 +304,7 @@ class Application:
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         view = {**view, "wait": {"status": wait_status, "expected_revision": expected_revision,
             "current_revision": view["record"]["revision"], "elapsed_ms": elapsed}}
-        return self.chat_recovery.project(view) if self.chat_recovery is not None else view
+        return tasks.present(self.chat_recovery.project(view) if self.chat_recovery is not None else view)
 
     def save_task(self, task_id: str, expected_revision: int, title: str, body: str,
                   anchors: list[str] | None = None) -> dict:
@@ -297,7 +322,7 @@ class Application:
             view = (self.chat_recovery.created(view) if transition["action"] == "revise_plan"
                     else self.chat_recovery.project(view))
         self.task_observer.notify()
-        return view
+        return tasks.present(view)
 
     def configure_chat_recovery(self, task_id: str, update_id: str,
                                 expected_revision: int, change: dict) -> dict:
@@ -368,7 +393,7 @@ class Application:
         if self.chat_recovery is not None:
             view = self.chat_recovery.created(view)
         self.task_observer.notify()
-        return view
+        return tasks.present(view)
 
     def rebuild_task_index(self, expected_generation: int = -1) -> dict:
         with self._admit():
@@ -417,7 +442,7 @@ class Application:
         if identity:
             feedback = {"status": "legacy", "task_id": identity}
             try:
-                view = self._task_view(identity)
+                view = self._task_view(identity, operation_ids=(result["execution_id"],))
                 if "record" in view:
                     target = self.config.machine(machine).ssh_identity or None
                     if not any(item["id"] == result["execution_id"] and item["locator"]["kind"] == "execution"

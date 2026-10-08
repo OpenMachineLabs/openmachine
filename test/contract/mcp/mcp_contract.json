@@ -93,6 +93,12 @@
       "base_commit": "c6df296b34318ed2b27f5a6230819d9dfa195a2e",
       "change": "Add only the optional bounded tool selector to inspect_skills. Existing argument order, defaults, tool names and annotations remain unchanged. Expectations are independently authored from Spec 105 and checked against real installed MCP discovery; descriptions add canonical exact guide routes.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/105"
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/108#classification",
+      "base_commit": "07d242782c48735f7e6cc09a1e47002bdd3e1269",
+      "change": "Task ledger read schema v2 adds section, bounded cursor and limit, exact original operation_id, and paired stage_id/decision_version evidence lookup to read_task. Existing tool names, required inputs and annotations remain unchanged. Expectations are authored from the approved contract, not copied from candidate discovery.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/108"
     }
   ],
   "baseline": {
@@ -3432,6 +3438,32 @@
       },
       "inputSchema": {
         "properties": {
+          "cursor": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Cursor",
+            "type": "string"
+          },
+          "decision_version": {
+            "default": 0,
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Decision Version",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "operation_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Operation Id",
+            "type": "string"
+          },
           "preparation_id": {
             "anyOf": [
               {
@@ -3444,6 +3476,24 @@
             ],
             "default": null,
             "title": "Preparation Id"
+          },
+          "section": {
+            "default": "summary",
+            "enum": [
+              "summary",
+              "operations",
+              "history",
+              "evidence"
+            ],
+            "title": "Section",
+            "type": "string"
+          },
+          "stage_id": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$",
+            "title": "Stage Id",
+            "type": "string"
           },
           "task_id": {
             "title": "Task Id",

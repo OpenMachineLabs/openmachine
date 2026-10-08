@@ -11,7 +11,8 @@ On this page:
 
 The service lifespan starts one observer, independent of clients and Desktop.
 Constructing Application or reading a task does not start it. Discovery uses
-changed metadata in 50-record/2-MiB pages, not repeated scans of unchanged history.
+indexed change sequences in pages of at most 50 bounded current views. It does
+not scan unchanged history or retain an all-task identity catalog.
 At most 32 active tasks share four actual local reader slots, normally due every
 two seconds with a two-second read budget. Terminal tasks retire. Timed-out readers
 keep slots and ownership until actual exit; no task/workspace lock spans backoff.

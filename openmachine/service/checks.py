@@ -39,7 +39,7 @@ def check_state(config_path: Path, state: Path) -> dict:
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
     return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), **_chat_recovery_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
-            "management_contract": service_state.MANAGEMENT_CONTRACT,
+            "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
             "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
             "configuration_sha256": config.configuration_sha256()}
 
@@ -164,20 +164,8 @@ def machine_unused(config, state: Path, name: str, *, check_remote: bool = True)
     history = tasks.check_state(state)
     if history["task_records"] != history["structured_task_records"]:
         raise Fault("machine_in_use", "Legacy task history cannot prove that this target is unused; preserve the connection.")
-    known = {}
-    while True:
-        page = tasks.observation_page(state, known)
-        if not page["complete"]:
-            raise Fault("machine_in_use", "Task history could not be verified; preserve the connection.")
-        for entry in page["entries"]:
-            record = entry["record"]
-            references = [*record["contract"]["targets"], *(item["locator"] for item in record["operations"])]
-            if any(item.get("machine") == name or target.ssh_identity and item.get("target_identity") == target.ssh_identity
-                   for item in references):
-                raise Fault("machine_in_use", "A retained task still references this machine.")
-            known[entry["task_id"]] = entry["metadata_sha256"]
-        if not page["has_more"]:
-            break
+    if tasks.references_target(state, name, target.ssh_identity):
+        raise Fault("machine_in_use", "A retained task still references this machine.")
     if target.ssh_identity in recovery.read(state)["targets"]:
         raise Fault("machine_in_use", "Retained SSH observation history still references this identity.")
     if not target.ssh_identity:
@@ -226,18 +214,12 @@ def activation_safe(state: Path) -> None:
                 raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
             if record.get("format_version", 1) >= 4 and record["cleanup"]["status"] == "verified":
                 settled_executions.add((record["request"]["machine"], directory.name))
-    known = {}
-    while True:
-        page = tasks.observation_page(state, known)
-        if not page["complete"]:
-            raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.")
-        for item in page["entries"]:
-            record = item["record"]
-            if any(_task_operation_blocks_activation(operation) for operation in record["operations"]):
-                raise Fault("activation_deferred", "An original task operation is active or unresolved; no worker was stopped.")
-            known[item["task_id"]] = item["metadata_sha256"]
-        if not page["has_more"]:
-            break
+    try:
+        blocked = any(_task_operation_blocks_activation(operation) for operation in tasks.activation_blockers(state))
+    except Fault as error:
+        raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.") from error
+    if blocked:
+        raise Fault("activation_deferred", "An original task operation is active or unresolved; no worker was stopped.")
     # The owning readers validate their records before classifying in-flight
     # writes or authentication. No service-owned copy of either schema exists.
     from integrations.connections import check_state as connections_state
@@ -266,12 +248,12 @@ def _change_support(value: dict) -> set[int]:
 
 
 class _TaskGenerationMoved(Exception):
-    """The candidate and local readers observed different task-index generations."""
+    """The candidate and local readers observed different Task generations."""
 
 
 def _candidate_state(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
                      *, env: dict[str, str] | None = None) -> dict:
-    # Only resample a provably changing task-index generation, before activation.
+    # Only resample a provably changing Task generation, before activation.
     # Every attempt repeats the complete candidate/retained-state verification.
     for attempt in range(3):
         try:
@@ -279,7 +261,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
         except _TaskGenerationMoved as error:
             if attempt == 2:
                 raise Fault("incompatible_state",
-                            "Task history kept changing during candidate validation; no state was migrated.") from error
+                            "Task history kept changing during candidate validation; activation remains unverified.") from error
             time.sleep(0.05)
 
 
@@ -322,6 +304,20 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in policy.items())):
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
+        storage = retained_tasks["task_storage"]
+        if storage["kind"] == "sqlite" or value["state_contract"] >= 18:
+            candidate_storage = value.get("task_storage")
+            engine = value.get("sqlite_runtime")
+            if (value["state_contract"] < 18 or not isinstance(candidate_storage, dict)
+                    or not isinstance(engine, dict) or engine.get("supported") is not True
+                    or any(type(candidate_storage.get(key)) is not type(storage[key])
+                           or candidate_storage[key] != storage[key]
+                           for key in storage if key != "generation")):
+                raise ValueError("candidate ignores the authoritative Task ledger or its SQLite engine")
+            if type(candidate_storage.get("generation")) is not type(storage["generation"]):
+                raise ValueError("missing Task ledger generation")
+            if candidate_storage["generation"] != storage["generation"]:
+                raise _TaskGenerationMoved()
         if (retained_tasks["task_index_format"] == 2
                 and type(value.get("task_index_generation")) is int
                 and value["task_index_generation"] != retained_tasks["task_index_generation"]):
@@ -333,7 +329,7 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
             if (value["state_contract"] < minimum_contract or not isinstance(present, list)
                     or any(type(item) is not int for item in present) or present != retained_formats):
                 raise ValueError("candidate ignores retained task recovery or scoped admission semantics")
-        if retained_tasks["task_index_format"] == 2:
+        if retained_tasks["task_index_format"] == 2 or storage["kind"] == "sqlite":
             formats = value.get("structured_task_read_formats")
             if (value["state_contract"] < 6 or not isinstance(formats, list) or not formats
                     or any(type(item) is not int or item not in tasks.READ_FORMATS for item in formats)
@@ -352,7 +348,7 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
                 raise ValueError("candidate ignores retained workspace state")
         return value
     except (ValueError, KeyError, TypeError) as error:
-        raise Fault("incompatible_state", "The candidate cannot validate current configuration and records; no state was migrated.") from error
+        raise Fault("incompatible_state", "The candidate cannot validate current configuration and records; preserve the selected Task authority.") from error
 
 
 async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_version: str,

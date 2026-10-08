@@ -1,10 +1,11 @@
 """Tests for app behavior at the resilience layer."""
 
 import json
+import sqlite3
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine.tasks import store as task_store
+from openmachine.tasks import database
 from openmachine import tasks
 from openmachine.bootstrap import create_application
 from test.support.task_observer_cases import TaskObserverCaseFixture
@@ -41,7 +42,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         self.assertFalse(retained["task_operation_replayed"])
         self.assertEqual((self.work / "counter").read_text(), "1")
         self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
-        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+        self.assertEqual(self.view()["facts"]["operation_count"], 2)
 
     def test_absent_caller_result_and_handoff_publish_without_replaying_or_accepting(self):
         args, started = self.owned()
@@ -79,11 +80,11 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         args, started = self.owned()
         with self.app.task_observer.running():
             self.until(lambda: self.app.task_observer._snapshot["last"].get("structured-one"))
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         (self.work / "release").touch()
         original = self.wait(started)
         self.assertEqual(original["status"], "succeeded")
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
         other = create_application(self.config, self.state)
         with other.task_observer.running():
             self.until(lambda: (self.raw()["operations"][0]["result"] or {}).get("status") == "succeeded")
@@ -137,11 +138,11 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
                 self.app.task_admission.reconcile(self.view())
                 self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[args["execution_id"]], reason="Read the original result.")
                 self.control("finish", outcome="completed", acceptance=[{"stage_id": "verify", "operation_id": args["execution_id"]}], limitations="Local fixture.")
-                final = self.path.read_bytes()
+                final = self.task_bytes()
                 release.set()
                 self.until(lambda: not self.app.task_observer._reads)
                 self.view()
-                self.assertEqual(self.path.read_bytes(), final)
+                self.assertEqual(self.task_bytes(), final)
                 self.assertEqual(self.view()["observations"][1]["state"], "retired")
         finally:
             release.set()
@@ -168,21 +169,24 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         operation_id = uuid.uuid4().hex
         input_args = dict(machine="desktop", execution_id=args["execution_id"], expected_control_seq=0,
             action="write_stdin", text="single-observed-pty-input\n", task_context=self.context_for(operation_id))
-        original_replace = task_store._replace
-        def lose_result(path, raw):
-            if path == self.path and any(item["id"] == operation_id and item["result"] is not None for item in json.loads(raw)["operations"]):
-                raise OSError("Disposable lost input-result publication")
-            return original_replace(path, raw)
-        with patch.object(task_store, "_replace", side_effect=lose_result):
+        original_commit = database.commit
+        def lose_result(connection):
+            row = connection.execute("SELECT payload FROM operations WHERE task_id=? AND id=?", ("structured-one", operation_id)).fetchone()
+            if row is not None and json.loads(row[0])["result"] is not None:
+                raise sqlite3.OperationalError("Disposable lost input-result publication")
+            return original_commit(connection)
+        with patch.object(database, "commit", side_effect=lose_result):
             self.fault("task_result_unverified", self.app.control_execution, **input_args)
         self.until(lambda: (self.work / "input-count").exists())
         with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("Never resend terminal input")), self.app.task_observer.running():
-            self.until(lambda: (self.raw()["operations"][1]["result"] or {}).get("status") == "succeeded")
-            self.assertEqual(self.raw()["operations"][1]["locator"]["control_seq"], 1)
-            self.assertNotIn("single-observed-pty-input", self.path.read_text())
+            self.until(lambda: (tasks.operation(self.state, "structured-one", operation_id)["result"] or {}).get("status") == "succeeded")
+            self.assertEqual(tasks.operation(self.state, "structured-one", operation_id)["locator"]["control_seq"], 1)
+            evidence = {section: tasks.public_read(self.state, "structured-one", section=section, limit=50)
+                        for section in ("operations", "history")}
+            self.assertNotIn("single-observed-pty-input", json.dumps(evidence))
             self.assertEqual((self.work / "input-count").read_text(), "1")
             (self.work / "input-release").touch()
-            self.until(lambda: (self.raw()["operations"][0]["result"] or {}).get("status") == "succeeded")
+            self.until(lambda: (tasks.operation(self.state, "structured-one", args["execution_id"])["result"] or {}).get("status") == "succeeded")
         self.assertEqual(self.wait(started)["status"], "succeeded")
         self.assertEqual((self.work / "input-count").read_text(), "1")
         self.assertIsNone(self.raw()["terminal"])
@@ -199,12 +203,13 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         self.addCleanup(lambda: self.wait(self.app.cancel_execution("desktop", args["execution_id"])))
         self.until(lambda: "READY" in self.app.read_execution("desktop", args["execution_id"])["output"])
         self.app.task_admission.reconcile(self.view())
-        original_replace = task_store._replace
-        def lose_result(path, raw):
-            if path == self.path and any(item["id"] != args["execution_id"] and item["result"] is not None for item in json.loads(raw)["operations"]):
-                raise OSError("Disposable lost cancellation-result publication")
-            return original_replace(path, raw)
-        with patch.object(task_store, "_replace", side_effect=lose_result):
+        original_commit = database.commit
+        def lose_result(connection):
+            rows = connection.execute("SELECT payload FROM operations WHERE task_id=? AND id<>?", ("structured-one", args["execution_id"]))
+            if any(json.loads(row[0])["result"] is not None for row in rows):
+                raise sqlite3.OperationalError("Disposable lost cancellation-result publication")
+            return original_commit(connection)
+        with patch.object(database, "commit", side_effect=lose_result):
             self.fault("task_result_unverified", self.control, "cancel", reason="Cancel the original fixture only.")
         self.assertEqual(self.raw()["control"]["stop_intent"], "cancel")
         self.assertIsNone(self.raw()["terminal"])
@@ -214,7 +219,10 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             self.assertEqual(record["terminal"]["outcome"], "cancelled")
             self.assertEqual(record["control"]["state"], "cancelled")
             self.assertIsNone(record["handoff"])
-            self.assertTrue(all(item["result"]["status"] == "cancelled" for item in record["operations"]))
+            evidence = tasks.public_read(self.state, "structured-one", section="operations", limit=50)
+            self.assertEqual(len(evidence["items"]), 2)
+            self.assertTrue(evidence["complete"])
+            self.assertTrue(all(item["result"]["status"] == "cancelled" for item in evidence["items"]))
             self.until(lambda: "structured-one" not in self.app.task_observer._snapshot["active"])
         original = self.wait(started)
         self.assertEqual(original["status"], "cancelled")

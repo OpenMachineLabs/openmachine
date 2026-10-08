@@ -6,6 +6,7 @@ from pathlib import Path
 import plistlib
 import sys
 
+from openmachine import tasks
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
@@ -82,8 +83,18 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         try:
             service_state._select_configuration(state, config_path, candidate_digest, allowed)
             runtime._stop(state)
+            if installed["state_contract"] >= 18:
+                tasks.migrate(state)
             ready = _start_selected(state, record)
         except (Fault, OSError) as error:
+            if installed["state_contract"] >= 18 and service_state._installed(state, previous)["state_contract"] < 18:
+                try:
+                    storage = tasks.storage_state(state)
+                    cutover = storage["kind"] == "sqlite" or storage["fenced"]
+                except (Fault, OSError):
+                    cutover = True  # An unreadable authority cannot justify an old writer.
+                if cutover:
+                    raise Fault("task_activation_pending", "Task cutover requires this candidate. Continue the original maintenance operation, or explicitly restart this pending service activation.") from error
             restored = {**original, "current": previous, "previous": previous_previous,
                         "configurations": configurations,
                         "pending": record["pending"]}
@@ -103,13 +114,62 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             _commit_ready(state, restored)
             cause = error.code if isinstance(error, Fault) else type(error).__name__
             raise Fault("activation_failed_restored", "The previous service and exact configuration were restored. No task was replayed. Cause: " + cause) from None
-        record.update(previous=previous if previous != target else previous_previous, pending=None)
-        retained = {record["current"], record["previous"]} - {None}
-        record["configurations"] = {key: value for key, value in configurations.items() if key in retained}
-        if require_safe and installed.get("management_contract") == service_state.MANAGEMENT_CONTRACT and installed.get("payload_sha256"):
-            record = service_state._bind_management(state, record, target)
-        _commit_ready(state, record)
-        return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
+        return _finish_activation(state, record, ready, bind_management=require_safe)
+
+
+def _task_cutover(state: Path, record: dict, *, committed: bool = False) -> bool:
+    pending, target = record["pending"], record["current"]
+    if (pending is None and not committed or pending is not None
+            and (pending["to"] != target or pending["from"] in {None, target})):
+        return False
+    digest = record.get("configurations", {}).get(target)
+    if (service_state._installed(state, target)["state_contract"] < 18 or digest is None
+            or service_state._configuration_digest(Path(record["config"])) != digest):
+        return False
+    service_state._saved_configuration(state, digest)
+    storage = tasks.storage_state(state)
+    return (storage["fenced"] and not storage.get("restore_required", False)
+            and (storage["kind"] == "sqlite" and (pending is not None or storage["active"])
+                 or storage["kind"] == "absent" and pending is not None and storage["active"] is False))
+
+
+def _resume_activation(state: Path, record: dict) -> dict:
+    """Finish the proven original cutover; never restore a pre-ledger writer."""
+    with lease(state / "locks/lifecycle.lock"):
+        current = service_state._record(state)
+        if ({key: value for key, value in current.items() if key != "recovery"}
+                != {key: value for key, value in record.items() if key != "recovery"}):
+            raise Fault("maintenance_input_changed", "The original activation selection changed; preserve its maintenance operation.")
+        record, target = current, current["current"]
+        if not _task_cutover(state, record, committed=True):
+            raise Fault("maintenance_not_continuable", "The original candidate, configuration and Task cutover are not verified.")
+        if record["pending"] is None:
+            # Readiness committed but the maintenance acknowledgement was lost.
+            # A live controller may have admitted new work: observation only.
+            install._verify_candidate(state, record, target, check_remote=True)
+            ready = runtime.status(Path(record["config"]), state)
+            if (ready.get("current") != target or ready.get("status") != "ready"
+                    and not (ready.get("status") == "stopped" and service_state.stopped(record))):
+                raise Fault("service_state_unverified", "The original committed selection is not verifiably ready or deliberately stopped.")
+            return ready
+        runtime._stop(state)
+        tasks.migrate(state)
+        install._verify_candidate(state, record, target, check_remote=True)
+        checks.activation_safe(state)
+        ready = _start_selected(state, record)
+        return _finish_activation(state, record, ready, bind_management=True)
+
+
+def _finish_activation(state: Path, record: dict, ready: dict, *, bind_management: bool) -> dict:
+    pending, target = record["pending"], record["current"]
+    record = record | {"previous": pending["from"] if pending["from"] != target else pending["previous"], "pending": None}
+    retained = {target, record["previous"]} - {None}
+    record["configurations"] = {key: value for key, value in record["configurations"].items() if key in retained}
+    installed = service_state._installed(state, target)
+    if bind_management and installed.get("management_contract") == service_state.MANAGEMENT_CONTRACT and installed.get("payload_sha256"):
+        record = service_state._bind_management(state, record, target)
+    _commit_ready(state, record)
+    return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
 
 
 def _start_selected(state: Path, record: dict) -> dict:
@@ -211,7 +271,9 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 raise Fault("rollback_unavailable", "No verified prior managed installation is retained.")
             return _activate(state, record, target, require_safe=require_safe)
         if record["pending"] is not None:
-            raise Fault("activation_pending", "An interrupted transition needs status readback and explicit rollback, not another update.")
+            if action == "restart" and not reset_recovery and _task_cutover(state, record):
+                return _resume_activation(state, record)
+            raise Fault("activation_pending", "Read the original transition; explicitly resume a verified Task cutover or restore a compatible prior installation.")
         if action == "update":
             if wheel is None or requirements is None:
                 raise Fault("invalid_service_request", "Update requires a trusted local wheel and pinned requirements.")

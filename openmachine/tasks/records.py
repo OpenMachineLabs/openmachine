@@ -12,6 +12,11 @@ from openmachine.foundation.sanitize import Fault, redact
 MAX_RECORD = 65536
 MAX_ACCEPTANCE = 49152
 MAX_SCOPE_REQUEST = 131072
+MAX_ACTIVE_OPERATIONS = 64
+MAX_OPERATION = MAX_OPERATION_BYTES = 65536
+MAX_EVENT_BYTES = 65536
+MAX_PAGE_BYTES = 65536
+MAX_PAGE_ITEMS = 50
 MAX_INTEGER = 2**53 - 1
 READ_FORMATS = (1, 2, 3, 4)
 
@@ -156,9 +161,13 @@ class StageDefinition(Model):
     source_sha256: SHA
 
 
-class Stage(StageDefinition):
+class Decision(Model):
     state: Literal["pending", "running", "blocked", "accepted", "invalidated"]
     evidence: Annotated[list[ID], Field(max_length=64)]
+
+
+class Stage(StageDefinition, Decision):
+    pass
 
 
 def _stages(contract: Contract, stages: list[StageDefinition]) -> None:
@@ -320,7 +329,7 @@ class Operation(Model):
 
     @model_validator(mode="after")
     def bounds(self):
-        if len(canonical(self.model_dump())) > 1536 or len(canonical(self.locator.model_dump())) > 768:
+        if len(canonical(self.model_dump())) > MAX_OPERATION:
             raise ValueError("operation or locator exceeds its encoded bound")
         if self.state == "observed" and (self.observed_at_ms is None or self.result is None):
             raise ValueError("observed operation needs original result evidence")
@@ -387,7 +396,7 @@ class LastUpdate(Model):
     request_sha256: SHA
 
 
-class Record(Model):
+class Current(Model):
     format: Annotated[int, Field(strict=True, ge=1, le=4)]
     task_id: TaskID
     revision: Revision
@@ -399,15 +408,12 @@ class Record(Model):
     contract: Contract
     plan: Plan
     control: Control
-    operations: Annotated[list[Operation], Field(max_length=64)]
-    history: Annotated[list[History], Field(max_length=64)]
     handoff: Handoff | None
     recovery: Recovery | None
     terminal: Terminal | None
     last_update: LastUpdate
     chat_registration: ID | None = None
     control_revision: Revision | None = None
-    effect_scopes: Annotated[list[EffectScopeWitness], Field(max_length=64)] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
@@ -418,6 +424,67 @@ class Record(Model):
             value.pop("control_revision", None)
             value.pop("effect_scopes", None)
         return value
+
+    @model_validator(mode="after")
+    def references(self):
+        _stages(self.contract, self.plan.stages)
+        if (self.format < 3 and (self.contract.recovery_policy is not None or self.chat_registration is not None)
+                or self.format >= 3 and self.contract.recovery_policy is None):
+            raise ValueError("task-owned recovery requires explicit format-3 creation semantics")
+        if self.format < 4:
+            if self.control_revision is not None:
+                raise ValueError("scoped supervision requires format 4")
+        elif self.control_revision is None or self.control_revision > self.revision:
+            raise ValueError("format 4 needs its material control revision")
+        if self.format == 1 and self.contract.github_connections:
+            raise ValueError("legacy records cannot acquire a new account binding")
+        if self.anchors != sorted(set(self.anchors)) or self.created_at_ms > self.updated_at_ms or self.plan.revision > self.revision:
+            raise ValueError("invalid record ordering")
+        stages = {stage.id: stage for stage in self.plan.stages}
+        if self.control.current_stage_id is not None and self.control.current_stage_id not in stages:
+            raise ValueError("invalid current stage")
+        for stage in self.plan.stages:
+            _unique(stage.evidence)
+        if self.control.owner is not None and self.control.owner.expires_at_ms > self.contract.expires_at_ms:
+            raise ValueError("ownership outlives task authority")
+        if self.handoff is not None:
+            handoff = self.handoff
+            if (handoff.stage_id not in stages or handoff.plan_revision != self.plan.revision
+                    or handoff.source_sha256 != stages[handoff.stage_id].source_sha256
+                    or not self.created_at_ms <= handoff.created_at_ms <= self.updated_at_ms
+                    or not handoff.created_at_ms < handoff.expires_at_ms <= self.contract.expires_at_ms):
+                raise ValueError("invalid pending handoff binding")
+        if self.recovery is not None:
+            recovery = self.recovery
+            if not self.created_at_ms <= recovery.started_at_ms <= recovery.next_attempt_ms <= recovery.deadline_ms:
+                raise ValueError("invalid recovery deadline")
+        is_terminal = self.control.state in {"completed", "failed", "cancelled"}
+        if is_terminal != (self.terminal is not None):
+            raise ValueError("terminal control and final record must agree")
+        if self.terminal is not None:
+            terminal = self.terminal
+            if (terminal.outcome != self.control.state or self.handoff is not None or self.control.owner is not None
+                    or not self.created_at_ms <= terminal.finished_at_ms <= self.updated_at_ms
+                    or len(canonical(terminal.model_dump())) > 4096):
+                raise ValueError("invalid terminal record")
+            for evidence in terminal.acceptance:
+                if evidence.stage_id not in stages:
+                    raise ValueError("invalid terminal acceptance reference")
+        bounded = self.model_dump()
+        for stage in bounded["plan"]["stages"]:
+            stage.pop("evidence")
+            stage["decision_version"] = self.revision
+        if len(canonical(bounded)) > MAX_RECORD:
+            raise ValueError("current task state exceeds its bounded contract")
+        return self
+
+
+class Record(Current):
+    """Exact formats 1-4 decoder, used only at the legacy import boundary."""
+
+    operations: Annotated[list[Operation], Field(max_length=64)]
+    history: Annotated[list[History], Field(max_length=64)]
+    effect_scopes: Annotated[list[EffectScopeWitness], Field(max_length=64)] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def references(self):

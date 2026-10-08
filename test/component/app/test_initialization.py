@@ -15,9 +15,11 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         finally:
             os.umask(previous_umask)
         self.assertEqual(saved["revision"], 1)
-        for path in (self.state, self.state / "locks", self.state / "tasks"):
+        for path in (self.state, self.state / "locks"):
             self.assertEqual(path.stat().st_mode & 0o777, 0o700)
         self.assertEqual((self.state / "locks/lifecycle.lock").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.state / "tasks.db").stat().st_mode & 0o777, 0o600)
+        self.assertFalse((self.state / "tasks").exists())
 
         unsafe = self.root / "unsafe-state"
         unsafe.mkdir()

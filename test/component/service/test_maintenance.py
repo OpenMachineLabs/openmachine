@@ -7,6 +7,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
+from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -19,6 +20,84 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def ledger_operation_fixture(self):
+        record = self.operation_fixture()
+        path = self.state / "service/versions" / self.b / "installation.json"
+        save_json(path, service_state._json(path) | {"state_contract": 18,
+                  "management_contract": 1, "payload_sha256": record["request"]["payload_sha256"]})
+        storage = {"kind": "legacy", "fenced": False, "active": False}
+        def migrate(state):
+            storage.update(kind="sqlite", fenced=True, active=True)
+            return storage
+        migration = self.enterContext(patch.object(tasks, "migrate", side_effect=migrate))
+        self.enterContext(patch.object(tasks, "storage_state", side_effect=lambda state: dict(storage)))
+        self.enterContext(patch.object(maintenance, "_bound"))
+        self.enterContext(patch.object(service_checks, "activation_safe"))
+        self.enterContext(patch.object(service_runtime, "socket_alive", return_value=False))
+        self.enterContext(patch.object(service_state, "_bind_management", side_effect=lambda state, selected, identity: selected))
+        _, stop, start = self.activation_mocks()
+        return record, storage, migration, stop, start
+
+    def test_sqlite_cutover_continues_only_original_candidate_without_repreparing(self):
+        record, storage, migration, stop, start = self.ledger_operation_fixture()
+        start.side_effect = [Fault("service_unready", "fixture"), {"status": "ready"}]
+        with patch.object(service_install, "_prepare_payload") as prepare:
+            with lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            observed = maintenance.read_operation(self.config, self.state, record["operation_id"])
+            self.assertEqual((observed["status"], observed["operation"]["phase"]),
+                             ("continuation_required", "recovery_required"))
+            with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.payload, "verify"):
+                accepted = maintenance.continue_operation(self.config, self.state, record["operation_id"])
+            self.assertEqual(accepted["operation"]["operation_id"], record["operation_id"])
+            spawn.assert_called_once()
+            with lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+            prepare.assert_not_called()
+        completed = maintenance._read(self.state, record["operation_id"])
+        self.assertEqual((completed["phase"], completed["request"]), ("completed", record["request"]))
+        self.assertEqual([item.args[1]["current"] for item in start.call_args_list], [self.b, self.b])
+        self.assertEqual((migration.call_count, stop.call_count), (2, 2))
+        self.assertTrue(storage["active"])
+
+    def test_sqlite_readiness_commit_loss_is_observed_without_restart(self):
+        record, _, migration, stop, start = self.ledger_operation_fixture()
+        original_commit = service_transition._commit_ready
+        def lost_acknowledgement(state, selected):
+            original_commit(state, selected)
+            raise OSError("readiness acknowledgement lost")
+        with patch.object(service_transition, "_commit_ready", side_effect=lost_acknowledgement), \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        self.assertIsNone(service_state._record(self.state)["pending"])
+        self.assertEqual(maintenance.read_operation(self.config, self.state, record["operation_id"])["status"], "continuation_required")
+        with patch.object(service_runtime, "status", return_value={"status": "ready", "current": self.b}) as observe, \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        observe.assert_called_once()
+        self.assertEqual((migration.call_count, stop.call_count, start.call_count), (1, 1, 1))
+        self.assertEqual(maintenance._read(self.state, record["operation_id"])["phase"], "completed")
+
+    def test_sqlite_continuation_rejects_changed_intent_or_unfenced_authority(self):
+        record, storage, _, _, start = self.ledger_operation_fixture()
+        start.side_effect = Fault("service_unready", "fixture")
+        with lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        selected = service_state._record(self.state)
+        original = maintenance._operation_path(self.state, record["operation_id"]).read_bytes()
+        cases = [(selected | {"probe": selected["probe"] | {"path": "changed.txt"}}, True, False),
+                 (selected | {"pending": selected["pending"] | {"from": "e" * 64}}, True, False),
+                 (selected, False, False), (selected, True, True)]
+        for changed, fenced, restore_required in cases:
+            with self.subTest(fenced=fenced, restore_required=restore_required, selection=changed):
+                self.save(changed)
+                storage.update(fenced=fenced, restore_required=restore_required)
+                with patch.object(maintenance, "_spawn") as spawn:
+                    self.assert_fault("maintenance_not_continuable", lambda: maintenance.continue_operation(
+                        self.config, self.state, record["operation_id"]))
+                    spawn.assert_not_called()
+                self.assertEqual(maintenance._operation_path(self.state, record["operation_id"]).read_bytes(), original)
+
     def test_explicit_policy_controls_keep_login_stop_and_recovery_separate(self):
         record = self.policy_fixture()
         episode = service_runtime._recovery_attempt(self.state, None, 1000000)

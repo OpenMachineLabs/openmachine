@@ -15,7 +15,7 @@ class ChatRecoveryTests(ChatRecoveryCaseFixture, unittest.TestCase):
         arguments = self.start_arguments("from pathlib import Path; Path('counter').write_text('1')")
         with patch.object(codex, "start", side_effect=AssertionError("Foreground work must not launch recovery.")):
             self.wait(self.app.start_execution(**arguments))
-        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+        self.assertEqual(self.view()["facts"]["operation_count"], 2)
         self.control("pause", reason="Retain the original result while recovery is unavailable.")
         self.config.chat_recovery.model = "Changed Fixture Model"
         with patch.object(self.app.machines, "start_execution", side_effect=AssertionError("Never replay")):

@@ -16,8 +16,8 @@ from openmachine.foundation.state import private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
-# Managed transitions deliberately do not perform persistent-state migrations.
-STATE_CONTRACT = 17
+# Contract 18 activates the Task ledger after stopping the old controller.
+STATE_CONTRACT = 18
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30
@@ -274,6 +274,15 @@ def _save_recovery(state: Path, episode: dict | None) -> None:
     save_json(state / "service/service.json", dict(_record(state), recovery=value))
     if _read_recovery(state) != value:
         raise Fault("runtime_recovery_unverified", "Recovery accounting was not verified; no further attempt is safe.")
+
+
+def _configuration_digest(path: Path) -> str:
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
+            or info.st_size > 65536):
+        raise Fault("invalid_service_configuration", "Select an owned regular configuration of at most 64 KiB.")
+    load(path)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _saved_configuration(state: Path, digest: str) -> Path:

@@ -12,26 +12,39 @@ records before acting and retain index generations between pages.
 openmachine --config /absolute/config.toml --state-dir /absolute/private/state rebuild-task-index
 ```
 
-Maintenance validates at most 50 records/2 MiB per page; continue with its observed
-`--expected-generation` until complete. New work requires complete lookup; original
-result publication and stopping do not. At most 10,000 entries are considered,
-without eviction or migration. Missing legacy metadata, established locks, unsafe
-paths, orphans and corrupt records block repair rather than permit guessed state.
-The index is derived lookup, not a second progress ledger. Reads never repair it.
+SQLite indexes commit with their authoritative rows. `rebuild-task-index` now
+performs an explicit integrity/coverage check; it does not reconstruct missing
+authority. There is no 2-MiB catalog or 10,000-task ceiling. Ordinary reads do not
+initialize, migrate or repair a store. Missing databases or established locks,
+unsafe paths and corrupt evidence fail closed.
+
+Managed service activation stops the controller before importing old task formats
+1–4 and Markdown. The migration validates all original bytes and IDs, commits
+normalized evidence, then archives the old directory under the stable lock before
+activating SQLite. The retained lock prevents old binaries from recreating their
+JSON store. Once fenced, a failed start retains the same candidate and activation
+intent; continue that original maintenance operation instead of rolling back to
+an old writer. Original paused/unknown state never becomes execution permission.
+
+Backups use the Task owner's SQLite online-backup operation, including live WAL
+content. A backup is published only after its copied write authority is disabled.
+Do not copy a live database alone, delete WAL files, or make a restored older copy
+writable without accounting for effects after its watermark. This increment has
+no automatic write-enablement or effect replay for restored copies.
 
 ## Legacy checkpoints
 
 `save_task` creates at expected revision zero and updates the observed revision.
 Identical latest-write retries remain unchanged; anchors are additive and an empty
-list preserves existing locators. Titles/anchors/revision/hash metadata live in
-the index, checkpoint prose only in Markdown. Checkpoints are bounded to 32 KiB,
-index to 2 MiB. Save concise goals, exclusions, authority, worktree/branch, original
+list preserves existing locators. Checkpoint body and metadata now commit together
+in SQLite; checkpoint prose remains bounded to 32 KiB. Save concise goals,
+exclusions, authority, worktree/branch, original
 handles/cursors, relevant outcomes and next action; never secrets, transcripts,
 hidden reasoning or bulk source/logs.
 
-Each file replacement is durable/atomic; checkpoint plus index is not a two-file
-transaction. Torn pairs, missing established locks, lost directories, stale hashes
-or generations fail rather than reinitialize. Reconnect by reading the same task,
+Retain original revisions and IDs after a lost commit acknowledgement. Missing
+established locks, lost databases or corrupt payloads never reinitialize history.
+Reconnect by reading the same task,
 current user instructions, Git and original operation receipts; reuse valid results
 and perform only remaining authorized work. A changed instruction retains earlier
 evidence and observes or explicitly stops incompatible original work. A checkpoint

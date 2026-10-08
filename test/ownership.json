@@ -518,8 +518,10 @@
       ],
       "sources": [
         "openmachine/tasks/__init__.py",
+        "openmachine/tasks/database.py",
         "openmachine/tasks/effects.py",
         "openmachine/tasks/index.py",
+        "openmachine/tasks/migration.py",
         "openmachine/tasks/records.py",
         "openmachine/tasks/store.py",
         "openmachine/tasks/transitions.py"
@@ -729,11 +731,6 @@
       "test/resilience/codex/test_delegation.py",
       "test/resilience/tasks/test_persistence.py",
       "test/resilience/workspace/test_legacy_lock.py"
-    ],
-    "test/support/tasks_cases.py": [
-      "test/component/tasks/test_store.py",
-      "test/resilience/app/test_task_association.py",
-      "test/resilience/tasks/test_persistence.py"
     ],
     "test/support/workspace.py": [
       "test/component/service/test_workspace_compatibility.py",

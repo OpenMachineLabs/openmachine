@@ -5,6 +5,8 @@ import json
 import unittest
 import uuid
 from mcp import Client
+from openmachine import tasks
+from openmachine.tasks import records
 from test.support.mcp import MCPFixture
 
 
@@ -25,7 +27,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     "expected_revision": 0, "change": {"action": "disable"}})
                 path = self.state / "chat_recovery.json"
                 before = path.read_bytes()
-                task_before = (self.state / "tasks" / identity / "task.json").read_bytes()
+                task_before = records.canonical(tasks.read(self.state, identity)["record"])
                 caps = await call("get_capabilities", {})
                 self.assertTrue(caps["chat_recovery"]["automatic_detection"])
                 invalid = await client.call_tool("read_task", {"task_id": None})
@@ -35,4 +37,4 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 await call("read_task", {"task_id": identity})
                 current = json.loads(path.read_bytes())["bindings"][identity]
                 self.assertGreater(current["activity_at_ms"], json.loads(before)["bindings"][identity]["activity_at_ms"])
-                self.assertEqual((self.state / "tasks" / identity / "task.json").read_bytes(), task_before)
+                self.assertEqual(records.canonical(tasks.read(self.state, identity)["record"]), task_before)

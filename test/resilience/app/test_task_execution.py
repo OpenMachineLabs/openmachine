@@ -7,8 +7,9 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
+from openmachine import tasks
 from openmachine.execution.records import TERMINAL
-from openmachine.tasks import store as task_store
+from openmachine.tasks import database, store as task_store
 from openmachine.bootstrap import create_application
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract
@@ -67,7 +68,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         write = self.write_arguments()
         write["expected_head_sha"] = current["head_sha"]
         self.assertEqual(self.app.write_workspace_file(**write)["status"], "applied")
-        self.assertEqual(len(self.view()["record"]["operations"]), 2)
+        self.assertEqual(tasks.read(self.state, "structured-one")["facts"]["operation_count"], 2)
         self.assertEqual(subprocess.check_output(["git", "rev-list", "--count", "HEAD"],
                          cwd=self.work, text=True).strip(), "2")
 
@@ -77,10 +78,10 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         result = self.app.start_execution(**args)
         terminal = self.wait(result)
         self.assertEqual(terminal["status"], "succeeded")
-        before = self.path.read_bytes()
+        before = self.task_bytes()
         self.app.read_execution("desktop", args["execution_id"])
         self.view()
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.task_bytes(), before)
         recovered = self.app.start_execution(**args)
         self.assertEqual(recovered["status"], "succeeded")
         self.assertFalse(recovered["task_operation_replayed"])
@@ -102,7 +103,8 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         if cancelled["record"]["terminal"] is None:
             cancelled = self.control("cancel", reason="Read the original cancellation outcome.")
         self.assertEqual(cancelled["record"]["terminal"]["outcome"], "cancelled")
-        self.assertEqual(len([item for item in cancelled["record"]["operations"] if item["id"] == args["execution_id"]]), 1)
+        retained = self.app.read_task("structured-one", section="operations", operation_id=args["execution_id"])
+        self.assertEqual([item["id"] for item in retained["items"]], [args["execution_id"]])
 
     def test_original_cancel_remains_available_with_busy_task_identity(self):
         from openmachine.tasks import records, transitions
@@ -133,14 +135,16 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         identity = uuid.uuid4().hex
         input_args = dict(machine="desktop", execution_id=args["execution_id"], expected_control_seq=0,
             action="write_stdin", text="only-once-fixture-input\n", task_context=self.context_for(identity))
-        original_replace = task_store._replace
-        def fail(path, raw):
-            value = json.loads(raw)
-            if path == self.path and len(value["operations"]) == 2 and value["operations"][1]["result"] is not None:
+        original_commit = database.commit
+        def fail(connection):
+            row = connection.execute("SELECT payload FROM operations WHERE task_id=? AND id=?",
+                                     ("structured-one", identity)).fetchone()
+            if row is not None and json.loads(row["payload"])["result"] is not None:
                 raise OSError("Lost task publication after terminal input.")
-            return original_replace(path, raw)
-        with patch.object(task_store, "_replace", side_effect=fail):
+            return original_commit(connection)
+        with patch.object(database, "commit", side_effect=fail):
             self.fault("task_result_unverified", self.app.control_execution, **input_args)
+        self.assertIsNone(tasks.operation(self.state, "structured-one", identity)["result"])
         deadline = time.monotonic() + 5
         counter = self.work / "input-count"
         while time.monotonic() < deadline and not counter.exists():
@@ -150,7 +154,9 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertFalse(recovered["task_operation_replayed"])
         self.assertEqual(recovered["control_result"]["seq"], 1)
         self.assertEqual(counter.read_text(), "1")
-        self.assertNotIn("only-once-fixture-input", self.path.read_text())
+        retained = [self.app.read_task("structured-one", section=section, limit=50) for section in ("operations", "history")]
+        self.assertTrue(all(page["complete"] for page in retained))
+        self.assertNotIn("only-once-fixture-input", json.dumps(retained))
         self.fault("task_operation_conflict", self.app.control_execution,
             **dict(input_args, task_context=self.context_for(uuid.uuid4().hex)))
         bare = {key: value for key, value in input_args.items() if key != "task_context"}
@@ -173,22 +179,23 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
 from pathlib import Path
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.tasks import store
+from openmachine.tasks import database
 value=json.loads(Path(sys.argv[1]).read_text())
-original=store._replace
-def stop(path,raw):
- if path.name=="task.json" and sys.argv[2]=="before": os._exit(17)
- original(path,raw)
- if path.name=="task.json": os._exit(18)
-store._replace=stop
+original=database.commit
+def stop(connection):
+ if sys.argv[2]=="before": os._exit(17)
+ original(connection)
+ os._exit(18)
+database.commit=stop
 create_application(Settings.model_validate(value["config"]),Path(value["state"])).control_task(**value["request"])
 '''
             result = subprocess.run([sys.executable, "-I", "-c", code, str(payload), phase], capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, exit_code, result.stderr)
             observed = app.read_task(args["task_id"])
             self.assertEqual(observed["record"]["revision"], 1 if phase == "before" else 2)
-            if phase == "after":
-                self.assertEqual(observed["index_status"], "stale")
+            self.assertEqual(observed["index_status"], "current")
+            self.assertEqual(tasks.control_update(state, args["task_id"], args["update_id"]) is not None,
+                             phase == "after")
             original_record = observed["record"]
             recovered = app.control_task(**args)
             self.assertEqual(recovered["record"]["revision"], 2)

@@ -10,7 +10,7 @@ from test.support.tasks import ObserverFixture, task_contract, terminal_task_fix
 
 
 class SSHObservationTests(ObserverFixture, unittest.TestCase):
-    def remote_tasks(self, count=1):
+    def remote_tasks(self, count=1, *, routes=None):
         from openmachine.config import Machine
         for name, identity in (("remote", "a" * 64), ("alias", "a" * 64), ("healthy", "b" * 64)):
             self.config.machines[name] = Machine(transport="ssh", ssh_alias=name,
@@ -18,12 +18,10 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
         self.app = create_application(self.config, self.state)
         self.addCleanup(self.app.task_observer.stop)
         self.enterContext(patch.object(self.observer_module, "SSH_INTERVAL_MS", 100))
-        identities = self.seed(count)
-        for index, identity in enumerate(identities):
-            def configure(record, now):
-                record["operations"][0]["locator"].update(machine="alias" if index % 2 else "remote", target_identity="a" * 64)
-            tasks.update(self.state, identity, configure)
-        return identities
+        def configure(record, index):
+            machine, target = (routes or {}).get(index, ("alias" if index % 2 else "remote", "a" * 64))
+            record["operations"][0]["locator"].update(machine=machine, target_identity=target)
+        return self.seed(count, configure=configure)
 
     def test_shared_outage_recovers_original_results_without_effect_dispatch(self):
         identities = self.remote_tasks(3)
@@ -82,9 +80,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
 
     def test_blocked_ssh_reader_does_not_consume_local_or_other_target_slots(self):
         import threading
-        identities = self.remote_tasks(4)
-        tasks.update(self.state, identities[2], lambda value, now: value["operations"][0]["locator"].update(machine="healthy", target_identity="b" * 64))
-        tasks.update(self.state, identities[3], lambda value, now: value["operations"][0]["locator"].update(machine="desktop", target_identity=None))
+        identities = self.remote_tasks(4, routes={2: ("healthy", "b" * 64), 3: ("desktop", None)})
         release, started = threading.Event(), threading.Event()
         calls = []
         def read(operation, **kwargs):

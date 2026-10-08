@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 import unittest
 from unittest.mock import call, patch
 from openmachine import service, tasks
@@ -14,9 +15,35 @@ from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
 from test.support.service_cases import ServiceCaseFixture
+from test.support.tasks import write_legacy_checkpoint, write_legacy_task
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def legacy_task_fixture(self, request=None):
+        from openmachine.tasks import records
+        from test.support.tasks import task_contract
+        value = records.new_record(records.normalize_create(request or task_contract()), time.time_ns() // 1000000)
+        return {"record": write_legacy_task(self.state, value)}
+
+    def test_sqlite_candidate_requires_same_authority_and_supported_actual_engine(self):
+        tasks.migrate(self.state)
+        proof = service.check_state(self.config, self.state)
+        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (18, "sqlite"))
+        storage = proof["task_storage"]
+        for delta in ({"state_contract": 17}, {"task_storage": None},
+                      {"task_storage": storage | {"identity": "f" * 32}},
+                      {"task_storage": storage | {"schema": 999}},
+                      {"task_storage": storage | {"fenced": False}},
+                      {"task_storage": storage | {"active": False}},
+                      {"sqlite_runtime": proof["sqlite_runtime"] | {"supported": False}}):
+            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                    Path(sys.executable), self.config, self.state))
+        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")):
+            self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), proof)
+        self.assertEqual(tasks.storage_state(self.state), storage)
+
     def test_retired_events_archive_is_passive_and_blocks_reactivation(self):
         value, digest = self.retired_events_fixture()
         path, lock = self.state / "events.json", self.state / "locks/events.lock"
@@ -81,7 +108,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 self.assert_fault("service_unready", lambda: service_checks._managed_probe(self.state, self.record, 456))
 
     def test_state_check_uses_actual_task_reader_and_preserves_bytes(self):
-        tasks.save(self.state, "original", 0, "Original task", "Preserve original execution evidence.\n", [])
+        write_legacy_checkpoint(self.state, "original", "Preserve original execution evidence.\n", "Original task", [])
         paths = [self.state / "tasks/index.json", self.state / "tasks/original/task.md"]
         before = [path.read_bytes() for path in paths]
         result = service.check_state(self.config, self.state)
@@ -95,16 +122,14 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_actual_task_reader_covers_terminal_history_and_rejects_partial_candidate_proof(self):
         from test.support.tasks import task_contract, terminal_task_fixture
-        from openmachine.tasks import records
         request = task_contract()
-        created = tasks.create(self.state, request.pop("task_id"), **request)
+        created = self.legacy_task_fixture(request)
         path = self.state / "tasks/structured-one/task.json"
-        path.write_bytes(records.canonical(terminal_task_fixture(created["record"])))
-        tasks.rebuild_index(self.state)
+        write_legacy_task(self.state, terminal_task_fixture(created["record"]))
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (17, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17)
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (18, 1, 1))
+        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, 18)
         self.assertEqual(actual, proof)
         for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
                        {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0}, {"task_records": True},
@@ -172,7 +197,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         binding = {"connection_id": "a" * 32, "account_id": 1, "authorization_revision": 1}
         request = task_contract()
         request["contract"].update(repositories=[repository], github_connections={repository: binding})
-        created = tasks.create(self.state, request.pop("task_id"), **request)
+        created = self.legacy_task_fixture(request)
         value = created["record"]
         self.assertEqual(value["format"], 4)
         value.update(revision=value["revision"] + 1, updated_at_ms=value["updated_at_ms"] + 1)
@@ -191,14 +216,13 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             "request_sha256": "b" * 64, "scope": scope, "principal_ref": "fixture:owner",
             "at_ms": value["updated_at_ms"]}]
         path = self.state / "tasks/structured-one/task.json"
-        path.write_bytes(records.canonical(records.Record.model_validate(value).model_dump()))
-        tasks.rebuild_index(self.state)
+        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
         paths = [path, self.state / "tasks/index.json"]
         before = [item.read_bytes() for item in paths]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (17, [4]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (18, [4]))
         self.assertIn(4, proof["structured_task_read_formats"])
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 18), proof)
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
                       {"structured_task_formats_present": []}, {"structured_task_formats_present": [3]},
                       {"structured_task_formats_present": [4.0]}, {"structured_task_formats_present": [4, 4]}):
@@ -212,14 +236,13 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         from test.support.tasks import task_contract
         from openmachine.tasks import records
         request = task_contract()
-        created = tasks.create(self.state, request.pop("task_id"), **request)
+        created = self.legacy_task_fixture(request)
         value = created["record"]
         value["format"] = 3
         value.pop("control_revision")
         value.pop("effect_scopes")
         path = self.state / "tasks/structured-one/task.json"
-        path.write_bytes(records.canonical(records.Record.model_validate(value).model_dump()))
-        tasks.rebuild_index(self.state)
+        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
         before = path.read_bytes()
         proof = service.check_state(self.config, self.state)
         older = proof | {"state_contract": 15, "structured_task_read_formats": [1, 2, 3]}
@@ -231,7 +254,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_candidate_ignoring_canonical_tasks_is_rejected_before_healthy_service_stop(self):
         from test.support.tasks import task_contract
         request = task_contract()
-        tasks.create(self.state, request.pop("task_id"), **request)
+        self.legacy_task_fixture(request)
         path = self.state / "service/versions" / self.b / "installation.json"
         save_json(path, service_state._json(path) | {"state_contract": 6})
         ignored = subprocess.CompletedProcess([], 0, json.dumps({"protocol": 1, "state_contract": 6}), "")
@@ -251,8 +274,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
         before = (self.state / "ssh-recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (17, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
+        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (18, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 18), proof)
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
@@ -272,8 +295,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             expires_at_ms=chatgpt.now_ms() + 3600000)
         before = (self.state / "chat_recovery.json").read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (17, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 17), proof)
+        self.assertEqual((proof["state_contract"], proof["chat_recovery_bindings"]), (18, 1))
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 18), proof)
         for delta in ({"state_contract": 14}, {"chat_recovery_present": False},
                       {"chat_recovery_bindings": 0}, {"chat_recovery_bindings": True},
                       {"chat_recovery_sha256": "e" * 64}, {"chat_recovery_format": 1}):
@@ -304,6 +327,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             save_json(path, original | {"state_contract": contract})
             self.assertEqual(service_state._installed(self.state, self.b)["state_contract"], contract)
             reply = {"protocol": 1, "state_contract": contract}
+            if contract >= 18:
+                reply.update(task_storage=tasks.storage_state(self.state), sqlite_runtime=tasks.sqlite_runtime())
             with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(reply), "")):
                 self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
@@ -466,7 +491,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         from test.support.tasks import task_contract
         from openmachine.tasks import records
         request = task_contract()
-        created = tasks.create(self.state, request.pop("task_id"), **request)
+        created = self.legacy_task_fixture(request)
         service_checks.activation_safe(self.state)
         # Compatibility still uses the actual canonical reader. An incomplete
         # canonical write cannot become an empty or safe task store.
@@ -475,9 +500,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         path.write_bytes(b'{}')
         self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         path.write_bytes(original)
-        with patch.object(service_checks.tasks, "observation_page", return_value={
-                "complete": True, "has_more": False, "entries": [{"task_id": "original", "metadata_sha256": "a" * 64,
-                "record": {"operations": [{"state": "unknown", "result": None}]}}]}):
+        with patch.object(service_checks.tasks, "activation_blockers", return_value=[{"state": "unknown", "result": None}]):
             self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         historical = [
             {"state": "unknown", "locator": {"kind": "github"},
@@ -486,18 +509,14 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             {"state": "unknown", "locator": {"kind": "change"},
              "result": {"status": "unknown", "receipt_sha256": None, "summary": "Domain failure: invalid_edits."}},
         ]
-        with patch.object(service_checks.tasks, "observation_page", return_value={
-                "complete": True, "has_more": False, "entries": [{"task_id": "historical", "metadata_sha256": "b" * 64,
-                "record": {"operations": historical}}]}):
+        with patch.object(service_checks.tasks, "activation_blockers", return_value=historical):
             service_checks.activation_safe(self.state)
         for operation in (
                 {"state": "unknown", "locator": {"kind": "change"},
                  "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original change outcome is unresolved."}},
                 {"state": "unknown", "locator": {"kind": "execution"},
                  "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original execution outcome is unresolved."}}):
-            with self.subTest(operation=operation), patch.object(service_checks.tasks, "observation_page", return_value={
-                    "complete": True, "has_more": False, "entries": [{"task_id": "unsafe", "metadata_sha256": "c" * 64,
-                    "record": {"operations": [operation]}}]}):
+            with self.subTest(operation=operation), patch.object(service_checks.tasks, "activation_blockers", return_value=[operation]):
                 self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         private_directory(self.state / "executions/original")
         with patch.object(service_checks.execution, "read_record", return_value={"status": "running"}):

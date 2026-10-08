@@ -24,7 +24,7 @@ import uvicorn
 
 from openmachine import __version__, service, skills, tasks
 from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT, MAX_TASK_WAIT
-from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, bound_workspace_result
+from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, MAX_TASK_RESULT_BYTES, bound_workspace_result
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -73,7 +73,7 @@ def _result(payload: dict, failed: bool = False) -> CallToolResult:
 
 
 def _reply(operation, *, execution_output: bool = False, workspace_output: bool = False, workspace_mutation: bool = False,
-           change_id: str = "") -> CallToolResult:
+           change_id: str = "", task_output: bool = False) -> CallToolResult:
     try:
         payload = operation()
     except Fault as error:
@@ -94,7 +94,13 @@ def _reply(operation, *, execution_output: bool = False, workspace_output: bool 
             if change_id:
                 payload["change_id"] = change_id
             failed = True
-    return _result(payload, bool(failed))
+    result = _result(payload, bool(failed))
+    if task_output and len(json.dumps(result.model_dump(
+            mode="json", by_alias=True, exclude_none=True)).encode()) > MAX_TASK_RESULT_BYTES - 1024:
+        return _result({"task_id": payload.get("task_id"), "error": {
+            "code": "task_response_limit", "message": "The task response exceeded its wire budget. "
+            "Preserve original task and operation IDs; request a smaller history page."}}, True)
+    return result
 
 
 def _submit_owned(operation) -> Future:
@@ -324,7 +330,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                     stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
         """Create an authorized structured task; preserve readable instructions and inputs with correctly hashed stage sources. Recovery defaults disabled: task_chat requires explicit user authorization and returned readiness/blockers must be checked. Preserve task/update IDs after uncertainty; committed creation is not receiver readiness or business permission. Explicit claim/current task_context remain required. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
-                      contract.model_dump(), [stage.model_dump() for stage in stages]))
+                      contract.model_dump(), [stage.model_dump() for stage in stages]), task_output=True)
 
     @guided_tool(annotations=WRITE)
     async def control_task(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
@@ -335,7 +341,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                            transition: tasks.Transition) -> CallToolResult:
         """Control the original task using exact task/plan/epoch revisions; retain update_id after uncertainty. Renew the original claim_id/principal/epoch. Expired authority requires a revised contract with fresh evidence. bind_effect_scope needs original normalized arguments and never resolves an unknown effect. Claims grant no permission. Pause blocks new admission; cancellation preserves admitted/unknown effects. Finish requires action, outcome, acceptance references to accepted original evidence and limitations. Inspect returned state/recovery blockers."""
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
-            expected_plan_revision, expected_epoch, update_id, transition.model_dump()))
+            expected_plan_revision, expected_epoch, update_id, transition.model_dump()), task_output=True)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @guided_tool(annotations=WRITE)
@@ -345,7 +351,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                                 change: RecoveryChange) -> CallToolResult:
         """Enable/disable task recovery under its original authority; callers cannot select a URL or account. Preserve update_id and observed recovery revision after uncertainty. Recovery neither grants business authority nor resets budgets/retries uncertain messages. Disable retains evidence and does not cancel admitted commands. Historical unbound tasks need explicit guarded plan enrollment."""
         return _reply(lambda: application.configure_chat_recovery(
-            task_id, update_id, expected_revision, change.model_dump()))
+            task_id, update_id, expected_revision, change.model_dump()), task_output=True)
 
     @guided_tool(annotations=READ)
     def find_tasks(query: Annotated[str, Field(max_length=200)] = "", anchors: Annotated[list[str], Field(max_length=16)] = [],
@@ -353,13 +359,21 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                    limit: Annotated[int, Field(ge=1, le=50)] = 20,
                    expected_generation: Annotated[int, Field(ge=-1)] = -1) -> CallToolResult:
         """Find private checkpoints by exact task/anchors or title/ID keywords. Anchor filters intersect; descriptive results are candidates, never continuation authority. Follow pagination/generation. Reads do not initialize state or start work; missing/corrupt history is explicit. resume_authorized=false means this lookup grants no authority, not that current user authorization is denied."""
-        return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation))
+        return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation), task_output=True)
 
     @guided_tool(annotations=READ)
     def read_task(task_id: str, preparation_id: Annotated[str | None,
-                  Field(pattern=r"^[0-9a-f]{32}$")] = None) -> CallToolResult:
-        """Read original validated task history without initialization, repair, claim or execution. Check current/stale/incomplete lookup status. Optional original preparation_id correlates receiver evidence only through a successful external MCP read; it does not enable recovery, prove identity or advance work. Reading grants no authority or terminal reactivation."""
-        return _reply(lambda: application.read_task(task_id, preparation_id))
+                  Field(pattern=r"^[0-9a-f]{32}$")] = None,
+                  section: Literal["summary", "operations", "history", "evidence"] = "summary",
+                  cursor: Annotated[str, Field(max_length=1024)] = "",
+                  limit: Annotated[int, Field(strict=True, ge=1, le=50)] = 20,
+                  operation_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
+                  stage_id: Annotated[str, Field(max_length=64, pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$")] = "",
+                  decision_version: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)] = 0) -> CallToolResult:
+        """Read schema v2 current state or a bounded operations/history/evidence page. Summary omits cumulative history; follow complete/has_more, cursor and revision watermarks. Use the exact original operation_id, or an evidence_ref's stage_id and decision_version together on evidence without cursor/operation_id. Reads never initialize, repair, claim or execute work. Optional preparation_id requires summary and correlates receiver evidence only after a successful external MCP read; it grants no business authority or terminal reactivation."""
+        return _reply(lambda: application.read_task(task_id, preparation_id, section=section,
+                      cursor=cursor, limit=limit, operation_id=operation_id,
+                      stage_id=stage_id, decision_version=decision_version), task_output=True)
 
     @guided_tool(annotations=READ)
     async def wait_task(task_id: Annotated[str, Field(min_length=1, max_length=64,
@@ -373,7 +387,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                 "message": "At most 16 bounded waits are admitted; immediate task reads and cancellation remain available."}}, True)
         cancelled = threading.Event()
         operation = partial(_reply, lambda: application.wait_task(
-            task_id, expected_revision, wait_seconds, cancelled=cancelled))
+            task_id, expected_revision, wait_seconds, cancelled=cancelled), task_output=True)
         try:
             if wait_seconds:
                 try:
@@ -393,7 +407,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                   body: Annotated[str, Field(min_length=1, max_length=32768)],
                   anchors: Annotated[list[str], Field(max_length=16)] = []) -> CallToolResult:
         """Save an existing legacy workflow, not a parallel structured-task checkpoint or conversion. Revision zero creates; updates require observed revision. Identical last-write retries are no-ops; stale/corrupt state is not overwritten. Anchors are additive. Retain authority/evidence/next action, never credentials or hidden reasoning. Torn saves stay explicit; saving does not execute, publish or resume work."""
-        return _reply(lambda: application.save_task(task_id, expected_revision, title, body, anchors))
+        return _reply(lambda: application.save_task(task_id, expected_revision, title, body, anchors), task_output=True)
 
     @guided_tool(annotations=WRITE)
     async def start_codex_task(machine: str, execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],

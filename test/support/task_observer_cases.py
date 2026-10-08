@@ -8,7 +8,6 @@ import unittest
 from unittest.mock import patch
 import uuid
 from openmachine import tasks
-from openmachine.tasks import store as task_store
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
@@ -27,16 +26,17 @@ class TaskObserverCaseFixture(ObserverFixture):
 from pathlib import Path
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.tasks import store
+from openmachine.tasks import database
 value=json.loads(Path(sys.argv[1]).read_text())
-original=store._replace
-def crash(path,raw):
- if path.name=="task.json" and any((item["result"] or {}).get("status")=="succeeded" for item in json.loads(raw)["operations"]):
+original=database.commit
+def crash(connection):
+ rows=connection.execute("SELECT payload FROM operations WHERE task_id=?",("structured-one",)).fetchall()
+ if any((json.loads(row[0])["result"] or {}).get("status")=="succeeded" for row in rows):
   if sys.argv[2]=="before": os._exit(67)
-  original(path,raw)
+  original(connection)
   os._exit(68)
- return original(path,raw)
-store._replace=crash
+ return original(connection)
+database.commit=crash
 app=create_application(Settings.model_validate(value["config"]),Path(value["state"]))
 with app.task_observer.running(): time.sleep(12)
 os._exit(69)
@@ -51,7 +51,6 @@ os._exit(69)
         self.assertEqual(final["handoff"]["reason"], "result_ready")
         if phase == "after":
             self.assertEqual(final, prior, "A committed result/handoff must not be republished")
-            self.assertEqual(self.view()["index_status"], "stale")
         self.assertEqual((self.work / "counter").read_text(), "1")
         self.assertEqual(len(final["operations"]), 1)
         self.assertEqual(self.wait(started)["created_at"], started["created_at"])
