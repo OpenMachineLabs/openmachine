@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
@@ -78,6 +79,23 @@ class Target(Model):
     workspace: Name
     workspace_identity: SHA
     head_sha: Head | None
+    worktree: Text1024 = ""
+
+    @model_validator(mode="after")
+    def selected_worktree(self):
+        if self.worktree:
+            path = PurePosixPath(self.worktree)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("worktree needs an absolute path without parent traversal")
+            _line(self.worktree)
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if not self.worktree:
+            value.pop("worktree", None)
+        return value
 
 
 class Source(Model):
@@ -120,7 +138,7 @@ class Contract(Model):
         if not all(value.strip() for value in (self.objective, self.acceptance, self.stop_condition)):
             raise ValueError("objective, acceptance and stop condition must be nonempty")
         for values in (self.authority_refs, self.repositories, self.tools,
-                       [(t.machine, t.workspace) for t in self.targets], [s.locator for s in self.sources]):
+                       [(t.machine, t.workspace, t.worktree) for t in self.targets], [s.locator for s in self.sources]):
             _unique(values)
         if any(repo.split("/")[1] in {".", ".."} for repo in self.repositories):
             raise ValueError("invalid repository")

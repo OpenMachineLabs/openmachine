@@ -19,7 +19,7 @@ from . import MAX_MESSAGE, PROTOCOL
 if TYPE_CHECKING:
     from openmachine.config import Settings
 
-MUTATIONS = {"apply_workspace_patch", "start_execution", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
+MUTATIONS = {"apply_workspace_patch", "start_execution", "create_worktree", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
 
 
 def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:

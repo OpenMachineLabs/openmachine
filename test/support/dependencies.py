@@ -14,7 +14,7 @@ class DependencyFixture(object):
             "integrations": (),
             "openmachine.foundation.*": ("openmachine.foundation.*",),
             "openmachine.execution.*": ("openmachine", "openmachine.execution.*",
-                                        "openmachine.foundation.*", "openmachine.workspace.git"),
+                                        "openmachine.foundation.*", "openmachine.workspace.git", "openmachine.workspace.worktrees"),
             "openmachine.workspace.*": ("openmachine", "openmachine.workspace.*", "openmachine.foundation.*"),
             "openmachine.tasks": ("openmachine.tasks.store", "openmachine.tasks.index", "openmachine.tasks.records"),
             "openmachine.tasks.store": ("openmachine.tasks.index", "openmachine.tasks.records", "openmachine.tasks.effects", "openmachine.foundation.*"),

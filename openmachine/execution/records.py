@@ -7,9 +7,11 @@ from pathlib import Path
 import re
 
 from openmachine.foundation.sanitize import Fault
+from openmachine.workspace import worktrees
 
 MAX_TIMEOUT = 86400
 FORMAT = 5
+CREATION_FORMAT = 6
 DEFAULT_GRACE = 5.0
 LEGACY_GRACE = 0.5
 CONTROL_PROTOCOL = 1
@@ -90,7 +92,7 @@ def is_remote(record: dict) -> bool:
 
 def _validate_facts(record: dict) -> None:
     command, stop, cleanup = record["command"], record["stop"], record["cleanup"]
-    modes = {"pipe", "pty"} if record["format_version"] == FORMAT else {"pipe"}
+    modes = {"pipe", "pty"} if record["format_version"] >= FORMAT else {"pipe"}
     if record["io_mode"] not in modes:
         raise ValueError("unsupported IO mode")
     grace = record["request"]["termination_grace_seconds"]
@@ -173,13 +175,49 @@ def _validate_interactive(record: dict) -> None:
         raise ValueError("inconsistent input effect")
 
 
+def _validate_creation(record: dict) -> None:
+    request = record["request"]
+    intent = request["worktree_creation"]
+    plan = record["context"]["creation_plan"]
+    if not isinstance(intent, dict) or set(intent) != {
+            "workspace", "destination", "base_ref", "new_branch", "expected_workspace_identity", "worktree"}:
+        raise ValueError("invalid worktree request")
+    if not isinstance(intent["workspace"], str) or not 1 <= len(intent["workspace"]) <= 128:
+        raise ValueError("invalid worktree workspace")
+    try:
+        normalized = worktrees.normalize_creation(**{key: value for key, value in intent.items() if key != "workspace"})
+        worktrees.validate_creation_plan(plan)
+    except Fault as error:
+        raise ValueError("invalid worktree plan") from error
+    if (normalized != {key: value for key, value in intent.items() if key != "workspace"}
+            or plan["destination"] != intent["destination"] or plan["branch"] != intent["new_branch"]
+            or plan["source_identity"] != intent["expected_workspace_identity"]
+            or request["cwd"] != plan["source_root"] or request["argv"] != plan["argv"]
+            or request["resource_keys"] != plan["resource_keys"]
+            or record["context"]["workspace_lock_root"] != plan["destination"]
+            or request["workspace_access"] != "exclusive" or request["expected_head_sha"]
+            or request["tty"] or request["terminal_size"] is not None):
+        raise ValueError("inconsistent worktree execution")
+    created = record["context"].get("created_worktree")
+    if created is not None and (not isinstance(created, dict)
+            or created.get("worktree") != plan["destination"]
+            or created.get("common_dir") != plan["common_dir"]
+            or created.get("head_sha") != plan["base_commit"]
+            or created.get("branch") != (plan["branch"] or None)
+            or not isinstance(created.get("workspace_identity"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", created["workspace_identity"])):
+        raise ValueError("invalid created worktree identity")
+    if record["status"] == "succeeded" and created is None:
+        raise ValueError("unverified worktree creation")
+
+
 def read_record(directory: Path) -> dict:
     """Validate all accepted formats without rewriting or observing the process."""
     try:
         with (directory / "record.json").open() as stream:
             record = json.load(stream)
         version = record.get("format_version", 1)
-        if type(version) is not int or version not in (1, 2, 3, 4, FORMAT):
+        if type(version) is not int or version not in (1, 2, 3, 4, FORMAT, CREATION_FORMAT):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
         states = TERMINAL | {"accepted", "preparing", "running", "stopping", "finishing"} if version >= 4 else (
             TERMINAL - {"outcome_unknown"}) | {"accepted", "preparing", "running"}
@@ -211,18 +249,22 @@ def read_record(directory: Path) -> dict:
         if record["status"] in TERMINAL and not _number(record["finished_at"]):
             raise ValueError("missing terminal receipt")
         if version == 3 or is_remote(record):
-            if (version not in (3, 4, FORMAT) or record.get("scope_unit") != f"openmachine-{directory.name}.scope"
+            if (version not in (3, 4, FORMAT, CREATION_FORMAT) or record.get("scope_unit") != f"openmachine-{directory.name}.scope"
                     or not re.fullmatch(r"[0-9a-f]{64}", request["machine"])
                     or record["context"].get("target_identity") != request["machine"]
                     or not re.fullmatch(r"[0-9a-f]{64}", record["context"].get("worker_sha256", ""))):
                 raise ValueError("invalid remote ownership")
         if version >= 4:
             _validate_facts(record)
-        if version == FORMAT:
+        if version >= FORMAT:
             try:
                 _validate_interactive(record)
             except Fault as error:
                 raise ValueError("invalid interactive receipt") from error
+        if version == CREATION_FORMAT:
+            _validate_creation(record)
+        elif "worktree_creation" in request or "creation_plan" in record["context"] or "created_worktree" in record["context"]:
+            raise ValueError("unsupported worktree execution semantics")
         return record
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error

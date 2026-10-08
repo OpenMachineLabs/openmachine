@@ -13,8 +13,9 @@ from openmachine.tasks import effects, records, transitions
 from . import task_attention
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
+EXECUTION_METHODS = {"start_execution", "create_worktree"}
 GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"}
-METHODS = FILE_METHODS | GITHUB_METHODS | {"start_execution", "control_execution", "cancel_execution"}
+METHODS = FILE_METHODS | EXECUTION_METHODS | GITHUB_METHODS | {"control_execution", "cancel_execution"}
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
 # else is unknown unless an original receipt proves its outcome.
@@ -184,8 +185,8 @@ class TaskAdmission:
         if method in GITHUB_METHODS:
             return self.app._github_call(method.removeprefix("github_"), arguments,
                                          binding=binding, historical_unbound=supervised and binding is None)
-        if method == "start_execution" and supervised:
-            return self.app.machines.start_execution(**arguments, task_admitted=True)
+        if method in EXECUTION_METHODS and supervised:
+            return getattr(self.app.machines, method)(**arguments, task_admitted=True)
         return getattr(self.app.machines, method)(**arguments)
 
     def _locator(self, method: str, arguments: dict, context: dict | None) -> dict | None:
@@ -210,10 +211,13 @@ class TaskAdmission:
 
     def _normalize(self, method: str, arguments: dict, context: dict) -> dict:
         value = deepcopy(arguments)
-        if method == "start_execution":
+        if method in FILE_METHODS | {"create_worktree"} and value.get("worktree") == "":
+            value.pop("worktree")
+        if method in EXECUTION_METHODS:
             if value.get("task_id") not in {"", None, context["task_id"]} or value["execution_id"] != context["operation_id"]:
                 raise Fault("task_operation_conflict", "Bind the original execution ID and task ID, not another identity.")
             value["task_id"] = context["task_id"]
+        if method == "start_execution":
             keys = execution.validate_start(value["cwd"], value["argv"], value["timeout_seconds"], value["expected_head_sha"],
                 value["workspace_access"], value["resource_keys"], value["task_id"], value["termination_grace_seconds"],
                 value["tty"], value["terminal_size"])
@@ -252,23 +256,23 @@ class TaskAdmission:
         try:
             binding = tasks.operation_binding(self.app.state, tasks.operation_key(locator))
         except Fault as index_error:
-            if method not in FILE_METHODS | {"start_execution"}:
+            if method not in FILE_METHODS | EXECUTION_METHODS:
                 raise
             try:
                 self._read({"locator": locator})
             except Fault:
                 raise index_error from None
-            return self._dispatch(method, arguments, supervised=method == "start_execution")
+            return self._dispatch(method, arguments, supervised=method in EXECUTION_METHODS)
         if binding is None:
             return self._dispatch(method, arguments)
-        if method in FILE_METHODS | {"start_execution"}:
+        if method in FILE_METHODS | EXECUTION_METHODS:
             try:
                 self._read({"locator": locator})
             except Fault:
                 pass
             else:
                 # Native immutable-ID reconciliation cannot create another effect.
-                return self._dispatch(method, arguments, supervised=method == "start_execution")
+                return self._dispatch(method, arguments, supervised=method in EXECUTION_METHODS)
         raise Fault("task_context_required", "This original effect was supervised; retain task_context before a new consequence.")
 
     def run(self, method: str, arguments: dict, context: dict | None) -> dict:
@@ -300,7 +304,7 @@ class TaskAdmission:
                 for name in sorted(names):
                     locks.enter_context(lease(self.app.state / "locks" / (name + ".lock")))
             except Fault as error:
-                if error.code != "resource_busy" or context is not None or method not in FILE_METHODS | {"start_execution"}:
+                if error.code != "resource_busy" or context is not None or method not in FILE_METHODS | EXECUTION_METHODS:
                     raise
                 try:
                     self._read({"locator": locator})
@@ -327,7 +331,7 @@ class TaskAdmission:
                 binding = tasks.operation_binding(self.app.state, key, context["operation_id"])
                 if binding is not None and binding["task_id"] != context["task_id"]:
                     raise Fault("task_operation_conflict", "This original effect belongs to another task; no new association was admitted.")
-            if method == "start_execution" or method in FILE_METHODS:
+            if method in EXECUTION_METHODS | FILE_METHODS:
                 try:
                     self._read({"locator": locator})
                 except Fault as error:
@@ -378,7 +382,7 @@ class TaskAdmission:
                         observed = self._read(operation, arguments)
                         result, enriched = self._observation(operation, observed)
                     except (Fault, OSError):
-                        unstarted = code == "resource_busy" and method == "start_execution" and self._unstarted_local(operation)
+                        unstarted = code == "resource_busy" and method in EXECUTION_METHODS and self._unstarted_local(operation)
                         result, enriched = _receipt("failed" if no_effect or unstarted else "unknown",
                                                     summary=f"Domain failure: {code}."), locator
                 if admitted["record"]["format"] >= 4:
@@ -414,7 +418,7 @@ class TaskAdmission:
                 raise Fault("github_not_allowed", "The selected task repository has no current verified write grant.")
             return
         machine = arguments["machine"]
-        target = self.app.config.machine(machine, write=method == "start_execution" or
+        target = self.app.config.machine(machine, write=method in EXECUTION_METHODS or
                                          method == "control_execution" and arguments["action"] in {"write_stdin", "resize"})
         if (target.ssh_identity or None) != locator["target_identity"]:
             raise Fault("task_scope_denied", "The original target identity changed.")
@@ -436,19 +440,31 @@ class TaskAdmission:
             configured = self.app.config.workspaces.get(name)
             if configured is None or configured.machine != machine:
                 continue
-            if method in FILE_METHODS and arguments["workspace_name"] != name:
+            selection = accepted.get("worktree", "")
+            if method in FILE_METHODS | {"create_worktree"} and (
+                    arguments["workspace_name"] != name or arguments.get("worktree", "") != selection):
                 continue
-            observed = self.app.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1, line_count=1)["context"]
-            if observed.get("workspace_identity") != accepted["workspace_identity"] or (observed.get("head_sha") or None) != accepted["head_sha"]:
-                raise Fault("context_mismatch", "The accepted task workspace or HEAD changed; revise the affected plan before new work.")
+            selected_arguments = {"worktree": selection} if selection else {}
+            observed = self.app.machines.read_workspace_file(machine, name, "AGENTS.md", start_line=1,
+                                                             line_count=1, **selected_arguments)["context"]
             if method == "start_execution":
-                cwd, root = PurePosixPath(arguments["cwd"]), PurePosixPath(configured.root)
+                cwd, root = PurePosixPath(arguments["cwd"]), PurePosixPath(observed["cwd"])
                 if ".." in cwd.parts or not cwd.is_relative_to(root):
                     continue
-                selected = self.app.machines.inspect_workspace(machine, name, "files", str(cwd.relative_to(root)), limit=1)
+                selected = self.app.machines.inspect_workspace(machine, name, "files", str(cwd.relative_to(root)),
+                                                               limit=1, **selected_arguments)
                 if not PurePosixPath(selected["path"]).is_relative_to(PurePosixPath(observed["cwd"])):
                     raise Fault("task_scope_denied", "The command cwd resolves outside the accepted task workspace.")
-            else:
+            if observed.get("workspace_identity") != accepted["workspace_identity"] or (
+                    method != "create_worktree" and (observed.get("head_sha") or None) != accepted["head_sha"]):
+                raise Fault("context_mismatch", "The accepted task workspace or HEAD changed; revise the affected plan before new work.")
+            if method == "create_worktree":
+                if arguments["expected_workspace_identity"] != accepted["workspace_identity"]:
+                    raise Fault("context_mismatch", "Worktree creation must retain the accepted source workspace identity.")
+                # The domain verifies the fixed base and destination grant. Creating
+                # a tree never enrolls that destination as another task target.
+                return
+            if method in FILE_METHODS:
                 self.app.config.workspace_machine(machine)
                 if arguments["expected_workspace_identity"] != accepted["workspace_identity"]:
                     raise Fault("context_mismatch", "The file intent does not bind the accepted task workspace.")

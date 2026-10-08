@@ -141,6 +141,15 @@ user consent was revoked. A lost response never authorizes replay.
 
 ## Explicit file editing
 
+Git worktrees are optional, selected per operation. The AI inspects task context
+and existing trees, reuses a suitable location, and calls `create_worktree` only
+when independent work needs isolation. Creation keeps one execution ID and leaves
+the original directory and uncommitted files in place. No tree is allocated per
+Chat or PR. See [on-demand worktrees](docs/operations.md#on-demand-worktrees) for
+path grants, task targets, recovery and the explicit cleanup boundary. This
+unreleased capability uses state contract 17, SSH protocol 7 and creation receipt
+format 6; ordinary execution receipts remain format 5.
+
 [Workspace operations](docs/operations.md#workspace) cover source windows, exact
 edits and `om_patch_v1`. Whole-plan preflight is not a multi-file transaction;
 partial/unknown results preserve the original ID and known applied prefix.

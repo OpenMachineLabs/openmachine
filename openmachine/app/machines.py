@@ -27,58 +27,85 @@ class Machines:
 
     def inspect_workspace(self, machine: str, workspace_name: str, action: str, path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
-                          expected_snapshot: str = "", path_glob: str = "") -> dict:
+                          expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
+        selection = {"worktree": worktree} if worktree else {}
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "inspect_workspace", workspace=workspace_name, action=action,
                              path=path, offset=offset, limit=limit, query=query, staged=staged,
-                             expected_snapshot=expected_snapshot, path_glob=path_glob)
+                             expected_snapshot=expected_snapshot, path_glob=path_glob, **selection)
         return workspace.inspect(self.config, machine, workspace_name, action, path, offset, limit,
-                                 query=query, staged=staged, expected_snapshot=expected_snapshot, path_glob=path_glob)
+                                 query=query, staged=staged, expected_snapshot=expected_snapshot, path_glob=path_glob,
+                                 **selection)
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str,
                             offset: int = 0, expected_sha256: str = "", start_line: int | None = None,
-                            line_count: int = 200) -> dict:
+                            line_count: int = 200, worktree: str = "") -> dict:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "read_workspace_file", workspace=workspace_name, path=path,
-                             offset=offset, expected_sha256=expected_sha256, start_line=start_line, line_count=line_count)
-        return workspace.read_text_file(self.config, machine, workspace_name, path, offset, expected_sha256,
+                             offset=offset, expected_sha256=expected_sha256, start_line=start_line, line_count=line_count,
+                             **({"worktree": worktree} if worktree else {}))
+        config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
+        return workspace.read_text_file(config, machine, workspace_name, path, offset, expected_sha256,
                                         start_line, line_count)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
-                             expected_workspace_identity: str = "") -> dict:
+                             expected_workspace_identity: str = "", worktree: str = "") -> dict:
         if self.config.machine(machine).transport == "ssh":
             return self._ssh(machine, "write_workspace_file", workspace=workspace_name, path=path,
                              content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256,
-                             change_id=change_id, expected_workspace_identity=expected_workspace_identity)
-        return workspace.write_text_file(self.config, self.state, machine, workspace_name, path, content,
+                             change_id=change_id, expected_workspace_identity=expected_workspace_identity,
+                             **({"worktree": worktree} if worktree else {}))
+        config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
+        return workspace.write_text_file(config, self.state, machine, workspace_name, path, content,
                                          expected_head_sha, expected_sha256, change_id, expected_workspace_identity,
-                                         validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+                                         validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
 
     def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
                             expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
-                            change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "") -> dict:
+                            change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
+                            worktree: str = "") -> dict:
         arguments = dict(workspace=workspace_name, path=path, edits=edits,
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run,
                          expected_plan_sha256=expected_plan_sha256)
         if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "edit_workspace_file", **arguments)
-        return workspace.edit_text_file(self.config, self.state, machine, **arguments,
-                                       validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+            return self._ssh(machine, "edit_workspace_file", **arguments, **({"worktree": worktree} if worktree else {}))
+        config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
+        return workspace.edit_text_file(config, self.state, machine, **arguments,
+                                       validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
 
     def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
                               expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
                               create_parents: bool = False, change_id: str = "", dry_run: bool = False,
-                              expected_plan_sha256: str = "") -> dict:
+                              expected_plan_sha256: str = "", worktree: str = "") -> dict:
         arguments = dict(workspace=workspace_name, patch_text=patch,
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          preconditions=preconditions, create_parents=create_parents, change_id=change_id,
                          dry_run=dry_run, expected_plan_sha256=expected_plan_sha256)
         if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "apply_workspace_patch", **arguments)
-        return workspace.apply_patch(self.config, self.state, machine, **arguments,
-            validate_new=lambda root: execution.check_workspace_leases(self.config, self.state, scope=root))
+            return self._ssh(machine, "apply_workspace_patch", **arguments, **({"worktree": worktree} if worktree else {}))
+        config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
+        return workspace.apply_patch(config, self.state, machine, **arguments,
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+
+    def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
+                        new_branch: str, execution_id: str, expected_workspace_identity: str,
+                        worktree: str = "", task_id: str = "", *, task_admitted: bool = False) -> dict:
+        arguments = dict(workspace_name=workspace_name, destination=destination, base_ref=base_ref,
+                         new_branch=new_branch, execution_id=execution_id,
+                         expected_workspace_identity=expected_workspace_identity, worktree=worktree, task_id=task_id)
+        if self.config.machine(machine).transport == "ssh":
+            if task_id and not task_admitted:
+                try:
+                    self._ssh(machine, "read_execution", execution_id=execution_id)
+                except Fault as error:
+                    if error.code != "execution_not_found":
+                        raise
+                    tasks.require_legacy(self.state, task_id)
+            return self._ssh(machine, "create_worktree", **arguments)
+        return execution.create_worktree(self.config, self.state, machine, **arguments,
+            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False,
                               *, cancelled: threading.Event | None = None) -> dict:

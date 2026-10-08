@@ -15,6 +15,7 @@ from openmachine.foundation.sanitize import Fault, redact_slice, redaction_spans
 
 from .files import MAX_SOURCE, read_text_file, reader_path, root_for
 from .git import MAX_CAPTURE, capture, context
+from .worktrees import list_worktrees, select
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -25,7 +26,13 @@ MAX_MATCHES = 1000
 
 def inspect(config: "Settings", machine: str, workspace: str, action: str,
             path: str = ".", offset: int = 0, limit: int = 100, *, query: str = "",
-            staged: bool = False, expected_snapshot: str = "", path_glob: str = "") -> dict:
+            staged: bool = False, expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
+    if worktree:
+        config = select(config, machine, workspace, worktree)
+    if action == "worktrees":
+        if path != "." or query or staged or path_glob:
+            raise Fault("invalid_filter", "Worktree discovery accepts only pagination and snapshot inputs.")
+        return list_worktrees(config, machine, workspace, offset, limit, expected_snapshot)
     root = root_for(config, machine, workspace)
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts or excluded(relative):
@@ -68,7 +75,7 @@ def inspect(config: "Settings", machine: str, workspace: str, action: str,
                 "mtime_ns": before.st_mtime_ns, "credential_paths_excluded": True,
                 "ordering": "filesystem; recheck mtime when paging"}
     if action != "read":
-        raise Fault("unsupported_operation", "Use files, read, search, status, or diff.")
+        raise Fault("unsupported_operation", "Use files, read, search, status, diff, or worktrees.")
     page = read_text_file(config, machine, workspace, str(relative), offset)
     return {**page, **identity, "size": page["size_bytes"], "source_changed": False}
 
