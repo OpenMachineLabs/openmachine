@@ -147,7 +147,7 @@ when independent work needs isolation. Creation keeps one execution ID and leave
 the original directory and uncommitted files in place. No tree is allocated per
 Chat or PR. See [on-demand worktrees](docs/operations.md#on-demand-worktrees) for
 path grants, task targets, recovery and the explicit cleanup boundary. This
-unreleased capability uses state contract 17, SSH protocol 7 and creation receipt
+capability uses state contract 17, SSH protocol 7 and creation receipt
 format 6; ordinary execution receipts remain format 5.
 
 [Workspace operations](docs/operations.md#workspace) cover source windows, exact
