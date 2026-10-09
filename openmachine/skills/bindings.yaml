@@ -11,6 +11,7 @@ start_execution: {skill: om.execution}
 read_execution: {skill: om.execution, path: terminal.md}
 list_executions: {skill: om.execution}
 cancel_execution: {skill: om.execution, path: terminal.md}
+reconcile_execution: {skill: om.execution, path: terminal.md}
 control_execution: {skill: om.execution, path: terminal.md}
 find_tasks: {skill: om.tasks, path: continue.md}
 read_task: {skill: om.tasks, path: continue.md}

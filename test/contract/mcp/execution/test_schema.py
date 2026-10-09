@@ -1,13 +1,44 @@
 """contract mcp execution test_schema behavior."""
 
+import json
 import sys
 import unittest
 import uuid
 from mcp import ClientSession
+from openmachine.foundation.state import save_json
 from test.support.mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_original_cleanup_reconciliation_round_trip_keeps_original_receipt(self):
+        self.launch()
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                identity = {"machine": "desktop", "execution_id": uuid.uuid4().hex}
+                missing = await session.call_tool("reconcile_execution", identity)
+                self.assertTrue(missing.is_error)
+                self.assertEqual(missing.structured_content["error"]["code"], "execution_not_found")
+                self.assertFalse((self.state / "executions" / identity["execution_id"]).exists())
+                started = await session.call_tool("start_execution", identity | {"cwd": str(self.work),
+                    "argv": [sys.executable, "-c", 'from pathlib import Path; Path("once").write_text("1")']})
+                self.assertFalse(started.is_error)
+                await self.execution_until(session, identity, lambda result: result["status"] == "succeeded")
+                path = self.state / "executions" / identity["execution_id"] / "record.json"
+                record = json.loads(path.read_text())
+                # Inject the missing cleanup observation after a real known exit.
+                record["status"] = "outcome_unknown"
+                record["cleanup"].update(status="unverified", error="cleanup_query_timeout")
+                save_json(path, record)
+                original = path.read_bytes()
+                for _ in range(2):
+                    result = await session.call_tool("reconcile_execution", identity)
+                    self.assertFalse(result.is_error, result)
+                    self.assertEqual(result.structured_content["status"], "succeeded")
+                    self.assertEqual(result.structured_content["cleanup"]["source"], "native_reconciliation")
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual((self.work / "once").read_text(), "1")
+
     async def test_grace_schema_rejects_invalid_values_before_admission(self):
         self.launch()
         async with self.client() as (reader, writer):

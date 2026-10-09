@@ -14,7 +14,7 @@ from openmachine.workspace import worktrees
 
 from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
-from .process import Process
+from .process import Process, boot_identity
 from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, is_remote, read_record
 
 PREPARE_SECONDS = 15
@@ -62,9 +62,20 @@ def _run(directory: Path, record: dict, process: Process, output, interrupted,
                     force_deadline = term_deadline + FORCE_SECONDS
                     _publish(directory, record)
                 if term_deadline is not None and drain_deadline is None:
-                    members = process.members(time.monotonic() + min(1, max(0.05, force_deadline - now)))
-                    if not members and exited:
-                        cleanup["status"] = "verified"
+                    try:
+                        members = process.members(time.monotonic() + min(1, max(0.05, force_deadline - now)))
+                    except Fault as error:
+                        # Keep the original child unreaped while a bounded query
+                        # can still recover. Never extend the cleanup deadline.
+                        if error.code not in {"cleanup_unverified", "cleanup_query_timeout", "cleanup_query_limit",
+                                              "cleanup_query_failed", "cleanup_query_invalid", "cleanup_query_raced"} or time.monotonic() >= force_deadline:
+                            raise
+                        cleanup["error"] = error.code
+                        members = None
+                    if members is None:
+                        pass
+                    elif not members and exited:
+                        cleanup.update(status="verified", error=None)
                         drain_deadline = time.monotonic() + DRAIN_SECONDS
                     elif now >= force_deadline:
                         cleanup.update(status="unverified", error="owned_processes_remain")
@@ -182,12 +193,15 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                             controls = control.Server(control.socket_path(directory.parent.parent, directory.name),
                                                       directory, record, process, selector, _publish)
                         try:
+                            native_boot = boot_identity() if not is_remote(record) else None
                             process.launch(request["argv"], request["cwd"], owned_fds, tty=request["tty"],
                                            terminal_size=request["terminal_size"], deadline=preparation_deadline)
                         except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
                             record["error"] = ("launch_unverified" if process.launch_uncertain else
                                                error.code if isinstance(error, Fault) else type(error).__name__)
                         if process.pid is not None:
+                            if native_boot is not None:
+                                record["cleanup"].update(session_id=process.session, boot_id=native_boot)
                             if process.spawned:
                                 record["command"].update(spawned=True, started_at=process.started_at)
                                 record.update(status="running", started_at=process.started_at,

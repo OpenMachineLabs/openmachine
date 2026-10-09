@@ -88,6 +88,31 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         execution.cancel(self.config, self.state, "local", busy["execution_id"])
         self.finish(busy)
 
+    def test_cleanup_reconciliation_verifies_original_worktree_without_creation_replay(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_query_failed", "injected failure")\nw.Process.members=fail'
+        with self.injected_worker(setup):
+            created = self.finish(self.create())
+        identity = created["execution_id"]
+        original = self.receipt_path(identity).read_bytes()
+        self.assertEqual(created["status"], "outcome_unknown")
+        parent_lock = self.state / "locks" / ("workspace-" + hashlib.sha256(str(self.destinations).encode()).hexdigest() + ".lock")
+        with lease(parent_lock), self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "resource_busy")
+        destination = self.arguments()["destination"]
+        subprocess.run(["git", "-C", destination, "checkout", "--detach", "--quiet"], check=True)
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "context_mismatch")
+        self.assertFalse((self.receipt_path(identity).parent / "reconciliation.json").exists())
+        subprocess.run(["git", "-C", destination, "checkout", "--quiet", "feature/isolated"], check=True)
+        recovered = execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(recovered["status"], "succeeded")
+        self.assertEqual(recovered["context"]["created_worktree"]["head_sha"], self.source_context["head_sha"])
+        self.assertEqual(self.create(execution_id=identity)["status"], "succeeded")
+        self.assertEqual(self.receipt_path(identity).read_bytes(), original)
+        self.assertEqual(self.git("worktree", "list", "--porcelain").count("worktree "), 2)
+
     def test_original_id_replays_after_ref_change_and_source_disappearance_in_fresh_process(self):
         created = self.finish(self.create())
         identity = created["execution_id"]

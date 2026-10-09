@@ -21,9 +21,10 @@ from openmachine.workspace import worktrees
 
 from . import control as controls, logs
 from .logs import MAX_READ
-from .process import supported
+from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
-                      effective_request, is_remote, read_record, resolve_terminal_size, termination_grace)
+                      effective_request, is_remote, read_record, reconciled_record, require_reconcilable,
+                      resolve_terminal_size, termination_grace)
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -514,6 +515,71 @@ def list_records(config: "Settings", state: Path, machine: str, cursor: str = ""
             unreadable.append({"execution_id": name, "error": error.code if isinstance(error, Fault) else "source_unavailable"})
     return {"machine": machine, "executions": items, "next_cursor": names[limit - 1] if len(names) > limit else None,
             "unreadable": unreadable, "ordering": "execution_id"}
+
+
+def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
+    """Append original-ID cleanup evidence; never launch, signal or rewrite history."""
+    if config.machine(machine).transport != "local":
+        raise Fault("unsupported_operation", "Native cleanup reconciliation is local-only; retain the original SSH scope route.")
+    directory = _directory(state, execution_id)
+    if not directory.exists():
+        raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
+    _, status = _receipt(directory, machine, wait=False)
+    if status in TERMINAL - {"outcome_unknown"}:
+        return read(config, state, machine, execution_id)
+    with ExitStack() as locks:
+        # Match launch/publication ordering, without waiting on a live worker.
+        locks.enter_context(lease(state / "locks" / f"{execution_id}.lock", create=False))
+        locks.enter_context(lease(directory / "control.lock", create=False))
+        locks.enter_context(lease(directory / "worker.lock", create=False))
+        record = read_record(directory)
+        if record["request"]["machine"] != machine:
+            raise Fault("context_mismatch", "Use the original machine identity for this execution.")
+        if record["status"] == "outcome_unknown":
+            require_reconcilable(record)
+            if boot_identity() != record["cleanup"]["boot_id"]:
+                raise Fault("cleanup_identity_unavailable", "The original native boot identity is no longer available.")
+            root = record["context"].get("workspace_lock_root", record["context"]["worktree"])
+            targets = [Path(root)]
+            if record["format_version"] == CREATION_FORMAT:
+                targets.append(Path(record["context"]["creation_plan"]["source_root"]))
+            if any(not any(target.is_relative_to(Path(item.root).resolve())
+                           for item in config.workspaces.values() if item.machine == machine) for target in targets):
+                raise Fault("invalid_cwd", "The original cleanup target is no longer in a configured workspace.")
+            path = state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")
+            locks.enter_context(lease(path, create=False))
+            if record["format_version"] == CREATION_FORMAT:
+                for parent in _creation_parent_roots(config, machine, Path(root)):
+                    if parent == root:
+                        continue
+                    path = state / "locks" / ("workspace-" + hashlib.sha256(parent.encode()).hexdigest() + ".lock")
+                    locks.enter_context(lease(path, shared=True, create=False))
+            for key in record["request"].get("resource_keys", []):
+                path = state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock")
+                locks.enter_context(lease(path, create=False))
+            try:
+                deadline = time.monotonic() + 1
+                while True:
+                    try:
+                        members = session_members(record["cleanup"]["session_id"], deadline, leader_exited=True)
+                        break
+                    except Fault as error:
+                        if error.code != "cleanup_query_raced" or time.monotonic() >= deadline:
+                            raise
+            except (OSError, ValueError, IndexError, subprocess.SubprocessError) as error:
+                raise Fault("cleanup_unverified", "The original session could not be observed; no recovery was published.") from error
+            if members:
+                raise Fault("cleanup_unverified", "The original session still has live members; no signals or recovery were issued.")
+            raw = (directory / "record.json").read_bytes()
+            evidence = {"format": 1, "execution_id": execution_id, "receipt_sha256": hashlib.sha256(raw).hexdigest(),
+                        "observed_at": max(time.time(), record["finished_at"]), "created_worktree": None}
+            if record["format_version"] == CREATION_FORMAT and record["exit_code"] == 0 and record["stop"]["reason"] is None:
+                evidence["created_worktree"] = worktrees.verify_creation(record["context"]["creation_plan"])
+            reconciled_record(record, evidence, evidence["receipt_sha256"], execution_id)
+            save_json(directory / "reconciliation.json", evidence)
+        elif record["status"] not in TERMINAL:
+            raise Fault("execution_running", "Observe or cancel the original live execution before cleanup reconciliation.")
+    return read(config, state, machine, execution_id)
 
 
 def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:

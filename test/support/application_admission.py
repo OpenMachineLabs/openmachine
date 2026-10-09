@@ -58,6 +58,7 @@ class ApplicationAdmissionFixture(object):
             ("start_execution", ("local", "c" * 32, str(self.root), ["true"], 600, "", "exclusive", None, "", None, False, None),
              app.machines, "start_execution"),
             ("cancel_execution", ("local", "c" * 32), app.machines, "cancel_execution"),
+            ("reconcile_execution", ("local", "c" * 32), application.execution, "reconcile"),
             ("control_execution", ("local", "c" * 32, 0, "interrupt", None, None), app.machines, "control_execution"),
             ("save_task", ("task", 0, "Title", "Body", []), tasks, "save"),
             ("github_issue", issue, app.github, "issue"),
@@ -81,7 +82,7 @@ class ApplicationAdmissionFixture(object):
                 with lease(self.state / "locks/lifecycle.lock"):
                     self.assert_fault("resource_busy", lambda: operation(*arguments))
                     self.assertEqual(app.find_tasks()["status"], "uninitialized")
-                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 19)
+                    self.assertEqual(app.get_capabilities()["lifecycle"]["state_contract"], 20)
                 dispatch.assert_not_called()
 
                 def admitted(*args, **kwargs):
@@ -95,11 +96,12 @@ class ApplicationAdmissionFixture(object):
                 with patch.object(sys, "prefix", str(service_state._runtime(self.state, self.a))), \
                         patch.object(application, "lease", wraps=lease) as admission:
                     response = {"dispatched": True}
-                    if name == "start_execution":
+                    if name in {"start_execution", "reconcile_execution"}:
                         response["task_feedback"] = {"status": "unbound"}
                     self.assertEqual(operation(*arguments), response)
                     admission.assert_called_once_with(self.state / "locks/lifecycle.lock", shared=True)
-                prefix = (config,) if name.startswith("github_") else (self.state,) if name == "save_task" else ()
+                prefix = ((config, self.state) if name == "reconcile_execution" else (config,) if name.startswith("github_")
+                          else (self.state,) if name == "save_task" else ())
                 self.assertEqual(dispatch.call_count, 1)
                 actual = signature.bind(*dispatch.call_args.args, **dispatch.call_args.kwargs)
                 injected = {"transport": request.return_value} if name.startswith("github_") else {}

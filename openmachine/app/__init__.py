@@ -316,7 +316,7 @@ class Application:
         known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
-                 "list_executions", "cancel_execution", "control_execution", "github_read", "github_issue",
+                 "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
                  "disconnect_integration", "start_codex_task", "read_codex_task"}
@@ -437,6 +437,11 @@ class Application:
     def cancel_execution(self, machine: str, execution_id: str, task_context: dict | None = None) -> dict:
         with self._admit():
             return self.task_admission.run("cancel_execution", dict(machine=machine, execution_id=execution_id), task_context)
+
+    def reconcile_execution(self, machine: str, execution_id: str) -> dict:
+        with self._admit():
+            result = execution.reconcile(self.config, self.state, machine, execution_id)
+        return self._execution_task_feedback(machine, result)
 
     def github_read(self, action: str, repository: str = "", number: int = 0, ref: str = "", path: str = "",
                     page: int = 1, limit: int = 30, cursor: str = "", expected_head_sha: str = "",

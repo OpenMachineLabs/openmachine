@@ -267,7 +267,8 @@
       "boundary_tests": [
         "test/component/service/test_machines.py",
         "test/component/service/test_maintenance.py",
-        "test/component/service/test_transition.py"
+        "test/component/service/test_transition.py",
+        "test/resilience/execution/test_process.py"
       ],
       "sources": [
         "openmachine/service/__init__.py",
@@ -589,6 +590,7 @@
       "test/component/execution/test_presentation.py",
       "test/component/execution/test_records.py",
       "test/component/execution/test_validation.py",
+      "test/resilience/app/test_task_execution.py",
       "test/resilience/execution/test_interactive.py",
       "test/resilience/execution/test_process.py",
       "test/resilience/execution/test_worktrees.py"
