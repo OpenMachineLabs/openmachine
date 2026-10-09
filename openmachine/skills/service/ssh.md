@@ -110,3 +110,8 @@ require operator attention; an unreachable connection does not prove power-off.
 while configured workspaces, retained task/recovery references or remote receipts
 still require it, or their absence cannot be verified. It never deletes remote
 files or work. This Mac cannot be removed.
+
+Legacy Markdown checkpoints remain readable controller notes and do not alone
+keep a connection in use. Core still verifies their integrity and protects actual
+work through task/operation references and original remote receipts, including
+completed work.

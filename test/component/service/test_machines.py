@@ -7,13 +7,14 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import call, patch
-from openmachine import __version__
+from openmachine import __version__, tasks
 from openmachine.config import Settings
 from openmachine.foundation.state import lease
 from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
 from openmachine.service import runtime as service_runtime
 from test.support.service_cases import ServiceCaseFixture
+from test.support.tasks import write_legacy_checkpoint
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
@@ -96,6 +97,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_machine_removal_preserves_local_and_refuses_retained_references(self):
         self.machine_fixture()
+        write_legacy_checkpoint(self.state, "unbound-notes", "Retain the original development notes.\n")
         self.config.write_text(self.config.read_text() + '\n[machines.remote]\ntransport="ssh"\nssh_alias="prepared"\nssh_worker="/' + "e" * 64 + '.pyz"\nssh_identity="' + "d" * 64 + '"\n')
         config = maintenance.load(self.config)
         digest = maintenance._digest(self.config)
@@ -122,6 +124,91 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(candidate["skills"]["roots"], ["/retained/skills"])
             spawn.assert_called_once()
         self.assertIn("remote", maintenance.load(self.config).machines)
+
+
+    def legacy_machine_fixture(self, migrated=False):
+        self.policy_fixture()
+        self.machine_fixture()
+        self.config.write_text(self.config.read_text() + '\n[machines.remote]\ntransport="ssh"\nssh_alias="prepared"\nssh_worker="/' + "e" * 64 + '.pyz"\nssh_identity="' + "d" * 64 + '"\n')
+        # Mentioning a target in prose is neither a machine binding nor authority.
+        write_legacy_checkpoint(self.state, "notes", "Continue remote work only after authorization.\n")
+        if migrated:
+            tasks.migrate(self.state)
+        return self.config.read_bytes(), tasks.read(self.state, "notes")
+
+    def prepare_legacy_removal(self, migrated=False):
+        before, checkpoint = self.legacy_machine_fixture(migrated)
+        with patch.object(maintenance, "_spawn") as spawn, \
+                patch.object(maintenance.ssh_client, "call", side_effect=AssertionError("SSH runs after admission")):
+            accepted = maintenance.change_machine(self.config, self.state, "machine-remove", "1" * 32,
+                "remote", hashlib.sha256(before).hexdigest())
+            self.assertEqual(accepted["status"], "accepted")
+            spawn.assert_called_once()
+        self.assertEqual(self.config.read_bytes(), before)
+        record = accepted["operation"]
+        prepared = {"status": "prepared", "identity": self.b, "version": __version__,
+                    "payload_sha256": "c" * 64, "runtime": str(self.state / "service/versions" / self.b),
+                    "launch_python": sys.executable, "path_environment": os.defpath,
+                    "selection": "unchanged", "service": "not_started"}
+        maintenance._save(self.state, record, "prepared", prepared=prepared)
+        return record, before, checkpoint
+
+    def run_legacy_removal(self, record, replies):
+        _, stop, start = self.activation_mocks()
+        with patch.object(service_runtime, "_sync_definition"), \
+                patch.object(maintenance.ssh_client, "call", side_effect=replies) as probe, \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        original = maintenance.read_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual(original["operation"]["operation_id"], record["operation_id"])
+        self.assertEqual([(item.args[1:], item.kwargs) for item in probe.call_args_list],
+                         [(("remote", "probe"), {}), (("remote", "list_executions"), {"limit": 1})])
+        return original, stop, start
+
+    def assert_legacy_removal_completes(self, migrated):
+        record, before, checkpoint = self.prepare_legacy_removal(migrated)
+        original, _, start = self.run_legacy_removal(record, [
+            {"workspace_change_records": 0}, {"executions": [], "unreadable": [], "next_cursor": None}])
+        self.assertEqual(original["status"], "completed")
+        self.assertEqual(original["operation"]["outcome"]["status"], "stopped")
+        expected = tomllib.loads(before.decode())
+        del expected["machines"]["remote"]
+        self.assertEqual(tomllib.loads(self.config.read_text()), expected)
+        self.assertEqual(tasks.read(self.state, "notes"), checkpoint)
+        self.assertFalse(checkpoint["resume_authorized"])
+        start.assert_not_called()
+
+    def test_legacy_checkpoint_allows_completed_removal(self):
+        self.assert_legacy_removal_completes(False)
+
+    def test_sqlite_legacy_checkpoint_allows_completed_removal(self):
+        self.assert_legacy_removal_completes(True)
+
+    def test_legacy_removal_rechecks_remote_history_before_activation(self):
+        record, before, checkpoint = self.prepare_legacy_removal(True)
+        original, stop, start = self.run_legacy_removal(record, [
+            {"workspace_change_records": 0},
+            {"executions": [{"execution_id": "2" * 32, "status": "succeeded"}],
+             "unreadable": [], "next_cursor": None}])
+        self.assertEqual(original["status"], "rejected")
+        self.assertEqual(original["operation"]["reason"], "machine_in_use")
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(tasks.read(self.state, "notes"), checkpoint)
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_corrupt_legacy_checkpoint_still_blocks_removal_before_admission(self):
+        before, _ = self.legacy_machine_fixture()
+        (self.state / "tasks/notes/task.md").write_text("Changed without its original hash.\n")
+        with patch.object(maintenance, "_spawn") as spawn, \
+                patch.object(maintenance.ssh_client, "call") as probe:
+            self.assert_fault("corrupt_tasks", lambda: maintenance.change_machine(
+                self.config, self.state, "machine-remove", "1" * 32, "remote",
+                hashlib.sha256(before).hexdigest()))
+            spawn.assert_not_called()
+            probe.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse((self.state / "service/operations").exists())
 
 
 if __name__ == "__main__":

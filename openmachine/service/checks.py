@@ -167,9 +167,8 @@ def machine_unused(config, state: Path, name: str, *, check_remote: bool = True)
     target = config.machine(name)
     if any(item.machine == name for item in config.workspaces.values()):
         raise Fault("machine_in_use", "A configured workspace still references this machine.")
-    history = tasks.check_state(state)
-    if history["task_records"] != history["structured_task_records"]:
-        raise Fault("machine_in_use", "Legacy task history cannot prove that this target is unused; preserve the connection.")
+    # Legacy notes have no machine binding; their effects retain domain receipts.
+    tasks.check_state(state)
     if tasks.references_target(state, name, target.ssh_identity):
         raise Fault("machine_in_use", "A retained task still references this machine.")
     if target.ssh_identity in recovery.read(state)["targets"]:
