@@ -165,6 +165,7 @@ while True: time.sleep(0.05)
         launch = subprocess.Popen
         for code, expected in (("import time; time.sleep(5)", "cleanup_query_timeout"),
                                ("raise SystemExit(2)", "cleanup_query_failed"),
+                               ("pass", "cleanup_query_failed"),
                                ('print("invalid")', "cleanup_query_invalid")):
             def query(_argv, **kwargs):
                 return launch([sys.executable, "-c", code], **kwargs)

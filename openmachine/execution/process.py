@@ -81,6 +81,10 @@ def _mac_states(deadline: float, pid: int | None = None) -> list[tuple[int, str]
         raise Fault("cleanup_query_limit", "The process query exceeded its entry bound.")
     try:
         states = [(int(parts[0]), parts[1].decode("ascii")) for line in lines if (parts := line.split())]
+        # Darwin ps can exit zero after a sysctl failure. An all-process
+        # snapshot must include the query itself before we exclude it.
+        if pid is None and not any(identity == query.pid for identity, _ in states):
+            raise Fault("cleanup_query_failed", "The all-process snapshot did not include its own query.")
         return [(pid, state) for pid, state in states if pid != query.pid]
     except (ValueError, IndexError, UnicodeError) as error:
         raise Fault("cleanup_query_invalid", "The process query returned invalid state.") from error
