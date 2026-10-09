@@ -37,7 +37,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(service_state._record(state)["pending"], {"from": self.a, "to": self.b, "previous": None})
             events.append("migrate")
         with patch.object(tasks, "migrate", side_effect=migrate), \
-                patch.object(service_checks, "activation_safe", side_effect=lambda state: events.append("gate")):
+                patch.object(service_checks, "activation_safe", side_effect=lambda state, **guards: events.append("gate")):
             result = service_transition._activate(self.state, self.record, self.b, require_safe=True)
         self.assertEqual(events, ["gate", "stop", "migrate", "start"])
         self.assertEqual(result["current"], self.b)
