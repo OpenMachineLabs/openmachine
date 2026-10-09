@@ -633,7 +633,8 @@
                   "github_comment",
                   "github_review",
                   "github_review_thread",
-                  "github_merge"
+                  "github_merge",
+                  "github_project"
                 ],
                 "title": "Method",
                 "type": "string"
@@ -2676,6 +2677,149 @@
         "type": "object"
       }
     },
+    "github_project": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "action": {
+            "enum": [
+              "add_item",
+              "update_field"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "expected_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Value"
+          },
+          "field_id": {
+            "default": "",
+            "title": "Field Id",
+            "type": "string"
+          },
+          "issue_number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Issue Number",
+            "type": "integer"
+          },
+          "item_id": {
+            "default": "",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "project_number": {
+            "minimum": 1,
+            "title": "Project Number",
+            "type": "integer"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "action",
+          "repository",
+          "project_number"
+        ],
+        "title": "github_projectArguments",
+        "type": "object"
+      }
+    },
     "github_read": {
       "annotations": {
         "destructiveHint": false,
@@ -2692,6 +2836,14 @@
               "branch",
               "commit",
               "file",
+              "file_history",
+              "release",
+              "releases",
+              "projects",
+              "project",
+              "project_fields",
+              "project_items",
+              "project_item",
               "issue",
               "issues",
               "pull_request",

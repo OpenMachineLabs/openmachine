@@ -51,8 +51,21 @@ def register_github_tools(application, config, guided_tool):
                         limit: Annotated[int, Field(ge=1, le=100)] = 30, cursor: Annotated[str, Field(max_length=1024)] = "",
                         expected_head_sha: str = "", expected_base_sha: str = "",
                         offset: Annotated[int, Field(ge=0, le=1048576)] = 0, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Read scoped GitHub evidence. Read pull_request before candidate pages; echo HEAD/base on continuation and follow pagination/evidence gaps. checks requires exact commit ref; file uses a fixed commit and 16 KiB UTF-8 pages, with no symlink/credential reads. API patches may be incomplete. status/merge_context only observe; no arbitrary endpoint or mutation dispatch."""
+            """Read GitHub evidence, including organization Projects, Releases by tag and document history. Project lists use cursors; REST lists use page. Historical file content is fixed-SHA. No arbitrary endpoint or mutation dispatch."""
             return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id))
+
+        @guided_tool(annotations=GITHUB_WRITE)
+        def github_project(action: Literal["add_item", "update_field"], repository: str,
+                           project_number: Annotated[int, Field(ge=1)],
+                           issue_number: Annotated[int, Field(ge=0)] = 0, item_id: str = "",
+                           field_id: str = "", value: dict | None = None,
+                           expected_value: dict | None = None,
+                           task_context: tasks.TaskContext | None = None,
+                           connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+            """Add an Issue to a Project or change one Project item field. Read Projects first for node IDs. Writes verify readback; never replay uncertain mutations."""
+            return _reply(lambda: application.github_project(action, repository, project_number,
+                issue_number, item_id, field_id, value, expected_value,
+                _task_context(task_context), connection_id))
 
         @guided_tool(annotations=GITHUB_WRITE)
         def github_issue(action: Literal["create", "update"], repository: str,

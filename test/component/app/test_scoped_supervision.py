@@ -21,14 +21,14 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}, "base": {"ref": "main"}}}),
             reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
-        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge"):
+        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge", "project"):
             setattr(self.provider, name, Mock(return_value={"status": "write_outcome_unknown"}))
         self.app.github = self.provider
         self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
             "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
         self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
-        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
+        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project",
                                "write_workspace_file", "start_execution", "read_task", "control_task"])
 
     def update_pr(self, **values):
@@ -59,6 +59,24 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             update_id=uuid.uuid4().hex, transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
         return {"task_id": "second-task", "task_revision": claimed["revision"], "plan_revision": claimed["plan"]["revision"],
                 "continuation_epoch": claimed["control"]["epoch"], "operation_id": uuid.uuid4().hex}
+
+    def test_unknown_project_write_blocks_alias_across_same_organization(self):
+        result = self.app.github_project(
+            action="update_field", repository="Owner/repo", project_number=12,
+            item_id="PVTI_fixture", field_id="PVTF_fixture", value={"text": "done"},
+            task_context=self.context_for(uuid.uuid4().hex))
+        self.assertEqual(result["status"], "write_outcome_unknown")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        proposal = deepcopy(original)
+        proposal["id"] = uuid.uuid4().hex
+        proposal["locator"]["repository"] = "Owner/other"
+        self.assertTrue(tasks.effect_conflicts(self.state, {}, proposal))
+        proposal["effect_scope"]["number"] = proposal["locator"]["number"] = 13
+        self.assertFalse(tasks.effect_conflicts(self.state, {}, proposal))
+        proposal["effect_scope"]["number"] = proposal["locator"]["number"] = 12
+        proposal["locator"]["repository"] = "Elsewhere/other"
+        self.assertFalse(tasks.effect_conflicts(self.state, {}, proposal))
+        self.assertEqual(self.view()["record"]["operations"][0], original)
 
     def test_review_thread_unknown_keeps_precise_identity_and_blocks_merge(self):
         op_id = uuid.uuid4().hex

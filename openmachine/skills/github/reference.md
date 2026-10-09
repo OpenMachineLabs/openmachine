@@ -40,6 +40,24 @@ credentials and binary data. Pages are 16 KiB UTF-8-safe with full hash/cursors,
 sources up to 1 MiB. Provider API/results are bounded to 2 MiB/256 KiB. The PR file
 API's 3,000-file ceiling and partial check/review/thread evidence remain explicit.
 
+Read organization Projects via github_read actions projects, project, project_fields,
+project_items and project_item. The repository owner identifies the organization;
+number is the Project number, and project_item uses ref=item node ID. Project lists
+use next_cursor (not page). github_project(action="add_item", project_number,
+issue_number) adds a repository Issue to the organization Project. action="update_field"
+takes project_number, item_id, field_id, and one value key: text, number, date,
+singleSelectOptionId or iterationId. Iteration choices are returned under
+project_fields configuration.iterations. Pass expected_value to detect an observed
+field change. Field updates reject draft or other-repository items, and uncertain
+Project writes exclude further writes to the same organization Project across
+repository aliases. Both writes require scoped permissions and verified readback.
+
+Read Releases with github_read(action="releases") or action="release", ref=exact
+tag name; use action="file_history", path=relative document path, optional ref
+for a branch/tag, to enumerate past commits. Read an old document with
+action="file", ref=the selected full commit SHA, path=same document. REST lists
+use numbered pages.
+
 Writes verify all submitted fields, object identity and acting account. Prefer observed
 `expected_updated_at` and exact PR HEAD; preflight/write is not atomic CAS, and
 legacy omission retains its weaker contract. Use `expected_fields` for every
@@ -111,8 +129,7 @@ Git working-tree operations stay native execution. HTTPS Git may use a command-s
 existing `gh auth git-credential` helper without changing global config or remotes.
 Never place tokens in URLs/logs or copy controller credentials to another target.
 The complete provider remains in `integrations/github/`. The native account owner
-is shared by its existing API operations. A native Git credential helper, Projects
-management and a general plugin SDK are not included in this increment.
+is shared by its existing API operations. A native Git credential helper and a general plugin SDK are not included in this increment.
 
 ## Attribution
 

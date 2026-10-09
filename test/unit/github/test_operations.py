@@ -1048,5 +1048,156 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.assert_fault("github_output_too_large", operations._public, {"body": "x" * operations.MAX_RESULT_BYTES})
 
 
+
+class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
+    def test_release_tags_and_document_history_use_bounded_rest(self):
+        calls = []
+
+        def api(method, endpoint, payload=None):
+            calls.append(endpoint)
+            if endpoint.startswith(f"{ROOT}/releases/tags/"):
+                return {"id": 1, "tag_name": "v0.2.18", "body": "Version notes", "html_url": "https://example.invalid/tag"}
+            if endpoint.startswith(f"{ROOT}/releases?"):
+                return [{"id": 1, "tag_name": "v0.2.18", "body": "Version notes"}]
+            if endpoint.startswith(f"{ROOT}/commits?"):
+                return [{"sha": HEAD, "html_url": "https://example.invalid/commit",
+                         "commit": {"message": "Document update", "committer": {"date": STAMP}}}]
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=api):
+            listing = github.read(settings(), "releases", REPO, limit=3, transport=self.transport)
+            release = github.read(settings(), "release", REPO, ref="v0.2.18", transport=self.transport)
+            history = github.read(settings(), "file_history", REPO, path="docs/release notes.md",
+                                  ref="v0.2.18", transport=self.transport)
+            self.assert_fault("invalid_github_request", github.read, settings(), "file_history",
+                              REPO, path="../secrets", transport=self.transport)
+        self.assertEqual(listing["data"][0]["tag_name"], "v0.2.18")
+        self.assertFalse(listing["has_more"])
+        self.assertEqual(release["data"]["body"], "Version notes")
+        self.assertEqual(history["data"][0]["sha"], HEAD)
+        self.assertTrue(any("path=docs%2Frelease%20notes.md&sha=v0.2.18" in call for call in calls))
+        self.assertTrue(any("/releases/tags/v0.2.18" in call for call in calls))
+
+    def test_project_listing_and_item_fields_are_cursor_paged(self):
+        requests = []
+
+        def api(method, endpoint, payload=None):
+            if endpoint != "graphql":
+                return self.response(method, endpoint, payload)
+            requests.append(payload["variables"])
+            query = payload["query"]
+            if "projectsV2(first:" in query:
+                return {"data": {"organization": {"projectsV2": {"nodes": [{"id": "PVT_1", "number": 1}],
+                    "pageInfo": {"hasNextPage": True, "endCursor": "next"}}}}}
+            if "fieldValues(first:100)" in query:
+                return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                    "fieldValues": {"nodes": [{"text": "triage", "field": {"id": "PVTF_1"}}],
+                                    "pageInfo": {"hasNextPage": False}}}}}
+            if "fields(first:" in query:
+                self.assertIn("configuration{iterations{id title}}", query)
+                return {"data": {"organization": {"projectV2": {"fields": {
+                    "nodes": [{"id": "PVTF_1", "name": "Status"},
+                              {"id": "PVTF_2", "name": "Sprint",
+                               "configuration": {"iterations": [{"id": "ITER_1", "title": "Sprint 1"}]}}],
+                    "pageInfo": {"hasNextPage": False}}}}}}
+            return {"data": {"organization": {"projectV2": {
+                "id": "PVT_1", "number": 1, "title": "Dashboard", "url": "https://example.invalid/project"}}}}
+
+        with patch.object(self, "transport", side_effect=api):
+            listing = github.read(settings(), "projects", REPO, limit=1, transport=self.transport)
+            fields = github.read(settings(), "project_fields", REPO, number=1, transport=self.transport)
+            item = github.read(settings(), "project_item", REPO, number=1, ref="PVTI_1", transport=self.transport)
+            self.assert_fault("invalid_github_request", github.read, settings(), "project_items",
+                              REPO, number=1, page=2, transport=self.transport)
+        self.assertEqual(listing["next_cursor"], "next")
+        self.assertEqual(fields["data"][0]["id"], "PVTF_1")
+        self.assertEqual(fields["data"][1]["configuration"]["iterations"][0]["id"], "ITER_1")
+        self.assertEqual(item["data"]["field_values"][0]["text"], "triage")
+        self.assertTrue(item["data"]["fields_complete"])
+        self.assertEqual(requests[0]["owner"], "Owner")
+
+    def test_project_add_and_single_field_write_verify_destination(self):
+        self.issue_value["node_id"] = "ISSUE_1"
+        field = {"text": "triage"}
+        mutations = []
+
+        def api(method, endpoint, payload=None):
+            if endpoint != "graphql":
+                return self.response(method, endpoint, payload)
+            query = payload["query"]
+            if "mutation(" in query:
+                mutations.append(copy.deepcopy(payload))
+                if "addProjectV2ItemById" in query:
+                    return {"data": {"addProjectV2ItemById": {"item": {"id": "PVTI_1"}}}}
+                field.update(payload["variables"]["input"]["value"])
+                return {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_1"}}}}
+            if "fieldValues(first:100)" in query:
+                return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                    "content": {"id": "ISSUE_1", "repository": {"nameWithOwner": REPO}}, "fieldValues": {
+                        "nodes": [{"text": field["text"], "field": {"id": "PVTF_1"}}],
+                        "pageInfo": {"hasNextPage": False}}}}}
+            return {"data": {"organization": {"projectV2": {"id": "PVT_1", "number": 1}}}}
+
+        with patch.object(self, "transport", side_effect=api):
+            added = github.project(settings(), "add_item", REPO, 1, issue_number=1, transport=self.transport)
+            updated = github.project(settings(), "update_field", REPO, 1, item_id="PVTI_1",
+                                     field_id="PVTF_1", value={"text": "done"},
+                                     expected_value={"text": "triage"}, transport=self.transport)
+            self.assert_fault("github_object_changed", github.project, settings(), "update_field",
+                              REPO, 1, item_id="PVTI_1", field_id="PVTF_1",
+                              value={"text": "again"}, expected_value={"text": "triage"},
+                              transport=self.transport)
+            self.assert_fault("invalid_github_request", github.project, settings(), "update_field",
+                              REPO, 1, item_id="PVTI_1", field_id="PVTF_1",
+                              value={"number": True}, transport=self.transport)
+        self.assertEqual((added["status"], updated["status"]), ("verified", "verified"))
+        self.assertEqual(len(mutations), 2)
+        self.assertEqual(mutations[1]["variables"]["input"]["fieldId"], "PVTF_1")
+        self.assertEqual(field, {"text": "done"})
+
+    def test_project_update_rejects_items_from_other_repositories_and_drafts(self):
+        for content in ({"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Owner/other"}},
+                        {"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Other/repo"}},
+                        None):
+            writes = []
+
+            def api(method, endpoint, payload=None):
+                if endpoint != "graphql":
+                    return self.response(method, endpoint, payload)
+                if "mutation(" in payload["query"]:
+                    writes.append(payload)
+                    self.fail("No mutation is allowed for foreign-repository or draft items.")
+                if "fieldValues(first:100)" in payload["query"]:
+                    return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                        "content": content, "fieldValues": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}
+                return {"data": {"organization": {"projectV2": {"id": "PVT_1"}}}}
+
+            with self.subTest(content=content), patch.object(self, "transport", side_effect=api):
+                self.assert_fault("github_not_allowed", github.project, settings(), "update_field",
+                                  REPO, 1, item_id="PVTI_1", field_id="PVTF_1",
+                                  value={"text": "changed"}, transport=self.transport)
+            self.assertEqual(writes, [])
+
+    def test_project_lost_mutation_acknowledgment_is_not_retried(self):
+        self.issue_value["node_id"] = "ISSUE_1"
+        writes = []
+
+        def api(method, endpoint, payload=None):
+            if endpoint != "graphql":
+                return self.response(method, endpoint, payload)
+            if "mutation(" in payload["query"]:
+                writes.append(payload)
+                raise OSError("Lost write acknowledgment")
+            return {"data": {"organization": {"projectV2": {"id": "PVT_1"}}}}
+
+        with patch.object(self, "transport", side_effect=api):
+            result = github.project(settings(), "add_item", REPO, 1, issue_number=1, transport=self.transport)
+            locator = dict(self.task_locator("project", 1))
+            observed = github.reconcile(settings(), locator, transport=self.transport)
+        self.assertEqual(result["status"], "write_outcome_unknown")
+        self.assertEqual(observed["status"], "write_outcome_unknown")
+        self.assertEqual(len(writes), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

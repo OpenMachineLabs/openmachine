@@ -11,7 +11,9 @@ def github_scope(method: str, arguments: dict) -> dict:
     positive = lambda value: value if type(value) is int and value > 0 else None
     scope = {"resource": "object",
              "number": positive(number), "parent_number": None, "fields": ["*"]}
-    if kind in {"issue", "pull_request"}:
+    if kind == "project":
+        scope.update(resource="project", number=positive(arguments.get("project_number")))
+    elif kind in {"issue", "pull_request"}:
         if action == "create":
             scope.update(number=None, fields=["create"])
             if kind == "issue":
@@ -56,14 +58,18 @@ def operation_scope(record: dict, operation: dict) -> dict | None:
                         if item["operation_id"] == operation["id"]), None)
         declared = witness["scope"] if witness is not None else None
     if declared is not None:
-        value = dict(declared, repository=locator["repository"].casefold())
+        repository = locator["repository"].casefold()
+        if declared["resource"] == "project":
+            repository = repository.split("/", 1)[0]
+        value = dict(declared, repository=repository)
         # A later verified destination can narrow an unknown creation's target.
         if value["number"] is None and locator.get("number") is not None:
             value["number"] = locator["number"]
         return value
     kind = locator["object_type"]
-    return {"repository": locator["repository"].casefold(),
-            "resource": kind if kind in {"comment", "review"} else "object",
+    repository = locator["repository"].casefold()
+    return {"repository": repository.split("/", 1)[0] if kind == "project" else repository,
+            "resource": kind if kind in {"comment", "review", "project"} else "object",
             "number": locator.get("number"),
             "parent_number": locator.get("parent_number") if kind == "review" else None,
             "fields": ["*"]}
@@ -73,6 +79,8 @@ def github_conflict(first: dict, second: dict) -> bool:
     if first["repository"].casefold() != second["repository"].casefold():
         return False
     left, right = first["resource"], second["resource"]
+    if left == right == "project":
+        return first["number"] is None or second["number"] is None or first["number"] == second["number"]
     unnumbered = [item for item in (first, second)
                   if item["resource"] == "object" and item["number"] is None]
     if unnumbered:

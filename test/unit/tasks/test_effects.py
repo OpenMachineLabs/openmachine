@@ -21,6 +21,22 @@ class EffectScopeTests(unittest.TestCase):
         self.assertEqual(left, effects.conflicts({}, second, {}, first))
         return left
 
+    def test_organization_project_scopes_retain_cross_repository_conflicts(self):
+        original = self.operation("github_project", project_number=12)
+        original["locator"]["number"] = 12
+        alias = deepcopy(original)
+        alias["locator"]["repository"] = "Owner/another"
+        self.assertTrue(self.conflict(original, alias))
+        alias["effect_scope"]["number"] = alias["locator"]["number"] = 13
+        self.assertFalse(self.conflict(original, alias))
+        alias["locator"]["repository"] = "Different/another"
+        alias["effect_scope"]["number"] = alias["locator"]["number"] = 12
+        self.assertFalse(self.conflict(original, alias))
+        alias = deepcopy(original)
+        alias.pop("effect_scope")
+        alias["locator"]["repository"] = "Owner/another"
+        self.assertTrue(self.conflict(original, alias))
+
     def test_review_thread_blocks_merge_but_not_unrelated_metadata(self):
         thread = self.operation("github_review_thread", thread_id="PRRT_fixture")
         self.assertEqual(thread["effect_scope"]["fields"], ["threads"])

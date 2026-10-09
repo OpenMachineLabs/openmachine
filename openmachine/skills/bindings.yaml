@@ -27,6 +27,7 @@ disconnect_integration: {skill: om.github, path: connections.md}
 start_codex_task: {skill: om.browser, path: reference.md}
 read_codex_task: {skill: om.browser, path: reference.md}
 github_read: {skill: om.github, path: reference.md}
+github_project: {skill: om.github, path: reference.md}
 github_issue: {skill: om.github, path: reference.md}
 github_pull_request: {skill: om.github, path: reference.md}
 github_comment: {skill: om.github, path: reference.md}
