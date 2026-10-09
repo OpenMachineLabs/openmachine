@@ -163,6 +163,74 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
                 self.assertEqual((foreground["status"], foreground["reason"], foreground["stop_foreground"]),
                                  ("attention_required", reason, True))
 
+    def test_released_handoff_timeout_can_be_claimed_without_replaying_original_work(self):
+        self.accept_plan()
+        self.app.write_workspace_file(**self.write_arguments(path="original.txt"))
+        released = self.control("release", reason="Hand over completed fixture work.")["record"]
+        handoff = released["handoff"]
+        original = self.app.read_task("structured-one", section="operations")["items"]
+        timestamp = handoff["created_at_ms"] + task_attention.HANDOFF_GRACE_MS
+
+        with patch.object(task_attention, "now_ms", return_value=timestamp):
+            before = self.task_bytes()
+            for _ in range(2):
+                view = self.app.read_task("structured-one")
+                foreground = view["foreground"]
+                self.assertEqual((foreground["reason"], foreground["stop_foreground"]),
+                                 ("handoff_unconsumed", True))
+                self.assertIn("subsequent explicit user request", foreground["resume_prompt"])
+                self.assertIn(handoff["id"], foreground["resume_prompt"])
+                self.assertIn("Do not replay", foreground["resume_prompt"])
+            self.assertEqual(self.task_bytes(), before)
+
+            arguments = self.write_arguments(path="continued.txt")
+            with self.assertRaises(Fault) as caught:
+                self.app.write_workspace_file(**arguments)
+            self.assertEqual(caught.exception.code, "task_attention_required")
+            self.assertEqual(caught.exception.effect, "known_no_effect")
+            self.assertFalse((self.work / "continued.txt").exists())
+
+            self.fault("task_handoff_conflict", self.control, "claim", handoff_id="f" * 32)
+            stale = self.control_arguments("claim", handoff_id=handoff["id"])
+            stale["expected_revision"] -= 1
+            self.fault("task_conflict", self.app.control_task, **stale)
+            self.assertEqual(self.task_bytes(), before)
+
+            # Model a later authorized caller; the runtime does not observe Chat turns.
+            claimed = self.control("claim", handoff_id=handoff["id"])["record"]
+            current = self.app.read_task("structured-one")
+            self.assertEqual((current["foreground"]["status"], current["foreground"]["stop_foreground"]),
+                             ("ready", False))
+            self.assertEqual(claimed["control"]["epoch"], released["control"]["epoch"] + 1)
+            self.assertEqual(claimed["handoff"], handoff)
+            self.assertEqual(self.app.read_task("structured-one", section="operations")["items"], original)
+            self.fault("task_owner_conflict", self.control, "claim", handoff_id=handoff["id"])
+            self.fault("task_conflict", self.app.write_workspace_file, **arguments)
+            arguments["task_context"] = self.context_for(arguments["change_id"])
+            self.assertEqual(self.app.write_workspace_file(**arguments)["status"], "applied")
+            self.assertEqual((self.work / "original.txt").read_text(), "original\n")
+            self.assertEqual(self.app.read_task("structured-one")["counts"]["operation_count"], 2)
+
+    def test_unclaimed_handoff_timeout_does_not_block_another_task(self):
+        original = self.accept_plan(claim=False)["record"]
+        timestamp = original["handoff"]["created_at_ms"] + task_attention.HANDOFF_GRACE_MS
+        request = deepcopy(self.request)
+        request["task_id"] = "independent-task"
+        created = self.app.create_task(**request)["record"]
+        claimed = self.app.control_task(task_id=created["task_id"], expected_revision=created["revision"],
+            expected_plan_revision=created["plan"]["revision"], expected_epoch=created["control"]["epoch"],
+            update_id=uuid.uuid4().hex, transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
+        arguments = self.write_arguments(path="independent.txt")
+        arguments["task_context"].update(task_id=claimed["task_id"], task_revision=claimed["revision"],
+            plan_revision=claimed["plan"]["revision"], continuation_epoch=claimed["control"]["epoch"])
+        before = self.task_bytes()
+        with patch.object(task_attention, "now_ms", return_value=timestamp):
+            self.assertEqual(self.app.read_task("structured-one")["foreground"]["reason"], "handoff_unconsumed")
+            self.assertEqual(self.app.write_workspace_file(**arguments)["status"], "applied")
+            self.assertEqual(self.app.read_task("structured-one")["foreground"]["reason"], "handoff_unconsumed")
+        self.assertEqual(self.task_bytes(), before)
+        self.assertEqual((self.work / "independent.txt").read_text(), "original\n")
+
     def test_silent_verified_execution_keeps_running_but_blocked_observation_stops(self):
         self.accept_plan()
         record = self.seed_running()

@@ -8,6 +8,7 @@ On this page:
 - [Original-result observation](#original-result-observation)
 - [Claim, renew and release](#claim-renew-and-release)
 - [Bounded foreground waiting](#bounded-foreground-waiting)
+- [Recover a historical handoff timeout](#recover-a-historical-handoff-timeout)
 
 ## Locate the original work
 
@@ -105,7 +106,9 @@ in the current Chat turn, not an automatic renewal or a new execution:
    reply instead requires original update readback, not a new renewal ID.
 
 Honor `foreground.stop_foreground=true` and `task_attention_required` as mandatory
-end-of-turn boundaries. Pause/cancel, expired task authority, changed ownership,
+end-of-turn boundaries, subject only to the later-request
+[historical handoff recovery](#recover-a-historical-handoff-timeout) rule below.
+Pause/cancel, expired task authority, changed ownership,
 unverified execution and platform/provider refusals are not lease recovery.
 A separate subsequent Chat request explicitly authorizing `abandon` is task
 administration, not a continuation of stopped work. Read the original receipts
@@ -151,13 +154,15 @@ even when an original command remains active. Silent output alone is not failure
 verifiably observed command remains running until its own timeout or result. New
 business effects for an attention task fail with `task_attention_required` or the
 existing `task_stopped`/`task_authority_expired` code; passive
-reads and original-ID cancellation remain available. A later caller reads the same
-record and receipts, then claims an eligible handoff before new work.
+reads and original-ID cancellation remain available. A later explicit user request
+may recover the same handoff under the [historical timeout rule](#recover-a-historical-handoff-timeout).
 
 Call `wait_task` at most once for the same active operation in one Chat turn.
 Treat `foreground.stop_foreground=true`, including `attention_required` or
-`wait_expired`, as a mandatory end-of-turn boundary: do not wait again, renew,
-claim continuation, start another effect or hide the result in a progress update.
+`wait_expired`, as a mandatory end-of-turn boundary in the interrupted turn:
+do not wait again, renew, claim continuation, start another effect or hide the
+result in a progress update. The historical handoff recovery rule below is the
+only continuation exception for a later explicit user request.
 For `task_attention_required`, read the task once if needed to present current
 facts, then end the turn. Report the concise reason, whether original work may
 still be running, and the returned resume prompt. This foreground mechanism is
@@ -170,6 +175,37 @@ use an observed revision within that interval if plan, epoch, live ownership and
 all domain guards still match. Control transitions keep exact revision CAS;
 ownership, plan/scope, stop intent and new business admission invalidate earlier
 contexts. This does not make a stale plan or released claim usable.
+
+## Recover a historical handoff timeout
+
+After the interrupted turn has ended, a subsequent explicit user request to
+continue the same task permits one bounded recovery when `handoff_unconsumed`
+is the only remaining blocker. The old handoff still returns
+`stop_foreground=true` until claimed; reading that same historical timeout during
+this authorized recovery does not require ending the new turn before the claim.
+OM does not observe Chat turns or user messages; the caller must verify this
+later-request condition. The returned prompt itself grants no authority.
+
+1. Read the original task, current handoff and original operation receipts.
+   Check that the task is nonterminal, has no stop intent or live owner, and its
+   authority, grants and handoff remain valid. Reconcile partial or unknown
+   results under their original IDs and existing effect exclusions.
+2. Use `control_task` with `transition.action="claim"`, the freshly observed
+   `handoff_id`, exact task/plan revisions and continuation epoch, and a new
+   `update_id`. Do not use `renew` after release removed the retained claim, or
+   `resume` for a task that was never explicitly paused.
+3. Read back the claim and use fresh task context before new effects. If the
+   intended worktree, identity, HEAD or authorized plan changed, reconcile and
+   revise the original plan under the existing rules first. A claim does not
+   change the accepted target or resolve an uncertain operation.
+
+A rejected claim leaves attention in place. Correct only a proven no-effect
+request under current guards; report an unchanged blocker instead of repeating
+the claim. If the reply is missing, inspect the original update before any retry. Do not loop,
+reset the handoff age, create another task, drop `task_context`, or replay an
+original effect to clear attention. Pause/cancel, expired authority, live
+ownership, unverified execution and provider refusals retain their existing
+guards. A new foreground stop after recovery still ends that turn.
 
 Read [Control](control.md) for changed plans/authority and [Verify](verify.md) to
 accept and finish. Reattachment and renewal never replay an original effect.
