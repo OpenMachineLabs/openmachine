@@ -90,7 +90,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         separate = self.root / "isolated"
         separate.mkdir()
         self.config.workspaces["isolated"] = type(self.config.workspaces["project"])(
-            machine="desktop", root=separate)
+            machine="desktop", root=str(separate))
         new_context = self.app.read_workspace_file("desktop", "isolated", "AGENTS.md")["context"]
         replacement = task_contract(new_context, "replacement")
         replacement["anchors"] = self.request["anchors"]
@@ -106,7 +106,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(repeated["status"], "unchanged")
         self.assertEqual(tasks.read(self.state, "structured-one", operation_ids=[old_id])["record"]["operations"][0], original)
         self.assertIsNone(self.app.read_task("structured-one")["foreground"]["original_work_running"])
-        self.assertEqual(tasks.read(self.state, "structured-one")["counts"]["unknown_count"], 1)
+        self.assertEqual(self.app.read_task("structured-one")["counts"]["unknown_count"], 1)
         self.fault("task_terminal", self.control, "resume", reason="A new task is required.")
 
         next_task = self.app.control_task(task_id="replacement", expected_revision=created["revision"],
@@ -149,7 +149,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(abandoned["record"]["terminal"]["outcome"], "abandoned")
         current = tasks.read(self.state, "structured-one", operation_ids=[original_id, cancellation_id])
         self.assertEqual(current["record"]["operations"], original)
-        self.assertEqual(current["counts"]["unknown_count"], 2)
+        self.assertEqual(self.app.read_task("structured-one")["counts"]["unknown_count"], 2)
 
     def test_unverified_live_execution_cannot_be_force_abandoned(self):
         self.accept_plan()
