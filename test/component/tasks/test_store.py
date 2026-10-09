@@ -246,6 +246,8 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.assertEqual(result["status"], "staged_not_applied")
         self.assertEqual(result["converted_tasks"], 1)
         self.assertEqual(result["structured_tasks"], 1)
+        with sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True) as read_only:
+            self.assertEqual(read_only.execute("PRAGMA journal_mode").fetchone()[0], "wal")
         with sqlite3.connect(self.path) as source, sqlite3.connect(staged) as output:
             original = source.execute("SELECT current FROM tasks WHERE task_id='structured-one'").fetchone()[0]
             converted = output.execute("SELECT current FROM tasks WHERE task_id='structured-one'").fetchone()[0]

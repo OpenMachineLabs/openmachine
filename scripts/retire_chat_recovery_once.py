@@ -142,8 +142,9 @@ def stage(source_db: Path, destination_db: Path) -> dict:
                         store._view(candidate, identity)  # All indexed operation/Task facts.
                 if tuple(candidate.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()) != (0, 0, 0):
                     raise ValueError("Staged copy did not checkpoint cleanly")
-                if candidate.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
-                    raise ValueError("Staged copy did not become self-contained")
+                # Preserve the WAL header required by the read-only runtime.
+                if candidate.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                    raise ValueError("Staged copy lost the required WAL journal mode")
                 result = {
                     "status": "staged_not_applied",
                     "structured_tasks": sum(candidate.execute(
