@@ -24,6 +24,12 @@ TERMINAL = {"succeeded", "failed", "timed_out", "cancelled", "interrupted", "out
 STOP_STATUS = {"cancel": "cancelled", "timeout": "timed_out", "worker_signal": "interrupted"}
 
 
+def record_directory(state: Path, execution_id: str) -> Path:
+    if not isinstance(execution_id, str) or not re.fullmatch(r"[0-9a-f]{32}", execution_id):
+        raise Fault("invalid_execution_id", "Use a 32-character lowercase hexadecimal execution ID.")
+    return state / "executions" / execution_id
+
+
 def _number(value) -> bool:
     return type(value) is int or (type(value) is float and math.isfinite(value))
 
@@ -253,11 +259,9 @@ def reconciled_record(record: dict, evidence: dict, receipt_sha256: str, executi
     return observed
 
 
-def read_record(directory: Path) -> dict:
-    """Validate all accepted formats without rewriting or observing the process."""
+def validate_record(record: dict, execution_id: str) -> None:
+    """Validate retained format and identity without IO or live process observation."""
     try:
-        raw = (directory / "record.json").read_bytes()
-        record = json.loads(raw)
         version = record.get("format_version", 1)
         if type(version) is not int or version not in (1, 2, 3, 4, FORMAT, CREATION_FORMAT):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
@@ -291,7 +295,7 @@ def read_record(directory: Path) -> dict:
         if record["status"] in TERMINAL and not _number(record["finished_at"]):
             raise ValueError("missing terminal receipt")
         if version == 3 or is_remote(record):
-            if (version not in (3, 4, FORMAT, CREATION_FORMAT) or record.get("scope_unit") != f"openmachine-{directory.name}.scope"
+            if (version not in (3, 4, FORMAT, CREATION_FORMAT) or record.get("scope_unit") != f"openmachine-{execution_id}.scope"
                     or not re.fullmatch(r"[0-9a-f]{64}", request["machine"])
                     or record["context"].get("target_identity") != request["machine"]
                     or not re.fullmatch(r"[0-9a-f]{64}", record["context"].get("worker_sha256", ""))):
@@ -307,6 +311,16 @@ def read_record(directory: Path) -> dict:
             _validate_creation(record)
         elif "worktree_creation" in request or "creation_plan" in record["context"] or "created_worktree" in record["context"]:
             raise ValueError("unsupported worktree execution semantics")
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error
+
+
+def read_record(directory: Path) -> dict:
+    """Validate all accepted formats without rewriting or observing the process."""
+    try:
+        raw = (directory / "record.json").read_bytes()
+        record = json.loads(raw)
+        validate_record(record, directory.name)
         path = directory / "reconciliation.json"
         if os.path.lexists(path):
             with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:

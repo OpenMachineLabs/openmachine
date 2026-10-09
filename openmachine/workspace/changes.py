@@ -10,8 +10,10 @@ from openmachine.foundation.state import lease, private_directory
 from .files import MAX_SOURCE, digest, publish_file, publish_path, root_for, snapshot
 from .git import context, lock_root
 from .worktrees import resolve_root
-from . import change_records as records
+from . import change_records as records, change_schema as schema
 from . import preparation
+
+MAX_WORKSPACE_RESULT = 512 * 1024
 
 
 def _bound_source(source, effects):
@@ -45,7 +47,7 @@ def _scope(config, state: Path, machine: str, record: dict) -> str:
 
 def read_change(config, state: Path, machine: str, change_id: str, observe_current: bool = False) -> dict:
     config.machine(machine)
-    if not records._hex(change_id, 32) or type(observe_current) is not bool:
+    if not schema.is_hex(change_id, 32) or type(observe_current) is not bool:
         raise Fault("invalid_change_id", "Use the original 32-lowercase-hex change ID and a boolean observation flag.")
     store = records._store(state)
     if store is None or not os.path.lexists(store / change_id):
@@ -62,7 +64,7 @@ def read_change(config, state: Path, machine: str, change_id: str, observe_curre
         for item in record["expected"]["preconditions"]:
             try:
                 source = snapshot(Path(record["context"]["root"]), item["path"],
-                                  max_bytes=min(MAX_SOURCE, records.MAX_PREPARED - total), allow_missing=True)
+                                  max_bytes=min(MAX_SOURCE, schema.MAX_PREPARED - total), allow_missing=True)
                 total += len(source["raw"] or b"")
                 current.append({"path": item["path"], "exists": source["raw"] is not None,
                                 "sha256": digest(source["raw"]), "context": preparation._context(source)})
@@ -85,16 +87,16 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
         plan, sources, desired = preparation._prepared(config, machine, workspace, root, request, operations)
         # Use the actual record shape for pure preview sizing without allocating
         # a state owner, change identity, lease, temporary file or parent.
-        sizing = records._initial_record(request, "0" * 32, plan["context"], "0" * 64, "0" * 64)
-        sizing.update(plan=plan, plan_sha256=records._hash(plan), effects=records._effects(plan, "0" * 32), status="prepared")
-        records._record_budget(sizing)
+        sizing = schema.initial_record(request, "0" * 32, plan["context"], "0" * 64, "0" * 64, time.time())
+        sizing.update(plan=plan, plan_sha256=schema.fingerprint(plan), effects=schema.initial_effects(plan, "0" * 32), status="prepared")
+        schema.check_record_budget(sizing)
         target = config.machine(machine)
         grant = target.workspace_write_enabled
         effective = target.execution_enabled if grant is None else grant
         return {"machine": machine, "workspace": workspace, "status": "preview", "plan": plan,
-                "plan_sha256": records._hash(plan), "workspace_write_enabled": effective, "diff_kind": "proposed",
+                "plan_sha256": schema.fingerprint(plan), "workspace_write_enabled": effective, "diff_kind": "proposed",
                 **preparation._display(plan, sources, desired)}
-    fingerprint = records._hash(request | {"root": str(root)})
+    fingerprint = schema.fingerprint(request | {"root": str(root)})
     # Reconcile retained identities before mutable source, grants or new leases.
     store = records._store(state)
     if store is not None and os.path.lexists(store / change_id):
@@ -106,11 +108,11 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
     observed = context(root)
     if observed["workspace_identity"] is None:
         raise Fault("context_unavailable", "Workspace identity is unavailable; no change was admitted.")
-    record = records._initial_record(request, change_id, preparation._context({"root": root, "context": observed}),
-                             "0" * 64, fingerprint)
+    record = schema.initial_record(request, change_id, preparation._context({"root": root, "context": observed}),
+                                   "0" * 64, fingerprint, time.time())
     # Reject oversized admission/rejection evidence before reserving an identity.
     # The actual owner has the same encoded width; prepared plans are sized later.
-    records._record_budget(record)
+    schema.check_record_budget(record)
     patching = operations is not None
     with records._own(state, change_id) as (directory, existing):
         if existing:
@@ -128,8 +130,8 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
                 plan, sources, desired = preparation._prepared(config, machine, workspace, root, request, operations)
                 if plan["context"] != record["context"]:
                     raise Fault("context_mismatch", "Workspace context changed after request admission.")
-                prepared = record | {"plan": plan, "plan_sha256": records._hash(plan), "effects": records._effects(plan, change_id), "status": "prepared"}
-                records._record_budget(prepared)
+                prepared = record | {"plan": plan, "plan_sha256": schema.fingerprint(plan), "effects": schema.initial_effects(plan, change_id), "status": "prepared"}
+                schema.check_record_budget(prepared)
                 record.update(prepared)
                 records._save(directory, record)
                 display = preparation._display(plan, sources, desired)
@@ -189,7 +191,7 @@ def apply_patch(config, state: Path, machine: str, workspace: str, patch_text: s
                 create_parents: bool = False, change_id: str = "", dry_run: bool = False,
                 expected_plan_sha256: str = "", *, validate_new=None) -> dict:
     try:
-        if type(dry_run) is not bool or (change_id != "" if dry_run else not records._hex(change_id, 32)):
+        if type(dry_run) is not bool or (change_id != "" if dry_run else not schema.is_hex(change_id, 32)):
             raise Fault("invalid_change_id", "Preview requires no ID; apply requires a new 32-lowercase-hex ID.")
         request, operations = preparation._patch_request(patch_text, preconditions, expected_workspace_identity,
                                              expected_head_sha, create_parents, expected_plan_sha256)
@@ -204,7 +206,7 @@ def edit_text_file(config, state: Path, machine: str, workspace: str, path: str,
                    change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
                    *, validate_new=None) -> dict:
     try:
-        if type(dry_run) is not bool or (change_id != "" if dry_run else not records._hex(change_id, 32)):
+        if type(dry_run) is not bool or (change_id != "" if dry_run else not schema.is_hex(change_id, 32)):
             raise Fault("invalid_change_id", "Preview requires no ID; apply requires a new 32-lowercase-hex ID.")
         request = preparation._request("edit", path, edits, expected_workspace_identity, expected_head_sha, expected_sha256, expected_plan_sha256)
         return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new)
@@ -217,7 +219,7 @@ def edit_text_file(config, state: Path, machine: str, workspace: str, path: str,
 def write_text_file(config, state: Path, machine: str, workspace: str, path: str, content: str,
                     expected_head_sha: str, expected_sha256: str, change_id: str = "",
                     expected_workspace_identity: str = "", *, validate_new=None) -> dict:
-    if not records._hex(change_id, 32, empty=True) or not records._hex(expected_workspace_identity, 64, empty=True):
+    if not schema.is_hex(change_id, 32, empty=True) or not schema.is_hex(expected_workspace_identity, 64, empty=True):
         raise Fault("invalid_precondition", "Use a valid change ID and workspace identity, or explicit empty legacy values.")
     if change_id:
         try:
@@ -227,7 +229,7 @@ def write_text_file(config, state: Path, machine: str, workspace: str, path: str
             error.evidence = {"machine": machine, "workspace": workspace, "change_id": change_id, **(error.evidence or {})}
             raise
     config.workspace_machine(machine)
-    if not records._hex(expected_head_sha, 40, empty=True) or not records._hex(expected_sha256, 64, empty=True):
+    if not schema.is_hex(expected_head_sha, 40, empty=True) or not schema.is_hex(expected_sha256, 64, empty=True):
         raise Fault("invalid_precondition", "Supply the observed HEAD and whole-file hash; empty means absent.")
     desired = preparation._text(content)
     root = root_for(config, machine, workspace)
@@ -255,7 +257,7 @@ def write_text_file(config, state: Path, machine: str, workspace: str, path: str
                          "effect": effect}
 
 
-def bound_result(payload: dict, encoded_size, limit: int = records.MAX_WORKSPACE_RESULT) -> dict:
+def bound_result(payload: dict, encoded_size, limit: int = MAX_WORKSPACE_RESULT) -> dict:
     """Bound presentation without skipping source bytes or captured entries."""
     result = dict(payload)
     while encoded_size(result) > limit and result.get("diff"):

@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 from openmachine import execution, service
-from openmachine.execution import api, process
+from openmachine.execution import api, observation, process
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from openmachine.service import checks as service_checks
@@ -496,10 +496,10 @@ while True: time.sleep(0.05)
         self.assertFalse(execution.read(self.config, self.state, "local", identity, wait_seconds=5)["wait_expired"])
         preparing = result | {"status": "preparing", "output_unavailable": True, "finished_at": None,
                               "exit_code": None, "command": {"spawned": False, "exited": False}}
-        with patch.object(api, "_snapshot", side_effect=lambda *args: preparing | {"observed_at": time.time()}):
+        with patch.object(observation, "_snapshot", side_effect=lambda *args: preparing | {"observed_at": time.time()}):
             observed = execution.read(self.config, self.state, "local", identity, wait_seconds=0.08)
         self.assertTrue(observed["wait_expired"])
-        with patch.object(api, "_snapshot", return_value=preparing | {"status": "outcome_unknown"}):
+        with patch.object(observation, "_snapshot", return_value=preparing | {"status": "outcome_unknown"}):
             observed = execution.read(self.config, self.state, "local", identity, wait_seconds=5)
         self.assertEqual(observed["status"], "outcome_unknown")
         self.assertFalse(observed["wait_expired"])

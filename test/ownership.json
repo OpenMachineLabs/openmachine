@@ -136,6 +136,7 @@
         "openmachine/execution/api.py",
         "openmachine/execution/control.py",
         "openmachine/execution/logs.py",
+        "openmachine/execution/observation.py",
         "openmachine/execution/process.py",
         "openmachine/execution/records.py",
         "openmachine/execution/worker.py"
@@ -154,7 +155,8 @@
         "test/resilience/execution/test_mcp_waiting.py",
         "test/resilience/execution/test_process.py",
         "test/resilience/execution/test_worktrees.py",
-        "test/unit/execution/test_output.py"
+        "test/unit/execution/test_output.py",
+        "test/unit/execution/test_records.py"
       ]
     },
     "foundation": {
@@ -580,6 +582,7 @@
       "sources": [
         "openmachine/workspace/__init__.py",
         "openmachine/workspace/change_records.py",
+        "openmachine/workspace/change_schema.py",
         "openmachine/workspace/changes.py",
         "openmachine/workspace/files.py",
         "openmachine/workspace/git.py",
