@@ -224,7 +224,7 @@ class Owner(Model):
 
 
 class Control(Model):
-    state: Literal["planned", "running", "recovering", "waiting_for_ai", "waiting_for_user", "paused", "completed", "failed", "cancelled"]
+    state: Literal["planned", "running", "recovering", "waiting_for_ai", "waiting_for_user", "paused", "completed", "failed", "cancelled", "abandoned"]
     current_stage_id: TaskID | None
     stop_intent: Literal["none", "pause", "cancel"]
     epoch: Integer
@@ -406,7 +406,7 @@ class Acceptance(Model):
 
 
 class Terminal(Model):
-    outcome: Literal["completed", "failed", "cancelled"]
+    outcome: Literal["completed", "failed", "cancelled", "abandoned"]
     finished_at_ms: Integer
     summary: Text2048
     acceptance: Annotated[list[Acceptance], Field(max_length=64)]
@@ -485,7 +485,7 @@ class Current(Model):
             recovery = self.recovery
             if not self.created_at_ms <= recovery.started_at_ms <= recovery.next_attempt_ms <= recovery.deadline_ms:
                 raise ValueError("invalid recovery deadline")
-        is_terminal = self.control.state in {"completed", "failed", "cancelled"}
+        is_terminal = self.control.state in {"completed", "failed", "cancelled", "abandoned"}
         if is_terminal != (self.terminal is not None):
             raise ValueError("terminal control and final record must agree")
         if self.terminal is not None:
@@ -494,6 +494,8 @@ class Current(Model):
                     or not self.created_at_ms <= terminal.finished_at_ms <= self.updated_at_ms
                     or len(canonical(terminal.model_dump())) > 4096):
                 raise ValueError("invalid terminal record")
+            if terminal.outcome == "abandoned" and (self.control.stop_intent != "cancel" or terminal.acceptance):
+                raise ValueError("abandonment must preserve stopped work without accepted effects")
             for evidence in terminal.acceptance:
                 if evidence.stage_id not in stages:
                     raise ValueError("invalid terminal acceptance reference")
@@ -578,7 +580,7 @@ class Record(Current):
             recovery = self.recovery
             if not self.created_at_ms <= recovery.started_at_ms <= recovery.next_attempt_ms <= recovery.deadline_ms:
                 raise ValueError("invalid recovery deadline")
-        is_terminal = self.control.state in {"completed", "failed", "cancelled"}
+        is_terminal = self.control.state in {"completed", "failed", "cancelled", "abandoned"}
         if is_terminal != (self.terminal is not None):
             raise ValueError("terminal control and final record must agree")
         if self.terminal is not None:
@@ -587,6 +589,8 @@ class Record(Current):
                     or not self.created_at_ms <= terminal.finished_at_ms <= self.updated_at_ms
                     or len(canonical(terminal.model_dump())) > 4096):
                 raise ValueError("invalid terminal record")
+            if terminal.outcome == "abandoned" and (self.control.stop_intent != "cancel" or terminal.acceptance):
+                raise ValueError("abandonment must preserve stopped work without accepted effects")
             for evidence in terminal.acceptance:
                 if (evidence.stage_id not in stages or evidence.operation_id is not None and
                         (evidence.operation_id not in operations or operations[evidence.operation_id].stage_id != evidence.stage_id)):
@@ -661,7 +665,7 @@ class BindEffectScope(Model):
 
 
 class ReasonedControl(Model):
-    action: Literal["release", "pause", "resume", "cancel"]
+    action: Literal["release", "pause", "resume", "cancel", "abandon"]
     reason: Annotated[Text512, Field(min_length=1)]
 
 

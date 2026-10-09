@@ -531,7 +531,8 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     op = operation(state, identity, item["operation_id"])
                     if op is None or op["stage_id"] != item["stage_id"]:
                         raise ValueError("terminal evidence differs")
-            if core["terminal"] is not None and connection.execute("SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 LIMIT 1", (identity,)).fetchone():
+            if (core["terminal"] is not None and core["terminal"]["outcome"] != "abandoned"
+                    and connection.execute("SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 LIMIT 1", (identity,)).fetchone()):
                 raise Fault("task_effect_unresolved", "Original live, partial or unknown effects prevent retirement.")
             for event in value["history"]:
                 records.History.model_validate(event)

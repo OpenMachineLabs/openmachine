@@ -80,6 +80,59 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         tasks.update(self.state, "structured-one", retain)
         return identity
 
+    def test_historical_unknown_can_be_abandoned_and_same_spec_restarted_isolated(self):
+        """v0.2.16-like known exit without verified cleanup keeps original uncertainty."""
+        self.accept_plan()
+        old_id = self.retained_local_operation(status="unknown")
+        original = self.view()["record"]["operations"][0].copy()
+        legacy = {"status": "outcome_unknown", "execution_id": old_id, "exit_code": 0,
+                  "command": {"exited": True}, "cleanup": {"status": "unverified"}}
+        with patch.object(self.app.machines, "read_execution", return_value=legacy):
+            request = self.control_arguments("abandon", reason="Replace the blocked Spec attempt.")
+            abandoned = self.app.control_task(**request)
+            repeated = self.app.control_task(**request)
+        self.assertEqual(abandoned["record"]["terminal"]["outcome"], "abandoned")
+        self.assertEqual(repeated["status"], "unchanged")
+        self.assertEqual(tasks.read(self.state, "structured-one", operation_ids=[old_id])["record"]["operations"][0], original)
+        self.assertIsNone(self.app.read_task("structured-one")["foreground"]["original_work_running"])
+        self.assertEqual(tasks.read(self.state, "structured-one")["counts"]["unknown_count"], 1)
+        self.fault("task_terminal", self.control, "resume", reason="A new task is required.")
+
+        separate = self.root / "isolated"
+        separate.mkdir()
+        self.config.workspaces["isolated"] = type(self.config.workspaces["project"])(
+            machine="desktop", root=separate)
+        new_context = self.app.read_workspace_file("desktop", "isolated", "AGENTS.md")["context"]
+        replacement = task_contract(new_context, "replacement")
+        replacement["anchors"] = self.request["anchors"]
+        replacement["contract"]["targets"][0]["workspace"] = "isolated"
+        replacement["contract"]["tools"] = ["read_task", "write_workspace_file"]
+        created = self.create(replacement)["record"]
+        next_task = self.app.control_task(task_id="replacement", expected_revision=created["revision"],
+            expected_plan_revision=1, expected_epoch=0, update_id=uuid.uuid4().hex,
+            transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
+        operation_id = uuid.uuid4().hex
+        result = self.app.write_workspace_file(machine="desktop", workspace_name="isolated",
+            path="continued.txt", content="new isolated work\\n", expected_sha256="", expected_head_sha="",
+            expected_workspace_identity=new_context["workspace_identity"], change_id=operation_id,
+            task_context={"task_id": "replacement", "task_revision": next_task["revision"],
+                "plan_revision": 1, "continuation_epoch": next_task["control"]["epoch"],
+                "operation_id": operation_id})
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual((separate / "continued.txt").read_text(), "new isolated work\\n")
+        self.assertEqual(self.app.read_task("structured-one")["record"]["terminal"]["outcome"], "abandoned")
+
+    def test_unverified_live_execution_cannot_be_force_abandoned(self):
+        self.accept_plan()
+        self.retained_local_operation(status="unknown")
+        old_bytes = self.task_bytes()
+        with patch.object(self.app.machines, "read_execution", return_value={
+                "status": "outcome_unknown", "command": {"exited": False},
+                "cleanup": {"status": "unverified"}}):
+            self.fault("task_effect_active", self.control, "abandon",
+                       reason="An unseen command must not be declared ended.")
+        self.assertEqual(self.task_bytes(), old_bytes)
+
     def test_workspace_request_rejection_is_no_effect_and_corrected_work_continues(self):
         self.accept_plan()
         identity = uuid.uuid4().hex

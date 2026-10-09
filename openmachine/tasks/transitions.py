@@ -80,7 +80,7 @@ def stage_has_operations(record: dict, stage_id: str) -> bool:
 
 
 def finish_record(record: dict, outcome: str, acceptance: list[dict], limitations: str, now_ms: int) -> None:
-    if any(effects.unresolved(operation) for operation in record["operations"]):
+    if outcome != "abandoned" and any(effects.unresolved(operation) for operation in record["operations"]):
         raise Fault("task_effect_unresolved", "Original live, partial or unknown effects must be reconciled before terminal retirement.")
     record["control"].update(state=outcome, current_stage_id=None, owner=None, pending_decision=None,
                               epoch=record["control"]["epoch"] + 1)
@@ -136,6 +136,14 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             material(record, now_ms, "stopped", reason)
         if desired == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):
             finish_record(record, "cancelled", [], "Explicit cancellation does not undo prior effects.", now_ms)
+        return
+    if action == "abandon":
+        if any(effects.unresolved(item) and (item["result"] is None
+                or item["result"]["status"] == "running") for item in record["operations"]):
+            raise Fault("task_effect_active", "Stop and observe active original effects before abandonment.")
+        control["stop_intent"] = "cancel"
+        finish_record(record, "abandoned", [],
+                      "Explicit abandonment does not verify, undo or replay original effects. Reason: " + reason, now_ms)
         return
     expired = now_ms >= record["contract"]["expires_at_ms"]
     if expired and action != "revise_plan":

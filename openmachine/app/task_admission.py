@@ -92,7 +92,7 @@ class TaskAdmission:
         retained = tasks.control_update(self.app.state, request["task_id"], update["id"])
         if retained is None:
             transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
-            if action not in {"pause", "cancel", "release"}:
+            if action not in {"pause", "cancel", "release", "abandon"}:
                 contract = request["transition"].get("contract", record["contract"])
                 # Reattachment acquires ownership, not permission for a new effect.
                 # Scope evidence also describes a past request, not the current HEAD.
@@ -112,6 +112,8 @@ class TaskAdmission:
                     current, _ = self._observation(operation, observed)
                     if current != operation["result"]:
                         raise Fault("task_evidence_changed", "Selected evidence changed; reconcile its original result before accepting it.")
+        if action == "abandon" and retained is None:
+            self._check_abandon(record)
         scope = self._scope_witness(record, request) if (
             action == "bind_effect_scope" and retained is None) else None
         view = tasks.update(self.app.state, request["task_id"],
@@ -122,6 +124,24 @@ class TaskAdmission:
         if action == "cancel" and view["record"]["terminal"] is None:
             view = self._cancel_owned(view, request["update_id"])
         return view
+
+    def _check_abandon(self, record: dict) -> None:
+        """Only terminal uncertainty may be abandoned; original effect scopes survive."""
+        for operation in record["operations"]:
+            if not effects.unresolved(operation):
+                continue
+            if (operation["result"] or {}).get("status") not in {"unknown", "partial"}:
+                raise Fault("task_effect_active", "Observe or cancel active original effects before abandonment.")
+            locator = operation["locator"]
+            if locator["kind"] == "github":
+                continue  # Its unresolved resource exclusion survives abandonment.
+            observed = self._read(operation)
+            if locator["kind"] == "execution":
+                if (observed.get("status") not in {"outcome_unknown", "succeeded", "failed", "timed_out", "cancelled"}
+                        or (observed.get("command") or {}).get("exited") is not True):
+                    raise Fault("task_effect_active", "Original execution lacks a known leader exit; preserve its active exclusion.")
+            elif observed.get("status") not in {"applied", "unchanged", "rejected", "partial"}:
+                raise Fault("task_effect_active", "Original workspace change lacks terminal publication evidence.")
 
     def _scope_witness(self, record: dict, request: dict) -> dict:
         transition = request["transition"]

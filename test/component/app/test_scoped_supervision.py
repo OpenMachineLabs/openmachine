@@ -178,6 +178,21 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(created["status"], "write_outcome_unknown")
         self.assertEqual(self.provider.pull_request.call_count, 2)
 
+    def test_abandon_unknown_provider_effect_preserves_cross_task_field_guards(self):
+        self.update_pr(labels=[])
+        original = deepcopy(self.view()["record"]["operations"][0])
+        abandoned = self.control("abandon", reason="Continue only disjoint work.")
+        self.assertEqual(abandoned["record"]["terminal"]["outcome"], "abandoned")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        other = self.second_task()
+        self.fault("task_effect_unresolved", self.app.github_issue, action="update",
+                   repository="Owner/repo", number=7, labels=[], task_context=other)
+        self.provider.pull_request.return_value = self.verified()
+        applied = self.app.github_pull_request(action="update", repository="Owner/repo",
+                   number=7, body="Independent review.", task_context=other)
+        self.assertEqual(applied["status"], "verified")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+
     def test_old_pr_unknown_does_not_block_new_pr_in_another_task(self):
         self.update_pr(body="Historical uncertainty.")
         original = deepcopy(self.view()["record"]["operations"][0])

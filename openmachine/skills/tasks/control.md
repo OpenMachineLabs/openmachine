@@ -12,7 +12,7 @@ check. Repeating any retained identical update ID observes history rather than r
 | Action | Required procedure |
 | --- | --- |
 | `claim`, `renew`, `release` | [Continuation ownership](continue.md#claim-renew-and-release) |
-| `pause`, `cancel`, `resume`, `revise_plan` | Admission and plan rules below |
+| `pause`, `cancel`, `abandon`, `resume`, `revise_plan` | Admission and plan rules below |
 | `record_decision`, `finish` | [Verify stages and finish](verify.md) |
 | `bind_effect_scope` | Historical effect scope below |
 
@@ -36,6 +36,13 @@ Original-ID cancellation remains available when task metadata/capacity is blocke
 
 Pause prevents new admission, not already-admitted effects. Cancellation records
 stop intent and requests termination only of owned commands; read their outcomes.
+Explicit `abandon` retires a Task without asserting cleanup or success of unknown
+effects. It requires observed uncertainty, never a known-running command; local
+executions require an observed original leader exit and changes require terminal
+publication evidence. Original receipts, unresolved rows and cross-Task GitHub
+resource exclusions survive. The terminal `abandoned` state records the reason.
+Restart separately in an isolated worktree with independent effect scope; do not
+replay unknown operations, override active leases or delete historical records.
 Late results do not clear pause or reopen terminal history. Resume does not claim
 ownership, extend expired authority or prove a worker is alive. `revise_plan`
 retains original stage IDs/order and operation evidence. Changed stage definitions
