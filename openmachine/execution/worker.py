@@ -68,7 +68,7 @@ def _run(directory: Path, record: dict, process: Process, output, interrupted,
                         # Keep the original child unreaped while a bounded query
                         # can still recover. Never extend the cleanup deadline.
                         if error.code not in {"cleanup_unverified", "cleanup_query_timeout", "cleanup_query_limit",
-                                              "cleanup_query_failed", "cleanup_query_invalid"} or time.monotonic() >= force_deadline:
+                                              "cleanup_query_failed", "cleanup_query_invalid", "cleanup_query_raced"} or time.monotonic() >= force_deadline:
                             raise
                         cleanup["error"] = error.code
                         members = None

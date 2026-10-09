@@ -22,6 +22,14 @@ from test.support.tasks import write_legacy_checkpoint, write_legacy_task
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def test_previous_reader_remains_compatible_without_execution_reconciliation(self):
+        proof = service.check_state(self.config, self.state)
+        self.assertEqual(proof["execution_reconciliations"], 0)
+        previous = {key: value for key, value in proof.items() if not key.startswith("execution_reconcil")}
+        previous["state_contract"] = 19
+        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(previous), "")):
+            self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), previous)
+
     def legacy_task_fixture(self, request=None):
         from openmachine.tasks import records
         from test.support.tasks import task_contract

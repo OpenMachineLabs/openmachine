@@ -33,6 +33,9 @@ Native cleanup queries may retry within the original cleanup deadline while the
 worker retains its unreaped child. A persistent failure retains a specific query
 error and an unknown result. New local workers retain their boot and session
 identity for later observation; this does not authorize signaling a reused PID.
+Disappearing candidates or descendants first observed as zombies during a scan
+make an otherwise empty scan inconclusive. Exits already present in the native
+snapshot and the previously observed original leader exit remain distinguishable.
 
 For an original local terminal `outcome_unknown` caused only by cleanup, call
 `reconcile_execution(machine, execution_id)`. It requires a known command exit,

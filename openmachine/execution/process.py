@@ -80,12 +80,13 @@ def _mac_states(deadline: float, pid: int | None = None) -> list[tuple[int, str]
     if len(lines) > MAX_PROCESSES:
         raise Fault("cleanup_query_limit", "The process query exceeded its entry bound.")
     try:
-        return [(int(parts[0]), parts[1].decode("ascii")) for line in lines if (parts := line.split())]
+        states = [(int(parts[0]), parts[1].decode("ascii")) for line in lines if (parts := line.split())]
+        return [(pid, state) for pid, state in states if pid != query.pid]
     except (ValueError, IndexError, UnicodeError) as error:
         raise Fault("cleanup_query_invalid", "The process query returned invalid state.") from error
 
 
-def session_members(session: int, deadline: float) -> dict[int, int]:
+def session_members(session: int, deadline: float, *, leader_exited: bool = False) -> dict[int, int]:
     """Observe a native session; this function never adopts or signals its PIDs."""
     if sys.platform == "darwin":
         candidates = _mac_states(deadline)
@@ -98,9 +99,13 @@ def session_members(session: int, deadline: float) -> dict[int, int]:
                 if entry.name.isdecimal():
                     candidates.append((int(entry.name), ""))
     members = {}
+    raced = False
     for pid, state in candidates:
         if time.monotonic() >= deadline:
             raise Fault("cleanup_query_timeout", "Session enumeration exceeded its deadline.")
+        # Darwin's native snapshot already observed these exits before the
+        # session queries. getsid cannot inspect its zombies. Linux states are
+        # read later and do not supply this pre-scan evidence.
         if state.startswith("Z"):
             continue
         try:
@@ -108,11 +113,16 @@ def session_members(session: int, deadline: float) -> dict[int, int]:
                 continue
             if sys.platform == "linux":
                 state = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[0]
-                if state == "Z":
-                    continue
+            if state.startswith("Z"):
+                # Only an exit observed before enumeration rules out a fork
+                # that introduced an unlisted descendant during this scan.
+                raced |= not (pid == session and leader_exited)
+                continue
             members[pid] = os.getpgid(pid)
         except (ProcessLookupError, FileNotFoundError):
-            continue
+            raced = True
+    if not members and raced:
+        raise Fault("cleanup_query_raced", "A process changed during session enumeration; emptiness is unverified.")
     return members
 
 
@@ -286,7 +296,7 @@ class Process:
             return {}
         if self.reaped:
             raise Fault("cleanup_unverified", "Session identity has already been released.")
-        return session_members(self.session, deadline)
+        return session_members(self.session, deadline, leader_exited=self.exited)
 
     def signal_groups(self, members: dict[int, int], signum: int) -> set[int]:
         if self.reaped:

@@ -558,7 +558,14 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
                 path = state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock")
                 locks.enter_context(lease(path, create=False))
             try:
-                members = session_members(record["cleanup"]["session_id"], time.monotonic() + 1)
+                deadline = time.monotonic() + 1
+                while True:
+                    try:
+                        members = session_members(record["cleanup"]["session_id"], deadline, leader_exited=True)
+                        break
+                    except Fault as error:
+                        if error.code != "cleanup_query_raced" or time.monotonic() >= deadline:
+                            raise
             except (OSError, ValueError, IndexError, subprocess.SubprocessError) as error:
                 raise Fault("cleanup_unverified", "The original session could not be observed; no recovery was published.") from error
             if members:

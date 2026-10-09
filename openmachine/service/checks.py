@@ -25,23 +25,34 @@ from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
 def check_state(config_path: Path, state: Path) -> dict:
     """Use the candidate's actual readers; never rewrite existing persistent data."""
     config = load(config_path)
-    count = 0
+    executions = _execution_state(state)
+    task_state = tasks.check_state(state)
+    execution.check_workspace_leases(config, state)
+    changes = workspace.check_change_state(state)
+    return {**executions, **changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+            "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
+            "prefix": str(Path(sys.prefix).resolve()), "configuration_sha256": config.configuration_sha256()}
+
+
+def _execution_state(state: Path) -> dict:
+    """Bind compatible readers to retained original-ID reconciliation outcomes."""
+    count = reconciliations = 0
+    fingerprint = hashlib.sha256()
     root = state / "executions"
     if root.exists():
         if root.is_symlink() or not root.is_dir():
             raise Fault("corrupt_state", "The execution store is not an ordinary directory.")
-        for directory in root.iterdir():
+        for directory in sorted(root.iterdir(), key=lambda path: path.name):
             if not re.fullmatch(r"[0-9a-f]{32}", directory.name) or directory.is_symlink() or not directory.is_dir():
                 raise Fault("corrupt_state", "An execution-store entry is invalid; preserve it before changing versions.")
-            execution.read_record(directory)
+            record = execution.read_record(directory)
+            if record.get("cleanup", {}).get("source") == "native_reconciliation":
+                reconciliations += 1
+                fingerprint.update(directory.name.encode())
+                fingerprint.update(json.dumps(record, sort_keys=True, separators=(",", ":")).encode())
             count += 1
-    task_state = tasks.check_state(state)
-    execution.check_workspace_leases(config, state)
-    changes = workspace.check_change_state(state)
-    return {**changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
-            "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
-            "prefix": str(Path(sys.prefix).resolve()), "execution_records": count,
-            "configuration_sha256": config.configuration_sha256()}
+    return {"execution_records": count, "execution_reconciliations": reconciliations,
+            "execution_reconciliation_sha256": fingerprint.hexdigest() if reconciliations else None}
 
 
 def _connections_state(state: Path) -> dict:
@@ -259,6 +270,11 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
                 or (expected_contract is not None and value["state_contract"] != expected_contract)):
             raise ValueError("incompatible candidate")
         execution.check_workspace_leases(load(config_path), state, legacy_candidate=value["state_contract"] < 4)
+        executions = _execution_state(state)
+        if executions["execution_reconciliations"] and (value["state_contract"] < 20 or any(
+                type(value.get(key)) is not type(executions[key]) or value[key] != executions[key]
+                for key in ("execution_reconciliations", "execution_reconciliation_sha256"))):
+            raise ValueError("candidate ignores or changes retained execution reconciliation")
         connections = _connections_state(state)
         required_connection_contract = 11 if connections["connections_format"] >= 2 else 10
         if connections["connections_present"] and (value["state_contract"] < required_connection_contract or any(

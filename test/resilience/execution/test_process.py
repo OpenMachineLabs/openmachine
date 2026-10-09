@@ -2,7 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 import threading
 import signal
 import sys
@@ -10,10 +12,11 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import execution
+from openmachine import execution, service
 from openmachine.execution import api, process
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
+from openmachine.service import checks as service_checks
 from test.support.execution_cases import ExecutionCaseFixture
 
 
@@ -172,6 +175,30 @@ while True: time.sleep(0.05)
                 self.assertEqual(caught.exception.code, expected)
                 self.assertLess(time.monotonic() - started, 2)
 
+    def test_native_session_scan_never_infers_empty_from_a_disappearing_candidate(self):
+        for error in (ProcessLookupError(), FileNotFoundError()):
+            with self.subTest(error=type(error)), patch.object(process.sys, "platform", "darwin"), \
+                    patch.object(process, "_mac_states", return_value=[(42, "S")]), \
+                    patch.object(process.os, "getsid", side_effect=error), self.assertRaises(Fault) as caught:
+                process.session_members(42, time.monotonic() + 1, leader_exited=True)
+            self.assertEqual(caught.exception.code, "cleanup_query_raced")
+        for pid, known_exit, expected_race in ((42, True, False), (42, False, True), (43, True, True)):
+            with self.subTest(pid=pid, known_exit=known_exit), patch.object(process.sys, "platform", "linux"), \
+                    patch.object(process.os, "scandir") as entries, \
+                    patch.object(process.Path, "read_text", return_value=f"{pid} (fixture) Z"), \
+                    patch.object(process.os, "getsid", return_value=42):
+                entries.return_value.__enter__.return_value = [SimpleNamespace(name=str(pid))]
+                if expected_race:
+                    with self.assertRaises(Fault) as caught:
+                        process.session_members(42, time.monotonic() + 1, leader_exited=known_exit)
+                    self.assertEqual(caught.exception.code, "cleanup_query_raced")
+                else:
+                    self.assertEqual(process.session_members(42, time.monotonic() + 1, leader_exited=known_exit), {})
+        with patch.object(process.sys, "platform", "darwin"), \
+                patch.object(process, "_mac_states", return_value=[(43, "Z")]), \
+                patch.object(process.os, "getsid", side_effect=AssertionError("Snapshot already proved exit")):
+            self.assertEqual(process.session_members(42, time.monotonic() + 1, leader_exited=True), {})
+
     def test_original_cleanup_reconciliation_survives_lost_reply_and_fresh_reader(self):
         setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_query_timeout", "injected failure")\nw.Process.members=fail'
         code = 'from pathlib import Path; p=Path("once"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1")'
@@ -201,6 +228,20 @@ while True: time.sleep(0.05)
                   'print(read_record(Path(sys.argv[1]))["status"])')
         output = subprocess.check_output([sys.executable, "-I", "-c", script, str(path.parent)], text=True)
         self.assertEqual(output.strip(), "succeeded")
+        config_path = self.root / "config.toml"
+        config_path.write_text('schema_version=1\n[machines.local]\ntransport="local"\n'
+                               '[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.work)) + '\n')
+        proof = service.check_state(config_path, self.state)
+        self.assertEqual(proof["execution_reconciliations"], 1)
+        self.assertEqual(service_checks._candidate_state(Path(sys.executable), config_path, self.state), proof)
+        for delta in ({"state_contract": 19}, {"execution_reconciliations": 0},
+                      {"execution_reconciliation_sha256": "f" * 64}):
+            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                with self.assertRaises(Fault) as caught:
+                    service_checks._candidate_state(Path(sys.executable), config_path, self.state)
+                self.assertEqual(caught.exception.code, "incompatible_state")
+        self.assertEqual(path.read_bytes(), original)
 
     def test_cleanup_reconciliation_rejects_missing_identity_changed_boot_and_uncertain_control(self):
         setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected failure")\nw.Process.members=fail'
