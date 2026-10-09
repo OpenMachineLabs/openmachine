@@ -2,7 +2,10 @@
 
 import sys
 import unittest
+from unittest.mock import patch
 import uuid
+from openmachine import execution
+from openmachine.execution import api
 from openmachine.foundation.state import private_directory, save_json
 from test.support.execution_cases import ExecutionCaseFixture
 
@@ -26,6 +29,14 @@ class ExecutionTests(ExecutionCaseFixture, unittest.TestCase):
             self.assertEqual(result["termination_grace_seconds"], 0.5)
             self.assertIsNone(result["command"])
             self.assertIsNone(result["cleanup"])
+        self.config.machines["local"].execution_enabled = False
+        self.config.workspaces.clear()
+        with patch.object(api, "_admit", side_effect=AssertionError("Observation cannot admit work")), \
+                patch.object(api, "validate_start", side_effect=AssertionError("Observation needs no launch rights")):
+            observed = execution.read(self.config, self.state, "local", directory.name)
+            listed = execution.list_records(self.config, self.state, "local")
+        self.assertEqual((observed["status"], observed["output"]), ("succeeded", "legacy\n"))
+        self.assertEqual([item["execution_id"] for item in listed["executions"]], [directory.name])
         self.assertEqual((directory / "record.json").read_bytes(), before)
 
 

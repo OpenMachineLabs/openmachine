@@ -26,10 +26,12 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
                               "integrations/ssh/endpoint.py", "integrations/ssh/bundle.py",
                               "openmachine/__init__.py", "openmachine/execution/__init__.py",
                               "openmachine/execution/__main__.py", "openmachine/execution/api.py",
+                              "openmachine/execution/observation.py",
                               "openmachine/execution/worker.py", "openmachine/execution/records.py", "openmachine/execution/process.py",
                               "openmachine/execution/logs.py", "openmachine/execution/control.py", "openmachine/workspace/__init__.py",
                               "openmachine/workspace/inspect.py", "openmachine/workspace/git.py",
                               "openmachine/workspace/files.py", "openmachine/workspace/change_records.py",
+                              "openmachine/workspace/change_schema.py",
                               "openmachine/workspace/preparation.py", "openmachine/workspace/changes.py", "openmachine/workspace/patch.py", "openmachine/workspace/worktrees.py", "openmachine/foundation/__init__.py",
                               "openmachine/foundation/state.py", "openmachine/foundation/files.py",
                               "openmachine/foundation/sanitize.py"})

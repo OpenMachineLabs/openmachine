@@ -9,7 +9,7 @@ from openmachine.foundation.files import MAX_TEXT_FILE, TEXT_PAGE, file_parts
 from openmachine.foundation.sanitize import Fault, redact
 from .files import MAX_SOURCE, digest, root_for, snapshot
 from . import patch
-from . import change_records as records
+from . import change_schema as schema
 
 
 def _text(value: str) -> bytes:
@@ -29,13 +29,13 @@ def _request(operation, path, payload, identity, head, sha, plan_sha) -> dict:
     file_parts(path)
     if len(path_bytes) > 1024:
         raise Fault("request_limit", "Use a path of at most 1024 UTF-8 bytes.")
-    if not (records._hex(identity, 64) and records._hex(head, 40, empty=True) and
-            records._hex(sha, 64, empty=operation == "write") and records._hex(plan_sha, 64, empty=True)):
+    if not (schema.is_hex(identity, 64) and schema.is_hex(head, 40, empty=True) and
+            schema.is_hex(sha, 64, empty=operation == "write") and schema.is_hex(plan_sha, 64, empty=True)):
         raise Fault("invalid_precondition", "Supply the observed workspace identity, HEAD and complete source hash.")
     if operation == "write":
         _text(payload)
     else:
-        if not isinstance(payload, list) or not 1 <= len(payload) <= records.MAX_EDITS:
+        if not isinstance(payload, list) or not 1 <= len(payload) <= schema.MAX_EDITS:
             raise Fault("invalid_edits", "Supply 1 through 64 exact replacements.")
         size = 0
         for edit in payload:
@@ -111,7 +111,7 @@ def _prepare(config, machine, workspace, root: Path, request: dict) -> tuple[dic
     plan = {"context": _context(source), "path": request["path"], "before_sha256": digest(previous),
             "after_sha256": digest(desired), "before_mode": mode, "after_mode": mode if mode is not None else 0o644,
             "ancestors": [list(item) for item in source["ancestors"]], "ranges": ranges}
-    if request["expected_plan_sha256"] and request["expected_plan_sha256"] != records._hash(plan):
+    if request["expected_plan_sha256"] and request["expected_plan_sha256"] != schema.fingerprint(plan):
         raise Fault("plan_mismatch", "The recomputed plan differs from the approved preview.")
     return source, desired, plan
 
@@ -172,12 +172,12 @@ def _diff(source: dict, desired: bytes | None, ranges: list[dict], destination: 
 def _patch_request(text, preconditions, identity, head, create_parents, plan_sha):
     operations = patch.parse(text)
     touched = patch.paths(operations)
-    if type(create_parents) is not bool or not (records._hex(identity, 64) and records._hex(head, 40, empty=True)
-                                                and records._hex(plan_sha, 64, empty=True)):
+    if type(create_parents) is not bool or not (schema.is_hex(identity, 64) and schema.is_hex(head, 40, empty=True)
+                                                and schema.is_hex(plan_sha, 64, empty=True)):
         raise Fault("invalid_precondition", "Supply the observed context, optional plan hash and a boolean parent choice.")
     if (not isinstance(preconditions, list) or len(preconditions) != len(touched) or
         any(not isinstance(item, dict) or set(item) != {"path", "expected_sha256"} or
-            not isinstance(item["path"], str) or not records._hex(item["expected_sha256"], 64, empty=True)
+            not isinstance(item["path"], str) or not schema.is_hex(item["expected_sha256"], 64, empty=True)
             for item in preconditions)):
         raise Fault("invalid_precondition", "Preconditions must exactly cover every unique touched path.")
     names = [item["path"] for item in preconditions]
@@ -201,7 +201,7 @@ def _prepare_patch(config, machine, workspace, root, request, operations):
     sources, desired, total = {}, {}, 0
     observed = None
     for path in patch.paths(operations):
-        source = snapshot(root, path, max_bytes=min(MAX_SOURCE, records.MAX_PREPARED - total), allow_missing=True)
+        source = snapshot(root, path, max_bytes=min(MAX_SOURCE, schema.MAX_PREPARED - total), allow_missing=True)
         ctx = _context(source)
         if (root_for(config, machine, workspace) != root or ctx["workspace_identity"] != request["expected_workspace_identity"]
             or (ctx["head_sha"] or "") != request["expected_head_sha"] or observed is not None and ctx != observed):
@@ -209,7 +209,7 @@ def _prepare_patch(config, machine, workspace, root, request, operations):
         observed = ctx
         if digest(source["raw"]) != expected[path]:
             raise Fault("content_mismatch", "A complete original source no longer matches its precondition.")
-        if len(source["missing_parents"]) > records.MAX_PARENT_DEPTH:
+        if len(source["missing_parents"]) > schema.MAX_PARENT_DEPTH:
             raise Fault("request_limit", "A destination may have at most eight missing parent levels.")
         if source["missing_parents"] and not request["create_parents"]:
             raise Fault("parent_missing", "Missing parents require explicit create_parents=true.")
@@ -219,7 +219,7 @@ def _prepare_patch(config, machine, workspace, root, request, operations):
     for operation in operations:
         path, kind = operation["path"], operation["kind"]
         source = sources[path]
-        result, ranges = patch.prepare(operation, source["raw"], min(MAX_SOURCE, records.MAX_PREPARED - total))
+        result, ranges = patch.prepare(operation, source["raw"], min(MAX_SOURCE, schema.MAX_PREPARED - total))
         total += len(result or b"")
         mode = stat.S_IMODE(source["metadata"].st_mode) if source["metadata"] else 0o644
         item = {"kind": kind, "path": path, "ranges": ranges}
@@ -234,7 +234,7 @@ def _prepare_patch(config, machine, workspace, root, request, operations):
         if kind in {"add", "move"}:
             for parent in sources[destination]["missing_parents"]:
                 if parent not in parents:
-                    if len(parents) >= records.MAX_PARENTS:
+                    if len(parents) >= schema.MAX_PARENTS:
                         raise Fault("request_limit", "A patch may create at most sixteen parent directories.")
                     parent_source = snapshot(root, parent, max_bytes=0, allow_missing=True)
                     if parent_source["raw"] is not None or _context(parent_source) != observed:
@@ -250,7 +250,7 @@ def _prepare_patch(config, machine, workspace, root, request, operations):
             "after_mode": modes[path]})
     plan = {"context": observed, "operations": prepared_operations, "files": entries,
             "parents": [_ancestry(source) for source in parents.values()]}
-    if request["expected_plan_sha256"] and request["expected_plan_sha256"] != records._hash(plan):
+    if request["expected_plan_sha256"] and request["expected_plan_sha256"] != schema.fingerprint(plan):
         raise Fault("plan_mismatch", "The recomputed patch differs from the approved preview.")
     return plan, sources | parents, desired
 
