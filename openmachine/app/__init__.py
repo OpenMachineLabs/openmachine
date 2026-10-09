@@ -20,6 +20,7 @@ from . import task_attention
 from .machines import Machines
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
+from .task_receipts import TaskReceipts
 
 MAX_WORKSPACE_RESULT = workspace.MAX_WORKSPACE_RESULT
 MAX_SOURCE = workspace.MAX_SOURCE
@@ -39,6 +40,7 @@ class Application:
         self.codex = codex
         if connections is not None:
             connections.admit = self._admit
+        self.task_receipts = TaskReceipts(state, config, machines, self._github_call)
         self.task_admission = TaskAdmission(self)
         self.task_observer = TaskObserver(self)
 

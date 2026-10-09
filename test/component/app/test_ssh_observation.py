@@ -32,7 +32,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
                 raise Fault("ssh_unavailable", "Fixture outage", {"ssh_retryable": True})
             return self.fixture_result(operation)
         observer = self.app.task_observer
-        with patch.object(self.app.task_admission, "_read", side_effect=read), \
+        with patch.object(self.app.task_receipts, "read", side_effect=read), \
                 patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No replay")), observer.running():
             self.until(lambda: self.app.machines.ssh_recovery.read(self.state)["targets"].get("a" * 64))
             self.assertEqual(len(attempts), 1, "Aliases and tasks share the failed connection")
@@ -53,7 +53,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             episode = owner.read(self.state)["targets"].get("a" * 64)
             attempts.append(None if episode is None else episode["attempts"])
             raise Fault("ssh_unavailable", "Fixture timeout", {"ssh_retryable": True})
-        with patch.object(self.app.task_admission, "_read", side_effect=read), patch.object(self.observer_module.random, "uniform", return_value=1):
+        with patch.object(self.app.task_receipts, "read", side_effect=read), patch.object(self.observer_module.random, "uniform", return_value=1):
             with self.app.task_observer.running():
                 self.until(lambda: owner.read(self.state)["targets"].get("a" * 64))
                 self.until(lambda: self.raw(identities[0])["recovery"])
@@ -72,7 +72,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             self.assertEqual(self.raw(identities[0])["control"]["stop_intent"], "pause")
             self.assertIsNone(self.raw(identities[0])["handoff"])
             restarted = create_application(self.config, self.state)
-            with patch.object(restarted.task_admission, "_read", side_effect=AssertionError("Cooldown survives restart")), restarted.task_observer.running():
+            with patch.object(restarted.task_receipts, "read", side_effect=AssertionError("Cooldown survives restart")), restarted.task_observer.running():
                 self.until(lambda: restarted.task_observer._snapshot.get("connections"))
                 for identity in identities:
                     self.assertEqual(restarted.read_task(identity)["observations"][1]["state"], "recovering")
@@ -92,7 +92,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             return self.fixture_result(operation)
         observer = self.app.task_observer
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=read), patch.object(self.observer_module, "SSH_READ_SECONDS", 0.1), observer.running():
+            with patch.object(self.app.task_receipts, "read", side_effect=read), patch.object(self.observer_module, "SSH_READ_SECONDS", 0.1), observer.running():
                 self.assertTrue(started.wait(2))
                 self.until(lambda: all((self.raw(identity)["operations"][0]["result"] or {}).get("status") == "succeeded" for identity in identities[2:]))
                 self.until(lambda: self.raw(identities[0])["recovery"])
@@ -114,15 +114,15 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
         for episode in (first, dict(first, attempts=1, reason_code="blocked_ssh_host_key_mismatch")):
             owner.replace(self.state, "a" * 64, owner.read(self.state)["targets"]["a" * 64], episode)
             for _ in range(2):
-                with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("No forbidden read")), self.app.task_observer.running():
+                with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("No forbidden read")), self.app.task_observer.running():
                     self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity))
             self.assertEqual(owner.read(self.state)["targets"]["a" * 64], episode)
         owner.replace(self.state, "a" * 64, episode, None)
-        with patch.object(self.app.task_admission, "_read", side_effect=Fault("source_unavailable", "Unclassified remote source fault")) as read, self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=Fault("source_unavailable", "Unclassified remote source fault")) as read, self.app.task_observer.running():
             self.until(lambda: (self.raw(identity)["recovery"] or {}).get("reason_code") == "blocked_source_unavailable")
             self.assertEqual(read.call_count, 1)
         tasks.update(self.state, identity, lambda value, timestamp: value["contract"].update(expires_at_ms=timestamp))
-        with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("Expired authority")), self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("Expired authority")), self.app.task_observer.running():
             self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity) == "task_authority_expired")
 
     def test_receipt_failure_does_not_block_connection_or_lose_budget_during_outage(self):
@@ -131,7 +131,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             if operation["id"] == "1".zfill(32):
                 raise Fault("execution_not_found", "Original receipt unavailable")
             return self.fixture_result(operation)
-        with patch.object(self.app.task_admission, "_read", side_effect=read), self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=read), self.app.task_observer.running():
             self.until(lambda: self.raw(identities[0])["recovery"])
             self.until(lambda: (self.raw(identities[1])["operations"][0]["result"] or {}).get("status") == "succeeded")
         record = self.raw(identities[0])
@@ -158,7 +158,7 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             record["control"]["state"] = "recovering"
         tasks.update(self.state, identity, configure)
         observer = self.app.task_observer
-        with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("No allowed retry")), observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("No allowed retry")), observer.running():
             self.until(lambda: observer._snapshot.get("connections"))
             self.assertIsNone(self.app.read_task(identity)["observations"][1]["next_attempt_at_ms"])
             with patch.object(self.observer_module, "now_ms", return_value=timestamp + 10001):
@@ -168,6 +168,6 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
         # Even losing both owner files cannot erase a canonical connection reference.
         (self.state / "ssh-recovery.json").unlink()
         (self.state / "locks/ssh-recovery.lock").unlink()
-        with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("Missing owner")), observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("Missing owner")), observer.running():
             self.until(lambda: observer._snapshot["errors"].get(identity) == "ssh_recovery_corrupt")
         self.assertFalse((self.state / "ssh-recovery.json").exists())

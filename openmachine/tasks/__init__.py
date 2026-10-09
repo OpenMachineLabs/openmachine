@@ -6,7 +6,8 @@ from .records import (MAX_RECORD, MAX_ACCEPTANCE, READ_FORMATS, MAX_ACTIVE_OPERA
                       Origin, Contract, StageDefinition, TaskContext, Transition, normalize_create, normalize_control)
 from .database import storage_state, sqlite_runtime
 from .store import (check_state, create, find, read, rebuild_index, require_legacy, save, update,
-                    operation, control_update, operation_binding, operation_key, effect_conflicts,
+                    operation, control_update, operation_binding, effect_conflicts,
                     observation_page, locked_read, has_event, first_admission, locator_matches,
                     references_target, activation_blockers, present, public_read)
 from .migration import migrate, backup
+from .rows import operation_key

@@ -60,7 +60,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             recovery = self.raw(identity)["recovery"]
             attempts.append(None if recovery is None else recovery["attempts"])
             raise Fault("source_unavailable", "Disposable observation failure")
-        with patch.object(self.app.task_admission, "_read", side_effect=unavailable), patch.object(self.observer_module.random, "uniform", return_value=1):
+        with patch.object(self.app.task_receipts, "read", side_effect=unavailable), patch.object(self.observer_module.random, "uniform", return_value=1):
             with observer.running():
                 self.until(lambda: self.raw(identity)["recovery"])
             first = self.raw(identity)["recovery"]
@@ -94,7 +94,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
                 raise Fault("task_store_busy", "Fixture writer holds Task authority.")
             return original(*args, **kwargs)
         with (patch.object(tasks, "update", side_effect=busy),
-                patch.object(self.app.task_admission, "_read", side_effect=self.fixture_result) as read,
+                patch.object(self.app.task_receipts, "read", side_effect=self.fixture_result) as read,
                 patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("Never repeat original work")),
                 self.app.task_observer.running()):
             self.until(lambda: (self.raw(identity)["operations"][0]["result"] or {}).get("status") == "succeeded")
@@ -109,7 +109,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             record["recovery"]["attempts"] = 120
         tasks.update(self.state, identity, exhausted)
         before = self.raw(identity)
-        with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("Budget exhausted")) as read:
+        with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("Budget exhausted")) as read:
             for _ in range(2):
                 with self.app.task_observer.running():
                     self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity))
@@ -117,7 +117,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         self.assertEqual(self.raw(identity), before)
         self.assertEqual(self.app.read_task(identity)["observations"][1]["blocker"], "observation_budget_exhausted")
         tasks.update(self.state, identity, lambda record, now: record.update(recovery=None))
-        with patch.object(self.app.task_admission, "_read", side_effect=Fault("path_denied", "Never retry permission")) as read:
+        with patch.object(self.app.task_receipts, "read", side_effect=Fault("path_denied", "Never retry permission")) as read:
             with self.app.task_observer.running():
                 self.until(lambda: self.raw(identity)["recovery"])
                 time.sleep(0.2)
@@ -136,7 +136,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             return self.fixture_result(operation)
         observer = self.app.task_observer
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=slow):
+            with patch.object(self.app.task_receipts, "read", side_effect=slow):
                 observer.start()
                 self.until(lambda: len(entered) == 4)
                 # Coordinator discovery/publication may briefly contend with this probe.
@@ -173,7 +173,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             return self.fixture_result(operation)
         observer = self.app.task_observer
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=slow):
+            with patch.object(self.app.task_receipts, "read", side_effect=slow):
                 observer.start()
                 self.assertTrue(entered.wait(3))
                 with patch.object(tasks, "observation_page", side_effect=RuntimeError("Disposable coordinator failure")):
@@ -200,7 +200,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
                     "number": 1, "parent_number": None, "anchor": "fixture-observation", "connection": binding}
         identities = self.seed(3, configure=configure)
         del self.config.machines["desktop"]
-        with patch.object(self.app.task_admission, "_read", side_effect=AssertionError("No alternate route")) as read, self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=AssertionError("No alternate route")) as read, self.app.task_observer.running():
             self.until(lambda: self.raw(identities[2])["recovery"])
             time.sleep(0.2)
             read.assert_not_called()
@@ -235,7 +235,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             release.wait(5)
             return self.fixture_result(operation)
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=slow), self.app.task_observer.running():
+            with patch.object(self.app.task_receipts, "read", side_effect=slow), self.app.task_observer.running():
                 self.assertTrue(entered.wait(3))
                 with lease(self.state / "locks/lifecycle.lock"):
                     release.set()
@@ -249,7 +249,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_start_during_lifecycle_activation_waits_without_losing_original_work(self):
         identity = self.seed()[0]
         observer = self.app.task_observer
-        with patch.object(self.app.task_admission, "_read", side_effect=self.fixture_result) as read:
+        with patch.object(self.app.task_receipts, "read", side_effect=self.fixture_result) as read:
             with lease(self.state / "locks/lifecycle.lock"):
                 observer.start()
                 time.sleep(0.15)
@@ -270,7 +270,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             return self.fixture_result(operation)
         observer = self.app.task_observer
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=slow), observer.running():
+            with patch.object(self.app.task_receipts, "read", side_effect=slow), observer.running():
                 self.until(lambda: len(observer._snapshot["active"]) == 32)
                 self.until(lambda: self.app.read_task(identities[-1])["observations"][1]["blocker"] == "task_observer_capacity")
                 self.assertLessEqual(len(observer._reads), 4)
@@ -298,7 +298,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
 
     def test_stopped_observer_does_not_advertise_a_live_retry_timer(self):
         identity = self.seed()[0]
-        with patch.object(self.app.task_admission, "_read", side_effect=Fault("source_unavailable", "Fixture outage")), self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=Fault("source_unavailable", "Fixture outage")), self.app.task_observer.running():
             self.until(lambda: self.raw(identity)["recovery"])
         before = self.raw(identity)
         view = self.app.read_task(identity)
@@ -321,7 +321,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             if operation["locator"]["control_seq"] is not None:
                 raise Fault("task_evidence_unavailable", "Original control receipt unavailable.")
             return {"execution_id": operation["id"], "status": "running", "created_at": 1.0}
-        with patch.object(self.app.task_admission, "_read", side_effect=partial), self.app.task_observer.running():
+        with patch.object(self.app.task_receipts, "read", side_effect=partial), self.app.task_observer.running():
             self.until(lambda: self.app.task_observer._snapshot["last"].get(identity))
             view = self.until(lambda: self.app.read_task(identity))
             command, control = view["observations"][2:4]
@@ -344,7 +344,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_permanent_result_publication_failure_stops_the_affected_read_loop(self):
         identity = self.seed()[0]
         before = self.raw(identity)
-        with patch.object(self.app.task_admission, "_read", side_effect=self.fixture_result) as read:
+        with patch.object(self.app.task_receipts, "read", side_effect=self.fixture_result) as read:
             with patch.object(tasks, "update", side_effect=Fault("task_storage_full", "Disposable publication blocker.")):
                 with self.app.task_observer.running():
                     self.until(lambda: self.app.task_observer._snapshot["errors"].get(identity) == "task_storage_full")

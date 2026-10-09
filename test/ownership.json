@@ -467,7 +467,15 @@
       ]
     },
     "task_observer": {
-      "boundary_tests": [],
+      "boundary_tests": [
+        "test/component/app/test_github_admission.py",
+        "test/component/app/test_scoped_supervision.py",
+        "test/component/app/test_task_admission.py",
+        "test/component/app/test_worktree_admission.py",
+        "test/contract/mcp/tasks/test_admission.py",
+        "test/resilience/app/test_mcp_admission.py",
+        "test/resilience/app/test_task_execution.py"
+      ],
       "sources": [
         "openmachine/app/task_observation.py",
         "openmachine/app/task_observer.py"
@@ -478,6 +486,25 @@
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/app/test_observer_process.py"
       ]
+    },
+    "task_receipts": {
+      "boundary_tests": [
+        "test/component/app/test_github_admission.py",
+        "test/component/app/test_scoped_supervision.py",
+        "test/component/app/test_ssh_observation.py",
+        "test/component/app/test_task_admission.py",
+        "test/component/app/test_task_observer.py",
+        "test/component/app/test_worktree_admission.py",
+        "test/contract/mcp/tasks/test_admission.py",
+        "test/resilience/app/test_mcp_admission.py",
+        "test/resilience/app/test_mcp_observer.py",
+        "test/resilience/app/test_observer_process.py",
+        "test/resilience/app/test_task_execution.py"
+      ],
+      "sources": [
+        "openmachine/app/task_receipts.py"
+      ],
+      "tests": []
     },
     "tasks": {
       "boundary_tests": [
@@ -500,6 +527,7 @@
         "openmachine/tasks/index.py",
         "openmachine/tasks/migration.py",
         "openmachine/tasks/records.py",
+        "openmachine/tasks/rows.py",
         "openmachine/tasks/store.py",
         "openmachine/tasks/transitions.py",
         "scripts/retire_chat_recovery_once.py"

@@ -96,7 +96,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         import threading
         _, started = self.owned()
         entered, release = threading.Event(), threading.Event()
-        original = self.app.task_admission._read
+        original = self.app.task_receipts.read
         def delayed(operation):
             result = original(operation)
             if not entered.is_set():
@@ -104,7 +104,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
                 release.wait(5)
             return result
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=delayed), self.app.task_observer.running():
+            with patch.object(self.app.task_receipts, "read", side_effect=delayed), self.app.task_observer.running():
                 self.assertTrue(entered.wait(3))
                 paused = self.control("pause", reason="Pause during an original read.")["record"]
                 release.set()
@@ -125,7 +125,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         (self.work / "release").touch()
         self.wait(started)
         entered, release = threading.Event(), threading.Event()
-        original = self.app.task_admission._read
+        original = self.app.task_receipts.read
         def delayed(operation, *args, **kwargs):
             result = original(operation, *args, **kwargs)
             if threading.current_thread().name == "om-task-read":
@@ -133,7 +133,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
                 release.wait(5)
             return result
         try:
-            with patch.object(self.app.task_admission, "_read", side_effect=delayed), self.app.task_observer.running():
+            with patch.object(self.app.task_receipts, "read", side_effect=delayed), self.app.task_observer.running():
                 self.assertTrue(entered.wait(3))
                 self.app.task_admission.reconcile(self.view())
                 self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[args["execution_id"]], reason="Read the original result.")
