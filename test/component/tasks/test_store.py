@@ -175,6 +175,79 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.assertEqual(saved["record"]["origin"], value["origin"])
         self.assertEqual(tasks.operation(self.state, "structured-one", f"{1:032x}")["result"]["status"], "succeeded")
 
+    def test_retired_recovery_fields_are_read_without_rewriting_or_reenabling(self):
+        self.create()
+        fresh = deepcopy(self.view()["record"])
+        for version, policy, registration in ((3, "disabled", None), (4, "task_chat", "a" * 32)):
+            with self.subTest(version=version, policy=policy):
+                value = deepcopy(fresh)
+                value["format"] = version
+                if version == 3:
+                    value.pop("control_revision")
+                    value.pop("effect_scopes")
+                value["contract"]["recovery_policy"] = policy
+                value["chat_registration"] = registration
+                replace_task_record(self.state, value)
+                with database.connect(self.state) as connection:
+                    before = connection.execute("SELECT current,sha256 FROM tasks").fetchone()
+                    raw, digest = before["current"], before["sha256"]
+                observed = self.app.read_task("structured-one")
+                self.assertEqual(observed["record"]["contract"]["recovery_policy"], policy)
+                self.assertEqual(observed["record"]["chat_registration"], registration)
+                self.assertFalse(observed["support"]["runtime_recovery"])
+                self.assertEqual(tasks.check_state(self.state)["structured_task_records"], 1)
+                with database.connect(self.state) as connection:
+                    after = connection.execute("SELECT current,sha256 FROM tasks").fetchone()
+                    self.assertEqual((after["current"], after["sha256"]), (raw, digest))
+        claimed = self.control("claim", handoff_id=self.view()["record"]["handoff"]["id"])
+        self.assertEqual(claimed["record"]["contract"]["recovery_policy"], "task_chat")
+        revised = self.control("revise_plan", contract=self.request["contract"],
+                               stages=self.request["stages"], invalidated_stage_ids=["verify"],
+                               reason="Explicitly accept a new plan without obsolete recovery controls.")
+        self.assertNotIn("recovery_policy", revised["record"]["contract"])
+        self.assertNotIn("chat_registration", revised["record"])
+        self.assertEqual(tasks.check_state(self.state)["structured_task_records"], 1)
+        self.fault("invalid_task_contract", tasks.normalize_create,
+                   {**self.request, "contract": {**self.request["contract"], "recovery_policy": "disabled"}})
+        self.fault("invalid_task_contract", tasks.normalize_create,
+                   {**self.request, "chat_registration": None})
+
+    def test_retired_recovery_fields_still_reject_broken_historical_authority(self):
+        self.create()
+        with database.connect(self.state) as connection:
+            original = connection.execute("SELECT current FROM tasks").fetchone()[0]
+        baseline = json.loads(original)
+        baseline["contract"]["recovery_policy"] = "disabled"
+        baseline["chat_registration"] = None
+        invalid = []
+        for change in ("invalid_policy", "missing_registration", "missing_policy", "invalid_registration", "old_format"):
+            value = deepcopy(baseline)
+            if change == "invalid_policy":
+                value["contract"]["recovery_policy"] = "unknown"
+            elif change == "missing_registration":
+                value.pop("chat_registration")
+            elif change == "missing_policy":
+                value["contract"].pop("recovery_policy")
+            elif change == "invalid_registration":
+                value["chat_registration"] = "not-an-id"
+            else:
+                value["format"] = 2
+                value.pop("control_revision")
+            invalid.append(value)
+        for broken in invalid:
+            with self.subTest(registration=broken.get("chat_registration"), policy=broken["contract"].get("recovery_policy")):
+                raw = records.canonical(broken).decode()
+                with sqlite3.connect(self.path) as connection:
+                    connection.execute("UPDATE tasks SET current=?,sha256=?",
+                                       (raw, hashlib.sha256(raw.encode()).hexdigest()))
+                self.fault("corrupt_tasks", tasks.read, self.state, "structured-one")
+                with sqlite3.connect(self.path) as connection:
+                    self.assertEqual(connection.execute("SELECT current FROM tasks").fetchone()[0], raw)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("UPDATE tasks SET current=?,sha256=?",
+                               (original, hashlib.sha256(original.encode()).hexdigest()))
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"]["contract"], self.request["contract"])
+
     def test_corrupt_authority_is_never_skipped_rebuilt_or_replaced(self):
         self.create()
         with database.connect(self.state) as connection:

@@ -18,6 +18,12 @@ authority. There is no 2-MiB catalog or 10,000-task ceiling. Ordinary reads do n
 initialize, migrate or repair a store. Missing databases or established locks,
 unsafe paths and corrupt evidence fail closed.
 
+Retired Chat recovery fields in existing format-3/4 Task records remain readable
+as original authority, including their exact policy and registration values.
+They are not accepted in new task requests and never reactivate automatic Chat
+continuation. Readiness checks preserve original Task bytes and hashes; do not
+delete or rewrite legacy records to complete a managed upgrade.
+
 Managed service activation stops the controller before importing old task formats
 1–4 and Markdown. The migration validates all original bytes and IDs, commits
 normalized evidence, then archives the old directory under the stable lock before
