@@ -5,6 +5,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 import uuid
+from openmachine.app import task_receipts
 from openmachine.tasks import database
 from openmachine import tasks
 from openmachine.bootstrap import create_application
@@ -52,7 +53,15 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
         observer = self.app.task_observer
         with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No background effects")), observer.running():
             self.until(lambda: observer._snapshot["last"].get("structured-one"))
-            before = self.raw()
+            def settled_running_receipt():
+                record = self.raw()
+                operation = record["operations"][0]
+                observed = self.app.task_receipts.read(operation)
+                result, _ = task_receipts.observation(operation, observed)
+                # The first observation may capture accepted before the process
+                # reaches running. Only identical running reads are quiet.
+                return record if observed["status"] == "running" and operation["result"] == result else None
+            before = self.until(settled_running_receipt)
             progress = before["operations"][0]["observed_at_ms"]
             observed = observer._snapshot["last"]["structured-one"][args["execution_id"]]
             self.until(lambda: observer._snapshot["last"].get("structured-one", {}).get(args["execution_id"], 0) > observed)
