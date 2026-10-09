@@ -2,17 +2,17 @@
 
 import json
 import unittest
-from openmachine import mcp_protocol
+from openmachine.mcp import protocol
 
 
 class ObservationAdmissionTests(unittest.TestCase):
     def test_execution_reply_counts_both_json_representations(self):
         payload = {"output": "\ufffd" * 200000, "offset": 0, "next_offset": 200000,
                    "output_presentation_truncated": False}
-        result = mcp_protocol._reply(lambda: payload, execution_output=True)
+        result = protocol._reply(lambda: payload, execution_output=True)
         encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
         self.assertFalse(result.is_error)
-        self.assertLessEqual(len(encoded), mcp_protocol.MAX_RESULT_BYTES - 1024)
+        self.assertLessEqual(len(encoded), protocol.MAX_RESULT_BYTES - 1024)
         self.assertTrue(result.structured_content["output_presentation_truncated"])
         self.assertEqual(result.structured_content["next_offset"], 200000)
         self.assertEqual(json.loads(result.content[0].text), result.structured_content)
@@ -24,17 +24,17 @@ class MCPContractTests(unittest.TestCase):
         from openmachine.foundation.sanitize import Fault
         payload = {"change_id": "a" * 32, "status": "outcome_unknown", "revision": 3,
                    "effects": [{"stage": "applied", "result_sha256": "b" * 64}], "error": "record_unverified"}
-        applied = mcp_protocol._reply(lambda: payload, workspace_output=True, workspace_mutation=True)
-        inspected = mcp_protocol._reply(lambda: payload, workspace_output=True)
+        applied = protocol._reply(lambda: payload, workspace_output=True, workspace_mutation=True)
+        inspected = protocol._reply(lambda: payload, workspace_output=True)
         self.assertTrue(applied.is_error)
         self.assertFalse(inspected.is_error)
         self.assertEqual(applied.structured_content["effects"], payload["effects"])
         def failed():
             raise Fault("change_outcome_unknown", "Original evidence only.", payload)
-        fault = mcp_protocol._reply(failed, workspace_output=True, workspace_mutation=True)
+        fault = protocol._reply(failed, workspace_output=True, workspace_mutation=True)
         self.assertTrue(fault.is_error)
         self.assertEqual(fault.structured_content["change_id"], payload["change_id"])
         self.assertEqual(fault.structured_content["effects"], payload["effects"])
-        abandoned = mcp_protocol._reply(lambda: {"status": "applying", "reconciliation": "outcome_unknown"},
+        abandoned = protocol._reply(lambda: {"status": "applying", "reconciliation": "outcome_unknown"},
                                    workspace_output=True, workspace_mutation=True)
         self.assertTrue(abandoned.is_error)

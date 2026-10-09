@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 from openmachine import tasks
-from openmachine.mcp_protocol import (READ, WRITE, DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT,
+from openmachine.mcp.protocol import (READ, WRITE, DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT,
                                       MAX_CONTROL_SEQ, MAX_INPUT, TerminalSize,
                                       _reply, _result, _submit_owned, _task_context)
 
