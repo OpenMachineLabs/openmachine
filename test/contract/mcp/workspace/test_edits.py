@@ -5,7 +5,7 @@ import sys
 import unittest
 import uuid
 from mcp import ClientSession
-from openmachine import server
+from openmachine import mcp_protocol
 from test.support.mcp import MCPFixture
 
 
@@ -32,7 +32,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 result = await session.call_tool("edit_workspace_file", args | {"change_id": identity})
                 self.assertFalse(result.is_error, result)
                 encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
-                self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
+                self.assertLessEqual(len(encoded), mcp_protocol.MAX_WORKSPACE_RESULT - 1024)
                 self.assertEqual(result.structured_content["change_id"], identity)
                 self.assertTrue(result.structured_content["truncated"])
                 self.assertEqual(result.structured_content["effects"][0]["stage"], "applied")

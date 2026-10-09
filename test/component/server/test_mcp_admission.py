@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import tempfile
@@ -11,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 import httpx2 as httpx
 from mcp.server.mcpserver.exceptions import ToolError
-from openmachine import server
+from openmachine import mcp_protocol, server, tasks
 from openmachine.config import Settings
 
 
@@ -33,13 +34,13 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.structured_content, payload)
             self.assertEqual(json.loads(result.content[0].text), payload)
             self.assertLess(len(json.dumps(result.model_dump(mode="json", by_alias=True)).encode()),
-                            server.MAX_TASK_RESULT_BYTES)
+                            mcp_protocol.MAX_TASK_RESULT_BYTES)
             # Modern HTTP escapes non-ASCII twice across text and structured
             # content; a valid maximum data item must still be retrievable.
             application.connections.running.return_value = nullcontext()
             application.task_observer.running.return_value = nullcontext()
             large = {"summary": "\u00e9" * (32 * 1024 - 16)}
-            self.assertLessEqual(len(server.tasks.records.canonical(large)), server.tasks.MAX_PAGE_BYTES)
+            self.assertLessEqual(len(tasks.records.canonical(large)), tasks.MAX_PAGE_BYTES)
             application.read_task.return_value = {**payload, "items": [large]}
             asgi = mcp.streamable_http_app(json_response=True)
             async with asgi.router.lifespan_context(asgi):
@@ -56,8 +57,8 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(wire["isError"])
             self.assertEqual(wire["structuredContent"]["items"], [large])
             self.assertEqual(json.loads(wire["content"][0]["text"]), wire["structuredContent"])
-            self.assertLess(len(response.content), server.MAX_TASK_RESULT_BYTES)
-            application.read_task.return_value = {**payload, "items": [{"summary": "x" * server.MAX_TASK_RESULT_BYTES}]}
+            self.assertLess(len(response.content), mcp_protocol.MAX_TASK_RESULT_BYTES)
+            application.read_task.return_value = {**payload, "items": [{"summary": "x" * mcp_protocol.MAX_TASK_RESULT_BYTES}]}
             result = await mcp.call_tool("read_task", arguments)
             self.assertTrue(result.is_error)
             self.assertEqual(result.structured_content["task_id"], "wire-bound")
@@ -91,7 +92,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "create_application", return_value=application):
                 mcp = server.create_server(config, root / "state")
             args = {"machine": "local", "execution_id": "a" * 32, "wait_seconds": 5}
-            with patch.object(server, "ThreadPoolExecutor", side_effect=OSError("fixture unavailable")):
+            with patch.object(mcp_protocol, "ThreadPoolExecutor", side_effect=OSError("fixture unavailable")):
                 with self.assertRaises(ToolError):
                     await mcp.call_tool("read_execution", args)
             readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(16)]
@@ -142,7 +143,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             application.control_execution.return_value = {"control_result": {"status": "applied"}}
             with patch.object(server, "create_application", return_value=application):
                 mcp = server.create_server(config, root / "state")
-            asyncio.get_running_loop().set_default_executor(server.ThreadPoolExecutor(max_workers=2))
+            asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=2))
             args = {"machine": "local", "execution_id": "b" * 32}
             readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(2)]
             try:
