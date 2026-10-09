@@ -238,9 +238,6 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                            if stage["id"] in old else "pending", evidence=[] if stage["id"] in affected or stage["id"] not in old
                            else old[stage["id"]]["evidence"]) for stage in definitions]
             record["contract"] = change["contract"]
-            # A newly accepted plan must not retain the retired registration alone.
-            if "recovery_policy" not in contract:
-                record.pop("chat_registration", None)
             record["plan"] = {"revision": record["plan"]["revision"] + 1, "stages": stages}
             paused = control["stop_intent"] == "pause"
             decision = control["pending_decision"] if paused or outstanding else None

@@ -2,7 +2,9 @@
 
 from copy import deepcopy
 import hashlib
+import importlib.util
 import json
+from pathlib import Path
 import sqlite3
 import unittest
 from unittest.mock import patch
@@ -11,6 +13,12 @@ from openmachine.tasks import database, records, store as task_store
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract, terminal_task_fixture, replace_task_record
+
+_OFFLINE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts/retire_chat_recovery_once.py"
+_OFFLINE_SPEC = importlib.util.spec_from_file_location("one_time_task_retirement", _OFFLINE_SCRIPT)
+_OFFLINE_MODULE = importlib.util.module_from_spec(_OFFLINE_SPEC)
+_OFFLINE_SPEC.loader.exec_module(_OFFLINE_MODULE)
+stage_clean_break = _OFFLINE_MODULE.stage
 
 
 class StructuredTaskTests(TaskFixture, unittest.TestCase):
@@ -175,44 +183,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.assertEqual(saved["record"]["origin"], value["origin"])
         self.assertEqual(tasks.operation(self.state, "structured-one", f"{1:032x}")["result"]["status"], "succeeded")
 
-    def test_retired_recovery_fields_are_read_without_rewriting_or_reenabling(self):
-        self.create()
-        fresh = deepcopy(self.view()["record"])
-        for version, policy, registration in ((3, "disabled", None), (4, "task_chat", "a" * 32)):
-            with self.subTest(version=version, policy=policy):
-                value = deepcopy(fresh)
-                value["format"] = version
-                if version == 3:
-                    value.pop("control_revision")
-                    value.pop("effect_scopes")
-                value["contract"]["recovery_policy"] = policy
-                value["chat_registration"] = registration
-                replace_task_record(self.state, value)
-                with database.connect(self.state) as connection:
-                    before = connection.execute("SELECT current,sha256 FROM tasks").fetchone()
-                    raw, digest = before["current"], before["sha256"]
-                observed = self.app.read_task("structured-one")
-                self.assertEqual(observed["record"]["contract"]["recovery_policy"], policy)
-                self.assertEqual(observed["record"]["chat_registration"], registration)
-                self.assertFalse(observed["support"]["runtime_recovery"])
-                self.assertEqual(tasks.check_state(self.state)["structured_task_records"], 1)
-                with database.connect(self.state) as connection:
-                    after = connection.execute("SELECT current,sha256 FROM tasks").fetchone()
-                    self.assertEqual((after["current"], after["sha256"]), (raw, digest))
-        claimed = self.control("claim", handoff_id=self.view()["record"]["handoff"]["id"])
-        self.assertEqual(claimed["record"]["contract"]["recovery_policy"], "task_chat")
-        revised = self.control("revise_plan", contract=self.request["contract"],
-                               stages=self.request["stages"], invalidated_stage_ids=["verify"],
-                               reason="Explicitly accept a new plan without obsolete recovery controls.")
-        self.assertNotIn("recovery_policy", revised["record"]["contract"])
-        self.assertNotIn("chat_registration", revised["record"])
-        self.assertEqual(tasks.check_state(self.state)["structured_task_records"], 1)
-        self.fault("invalid_task_contract", tasks.normalize_create,
-                   {**self.request, "contract": {**self.request["contract"], "recovery_policy": "disabled"}})
-        self.fault("invalid_task_contract", tasks.normalize_create,
-                   {**self.request, "chat_registration": None})
-
-    def test_retired_recovery_fields_still_reject_broken_historical_authority(self):
+    def test_retired_recovery_fields_are_not_valid_task_authority(self):
         self.create()
         with database.connect(self.state) as connection:
             original = connection.execute("SELECT current FROM tasks").fetchone()[0]
@@ -220,9 +191,13 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         baseline["contract"]["recovery_policy"] = "disabled"
         baseline["chat_registration"] = None
         invalid = []
-        for change in ("invalid_policy", "missing_registration", "missing_policy", "invalid_registration", "old_format"):
+        for change in ("valid_old_pair", "task_chat_old_pair", "invalid_policy",
+                       "missing_registration", "missing_policy", "invalid_registration", "old_format"):
             value = deepcopy(baseline)
-            if change == "invalid_policy":
+            if change == "task_chat_old_pair":
+                value["contract"]["recovery_policy"] = "task_chat"
+                value["chat_registration"] = "a" * 32
+            elif change == "invalid_policy":
                 value["contract"]["recovery_policy"] = "unknown"
             elif change == "missing_registration":
                 value.pop("chat_registration")
@@ -247,6 +222,65 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
             connection.execute("UPDATE tasks SET current=?,sha256=?",
                                (original, hashlib.sha256(original.encode()).hexdigest()))
         self.assertEqual(tasks.read(self.state, "structured-one")["record"]["contract"], self.request["contract"])
+        self.fault("invalid_task_contract", tasks.normalize_create,
+                   {**self.request, "contract": {**self.request["contract"], "recovery_policy": "disabled"}})
+        self.fault("invalid_task_contract", tasks.normalize_create,
+                   {**self.request, "chat_registration": None})
+
+    def test_offline_retirement_stages_verified_copy_and_keeps_original_evidence(self):
+        self.create()
+        self.app.save_task("legacy-checkpoint", 0, "Checkpoint", "Preserve unrelated work.", [])
+        with sqlite3.connect(self.path) as connection:
+            row = connection.execute("SELECT current FROM tasks WHERE task_id='structured-one'").fetchone()
+            old = json.loads(row[0])
+            old["contract"]["recovery_policy"] = "task_chat"
+            old["chat_registration"] = "a" * 32
+            old_raw = records.canonical(old).decode()
+            connection.execute("UPDATE tasks SET current=?,sha256=? WHERE task_id='structured-one'",
+                               (old_raw, hashlib.sha256(old_raw.encode()).hexdigest()))
+            before_events = list(connection.execute("SELECT * FROM task_events"))
+            before_operations = list(connection.execute("SELECT * FROM operations"))
+        self.fault("corrupt_tasks", tasks.read, self.state, "structured-one")
+        staged = self.root / "converted-tasks.db"
+        result = stage_clean_break(self.path, staged)
+        self.assertEqual(result["status"], "staged_not_applied")
+        self.assertEqual(result["converted_tasks"], 1)
+        self.assertEqual(result["structured_tasks"], 1)
+        with sqlite3.connect(staged.as_uri() + "?mode=ro", uri=True) as read_only:
+            self.assertEqual(read_only.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        with sqlite3.connect(self.path) as source, sqlite3.connect(staged) as output:
+            original = source.execute("SELECT current FROM tasks WHERE task_id='structured-one'").fetchone()[0]
+            converted = output.execute("SELECT current FROM tasks WHERE task_id='structured-one'").fetchone()[0]
+            self.assertEqual(original, old_raw)
+            self.assertNotIn("recovery_policy", converted)
+            self.assertNotIn("chat_registration", converted)
+            self.assertEqual(before_events, list(output.execute("SELECT * FROM task_events")))
+            self.assertEqual(before_operations, list(output.execute("SELECT * FROM operations")))
+            self.assertEqual(list(source.execute("SELECT * FROM tasks WHERE task_id='legacy-checkpoint'")),
+                             list(output.execute("SELECT * FROM tasks WHERE task_id='legacy-checkpoint'")))
+        self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+        with self.assertRaises(ValueError):
+            stage_clean_break(self.path, staged)  # Never overwrite a previously staged destination.
+
+    def test_offline_retirement_refuses_invalid_history_without_publishing(self):
+        self.create()
+        with sqlite3.connect(self.path) as connection:
+            original = connection.execute("SELECT current FROM tasks").fetchone()[0]
+        for case in ("missing_registration", "invalid_policy", "bad_sha"):
+            value = json.loads(original)
+            value["contract"]["recovery_policy"] = "disabled" if case != "invalid_policy" else "unknown"
+            if case != "missing_registration":
+                value["chat_registration"] = None
+            raw = records.canonical(value).decode()
+            digest = "f" * 64 if case == "bad_sha" else hashlib.sha256(raw.encode()).hexdigest()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("UPDATE tasks SET current=?,sha256=?", (raw, digest))
+            destination = self.root / f"invalid-{case}.db"
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                stage_clean_break(self.path, destination)
+            self.assertFalse(destination.exists())
+            with sqlite3.connect(self.path) as connection:
+                self.assertEqual(connection.execute("SELECT current,sha256 FROM tasks").fetchone(), (raw, digest))
 
     def test_corrupt_authority_is_never_skipped_rebuilt_or_replaced(self):
         self.create()
