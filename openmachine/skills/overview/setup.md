@@ -17,12 +17,12 @@ identity. Task storage requires SQLite 3.51.3 or newer, or the patched 3.50.7+
 (3.50.x) or 3.44.6+ (3.44.x) releases. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.17 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.18 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.17-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.18-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -117,7 +117,7 @@ never confer grants, install tools or execute embedded resources automatically.
 Managed services support logged-in macOS controllers. Linux supports manual `serve`
 and explicitly prepared SSH workers; managed Linux services and Windows are not
 included. Read [management](../service/management.md) before lifecycle changes and
-[SSH](../service/ssh.md) before target preparation. Version `0.2.17` is an initial
+[SSH](../service/ssh.md) before target preparation. Version `0.2.18` is an initial
 development release, not a stable 1.x promise. State contract 21, SSH protocol 7
 and worktree receipt format 6 are compatibility contracts, not release versions;
 ordinary format-5 and historical receipts remain readable. Inspect installed
