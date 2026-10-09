@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 from openmachine import tasks
 from openmachine.tasks import database, records, store as task_store
+from openmachine.tasks.rows import put_legacy
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract, terminal_task_fixture, replace_task_record
@@ -403,7 +404,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.create()
         with database.connect(self.state, write=True) as connection:
             for number in range(10001):
-                task_store._put_legacy(connection, f"archive-{number:05}", {"title": "x" * 400,
+                put_legacy(connection, f"archive-{number:05}", {"title": "x" * 400,
                     "anchors": ["fixture=archive"], "revision": 1, "body": "Retained checkpoint.",
                     "sha256": hashlib.sha256(b"Retained checkpoint.").hexdigest(), "content_redacted": False})
         self.assertEqual(tasks.find(self.state, limit=1)["total"], 10002)

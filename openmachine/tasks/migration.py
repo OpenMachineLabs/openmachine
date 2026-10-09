@@ -8,7 +8,9 @@ import uuid
 
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory
-from . import database as db, records, store
+from . import database as db, records
+from .rows import (decode_operation, insert_record, put_legacy, read_current,
+                   read_witnesses, record_core, task_row)
 from .index import MAX_INDEX, private_path, read_bytes, read_checkpoint, read_index, read_structured, structured_metadata
 
 
@@ -43,15 +45,15 @@ def _verify_import(connection, root: Path, manifest: list) -> None:
     if connection.execute("SELECT count(*) FROM tasks").fetchone()[0] != len(index["tasks"]):
         raise Fault("task_migration_incomplete", "The imported Task count is incomplete.")
     for identity, item in sorted(index["tasks"].items()):
-        row = store._row(connection, identity)
+        row = task_row(connection, identity)
         current = db.decode(row["current"], row["sha256"])
         if item.get("owner") == "structured":
-            current, _ = store._current(connection, row)
+            current, _ = read_current(connection, row)
             original, _ = read_structured(root, identity)
-            operations = [store._operation(op) for op in connection.execute("SELECT * FROM operations WHERE task_id=? ORDER BY ordinal", (identity,))]
+            operations = [decode_operation(op) for op in connection.execute("SELECT * FROM operations WHERE task_id=? ORDER BY ordinal", (identity,))]
             history = [db.decode(event["payload"], event["sha256"]) for event in connection.execute("SELECT payload,sha256 FROM task_events WHERE task_id=? ORDER BY seq", (identity,))]
-            witnesses = store._witnesses(connection, identity, operations)
-            if (current != store._core(original) or operations != original["operations"] or history != original["history"]
+            witnesses = read_witnesses(connection, identity, operations)
+            if (current != record_core(original) or operations != original["operations"] or history != original["history"]
                     or {w["operation_id"]: w for w in witnesses} != {w["operation_id"]: w for w in original.get("effect_scopes", [])}
                     or row["operation_count"] != len(operations) or row["history_count"] != len(history)):
                 raise Fault("task_migration_incomplete", "Imported Task facts do not match the original retained state.")
@@ -116,10 +118,10 @@ def migrate(state: Path) -> dict:
                     for sequence, (identity, item) in enumerate(sorted(index["tasks"].items()), 1):
                         if item.get("owner") == "structured":
                             record, _ = read_structured(source, identity)
-                            store._insert_record(connection, record, sequence=sequence)
+                            insert_record(connection, record, sequence=sequence)
                         else:
                             metadata, raw = read_checkpoint(source, index, identity)
-                            store._put_legacy(connection, identity, {**metadata, "body": raw.decode(), "content_redacted": False}, sequence=sequence)
+                            put_legacy(connection, identity, {**metadata, "body": raw.decode(), "content_redacted": False}, sequence=sequence)
                     connection.executemany("INSERT INTO imports VALUES (?,?,?)", manifest)
                     db.commit(connection)
                 _verify_import(connection, source, manifest)

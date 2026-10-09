@@ -11,7 +11,7 @@ from openmachine import execution, tasks
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 from openmachine.tasks import effects, records, transitions
-from . import task_attention
+from . import task_attention, task_observation, task_receipts
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
 EXECUTION_METHODS = {"start_execution", "create_worktree"}
@@ -27,16 +27,6 @@ NO_EFFECT = {"integration_disconnected", "integration_connection_changed", "inte
              "github_object_changed", "github_candidate_changed", "github_identity_changed",
              "github_authentication_required", "github_access_denied",
              "github_not_found", "github_conflict", "github_rejected"}
-
-
-def _receipt(status: str, facts: dict | None = None, summary: str = "", *, failure_code=None, effect=None) -> dict:
-    result = {"status": status, "receipt_sha256": records.digest(facts) if facts is not None else None,
-            "summary": summary or f"Original domain outcome: {status}.", "log_offset": None}
-    if failure_code is not None:
-        result["failure_code"] = failure_code
-    if effect is not None:
-        result["effect"] = effect
-    return result
 
 
 def _context(view: dict, operation_id: str) -> dict:
@@ -108,8 +98,8 @@ class TaskAdmission:
                     operation = next((item for item in view["record"]["operations"] if item["id"] == identity), None)
                     if operation is None:
                         raise Fault("task_evidence_invalid", "Acceptance must reference an original task operation.")
-                    observed = self._read(operation, verify=True)
-                    current, _ = self._observation(operation, observed)
+                    observed = self.app.task_receipts.read(operation, verify=True)
+                    current, _ = task_receipts.observation(operation, observed)
                     if current != operation["result"]:
                         raise Fault("task_evidence_changed", "Selected evidence changed; reconcile its original result before accepting it.")
         if action == "abandon" and retained is None:
@@ -136,7 +126,7 @@ class TaskAdmission:
             locator = operation["locator"]
             if locator["kind"] == "github":
                 continue  # Its unresolved resource exclusion survives abandonment.
-            observed = self._read(operation)
+            observed = self.app.task_receipts.read(operation)
             if locator["kind"] == "execution":
                 if (observed.get("status") not in {"outcome_unknown", "succeeded", "failed", "timed_out", "cancelled"}
                         or (observed.get("command") or {}).get("exited") is not True):
@@ -286,7 +276,7 @@ class TaskAdmission:
             if method not in FILE_METHODS | EXECUTION_METHODS:
                 raise
             try:
-                self._read({"locator": locator})
+                self.app.task_receipts.read({"locator": locator})
             except Fault:
                 raise index_error from None
             return self._dispatch(method, arguments, supervised=method in EXECUTION_METHODS)
@@ -294,7 +284,7 @@ class TaskAdmission:
             return self._dispatch(method, arguments)
         if method in FILE_METHODS | EXECUTION_METHODS:
             try:
-                self._read({"locator": locator})
+                self.app.task_receipts.read({"locator": locator})
             except Fault:
                 pass
             else:
@@ -334,7 +324,7 @@ class TaskAdmission:
                 if error.code != "resource_busy" or context is not None or method not in FILE_METHODS | EXECUTION_METHODS:
                     raise
                 try:
-                    self._read({"locator": locator})
+                    self.app.task_receipts.read({"locator": locator})
                 except Fault:
                     raise error from None
                 return self._dispatch(method, arguments)
@@ -353,8 +343,8 @@ class TaskAdmission:
                         or operation["request_sha256"] != self._fingerprint(method, arguments, operation)):
                     raise Fault("task_operation_conflict", "The original operation ID belongs to different intent; do not replace or replay it.")
                 expected = {operation["id"]: records.digest(operation)}
-                observed = self._read(operation, arguments)
-                result, enriched = self._observation(operation, observed)
+                observed = self.app.task_receipts.read(operation, arguments)
+                result, enriched = task_receipts.observation(operation, observed)
                 current = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
                 return {**observed, "task": _reference(current), "task_operation_replayed": False}
             transitions.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)
@@ -364,7 +354,7 @@ class TaskAdmission:
                     raise Fault("task_operation_conflict", "This original effect belongs to another task; no new association was admitted.")
             if method in EXECUTION_METHODS | FILE_METHODS:
                 try:
-                    self._read({"locator": locator})
+                    self.app.task_receipts.read({"locator": locator})
                 except Fault as error:
                     if error.code not in {"execution_not_found", "change_not_found"}:
                         raise
@@ -414,15 +404,15 @@ class TaskAdmission:
                 if method in GITHUB_METHODS:
                     # Preserve the owner's dispatch boundary. A matching current
                     # snapshot cannot turn a lost reply into acknowledged work.
-                    result, enriched = _receipt("failed" if no_effect else "unknown",
+                    result, enriched = task_receipts.receipt_result("failed" if no_effect else "unknown",
                                                 summary=f"Domain failure: {code}."), locator
                 else:
                     try:
-                        observed = self._read(operation, arguments)
-                        result, enriched = self._observation(operation, observed)
+                        observed = self.app.task_receipts.read(operation, arguments)
+                        result, enriched = task_receipts.observation(operation, observed)
                     except (Fault, OSError):
-                        unstarted = code == "resource_busy" and method in EXECUTION_METHODS and self._unstarted_local(operation)
-                        result, enriched = _receipt("failed" if no_effect or unstarted else "unknown",
+                        unstarted = code == "resource_busy" and method in EXECUTION_METHODS and self.app.task_receipts.unstarted_local(operation)
+                        result, enriched = task_receipts.receipt_result("failed" if no_effect or unstarted else "unknown",
                                                     summary=f"Domain failure: {code}."), locator
                 if admitted["record"]["format"] >= 4:
                     phase = {"running": "active", "partial": "effect_partial", "unknown": "effect_unknown"}.get(result["status"], "effect_verified")
@@ -431,7 +421,7 @@ class TaskAdmission:
                     result = dict(result, failure_code=code, effect=phase)
                 self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
                 raise
-            result, enriched = self._observation(operation, observed)
+            result, enriched = task_receipts.observation(operation, observed)
             current = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
             return {**observed, "task": _reference(current)}
 
@@ -561,106 +551,6 @@ class TaskAdmission:
         limit = records.MAX_ACTIVE_OPERATIONS - (0 if stopping else 1 if method == "control_execution" else 2)
         transitions.reserve(record, operation_limit=limit, new_operation=operation)
 
-    def _read(self, operation: dict, arguments: dict | None = None, *, verify: bool = False, cancelled=None) -> dict:
-        locator = operation["locator"]
-        if locator["kind"] == "github":
-            if operation.get("result") is not None and not records.pending(operation):
-                # A terminal provider receipt proves historical effect. Fresh
-                # merge/state gates belong to the subsequent owner operation.
-                return {"status": "retained_task_evidence", "locator": locator,
-                        "result": operation["result"], "current_state_observed": False}
-            observed = self.app._github_call("reconcile", dict(locator=locator, request=arguments),
-                                             binding=locator.get("connection"), historical_unbound="connection" not in locator)
-            return observed
-        target = self.app.config.machine(locator["machine"])
-        if (target.ssh_identity or None) != locator["target_identity"]:
-            raise Fault("task_target_changed", "The original target identity no longer matches; do not follow another host.")
-        if locator["kind"] == "change":
-            observed = self.app.machines.read_workspace_change(locator["machine"], locator["change_id"], observe_current=verify, cancelled=cancelled)
-            if verify:
-                current, plan = observed.get("current") or {}, observed.get("plan") or {}
-                if observed.get("format") == 2:
-                    expected = {item["path"]: item["after_sha256"] for item in plan.get("files", [])}
-                    actual = {item["path"]: item.get("sha256") for item in current.get("files", [])}
-                    matches = bool(expected) and current.get("complete") is True and expected == actual
-                else:
-                    matches = current.get("sha256") == plan.get("after_sha256") and "error" not in current and bool(plan)
-                if not matches:
-                    raise Fault("task_evidence_changed", "Current files differ from original accepted change evidence.")
-            return observed
-        observed = self.app.machines.read_execution(locator["machine"], locator["execution_id"], max_bytes=1, cancelled=cancelled)
-        if locator["control_seq"] is not None:
-            last = (observed.get("control") or {}).get("last")
-            if last is None or last["seq"] != locator["control_seq"]:
-                if operation["result"] is not None and not records.pending(operation):
-                    return {"status": "retained_task_evidence", "execution_id": locator["execution_id"], "control_result": None}
-                raise Fault("task_evidence_unavailable", "The original control receipt is no longer retained; never resend its input.")
-            return {**observed, "control_result": last}
-        return observed
-
-    def _observation(self, operation: dict, observed: dict) -> tuple[dict, dict]:
-        locator = operation["locator"]
-        status = observed.get("status")
-        if status == "retained_task_evidence":
-            return operation["result"], locator
-        if locator["kind"] == "github":
-            if operation.get("result") is not None and not records.pending(operation):
-                return operation["result"], locator
-            if status not in {"verified", "merged_verified"} and operation.get("result") is not None:
-                # An unproven mutable destination snapshot cannot rewrite the
-                # original uncertainty or discard its retained failure phase.
-                return operation["result"], locator
-            receipt = observed.get("receipt") or {}
-            if locator["object_type"] == "merge":
-                receipt = {key: (receipt or observed).get(key) for key in ("number", "head_sha", "merge_commit_sha")}
-            number = receipt.get("number" if locator["object_type"] in {"issue", "pull_request", "merge"} else "id")
-            enriched = dict(locator, number=number) if type(number) is int and number > 0 else locator
-            if status in {"verified", "merged_verified"}:
-                return _receipt("succeeded", receipt), enriched
-            if status == "observed" and operation["result"] is not None and not records.pending(operation):
-                return operation["result"], enriched
-            if status == "merge_blocked":
-                return _receipt("failed", summary="Original merge was blocked before dispatch."), enriched
-            result = _receipt("unknown", receipt or None, "Original provider outcome is unresolved; no request was repeated.")
-            if operation.get("effect_scope") is not None:
-                result["effect"] = "effect_unknown"
-                code = observed.get("error_code")
-                if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", code):
-                    result["failure_code"] = code
-            return result, enriched
-        if locator["kind"] == "change":
-            outcome = {"applied": "succeeded", "unchanged": "succeeded", "rejected": "failed", "partial": "partial"}.get(status, "unknown")
-            facts = {key: observed.get(key) for key in ("change_id", "request_sha256", "revision", "status", "plan_sha256", "effects", "error")}
-            return _receipt(outcome, facts), locator
-        if locator["control_seq"] is not None:
-            receipt = observed["control_result"]
-            outcome = {"applied": "succeeded", "rejected": "failed", "partial": "partial"}.get(receipt["status"], "unknown")
-            return _receipt(outcome, receipt), locator
-        outcome = {"accepted": "running", "running": "running", "finishing": "running", "succeeded": "succeeded",
-                   "failed": "failed", "timed_out": "failed", "cancelled": "cancelled"}.get(status, "unknown")
-        if outcome in {"succeeded", "failed", "cancelled"} and (observed.get("cleanup", {}).get("status") != "verified"
-                or outcome == "succeeded" and observed.get("exit_code") != 0):
-            outcome = "unknown"
-        facts = {key: observed.get(key) for key in ("execution_id", "created_at", "status", "exit_code", "command", "stop", "cleanup", "error")}
-        result = _receipt(outcome, facts)
-        result["log_offset"] = (operation["result"] or {}).get("log_offset") or 0
-        return result, locator
-
-    def _unstarted_local(self, operation: dict) -> bool:
-        # A missing receipt alone never proves non-execution. Only the recorded
-        # local start rejection and its original free launch lock can do so.
-        locator = operation["locator"]
-        if (locator["kind"] != "execution" or locator["control_seq"] is not None
-                or locator["target_identity"] is not None or operation["id"] != locator["execution_id"]
-                or self.app.config.machine(locator["machine"]).transport != "local"):
-            return False
-        identity = locator["execution_id"]
-        try:
-            with lease(self.app.state / "locks" / f"{identity}.lock", create=False):
-                return not os.path.lexists(self.app.state / "executions" / identity)
-        except (Fault, OSError):
-            return False
-
     def reconcile(self, view: dict) -> dict:
         record = view["record"]
         if record["terminal"] is not None:
@@ -671,70 +561,27 @@ class TaskAdmission:
                 continue
             expected[operation["id"]] = records.digest(operation)
             try:
-                observed = self._read(operation)
+                observed = self.app.task_receipts.read(operation)
             except Fault as error:
                 result = operation.get("result") or {}
                 if (error.code == "execution_not_found" and result.get("status") == "unknown"
                         and result.get("summary") == "Domain failure: resource_busy."
-                        and self._unstarted_local(operation)):
+                        and self.app.task_receipts.unstarted_local(operation)):
                     changes.append((operation["id"],
-                        _receipt("failed", summary="Original resource_busy confirmed before local launch; no execution created."),
+                        task_receipts.receipt_result("failed", summary="Original resource_busy confirmed before local launch; no execution created."),
                         operation["locator"]))
                 continue
             except OSError:
                 continue
-            result, locator = self._observation(operation, observed)
+            result, locator = task_receipts.observation(operation, observed)
             changes.append((operation["id"], result, locator))
         return self._publish(record["task_id"], changes,
             operation_ids=[item["id"] for item in record["operations"]], expected=expected) if changes else view
 
-    def apply_observations(self, record: dict, now_ms: int, observations: list[tuple[str, dict, dict]], *, expected=None) -> None:
-        """Pure result/handoff transition shared with the revision-checked observer."""
-        if record["terminal"] is not None:
-            return
-        changed = []
-        for operation_id, result, locator in observations:
-            operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
-            if operation is None or tasks.operation_key(operation["locator"]) != tasks.operation_key(locator):
-                raise Fault("task_operation_conflict", "Original observation binding changed; preserve its domain receipt.")
-            if expected is not None and expected.get(operation_id) != records.digest(operation):
-                # The original receipt was read outside the transaction. A
-                # newer observation owns the current row; this stale read is inert.
-                continue
-            if operation["result"] == result and operation["locator"] == locator:
-                continue
-            if operation["locator"]["kind"] == "github" and operation["result"] is not None and not records.pending(operation):
-                continue
-            # A transient unavailable read never erases a verified historical outcome.
-            if operation["result"] is not None and not records.pending(operation) and result["status"] in {"unknown", "running"}:
-                continue
-            operation.update(result=result, locator=locator, state="unknown" if result["status"] == "unknown" else "observed",
-                             observed_at_ms=now_ms)
-            changed.append(operation)
-        if not changed:
-            return
-        recovery = record["recovery"]
-        if recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"} and not any(
-                records.pending(item) and item["locator"]["kind"] in {"execution", "change"} for item in record["operations"]):
-            record["recovery"] = None
-        control = record["control"]
-        if control["stop_intent"] == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):
-            transitions.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
-        elif control["stop_intent"] == "none":
-            stage = transitions.stage_for(record)
-            decisive = next((item for item in reversed(changed) if item["result"]["status"] != "running"
-                and item["stage_id"] == stage["id"] and item["plan_revision"] == record["plan"]["revision"]
-                and item["source_sha256"] == stage["source_sha256"]), None)
-            if decisive is not None:
-                control["state"] = "waiting_for_ai"
-                control["pending_decision"] = None if decisive["result"]["status"] == "succeeded" else "Review the original operation outcome before new work."
-                transitions.handoff(record, decisive["id"], now_ms,
-                                "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
-
     def _publish(self, identity: str, observations: list[tuple[str, dict, dict]], *, operation_ids=(), expected=None) -> dict:
         try:
             view = tasks.update(self.app.state, identity,
-                lambda value, now: self.apply_observations(value, now, observations, expected=expected), observation=True,
+                lambda value, now: task_observation.apply_observations(value, now, observations, expected=expected), observation=True,
                 operation_ids=[*operation_ids, *(item[0] for item in observations)])
         except (Fault, OSError) as error:
             raise Fault("task_result_unverified", "Original domain work may have finished, but task evidence publication was not verified. Read the same task and original operation; do not repeat its effect.",

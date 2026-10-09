@@ -18,6 +18,7 @@ import stat
 import tempfile
 
 from openmachine.tasks import database, records, store
+from openmachine.tasks.rows import read_current, task_row
 
 OPAQUE_TABLES = (
     "store", "operations", "task_events", "task_updates",
@@ -136,9 +137,9 @@ def stage(source_db: Path, destination_db: Path) -> dict:
                     if any(a != b for index, (a, b) in enumerate(zip(prior, latest))
                            if index not in changed_columns):
                         raise ValueError("Conversion changed retained Task indexes")
-                    row = store._row(candidate, identity)
+                    row = task_row(candidate, identity)
                     if row["kind"] == "structured":
-                        store._current(candidate, row)  # Strict format reader, including decision references.
+                        read_current(candidate, row)  # Strict format reader, including decision references.
                         store._view(candidate, identity)  # All indexed operation/Task facts.
                 if tuple(candidate.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()) != (0, 0, 0):
                     raise ValueError("Staged copy did not checkpoint cleanly")

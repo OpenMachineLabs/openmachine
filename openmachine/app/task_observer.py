@@ -8,7 +8,7 @@ from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 from openmachine.tasks import records
-from . import task_observation as observation
+from . import task_observation as observation, task_receipts
 
 
 @dataclass
@@ -316,8 +316,8 @@ class TaskObserver:
                 if (target.ssh_identity or None) != read.target or target.transport != ("ssh" if read.target else "local"):
                     raise Fault("task_target_changed", "Original evidence must not follow another route.")
                 read.contacted = True
-                observed = self.app.task_admission._read(operation, cancelled=read.stop) if read.target else self.app.task_admission._read(operation)
-                result, locator = self.app.task_admission._observation(operation, observed)
+                observed = self.app.task_receipts.read(operation, cancelled=read.stop) if read.target else self.app.task_receipts.read(operation)
+                result, locator = task_receipts.observation(operation, observed)
                 read.observations.append((operation["id"], result, locator))
                 read.observed_at_ms[operation["id"]] = observation.now_ms()
                 if result["status"] == "unknown":
@@ -353,7 +353,7 @@ class TaskObserver:
             if record["terminal"] is not None:
                 return
             if not timeout:
-                self.app.task_admission.apply_observations(record, timestamp, read.observations)
+                observation.apply_observations(record, timestamp, read.observations)
             if code:
                 shared = dict(connection, connection_ref=read.target) if connection is not None else None
                 observation.fail_observation(record, read.started_at_ms, timestamp, code, shared)

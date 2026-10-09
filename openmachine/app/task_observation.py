@@ -1,11 +1,12 @@
-"""Bounded original-result observation policy and read-only views; no operation dispatch."""
+"""Bounded original-result observation policy, pure transitions and read-only views."""
 
 import errno
 import random
 import re
 import time
+from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import records, transitions
+from openmachine.tasks import effects, records, transitions
 
 INTERVAL_MS = 2000
 READ_SECONDS = 2.0
@@ -104,6 +105,50 @@ def clear_observation(record: dict) -> None:
         record["recovery"] = None
         if record["control"]["state"] == "recovering":
             record["control"]["state"] = "running" if any(records.pending(item) for item in record["operations"]) else "waiting_for_ai"
+
+
+def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, dict, dict]], *, expected=None) -> None:
+    """Pure result/handoff transition shared with the revision-checked observer."""
+    if record["terminal"] is not None:
+        return
+    changed = []
+    for operation_id, result, locator in observations:
+        operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
+        if operation is None or tasks.operation_key(operation["locator"]) != tasks.operation_key(locator):
+            raise Fault("task_operation_conflict", "Original observation binding changed; preserve its domain receipt.")
+        if expected is not None and expected.get(operation_id) != records.digest(operation):
+            # The original receipt was read outside the transaction. A
+            # newer observation owns the current row; this stale read is inert.
+            continue
+        if operation["result"] == result and operation["locator"] == locator:
+            continue
+        if operation["locator"]["kind"] == "github" and operation["result"] is not None and not records.pending(operation):
+            continue
+        # A transient unavailable read never erases a verified historical outcome.
+        if operation["result"] is not None and not records.pending(operation) and result["status"] in {"unknown", "running"}:
+            continue
+        operation.update(result=result, locator=locator, state="unknown" if result["status"] == "unknown" else "observed",
+                         observed_at_ms=now_ms)
+        changed.append(operation)
+    if not changed:
+        return
+    recovery = record["recovery"]
+    if recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"} and not any(
+            records.pending(item) and item["locator"]["kind"] in {"execution", "change"} for item in record["operations"]):
+        record["recovery"] = None
+    control = record["control"]
+    if control["stop_intent"] == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):
+        transitions.finish_record(record, "cancelled", [], "Explicit stop; original operation outcomes are retained separately.", now_ms)
+    elif control["stop_intent"] == "none":
+        stage = transitions.stage_for(record)
+        decisive = next((item for item in reversed(changed) if item["result"]["status"] != "running"
+            and item["stage_id"] == stage["id"] and item["plan_revision"] == record["plan"]["revision"]
+            and item["source_sha256"] == stage["source_sha256"]), None)
+        if decisive is not None:
+            control["state"] = "waiting_for_ai"
+            control["pending_decision"] = None if decisive["result"]["status"] == "succeeded" else "Review the original operation outcome before new work."
+            transitions.handoff(record, decisive["id"], now_ms,
+                            "result_ready" if decisive["result"]["status"] == "succeeded" else "decision_required")
 
 
 def project(view: dict, snapshot: dict, ssh_supported: bool) -> dict:

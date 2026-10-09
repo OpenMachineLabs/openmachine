@@ -13,10 +13,11 @@ import time
 from openmachine.foundation.sanitize import Fault, redact
 from openmachine.foundation.state import lease
 from . import database as db, effects, records
+from .rows import (append_event, decode_operation, insert_record, operation_key, pack_current,
+                   put_legacy, put_operation, read_current, read_decision, read_witnesses,
+                   record_core, task_row, validate_operation)
 from .index import (INDEX_PAGE, MAX_CHECKPOINT, metadata as validate_metadata,
                     private_path, read_checkpoint, read_index, read_structured, task_id)
-
-HISTORICAL = {"operations", "history", "effect_scopes", "_facts", "_decisions"}
 
 
 def _observation_support() -> dict:
@@ -25,103 +26,6 @@ def _observation_support() -> dict:
             "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
                 "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
                 "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
-
-
-def operation_key(locator: dict) -> tuple:
-    kind = locator["kind"]
-    if kind == "github":
-        if not locator["anchor"]:
-            object_type = "pull_request" if locator["object_type"] == "merge" else locator["object_type"]
-            return "github_destination", locator["repository"].casefold(), object_type, locator["number"]
-        return kind, locator["repository"].casefold(), locator["anchor"]
-    return kind, locator["target_identity"] or "local", locator["execution_id" if kind == "execution" else "change_id"]
-
-
-def _key(locator: dict) -> str:
-    return records.canonical(operation_key(locator)).decode()
-
-
-def _core(record: dict) -> dict:
-    return {key: value for key, value in record.items() if key not in HISTORICAL}
-
-
-def _decision(connection, identity: str, stage_id: str, version: int) -> dict:
-    row = connection.execute("SELECT payload,sha256 FROM stage_decisions WHERE task_id=? AND stage_id=? AND version=?",
-                             (identity, stage_id, version)).fetchone()
-    if row is None:
-        raise Fault("corrupt_tasks", "A current stage lost its original decision version.")
-    try:
-        value = records.Decision.model_validate(db.decode(row["payload"], row["sha256"])).model_dump()
-        if len(set(value["evidence"])) != len(value["evidence"]):
-            raise ValueError("duplicate decision evidence")
-        missing = connection.execute("""SELECT 1 FROM json_each(?) AS evidence LEFT JOIN operations AS op
-            ON op.task_id=? AND op.id=evidence.value WHERE op.id IS NULL OR op.stage_id<>? LIMIT 1""",
-            (json.dumps(value["evidence"]), identity, stage_id)).fetchone()
-        if missing:
-            raise ValueError("decision evidence lost its original operation")
-        return value
-    except ValueError as error:
-        raise Fault("corrupt_tasks", "A stage decision has invalid original evidence.") from error
-
-
-def _current(connection, row) -> tuple[dict, dict]:
-    value = db.decode(row["current"], row["sha256"])
-    versions = {}
-    try:
-        if value["task_id"] != row["task_id"] or value["revision"] != row["revision"]:
-            raise ValueError("current identity or revision differs")
-        for stage in value["plan"]["stages"]:
-            version = stage.pop("decision_version")
-            if type(version) is not int or not 1 <= version <= value["revision"] or "evidence" in stage:
-                raise ValueError("invalid decision version")
-            decision = _decision(connection, row["task_id"], stage["id"], version)
-            if stage["state"] != decision["state"]:
-                raise ValueError("decision state differs")
-            stage["evidence"] = decision["evidence"]
-            versions[stage["id"]] = version
-        return records.Current.model_validate(value).model_dump(), versions
-    except (ValueError, TypeError, KeyError) as error:
-        raise Fault("corrupt_tasks", "Current Task authority or its decision references are invalid.") from error
-
-
-def _pack_current(connection, core: dict, prior: dict | None = None) -> dict:
-    """Keep only immutable decision references in the bounded current-state row."""
-    value = deepcopy(core)
-    for stage in value["plan"]["stages"]:
-        decision = {"state": stage["state"], "evidence": stage.pop("evidence")}
-        version = (prior or {}).get(stage["id"])
-        if version is None or _decision(connection, core["task_id"], stage["id"], version) != decision:
-            version = core["revision"]
-            payload, sha = db.encoded(decision)
-            connection.execute("INSERT INTO stage_decisions VALUES (?,?,?,?,?)",
-                               (core["task_id"], stage["id"], version, payload, sha))
-        stage["decision_version"] = version
-    return value
-
-
-def _row(connection, identity: str):
-    row = connection.execute("SELECT * FROM tasks WHERE task_id=?", (identity,)).fetchone()
-    if row is None:
-        raise Fault("task_not_found", "No original Task exists for this ID.")
-    return row
-
-
-def _operation(row) -> dict:
-    value = db.decode(row["payload"], row["sha256"])
-    try:
-        value = records.Operation.model_validate(value).model_dump()
-        locator = value["locator"]
-        indexes = {key: value[key] for key in ("id", "stage_id", "plan_revision", "epoch", "admitted_at_ms", "observed_at_ms")}
-        indexes.update(kind=locator["kind"], machine=locator.get("machine"), target_identity=locator.get("target_identity"),
-                       repository=locator.get("repository", "").casefold() or None, effect_key=_key(locator),
-                       pending=int(records.pending(value)), unresolved=int(effects.unresolved(value)),
-                       outcome=(value["result"] or {}).get("status"),
-                       locator_id=locator.get("execution_id", locator.get("change_id", locator.get("anchor"))))
-        if any(row[key] != item for key, item in indexes.items()):
-            raise ValueError("operation indexes differ")
-        return value
-    except (ValueError, TypeError, KeyError) as error:
-        raise Fault("corrupt_tasks", "An original operation has invalid content or binding indexes.") from error
 
 
 def _selected(connection, identity: str, current: dict, operation_ids=()) -> list[dict]:
@@ -141,25 +45,7 @@ def _selected(connection, identity: str, current: dict, operation_ids=()) -> lis
         row = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, key)).fetchone()
         if row is not None:
             rows[key] = row
-    return [_operation(row) for row in sorted(rows.values(), key=lambda row: row["ordinal"])]
-
-
-def _witnesses(connection, identity: str, operations: list[dict]) -> list[dict]:
-    result = []
-    for operation in operations:
-        row = connection.execute("SELECT scope,witness,sha256 FROM operation_scopes WHERE task_id=? AND operation_id=? AND witness IS NOT NULL",
-                                  (identity, operation["id"])).fetchone()
-        if row is not None:
-            try:
-                witness = records.EffectScopeWitness.model_validate(db.decode(row["witness"], row["sha256"])).model_dump()
-                if (witness["operation_id"] != operation["id"] or witness["request_sha256"] != operation["request_sha256"]
-                        or operation.get("effect_scope") is not None or operation["locator"]["kind"] != "github"
-                        or witness["at_ms"] < operation["admitted_at_ms"] or records.canonical(witness["scope"]).decode() != row["scope"]):
-                    raise ValueError("scope witness binding differs")
-                result.append(witness)
-            except (ValueError, TypeError, KeyError) as error:
-                raise Fault("corrupt_tasks", "An effect-scope witness lost its original operation binding.") from error
-    return result
+    return [decode_operation(row) for row in sorted(rows.values(), key=lambda row: row["ordinal"])]
 
 
 def _facts(connection, row, current: dict, operations: list[dict]) -> dict:
@@ -186,18 +72,18 @@ def _facts(connection, row, current: dict, operations: list[dict]) -> dict:
 
 
 def _view(connection, identity: str, operation_ids=()) -> dict:
-    row = _row(connection, identity)
+    row = task_row(connection, identity)
     current = db.decode(row["current"], row["sha256"])
     if row["kind"] == "legacy":
         body = current["body"]
         return {"task_id": identity, **current, "body": redact(body), "content_redacted": redact(body) != body,
                 "generation": db.metadata(connection)["generation"], "resume_authorized": False}
-    current, versions = _current(connection, row)
+    current, versions = read_current(connection, row)
     if current["task_id"] != identity or current["revision"] != row["revision"]:
         raise Fault("corrupt_tasks", "Task identity or revision differs from its stored authority.")
     operations = _selected(connection, identity, current, operation_ids)
     facts = _facts(connection, row, current, operations)
-    current.update(operations=operations, history=[], effect_scopes=_witnesses(connection, identity, operations), _facts=facts,
+    current.update(operations=operations, history=[], effect_scopes=read_witnesses(connection, identity, operations), _facts=facts,
                    _decisions=versions)
     return {"task_id": identity, "record": current, "facts": facts, "read_schema": 2, "record_complete": False,
             "observed_at_ms": time.time_ns() // 1000000, "index_status": "current",
@@ -287,7 +173,7 @@ def operation(state: Path, identity: str, operation_id: str) -> dict | None:
         if connection is None:
             return next((op for op in read(state, identity)["record"]["operations"] if op["id"] == operation_id), None)
         row = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, operation_id)).fetchone()
-        return _operation(row) if row else None
+        return decode_operation(row) if row else None
 
 
 def control_update(state: Path, identity: str, update_id: str) -> dict | None:
@@ -297,91 +183,6 @@ def control_update(state: Path, identity: str, update_id: str) -> dict | None:
             return retained if retained["id"] == update_id else None
         row = connection.execute("SELECT id,request_sha256 FROM task_updates WHERE task_id=? AND id=?", (identity, update_id)).fetchone()
         return {"id": row[0], "request_sha256": row[1]} if row else None
-
-
-def _validate_operation(operation: dict, current: dict) -> dict:
-    value = records.Operation.model_validate(operation).model_dump()
-    stages = {stage["id"]: stage for stage in current["plan"]["stages"]}
-    locator = value["locator"]
-    if (value["stage_id"] not in stages or value["plan_revision"] > current["plan"]["revision"]
-            or value["epoch"] > current["control"]["epoch"] or not current["created_at_ms"] <= value["admitted_at_ms"] <= current["updated_at_ms"]
-            or value["observed_at_ms"] is not None and value["observed_at_ms"] > current["updated_at_ms"]):
-        raise ValueError("operation authority binding differs")
-    if current["format"] < 4 and (value.get("effect_scope") is not None or any(
-            (value["result"] or {}).get(key) is not None for key in ("effect", "failure_code"))):
-        raise ValueError("format does not permit scoped results")
-    if current["format"] == 1 and locator.get("connection") is not None:
-        raise ValueError("legacy operations cannot acquire native account authority")
-    if value["plan_revision"] == current["plan"]["revision"]:
-        if value["source_sha256"] != stages[value["stage_id"]]["source_sha256"]:
-            raise ValueError("operation source differs")
-        if current["format"] >= 2 and locator["kind"] == "github":
-            binding = next((item for repo, item in current["contract"].get("github_connections", {}).items()
-                            if repo.casefold() == locator["repository"].casefold()), None)
-            if binding is None or locator.get("connection") != binding:
-                raise ValueError("original native account binding differs")
-    return value
-
-
-def _put_operation(connection, identity: str, operation: dict, ordinal: int) -> None:
-    locator = operation["locator"]
-    payload, sha = db.encoded(operation)
-    connection.execute("""INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(task_id,id) DO UPDATE SET observed_at_ms=excluded.observed_at_ms,pending=excluded.pending,
-      unresolved=excluded.unresolved,outcome=excluded.outcome,payload=excluded.payload,sha256=excluded.sha256,
-      effect_key=excluded.effect_key""", (identity, operation["id"], ordinal, operation["stage_id"],
-        operation["plan_revision"], operation["epoch"], locator["kind"], locator.get("machine"),
-        locator.get("target_identity"), locator.get("repository", "").casefold() or None, _key(locator),
-        operation["admitted_at_ms"], operation["observed_at_ms"], int(records.pending(operation)),
-        int(effects.unresolved(operation)), (operation["result"] or {}).get("status"), payload, sha,
-        locator.get("execution_id", locator.get("change_id", locator.get("anchor")))))
-    if operation.get("effect_scope") is not None:
-        scope, scope_sha = db.encoded(operation["effect_scope"])
-        connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,NULL,?) ON CONFLICT DO NOTHING",
-                           (identity, operation["id"], scope, scope_sha))
-
-
-def _event(connection, identity: str, value: dict, *, update: dict | None = None,
-           snapshot_at: int | None = None) -> None:
-    payload, sha = db.encoded(value)
-    if len(payload.encode()) > records.MAX_EVENT_BYTES:
-        raise ValueError("audit event exceeds its bound")
-    row = connection.execute("UPDATE tasks SET history_count=history_count+1 WHERE task_id=? RETURNING history_count", (identity,)).fetchone()
-    connection.execute("INSERT INTO task_events VALUES (?,?,?,?,?,?,?,?)", (identity, row[0],
-        "snapshot" if snapshot_at is not None else value["kind"], snapshot_at if snapshot_at is not None else value["at_ms"],
-        value.get("stage_id"), value.get("operation_id"), payload, sha))
-    if update is not None:
-        connection.execute("INSERT INTO task_updates VALUES (?,?,?)", (identity, update["id"], update["request_sha256"]))
-
-
-def _insert_record(connection, record: dict, *, sequence: int | None = None) -> None:
-    identity = record["task_id"]
-    core = records.Current.model_validate(_core(record)).model_dump()
-    payload, sha = db.encoded(_pack_current(connection, core))
-    stage_counts = {stage["id"]: 0 for stage in core["plan"]["stages"]}
-    for operation in record["operations"]:
-        stage_counts[operation["stage_id"]] += 1
-    connection.execute("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (identity, "structured", core["revision"],
-        db.bump(connection) if sequence is None else sequence, payload, sha, (identity + " " + core["title"]).casefold(),
-        json.dumps(core["anchors"]), len(record["operations"]), 0, len(record.get("effect_scopes", [])), json.dumps(stage_counts)))
-    for ordinal, operation in enumerate(record["operations"], 1):
-        _put_operation(connection, identity, _validate_operation(operation, core), ordinal)
-    for witness in record.get("effect_scopes", []):
-        payload, sha = db.encoded(witness)
-        scope, _ = db.encoded(witness["scope"])
-        connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, witness["operation_id"], scope, payload, sha))
-    for event in record["history"]:
-        _event(connection, identity, event)
-    connection.execute("INSERT INTO task_updates VALUES (?,?,?)", (identity, record["last_update"]["id"], record["last_update"]["request_sha256"]))
-
-
-def _put_legacy(connection, identity: str, value: dict, *, sequence: int | None = None) -> None:
-    payload, sha = db.encoded(value)
-    connection.execute("""INSERT INTO tasks(task_id,kind,revision,change_seq,current,sha256,title_key,anchors)
-      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET revision=excluded.revision,
-      change_seq=excluded.change_seq,current=excluded.current,sha256=excluded.sha256,title_key=excluded.title_key,anchors=excluded.anchors""",
-      (identity, "legacy", value["revision"], db.bump(connection) if sequence is None else sequence,
-       payload, sha, (identity + " " + value["title"]).casefold(), json.dumps(value["anchors"])))
 
 
 def create(state: Path, identity: str, update_id: str, title: str, anchors: list[str], origin: dict,
@@ -409,7 +210,7 @@ def create(state: Path, identity: str, update_id: str, title: str, anchors: list
         if connection.execute("SELECT 1 FROM tasks WHERE task_id=?", (identity,)).fetchone():
             raise Fault("task_conflict", "An original Task appeared during creation; observe it before another action.")
         db.admission_space(state)
-        _insert_record(connection, record)
+        insert_record(connection, record)
         view = _view(connection, identity)
     return {**view, "status": "created"}
 
@@ -459,11 +260,11 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             material |= any(value["control"][key] != original["control"][key] for key in ("owner", "epoch", "stop_intent", "current_stage_id"))
             value["control_revision"] = value["revision"] if material else original.get("control_revision", original["revision"])
         try:
-            core = records.Current.model_validate(_core(value)).model_dump()
-            prior_row = _row(connection, identity)
+            core = records.Current.model_validate(record_core(value)).model_dump()
+            prior_row = task_row(connection, identity)
             prior = db.decode(prior_row["current"], prior_row["sha256"])
             if not connection.execute("SELECT 1 FROM task_events WHERE task_id=? AND kind='snapshot' LIMIT 1", (identity,)).fetchone():
-                _event(connection, identity, prior, snapshot_at=now)
+                append_event(connection, identity, prior, snapshot_at=now)
             old_operations = {item["id"]: item for item in original["operations"]}
             selected = {item["id"]: item for item in value["operations"]}
             if len(selected) != len(value["operations"]) or not old_operations.keys() <= selected.keys():
@@ -475,7 +276,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                 old = old_operations.get(item["id"])
                 if item == old:
                     continue
-                item = _validate_operation(item, core)
+                item = validate_operation(item, core)
                 if old is not None:
                     for key in ("id", "stage_id", "plan_revision", "epoch", "request_sha256", "source_sha256", "admitted_at_ms", "effect_scope"):
                         if old.get(key) != item.get(key):
@@ -501,8 +302,8 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     count += 1
                     ordinal = count
                     stages[item["stage_id"]] = stages.get(item["stage_id"], 0) + 1
-                _put_operation(connection, identity, item, ordinal)
-                _event(connection, identity, {"kind": "operation_admitted" if old is None else "operation_observed", "at_ms": now,
+                put_operation(connection, identity, item, ordinal)
+                append_event(connection, identity, {"kind": "operation_admitted" if old is None else "operation_observed", "at_ms": now,
                     "stage_id": item["stage_id"], "operation_id": item["id"],
                     "operation": item if old is None else {key: item[key] for key in ("id", "state", "observed_at_ms", "result", "locator")}})
             if connection.execute("SELECT count(*) FROM operations WHERE task_id=? AND unresolved=1", (identity,)).fetchone()[0] > records.MAX_ACTIVE_OPERATIONS:
@@ -519,7 +320,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     raise ValueError("scope witness does not bind original intent")
                 payload, sha = db.encoded(witness)
                 connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, key, db.encoded(witness["scope"])[0], payload, sha))
-                _event(connection, identity, {"kind": "scope_bound", "at_ms": now, "operation_id": key, "witness": witness})
+                append_event(connection, identity, {"kind": "scope_bound", "at_ms": now, "operation_id": key, "witness": witness})
             for stage in core["plan"]["stages"]:
                 if stage not in original["plan"]["stages"]:
                     for key in stage["evidence"]:
@@ -538,15 +339,15 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                 records.History.model_validate(event)
                 if not core["created_at_ms"] <= event["at_ms"] <= now:
                     raise ValueError("material event time differs")
-                _event(connection, identity, event)
-            packed = _pack_current(connection, core, original["_decisions"])
+                append_event(connection, identity, event)
+            packed = pack_current(connection, core, original["_decisions"])
             changes = {key: item for key, item in packed.items() if key not in {"revision", "updated_at_ms", "control_revision", "last_update"} and item != prior.get(key)}
             if "plan" in changes and core["plan"]["revision"] == original["plan"]["revision"]:
                 changes["plan"] = {"revision": core["plan"]["revision"], "decisions": [
                     {key: stage[key] for key in ("id", "state", "decision_version")}
                     for stage in packed["plan"]["stages"] if stage not in prior["plan"]["stages"]]}
             if changes or last_update is not None:
-                _event(connection, identity, {"kind": "control" if last_update else "state_changed", "at_ms": now, "changes": changes}, update=last_update)
+                append_event(connection, identity, {"kind": "control" if last_update else "state_changed", "at_ms": now, "changes": changes}, update=last_update)
             payload, sha = db.encoded(packed)
             connection.execute("UPDATE tasks SET revision=?,change_seq=?,current=?,sha256=?,operation_count=?,scope_count=scope_count+?,stage_counts=? WHERE task_id=?",
                 (core["revision"], db.bump(connection), payload, sha, count, len(new_witnesses) - len(old_witnesses), json.dumps(stages), identity))
@@ -574,7 +375,7 @@ def operation_binding(state: Path, key: tuple, operation_id: str = "") -> dict |
                                    (identity, encoded_key)).fetchone()
         exact = connection.execute("SELECT * FROM operations WHERE task_id=? AND id=?", (identity, operation_id)).fetchone()
         rows = {row["id"]: row for row in (first, exact) if row is not None}
-        return {"task_id": identity, "operations": [_operation(row) for row in rows.values()]}
+        return {"task_id": identity, "operations": [decode_operation(row) for row in rows.values()]}
 
 
 def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list[dict]:
@@ -590,8 +391,8 @@ def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list
         for row in rows:
             if row["id"] == proposed.get("id"):
                 continue
-            item = _operation(row)
-            scope = {"effect_scopes": _witnesses(connection, row["task_id"], [item])}
+            item = decode_operation(row)
+            scope = {"effect_scopes": read_witnesses(connection, row["task_id"], [item])}
             if effects.conflicts(scope, item, proposed_record, proposed):
                 return [{"task_id": row["task_id"], "operations": [item]}]
         return []
@@ -728,7 +529,7 @@ def activation_blockers(state: Path):
         if connection is None:
             return
         for row in connection.execute("SELECT * FROM operations WHERE unresolved=1"):
-            yield _operation(row)
+            yield decode_operation(row)
 
 
 def save(state: Path, identity: str, expected_revision: int, title: str, body: str, anchors: list[str]) -> dict:
@@ -760,7 +561,7 @@ def save(state: Path, identity: str, expected_revision: int, title: str, body: s
             db.admission_space(state)
         value = {**meta, "revision": revision + 1, "sha256": hashlib.sha256(raw).hexdigest(),
                  "body": body, "content_redacted": False}
-        _put_legacy(connection, identity, value)
+        put_legacy(connection, identity, value)
         result = _view(connection, identity)
     return {**result, "status": "saved"}
 
@@ -780,7 +581,7 @@ def present(view: dict) -> dict:
                       read_schema=2, section="summary", counts=counts, current_record_complete=True,
                       record_complete=True, complete=True, has_more=False)
         return result
-    current = deepcopy(_core(record))
+    current = deepcopy(record_core(record))
     for stage in current["plan"]["stages"]:
         if stage["id"] in record.get("_decisions", {}):
             stage.pop("evidence")
@@ -815,7 +616,7 @@ def public_read(state: Path, identity: str, *, section: str = "summary", cursor:
     with db.connect(state) as connection:
         if connection is None:
             raise Fault("task_migration_required", "Legacy history remains readable through its original summary until managed migration.")
-        row = _row(connection, identity)
+        row = task_row(connection, identity)
         if row["kind"] != "structured":
             raise Fault("task_legacy", "A Markdown checkpoint has no supervised operation ledger.")
         if expected_revision != -1 and expected_revision != row["revision"]:
@@ -825,7 +626,7 @@ def public_read(state: Path, identity: str, *, section: str = "summary", cursor:
             if not connection.execute("SELECT 1 FROM stage_decisions WHERE task_id=? AND stage_id=? AND version=?",
                                       (identity, stage_id, decision_version)).fetchone():
                 raise Fault("task_evidence_not_found", "No retained decision exists for this stage and version.")
-            decision = _decision(connection, identity, stage_id, decision_version)
+            decision = read_decision(connection, identity, stage_id, decision_version)
             return {"task_id": identity, "read_schema": 2, "section": "evidence", "task_revision": row["revision"],
                     "generation": owner["generation"], "complete": True, "has_more": False, "next_cursor": None,
                     "items": [{"kind": "stage_decision", "stage_id": stage_id, "decision_version": decision_version, **decision}]}
@@ -847,7 +648,7 @@ def public_read(state: Path, identity: str, *, section: str = "summary", cursor:
         if section == "operations":
             clause, args = ("id=?", [operation_id]) if operation_id else ("ordinal>? AND ordinal<=?", [after, ceiling])
             rows = connection.execute("SELECT * FROM operations WHERE task_id=? AND " + clause + " ORDER BY ordinal LIMIT ?", [identity, *args, limit + 1]).fetchall()
-            decode = lambda item: {"sequence": item["ordinal"], **_operation(item)}
+            decode = lambda item: {"sequence": item["ordinal"], **decode_operation(item)}
             sequence = "ordinal"
         else:
             selected = " AND kind NOT IN ('operation_admitted','operation_observed')" if section == "evidence" else ""
@@ -904,13 +705,13 @@ def check_state(state: Path) -> dict:
                     if hashlib.sha256(value["body"].encode()).hexdigest() != value["sha256"]:
                         raise Fault("corrupt_tasks", "A legacy checkpoint differs from its original body hash.")
                     continue
-                core, _ = _current(connection, row)
+                core, _ = read_current(connection, row)
                 formats.add(core["format"])
                 structured += 1
                 stage_counts = {stage["id"]: 0 for stage in core["plan"]["stages"]}
                 operations = 0
                 for item in connection.execute("SELECT * FROM operations WHERE task_id=? ORDER BY ordinal", (row["task_id"],)):
-                    op = _validate_operation(_operation(item), core)
+                    op = validate_operation(decode_operation(item), core)
                     operations += 1
                     if item["ordinal"] != operations:
                         raise Fault("corrupt_tasks", "An original operation ordinal is missing.")
@@ -920,7 +721,7 @@ def check_state(state: Path) -> dict:
                         if scope is None or scope["witness"] is not None or db.decode(scope["scope"], scope["sha256"]) != op["effect_scope"]:
                             raise Fault("corrupt_tasks", "An original declared scope differs from its conflict index.")
                     elif scope is not None:
-                        _witnesses(connection, row["task_id"], [op])
+                        read_witnesses(connection, row["task_id"], [op])
                 events = 0
                 for item in connection.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY seq", (row["task_id"],)):
                     event = db.decode(item["payload"], item["sha256"])
@@ -939,7 +740,7 @@ def check_state(state: Path) -> dict:
                 for decision in connection.execute("SELECT stage_id,version FROM stage_decisions WHERE task_id=?", (row["task_id"],)):
                     if not 1 <= decision["version"] <= core["revision"]:
                         raise Fault("corrupt_tasks", "A decision version exceeds its Task revision.")
-                    _decision(connection, row["task_id"], decision["stage_id"], decision["version"])
+                    read_decision(connection, row["task_id"], decision["stage_id"], decision["version"])
                 last = connection.execute("SELECT request_sha256 FROM task_updates WHERE task_id=? AND id=?", (row["task_id"], core["last_update"]["id"])).fetchone()
                 if last is None or last[0] != core["last_update"]["request_sha256"]:
                     raise Fault("corrupt_tasks", "The last control lost its retained request fingerprint.")

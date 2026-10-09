@@ -222,14 +222,15 @@ def write_legacy_task(state, record):
 
 def replace_task_record(state, record):
     """Seed one explicit historical shape inside a disposable SQLite fixture."""
-    from openmachine.tasks import database, records, store
+    from openmachine.tasks import database, records
+    from openmachine.tasks.rows import insert_record
     value = {key: item for key, item in record.items() if key not in {"_facts", "_decisions"}}
     value = records.Record.model_validate(value).model_dump()
     with database.connect(state, write=True) as connection:
         identity = value["task_id"]
         for table in ("operation_scopes", "task_events", "task_updates", "operations", "stage_decisions", "tasks"):
             connection.execute(f"DELETE FROM {table} WHERE task_id=?", (identity,))
-        store._insert_record(connection, value)
+        insert_record(connection, value)
     return value
 
 
