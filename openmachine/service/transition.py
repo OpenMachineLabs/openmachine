@@ -1,6 +1,7 @@
 """Serialize service operations, activate candidates and restore prior selections."""
 
 from collections.abc import Callable
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import plistlib
@@ -19,13 +20,14 @@ from .state import LAUNCHER
 
 
 def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None, *,
-              before_change: Callable[[], None] | None = None, require_safe: bool = False) -> dict:
+              before_change: Callable[[], None] | None = None, require_safe: bool = False,
+              execution_boots: dict | None = None) -> dict:
     candidate_path = candidate_config or service_state._configuration_for(state, record, target)
     candidate_digest = service_state._snapshot_configuration(state, candidate_path)
     candidate_path = service_state._saved_configuration(state, candidate_digest)
     candidate_record = record | {"config": str(candidate_path)}
     install._verify_candidate(state, candidate_record, target)
-    with lease(state / "locks/lifecycle.lock"):
+    with lease(state / "locks/lifecycle.lock"), ExitStack() as execution_locks:
         # The parent may have advanced its budget during candidate preflight.
         # Preserve that current value in any pending/restored selection.
         recovery = service_state._read_recovery(state)
@@ -54,7 +56,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             if machine.transport == "ssh" and name not in candidate_settings.machines:
                 checks.machine_unused(original_settings, state, name)
         if require_safe:
-            checks.activation_safe(state)
+            checks.activation_safe(state, config=original_settings, locks=execution_locks, execution_boots=execution_boots)
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
@@ -133,9 +135,9 @@ def _task_cutover(state: Path, record: dict, *, committed: bool = False) -> bool
                  or storage["kind"] == "absent" and pending is not None and storage["active"] is False))
 
 
-def _resume_activation(state: Path, record: dict) -> dict:
+def _resume_activation(state: Path, record: dict, *, execution_boots: dict | None = None) -> dict:
     """Finish the proven original cutover; never restore a pre-ledger writer."""
-    with lease(state / "locks/lifecycle.lock"):
+    with lease(state / "locks/lifecycle.lock"), ExitStack() as execution_locks:
         current = service_state._record(state)
         if ({key: value for key, value in current.items() if key != "recovery"}
                 != {key: value for key, value in record.items() if key != "recovery"}):
@@ -152,10 +154,10 @@ def _resume_activation(state: Path, record: dict) -> dict:
                     and not (ready.get("status") == "stopped" and service_state.stopped(record))):
                 raise Fault("service_state_unverified", "The original committed selection is not verifiably ready or deliberately stopped.")
             return ready
-        runtime._stop(state)
         tasks.migrate(state)
         install._verify_candidate(state, record, target, check_remote=True)
-        checks.activation_safe(state)
+        checks.activation_safe(state, config=load(Path(record["config"])), locks=execution_locks, execution_boots=execution_boots)
+        runtime._stop(state)
         ready = _start_selected(state, record)
         return _finish_activation(state, record, ready, bind_management=True)
 

@@ -296,7 +296,7 @@ requested target. A pending selection remains `activation_pending` in status.
 Explicit compatible rollback can reconcile the native selection but does not
 fabricate the missing original operation outcome or unblock uncertain history.
 
-Product activation conservatively defers active/unresolved execution, task,
+Product activation conservatively defers active/unresolved local execution, task,
 workspace-write, native-login or busy lifecycle admission. Original
 workers, target archives, receipts and local/SSH observation budgets are never
 cancelled or reset to pass a gate. A deferred operation does not auto-activate when
@@ -308,6 +308,69 @@ Retained unknown GitHub outcomes stay unknown across compatible local activation
 they do not represent a local worker to stop or replay. Historical workspace
 operations are nonblocking only when their exact retained task result names a
 pre-admission validation failure that cannot have allocated a change receipt.
+
+### Historical execution cleanup and activation
+
+A native command can exit with code zero while its process-session cleanup is
+unverified. That code proves the observed command result, not that every child
+exited, that the intended business effect succeeded, or that repeating the
+command is safe. Some retained receipts predate persisted session and kernel boot
+identities. `reconcile_execution` cannot reconstruct those missing identities;
+preserve `cleanup_identity_unavailable` and the original unknown outcome.
+
+For a known command exit with only native cleanup unresolved, the incoming
+manager can admit a compatible update after a verified kernel boot boundary:
+
+- A valid original `cleanup.boot_id` must differ from the current kernel boot ID.
+- If that identity was never retained, the first managed activation attempt
+  records `outcome.execution_boots` in its existing maintenance operation. Each
+  entry binds the original execution ID and complete receipt SHA256 to the boot
+  ID observed while the original ownership and resource locks are held. That
+  attempt remains `deferred` with reason `activation_deferred`.
+- A later explicit continuation must observe a different kernel boot ID and
+  the same original receipt bytes. Restarting the service, waiting, or an
+  operator's assertion does not satisfy this check. On macOS the existing native
+  reader uses `kern.bootsessionuuid`; on Linux it uses the kernel `boot_id`.
+
+The boundary proves only that processes from the observed earlier kernel boot
+cannot still be running locally. Execution receipts and their Task observations
+remain unknown; no reconciliation, success, Task completion, command replay or
+permission to rerun is inferred. Task activation requires the exact same machine,
+original execution ID and retained observation digest, without an unresolved
+sequenced control request. Missing command results, pending/partial controls,
+busy original owners or resources, unreadable records and mismatched evidence
+continue to block. Original identity, control, worker, workspace and named-resource
+locks remain held through activation and any restoration; shared histories use
+the strongest required lock mode. Other compatibility and admission checks still
+apply.
+
+Use the bound management entry reported by `manage --contract 1 status`:
+
+1. Read the original maintenance operation and actual selected version. An already
+   completed operation needs no continuation, even if old execution results are
+   still unknown.
+2. Obtain a reviewed release payload containing this behavior. If the deferred
+   operation is bound to an older payload, its `continue` still uses that exact
+   payload. Use the existing `retire` only when it can verify that the original
+   update never activated, then submit a new `update` with the new payload and a
+   new operation ID. Never change a retained request or payload binding.
+3. Let the incoming manager prepare and attempt activation. An old installed Core
+   can enter this path because it hands off to the verified incoming bootstrap
+   before preparation and activation. Read the original operation again; retain
+   its boot evidence if activation is deferred for missing cleanup identity.
+4. Separately authorize and arrange a full machine reboot when required. After
+   reboot, read status and the same operation, then explicitly `continue` it.
+   Recheck any intervening configuration or policy change instead of rebasing
+   the original intent. No automatic reboot or continuation is performed.
+5. Verify selected identity and readiness. Keep the unknown execution and Task
+   evidence for any separate business investigation. Bound observations survive
+   completed, restored and retired maintenance operations and can be reused by
+   later updates without another reboot for the same receipt.
+
+If evidence publication or an activation acknowledgement is lost, read the same
+operation ID first. The original finite phase and recovery rules still decide
+whether continuation is allowed. The existing 128-operation and 64-KiB-per-record
+bounds also apply to boot evidence; no history is pruned to make room.
 
 These CLI/reader tests are separate from native GUI startup permission, signed
 product installation/update and real ChatGPT-route acceptance. Management adds

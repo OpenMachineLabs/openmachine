@@ -1,5 +1,6 @@
 """Tests for service behavior at the component layer."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,10 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-from openmachine import tasks
+from openmachine import execution, tasks
+from openmachine.config import load
+from openmachine.app.task_receipts import observation as task_observation
+from openmachine.execution import api as execution_api
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -17,10 +21,344 @@ from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
+from openmachine.tasks import records as task_records
+from openmachine.workspace import worktrees
+from openmachine.workspace.git import context
 from test.support.service_cases import ServiceCaseFixture
+from test.support.tasks import task_contract, write_legacy_task
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def historical_execution_fixture(self, *, creation=False, boot_id=None):
+        work = self.root / "work"
+        work.mkdir()
+        self.config.write_text(self.config.read_text() +
+            f'\n[workspaces.project]\nmachine="local"\nroot="{work}"\n'
+            f'\n[workspaces.container]\nmachine="local"\nroot="{self.root}"\n')
+        request = {"machine": "local", "cwd": str(work), "argv": ["true"], "timeout_seconds": 10,
+            "expected_head_sha": "", "workspace_access": "exclusive", "resource_keys": ["fixture-resource"],
+            "task_id": "", "termination_grace_seconds": 0.5, "tty": False, "terminal_size": None}
+        observed = {"worktree": str(work), "workspace_lock_root": str(work)}
+        roots = [str(work)]
+        if creation:
+            subprocess.run(["git", "init", "--quiet", str(work)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(work), "-c", "user.name=Fixture", "-c",
+                "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c",
+                "core.hooksPath=/dev/null", "commit", "--allow-empty", "--quiet", "-m", "Initial"], check=True)
+            observed = context(work)
+            intent = {"workspace": "project", "destination": str(self.root / "created"), "base_ref": "HEAD",
+                "new_branch": "fixture/created", "expected_workspace_identity": observed["workspace_identity"], "worktree": ""}
+            plan = worktrees.prepare_creation(load(self.config), "local", **intent)
+            request.update(argv=plan["argv"], resource_keys=plan["resource_keys"], worktree_creation=intent)
+            observed.update(workspace_lock_root=plan["destination"], creation_plan=plan)
+            roots = [plan["destination"], str(self.root)]
+        record = {"format_version": 6 if creation else 5, "version": "historical-fixture", "request": request,
+            "context": observed, "status": "outcome_unknown", "exit_code": 0, "created_at": 1000.0,
+            "finished_at": 1003.0, "log_truncated": False, "output_incomplete": False,
+            "io_mode": "pipe", "terminal_size": None, "control_ready": False,
+            "control": {"protocol": 1, "seq": 0, "last": None},
+            "command": {"spawned": True, "exited": True, "started_at": 1001.0, "exited_at": 1002.0, "exit_signal": None},
+            "stop": {"reason": None, "requested_at": None, "grace_seconds": 0.5, "force_used": False},
+            "cleanup": {"containment": "posix_session", "status": "unverified", "error": "cleanup_unverified"}}
+        if boot_id is not None:
+            record["cleanup"].update(session_id=1234, boot_id=boot_id)
+        directory = private_directory(private_directory(self.state / "executions") / ("e" * 32))
+        save_json(directory / "record.json", record)
+        paths = [self.state / "locks" / (directory.name + ".lock"), directory / "control.lock", directory / "worker.lock"]
+        paths += [self.state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock") for root in roots]
+        paths += [self.state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock") for key in request["resource_keys"]]
+        for path in paths:
+            with lease(path):
+                pass
+        self.assertEqual(execution.read_record(directory), record)
+        return directory, record, paths
+
+    def historical_task_fixture(self, directory, historical):
+        record = task_records.new_record(task_records.normalize_create(task_contract()), 1004000)
+        operations = []
+        for identity in ("1" * 32, "2" * 32):
+            operation = {"id": identity, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
+                "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
+                "locator": {"kind": "execution", "machine": "local", "target_identity": None,
+                            "execution_id": directory.name, "control_seq": None},
+                "admitted_at_ms": 1004000, "state": "unknown", "observed_at_ms": 1004001, "result": None}
+            operation["result"], _ = task_observation(operation, historical | {"execution_id": directory.name})
+            operations.append(operation)
+        record.update(operations=operations, revision=2, control_revision=2, updated_at_ms=1004001, handoff=None)
+        record["control"].update(state="paused", stop_intent="cancel")
+        record["plan"]["stages"][0].update(state="blocked", evidence=[item["id"] for item in operations])
+        write_legacy_task(self.state, record)
+        return operations
+
+    def run_maintenance(self, record):
+        with lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        return maintenance._read(self.state, record["operation_id"])
+
+    def test_historical_creation_waits_for_bound_kernel_boot_without_repairing_history(self):
+        directory, historical, _ = self.historical_execution_fixture(creation=True)
+        original = (directory / "record.json").read_bytes()
+        operations = self.historical_task_fixture(directory, historical)
+        self.assertEqual(operations[0]["result"]["receipt_sha256"],
+                         "a48d410a94c7617d20e7e3191125e0909f75c3fa2bf341691140f646fc715955")
+        task_path = self.state / "tasks/structured-one/task.json"
+        task_bytes = task_path.read_bytes()
+        installed = self.state / "service/versions" / self.b / "installation.json"
+        save_json(installed, service_state._json(installed) | {"state_contract": service_state.STATE_CONTRACT})
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            for _ in range(2):
+                with lease(self.state / "service/operation.lock") as lock:
+                    maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+                deferred = maintenance._read(self.state, record["operation_id"])
+                self.assertEqual((deferred["phase"], deferred["reason"]), ("deferred", "activation_deferred"))
+                self.assertIsInstance(deferred["outcome"], dict)
+                self.assertEqual(deferred["outcome"]["execution_boots"], {directory.name: {
+                    "receipt_sha256": hashlib.sha256(original).hexdigest(), "boot_id": boot.return_value}})
+                stop.assert_not_called()
+                start.assert_not_called()
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            with lease(self.state / "service/operation.lock") as lock:
+                maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        completed = maintenance._read(self.state, record["operation_id"])
+        self.assertEqual(completed["phase"], "completed")
+        self.assertEqual(completed["request"], record["request"])
+        self.assertEqual(completed["prepared"], record["prepared"])
+        self.assertEqual(completed["outcome"]["execution_boots"], deferred["outcome"]["execution_boots"])
+        self.assertEqual((directory / "record.json").read_bytes(), original)
+        self.assertEqual(execution.read_record(directory), historical)
+        self.assertFalse((directory / "reconciliation.json").exists())
+        archived = list(self.state.glob("tasks-legacy-*/structured-one/task.json"))
+        self.assertEqual(len(archived), 1)
+        self.assertEqual(archived[0].read_bytes(), task_bytes)
+        self.assertEqual(tasks.storage_state(self.state)["kind"], "sqlite")
+        self.assertEqual(list(tasks.activation_blockers(self.state)), operations)
+        for operation in operations:
+            self.assertEqual(task_observation(operation, historical | {"execution_id": directory.name})[0], operation["result"])
+
+    def test_native_boot_identity_and_shared_historical_resources_need_no_new_witness(self):
+        directory, historical, paths = self.historical_execution_fixture(
+            creation=True, boot_id="11111111-1111-1111-1111-111111111111")
+        second = private_directory(directory.parent / ("f" * 32))
+        independent = historical | {"format_version": 5,
+            "request": {key: value for key, value in historical["request"].items() if key != "worktree_creation"},
+            "context": {"worktree": str(self.root), "workspace_lock_root": str(self.root)}}
+        independent["request"].update(cwd=str(self.root), argv=["true"])
+        save_json(second / "record.json", independent)
+        for path in (self.state / "locks" / (second.name + ".lock"), second / "worker.lock", second / "control.lock"):
+            with lease(path):
+                pass
+            paths.append(path)
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        def ready(*args):
+            for path in paths:
+                self.assert_fault("resource_busy", lambda: lease(path, shared=True).__enter__())
+            with lease(self.state / "locks/unrelated-resource.lock"):
+                pass
+            return {"status": "ready"}
+        start.side_effect = ready
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            self.assertEqual(self.run_maintenance(record)["phase"], "deferred")
+            stop.assert_not_called()
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            completed = self.run_maintenance(record)
+        self.assertEqual(completed["phase"], "completed")
+        self.assertNotIn("execution_boots", completed["outcome"])
+        for path in paths:
+            with lease(path):
+                pass
+        self.assertEqual(execution.read_record(directory), historical)
+        self.assertEqual(execution.read_record(second), independent)
+
+    def test_historical_activation_rejects_busy_original_owners_and_creation_resources(self):
+        directory, historical, paths = self.historical_execution_fixture(creation=True,
+            boot_id="11111111-1111-1111-1111-111111111111")
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        with patch.object(maintenance, "_bound"), patch.object(execution_api, "boot_identity",
+                return_value="22222222-2222-2222-2222-222222222222"):
+            for path in paths:
+                with self.subTest(path=path.name), lease(path):
+                    result = self.run_maintenance(record)
+                    self.assertEqual((result["phase"], result["reason"]), ("deferred", "activation_deferred"))
+        stop.assert_not_called()
+        start.assert_not_called()
+        self.assertEqual(execution.read_record(directory), historical)
+
+    def test_historical_activation_rejects_unmatched_task_evidence(self):
+        directory, historical, _ = self.historical_execution_fixture(
+            boot_id="11111111-1111-1111-1111-111111111111")
+        operation = self.historical_task_fixture(directory, historical)[0]
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        cases = [operation | {"result": operation["result"] | {"receipt_sha256": value}} for value in (None, "0" * 64)]
+        cases += [operation | {"locator": operation["locator"] | update} for update in (
+            {"machine": "other"}, {"execution_id": "0" * 32}, {"target_identity": "0" * 64}, {"control_seq": 1})]
+        cases += [operation | {"state": "admitted", "result": None}]
+        with patch.object(maintenance, "_bound"), patch.object(execution_api, "boot_identity",
+                return_value="22222222-2222-2222-2222-222222222222"):
+            for operation in cases:
+                with self.subTest(operation=operation), patch.object(tasks, "activation_blockers", return_value=iter([operation])):
+                    self.assertEqual(self.run_maintenance(record)["phase"], "deferred")
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_boot_witness_does_not_admit_changed_corrupt_or_unresolved_receipts(self):
+        directory, historical, _ = self.historical_execution_fixture()
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        with patch.object(maintenance, "_bound"), patch.object(execution_api, "boot_identity",
+                return_value="11111111-1111-1111-1111-111111111111") as boot:
+            witness = self.run_maintenance(record)["outcome"]["execution_boots"]
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            cases = [{"created_at": 999.0}, {"exit_code": None}, {"error": "worker_unverified"}, {"status": "running"},
+                     {"cleanup": historical["cleanup"] | {"boot_id": boot.return_value}},
+                     {"context": {}}, {"request": historical["request"] | {"resource_keys": None}}]
+            for status in ("pending", "partial", "outcome_unknown"):
+                cases.append({"control": {"protocol": 1, "seq": 1, "last": {"seq": 1, "action": "write_stdin",
+                    "request_sha256": "a" * 64, "status": status, "bytes_written": 1 if status == "partial" else None,
+                    "accepted_at": 1002.0, "completed_at": None if status == "pending" else 1003.0, "error": None}}})
+            for update in cases:
+                with self.subTest(update=update):
+                    save_json(directory / "record.json", historical | update)
+                    before = (directory / "record.json").read_bytes()
+                    current = maintenance._read(self.state, record["operation_id"])
+                    maintenance._save(self.state, current, "deferred")
+                    result = self.run_maintenance(record)
+                    self.assertNotEqual(result["phase"], "completed")
+                    self.assertEqual(result["outcome"]["execution_boots"], witness)
+                    self.assertEqual((directory / "record.json").read_bytes(), before)
+            save_json(directory / "record.json", historical)
+            maintenance._save(self.state, maintenance._read(self.state, record["operation_id"]), "deferred")
+            boot.side_effect = Fault("cleanup_identity_unavailable", "Fixture kernel identity query failed.")
+            self.assertEqual(self.run_maintenance(record)["phase"], "deferred")
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_boot_evidence_survives_restore_and_is_reused_by_a_new_update(self):
+        directory, _, paths = self.historical_execution_fixture()
+        original = (directory / "record.json").read_bytes()
+        record = self.operation_fixture()
+        _, _, start = self.activation_mocks()
+        calls = 0
+        def ready(*args):
+            nonlocal calls
+            for path in paths:
+                self.assert_fault("resource_busy", lambda: lease(path).__enter__())
+            calls += 1
+            if calls == 1:
+                raise Fault("service_unready", "Fixture activation failed.")
+            return {"status": "ready"}
+        start.side_effect = ready
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            deferred = self.run_maintenance(record)
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            restored = self.run_maintenance(record)
+            self.assertEqual(restored["phase"], "restored")
+            retained = maintenance._operation_path(self.state, record["operation_id"]).read_bytes()
+            following = record | {"operation_id": "d" * 32,
+                "request": record["request"] | {"selection_sha256": maintenance._selection(self.state)}}
+            maintenance._save(self.state, following, "prepared")
+            completed = self.run_maintenance(following)
+        self.assertEqual(completed["phase"], "completed")
+        self.assertEqual(completed["outcome"]["execution_boots"], deferred["outcome"]["execution_boots"])
+        self.assertEqual(maintenance._operation_path(self.state, record["operation_id"]).read_bytes(), retained)
+        self.assertEqual((directory / "record.json").read_bytes(), original)
+        self.assertEqual(calls, 3)
+
+    def test_lost_boot_evidence_acknowledgement_is_read_and_continued_by_original_id(self):
+        self.historical_execution_fixture()
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        save = maintenance._save
+        def lose_acknowledgement(state, original, phase, **changes):
+            saved = save(state, original, phase, **changes)
+            if phase == "deferred":
+                raise OSError("Fixture lost the publication acknowledgement.")
+            return saved
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            with patch.object(maintenance, "_save", side_effect=lose_acknowledgement), self.assertRaises(OSError):
+                self.run_maintenance(record)
+            retained = maintenance._read(self.state, record["operation_id"])
+            self.assertEqual(retained["phase"], "deferred")
+            self.assertEqual(self.run_maintenance(record)["outcome"], retained["outcome"])
+            stop.assert_not_called()
+            start.assert_not_called()
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            self.assertEqual(self.run_maintenance(record)["phase"], "completed")
+
+    def test_malformed_or_conflicting_maintenance_boot_evidence_is_rejected(self):
+        directory, _, _ = self.historical_execution_fixture()
+        record = self.operation_fixture()
+        path = maintenance._operation_path(self.state, record["operation_id"])
+        witness = {"receipt_sha256": hashlib.sha256((directory / "record.json").read_bytes()).hexdigest(),
+                   "boot_id": "11111111-1111-1111-1111-111111111111"}
+        for changed in (None, [], {directory.name: witness | {"boot_id": "not-a-boot"}},
+                        {directory.name: witness | {"receipt_sha256": ""}}):
+            with self.subTest(changed=changed):
+                save_json(path, record | {"outcome": {"execution_boots": changed}})
+                self.assert_fault("maintenance_state_invalid", lambda: maintenance._read(self.state, record["operation_id"]))
+        save_json(path, record | {"outcome": {"execution_boots": {directory.name: witness}}})
+        other = record | {"operation_id": "d" * 32, "outcome": {"execution_boots": {
+            directory.name: witness | {"boot_id": "22222222-2222-2222-2222-222222222222"}}}}
+        maintenance._save(self.state, other, "restored")
+        self.assert_fault("maintenance_state_invalid", lambda: maintenance._execution_boots(self.state))
+
+    def test_retired_update_keeps_boot_evidence_and_does_not_rebind_its_payload(self):
+        self.historical_execution_fixture()
+        record = self.operation_fixture()
+        self.activation_mocks()
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            deferred = self.run_maintenance(record)
+            with patch.object(maintenance, "observe", return_value={"status": "ready", "current": self.a}):
+                retired = maintenance.retire_operation(self.config, self.state, record["operation_id"])["operation"]
+            self.assertEqual(retired["request"], record["request"])
+            self.assertEqual(retired["prepared"], record["prepared"])
+            retained = maintenance._operation_path(self.state, record["operation_id"]).read_bytes()
+            following = record | {"operation_id": "d" * 32,
+                "request": record["request"] | {"payload_sha256": "f" * 64, "source": str(self.root / "new-payload")},
+                "prepared": record["prepared"] | {"payload_sha256": "f" * 64}}
+            maintenance._save(self.state, following, "prepared")
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            completed = self.run_maintenance(following)
+        self.assertEqual(completed["phase"], "completed")
+        self.assertEqual(completed["request"], following["request"])
+        self.assertEqual(completed["outcome"]["execution_boots"], deferred["outcome"]["execution_boots"])
+        self.assertEqual(maintenance._operation_path(self.state, record["operation_id"]).read_bytes(), retained)
+
+    def test_boot_evidence_continues_original_activation_after_task_cutover_failure(self):
+        directory, historical, _ = self.historical_execution_fixture()
+        operations = self.historical_task_fixture(directory, historical)
+        record = self.operation_fixture()
+        installed = self.state / "service/versions" / self.b / "installation.json"
+        save_json(installed, service_state._json(installed) | {"state_contract": service_state.STATE_CONTRACT,
+                  "management_contract": 1, "payload_sha256": record["request"]["payload_sha256"]})
+        _, _, start = self.activation_mocks()
+        start.side_effect = [Fault("service_unready", "Fixture lost readiness after cutover."), {"status": "ready"}]
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(service_state, "_bind_management", side_effect=lambda state, selected, identity: selected), \
+                patch.object(execution_api, "boot_identity", return_value="11111111-1111-1111-1111-111111111111") as boot:
+            deferred = self.run_maintenance(record)
+            boot.return_value = "22222222-2222-2222-2222-222222222222"
+            pending = self.run_maintenance(record)
+            self.assertEqual(pending["phase"], "recovery_required")
+            self.assertEqual(pending["outcome"]["execution_boots"], deferred["outcome"]["execution_boots"])
+            self.assertEqual(maintenance.read_operation(self.config, self.state, record["operation_id"])["status"], "continuation_required")
+            completed = self.run_maintenance(record)
+        self.assertEqual(completed["phase"], "completed")
+        self.assertEqual(completed["request"], record["request"])
+        self.assertEqual(completed["prepared"], record["prepared"])
+        self.assertEqual(completed["outcome"]["execution_boots"], deferred["outcome"]["execution_boots"])
+        self.assertEqual(list(tasks.activation_blockers(self.state)), operations)
+        self.assertEqual(execution.read_record(directory), historical)
+
     def ledger_operation_fixture(self):
         record = self.operation_fixture()
         path = self.state / "service/versions" / self.b / "installation.json"
@@ -376,7 +714,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             deferred = maintenance._read(self.state, record["operation_id"])
             self.assertEqual(deferred["phase"], "deferred")
             prepare.assert_not_called()
-            def effect(state, selected, identity, snapshot, *, before_change, require_safe):
+            def effect(state, selected, identity, snapshot, *, before_change, require_safe, execution_boots):
                 before_change()
                 self.assertEqual(maintenance._read(state, record["operation_id"])["phase"], "activating")
                 self.assertTrue(require_safe)

@@ -1,7 +1,7 @@
 """Execution admission and mutations under original identity, rights and leases."""
 
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import hashlib
 import os
 from pathlib import Path
@@ -21,7 +21,8 @@ from openmachine.workspace import worktrees
 from . import control as controls, observation
 from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
-                      effective_request, is_remote, read_record, reconciled_record, record_directory, require_reconcilable,
+                      effective_request, is_remote, read_record, reconciled_record, record_directory,
+                      require_cleanup_only_unknown, require_reconcilable,
                       resolve_terminal_size, termination_grace)
 
 if TYPE_CHECKING:
@@ -326,6 +327,62 @@ def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = Fals
             raise Fault("legacy_workspace_busy", "An original non-Git cwd lease is busy or unavailable; let its owner finish before changing the lock domain.") from error
 
 
+def _cleanup_resources(config: "Settings", state: Path, record: dict) -> dict[Path, bool]:
+    machine = record["request"]["machine"]
+    if config.machine(machine).transport != "local":
+        raise Fault("unsupported_operation", "Native cleanup evidence requires the original local machine.")
+    request = effective_request(record)
+    if not isinstance(request["resource_keys"], list) or any(not isinstance(key, str) for key in request["resource_keys"]):
+        raise Fault("corrupt_state", "The original execution resource identities are invalid; preserve its receipt.")
+    validate_start(request["cwd"], request["argv"], request["timeout_seconds"], request["expected_head_sha"],
+                   request["workspace_access"], request["resource_keys"], request["task_id"],
+                   request["termination_grace_seconds"], request["tty"], request["terminal_size"])
+    root = record["context"].get("workspace_lock_root", record["context"].get("worktree"))
+    if not isinstance(root, str) or not Path(root).is_absolute() or ".." in Path(root).parts:
+        raise Fault("corrupt_state", "The original execution workspace identity is invalid; preserve its receipt.")
+    targets = [Path(root)]
+    if record["format_version"] == CREATION_FORMAT:
+        targets.append(Path(record["context"]["creation_plan"]["source_root"]))
+    if any(not any(target.is_absolute() and target.is_relative_to(Path(item.root).resolve())
+                   for item in config.workspaces.values() if item.machine == machine) for target in targets):
+        raise Fault("invalid_cwd", "The original cleanup target is no longer in a configured workspace.")
+    path = state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")
+    resources = {path: False}
+    if record["format_version"] == CREATION_FORMAT:
+        for parent in _creation_parent_roots(config, machine, Path(root)):
+            if parent == root:
+                continue
+            path = state / "locks" / ("workspace-" + hashlib.sha256(parent.encode()).hexdigest() + ".lock")
+            resources[path] = True
+    for key in record["request"].get("resource_keys", []):
+        path = state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock")
+        resources[path] = False
+    return resources
+
+
+@contextmanager
+def cleanup_guard(config: "Settings", state: Path, execution_ids: list[str]):
+    """Hold original owners and combined resources of cleanup-only unknown receipts."""
+    with ExitStack() as locks:
+        records, resources = {}, {}
+        for execution_id in execution_ids:
+            directory = record_directory(state, execution_id)
+            locks.enter_context(lease(state / "locks" / f"{execution_id}.lock", create=False))
+            locks.enter_context(lease(directory / "control.lock", create=False))
+            locks.enter_context(lease(directory / "worker.lock", create=False))
+            record = read_record(directory)
+            require_cleanup_only_unknown(record)
+            for path, shared in _cleanup_resources(config, state, record).items():
+                # Histories can share roots/resources. Acquire once, using the
+                # strongest mode when a creation's parent is another root.
+                resources[path] = resources.get(path, True) and shared
+            raw = (directory / "record.json").read_bytes()
+            records[execution_id] = record, hashlib.sha256(raw).hexdigest()
+        for path, shared in sorted(resources.items()):
+            locks.enter_context(lease(path, shared=shared, create=False))
+        yield records, boot_identity()
+
+
 def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
     """Append original-ID cleanup evidence; never launch, signal or rewrite history."""
     if config.machine(machine).transport != "local":
@@ -348,24 +405,8 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
             require_reconcilable(record)
             if boot_identity() != record["cleanup"]["boot_id"]:
                 raise Fault("cleanup_identity_unavailable", "The original native boot identity is no longer available.")
-            root = record["context"].get("workspace_lock_root", record["context"]["worktree"])
-            targets = [Path(root)]
-            if record["format_version"] == CREATION_FORMAT:
-                targets.append(Path(record["context"]["creation_plan"]["source_root"]))
-            if any(not any(target.is_relative_to(Path(item.root).resolve())
-                           for item in config.workspaces.values() if item.machine == machine) for target in targets):
-                raise Fault("invalid_cwd", "The original cleanup target is no longer in a configured workspace.")
-            path = state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")
-            locks.enter_context(lease(path, create=False))
-            if record["format_version"] == CREATION_FORMAT:
-                for parent in _creation_parent_roots(config, machine, Path(root)):
-                    if parent == root:
-                        continue
-                    path = state / "locks" / ("workspace-" + hashlib.sha256(parent.encode()).hexdigest() + ".lock")
-                    locks.enter_context(lease(path, shared=True, create=False))
-            for key in record["request"].get("resource_keys", []):
-                path = state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock")
-                locks.enter_context(lease(path, create=False))
+            for path, shared in _cleanup_resources(config, state, record).items():
+                locks.enter_context(lease(path, shared=shared, create=False))
             try:
                 deadline = time.monotonic() + 1
                 while True:

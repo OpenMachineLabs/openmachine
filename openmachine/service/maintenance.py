@@ -123,6 +123,17 @@ def _read(state: Path, identity: str) -> dict:
             raise ValueError("inconsistent prepared phase")
         if record["outcome"] is not None and not isinstance(record["outcome"], dict):
             raise ValueError("invalid outcome")
+        boots = (record["outcome"] or {}).get("execution_boots", {})
+        if not isinstance(boots, dict) or boots and (request["action"] != "update" or prepared is None):
+            raise ValueError("invalid execution boot evidence")
+        for execution_id, evidence in boots.items():
+            if (not re.fullmatch(r"[0-9a-f]{32}", execution_id) or not isinstance(evidence, dict)
+                    or set(evidence) != {"receipt_sha256", "boot_id"}
+                    or not isinstance(evidence["receipt_sha256"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", evidence["receipt_sha256"])
+                    or not isinstance(evidence["boot_id"], str)
+                    or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", evidence["boot_id"])):
+                raise ValueError("invalid execution boot evidence")
         if record["phase"] == "completed" and record["outcome"] is None:
             raise ValueError("missing completed outcome")
     except (KeyError, ValueError, TypeError) as error:
@@ -155,6 +166,19 @@ def _available(state: Path) -> None:
             raise Fault("maintenance_busy", "Read or explicitly continue the original maintenance operation; do not allocate a replacement ID.")
     if count == MAX_OPERATIONS:
         raise Fault("maintenance_store_full", "The bounded maintenance store has reached 128 retained operations.")
+
+
+def _execution_boots(state: Path) -> dict:
+    """Reuse bound observations from retained operations, including retired updates."""
+    boots = {}
+    for count, path in enumerate((state / "service/operations").iterdir(), 1):
+        if count > MAX_OPERATIONS or not re.fullmatch(r"[0-9a-f]{32}\.json", path.name):
+            raise Fault("maintenance_state_invalid", "Preserve the bounded original maintenance history.")
+        for identity, evidence in (_read(state, path.stem)["outcome"] or {}).get("execution_boots", {}).items():
+            if identity in boots and boots[identity] != evidence:
+                raise Fault("maintenance_state_invalid", "Retained execution boot observations disagree; no activation was admitted.")
+            boots[identity] = evidence
+    return boots
 
 
 def read_operation(config_path: Path, state: Path, identity: str) -> dict:
@@ -361,14 +385,18 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
     record = _read(state, identity)
     if record["phase"] not in CONTINUABLE | {"activating", "recovery_required"}:
         return
+    execution_boots = {}
+    def outcome(value):
+        return (value or {}) | {"execution_boots": execution_boots} if execution_boots else value
     try:
         request = record["request"]
         if record["phase"] not in CONTINUABLE:
             selected = _cutover_selection(state, record)
             if selected is not None:
                 _bound(Path(request["config"]), state, selected)
-                result = transition._resume_activation(state, selected)
-                _save(state, record, "completed", outcome=result)
+                execution_boots = _execution_boots(state)
+                result = transition._resume_activation(state, selected, execution_boots=execution_boots)
+                _save(state, record, "completed", outcome=outcome(result))
             return
         snapshot = _inputs_unchanged(state, record)
         if record["phase"] == "accepted":
@@ -401,6 +429,8 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         if record["phase"] not in {"prepared", "deferred"}:
             return
         prepared = record["prepared"]
+        if request["action"] == "update":
+            execution_boots = _execution_boots(state)
         config = Path(request["config"])
         def before_change():
             nonlocal record
@@ -410,7 +440,7 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
                 selected = service_state._record(state)
                 checkpoint = {"activation": {"from": selected["current"], "previous": selected["previous"],
                                                "basis_sha256": _activation_basis(selected)}}
-            record = _save(state, record, "activating", outcome=checkpoint)
+            record = _save(state, record, "activating", outcome=outcome(checkpoint))
         if request["action"] == "install":
             _uninstalled(state)
             result = transition._register(config, state, prepared["identity"], request["workspace"], request["path"],
@@ -431,18 +461,18 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
                         save_json(state / "service/service.json", selected)
             else:
                 result = transition._activate(state, selected, prepared["identity"], snapshot,
-                                              before_change=before_change, require_safe=True)
-        _save(state, record, "completed", outcome=result)
+                                              before_change=before_change, require_safe=True, execution_boots=execution_boots)
+        _save(state, record, "completed", outcome=outcome(result))
     except Fault as error:
         phase = "restored" if error.code == "activation_failed_restored" else (
             "recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
             or error.code == "service_output_limit" else
             "deferred" if record["phase"] in {"prepared", "deferred"} and error.code in {
                 "resource_busy", "activation_deferred", "legacy_workspace_busy", "incompatible_remote_state"} else "rejected")
-        _save(state, record, phase, reason=error.code)
+        _save(state, record, phase, reason=error.code, outcome=outcome(record["outcome"]))
     except OSError:
         # Filesystem acknowledgement loss can follow a completed atomic effect.
-        _save(state, record, "recovery_required", reason="maintenance_effect_unverified")
+        _save(state, record, "recovery_required", reason="maintenance_effect_unverified", outcome=outcome(record["outcome"]))
 
 
 def control(config_path: Path, state: Path, action: Literal["start", "stop", "startup", "bind"], *,

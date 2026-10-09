@@ -149,7 +149,7 @@ _HISTORICAL_CHANGE_NO_EFFECT = frozenset(
     f"Domain failure: {code}." for code in PRE_EFFECT_REQUEST_FAILURES)
 
 
-def _task_operation_blocks_activation(operation: dict) -> bool:
+def _task_operation_blocks_activation(operation: dict, historical: dict | None = None) -> bool:
     result = operation.get("result")
     pending = (operation.get("state") != "observed" or result is None
                or result.get("status") in {"running", "unknown"})
@@ -158,6 +158,13 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
     if operation.get("state") != "unknown":
         return True
     locator = operation.get("locator") or {}
+    if (locator.get("kind") == "execution" and locator.get("target_identity") is None
+            and locator.get("control_seq") is None and result.get("receipt_sha256") is not None
+            and (historical or {}).get(locator.get("execution_id")) ==
+                (locator.get("machine"), result["receipt_sha256"])):
+        # The same original facts remain unknown to Task observation. This
+        # exception proves only that switching the local runtime is now safe.
+        return False
     if locator.get("kind") == "github":
         # Provider uncertainty remains retained; switching a compatible local
         # runtime neither replays nor cancels that external operation.
@@ -166,8 +173,10 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
                 and result.get("summary") in _HISTORICAL_CHANGE_NO_EFFECT)
 
 
-def activation_safe(state: Path) -> None:
-    """Conservative product admission under lifecycle.lock; no receipt repair."""
+def activation_safe(state: Path, *, config=None, locks=None, execution_boots: dict | None = None) -> None:
+    """Product admission under lifecycle.lock; retain guards until transition ends."""
+    historical, snapshots, needs_boot = {}, {}, False
+    unresolved = []
     root = state / "executions"
     if root.exists():
         for directory in root.iterdir():
@@ -175,9 +184,31 @@ def activation_safe(state: Path) -> None:
             if (record["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
-                raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+                if config is None or locks is None or execution_boots is None:
+                    raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+                unresolved.append(directory.name)
+    if unresolved:
+        try:
+            records, current_boot = locks.enter_context(execution.cleanup_guard(config, state, unresolved))
+        except Fault as error:
+            raise Fault("activation_deferred", "The original execution's command, control or resource ownership is unresolved; no service was stopped.") from error
+        for identity, (record, digest) in records.items():
+            witness = execution_boots.get(identity)
+            if witness is not None and witness["receipt_sha256"] != digest:
+                raise Fault("activation_deferred", "Historical boot evidence no longer matches the original execution receipt; preserve both records.")
+            original_boot = record["cleanup"].get("boot_id")
+            if original_boot is None:
+                witness = witness or {"receipt_sha256": digest, "boot_id": current_boot}
+                snapshots[identity] = witness
+                original_boot = witness["boot_id"]
+            needs_boot |= original_boot == current_boot
+            historical[identity] = (record["request"]["machine"],
+                                    tasks.execution_receipt_digest(record | {"execution_id": identity}))
     try:
-        blocked = any(_task_operation_blocks_activation(operation) for operation in tasks.activation_blockers(state))
+        # Exhaust the owning iterator so both SQLite and legacy read leases close.
+        blocked = False
+        for operation in tasks.activation_blockers(state):
+            blocked |= _task_operation_blocks_activation(operation, historical)
     except Fault as error:
         raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.") from error
     if blocked:
@@ -187,6 +218,10 @@ def activation_safe(state: Path) -> None:
     from integrations.connections import check_state as connections_state
     workspace.check_change_state(state, require_idle=True)
     connections_state(state, require_idle=True)
+    if execution_boots is not None:
+        execution_boots.update(snapshots)
+    if needs_boot:
+        raise Fault("activation_deferred", "Historical cleanup needs a different kernel boot from its retained evidence. A service restart is insufficient; preserve unknown outcomes and explicitly continue this update after a separately authorized reboot.")
 
 
 def _change_support(value: dict) -> set[int]:

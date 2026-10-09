@@ -224,8 +224,8 @@ def _validate_creation(record: dict) -> None:
         raise ValueError("unverified worktree creation")
 
 
-def require_reconcilable(record: dict) -> None:
-    """Recovery can prove only missing cleanup, never a missing command result."""
+def require_cleanup_only_unknown(record: dict) -> None:
+    """A lifecycle boundary cannot resolve missing command or control results."""
     cleanup = record.get("cleanup", {})
     command = record.get("command", {})
     last = (record.get("control") or {}).get("last")
@@ -233,7 +233,12 @@ def require_reconcilable(record: dict) -> None:
             or not command.get("spawned") or not command.get("exited") or type(record["exit_code"]) is not int
             or record.get("error") or last and last["status"] in {"pending", "partial", "outcome_unknown"}):
         raise Fault("cleanup_recovery_unavailable", "Recovery requires an original terminal result with only cleanup unresolved.")
-    if "session_id" not in cleanup or "boot_id" not in cleanup:
+
+
+def require_reconcilable(record: dict) -> None:
+    """Recovery can prove only missing cleanup, never a missing command result."""
+    require_cleanup_only_unknown(record)
+    if "session_id" not in record["cleanup"] or "boot_id" not in record["cleanup"]:
         raise Fault("cleanup_identity_unavailable", "This historical receipt has no native session identity; preserve its unknown outcome.")
 
 

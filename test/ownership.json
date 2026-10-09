@@ -744,6 +744,7 @@
       "test/component/codex/test_discovery.py",
       "test/component/connections/test_connections.py",
       "test/component/service/test_checks.py",
+      "test/component/service/test_maintenance.py",
       "test/component/service/test_transition.py",
       "test/component/skills/test_resources.py",
       "test/component/tasks/test_legacy.py",
