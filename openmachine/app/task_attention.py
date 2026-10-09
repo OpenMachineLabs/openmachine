@@ -90,7 +90,16 @@ def _foreground(view: dict, timestamp: int) -> dict:
     if handoff is not None and not owner_live and timestamp - handoff["created_at_ms"] >= HANDOFF_GRACE_MS:
         since = handoff["created_at_ms"] + HANDOFF_GRACE_MS
         return {**common, "status": "attention_required", "reason": "handoff_unconsumed",
-                "summary": "A ready task handoff was not claimed within the foreground grace period.",
+                "summary": "A ready task handoff was not claimed within the foreground grace period. "
+                           "End the interrupted Chat turn; a later user-authorized continuation may reclaim it.",
+                "resume_prompt": f"Continue Open Machine task {record['task_id']}. On a subsequent explicit user request "
+                    "after the interrupted turn has ended, read the current task, handoff and original operation results. "
+                    "If handoff_unconsumed is the only remaining blocker, claim the current eligible handoff "
+                    f"(observed handoff_id: {handoff['id']}) through control_task with exact task/plan revisions, "
+                    "continuation epoch and a new update_id. The historical timeout alone does not require ending "
+                    "that recovery turn before claiming. Do not claim automatically in the interrupted turn. "
+                    "Keep all ownership, scope and authority guards; read back the claim before new effects. "
+                    "If another blocker remains, report it. Do not replay completed, failed, partial, or unknown operations.",
                 "since_ms": since, "age_ms": max(0, timestamp - since),
                 "original_work_running": False, "stop_foreground": True}
 
