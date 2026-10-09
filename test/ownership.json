@@ -81,6 +81,7 @@
         "test/component/cli/test_management.py",
         "test/component/cli/test_ssh_doctor.py",
         "test/component/service/test_machines.py",
+        "test/component/service/test_retired_config.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
         "test/contract/mcp/ssh/test_discovery.py"
@@ -297,7 +298,8 @@
     },
     "service_maintenance": {
       "boundary_tests": [
-        "test/component/cli/test_management.py"
+        "test/component/cli/test_management.py",
+        "test/component/service/test_retired_config.py"
       ],
       "sources": [
         "openmachine/service/maintenance.py"
@@ -342,6 +344,7 @@
         "test/component/service/test_checks.py",
         "test/component/service/test_maintenance.py",
         "test/component/service/test_management_cli.py",
+        "test/component/service/test_retired_config.py",
         "test/component/service/test_transition.py"
       ],
       "sources": [
@@ -362,6 +365,7 @@
         "openmachine/service/transition.py"
       ],
       "tests": [
+        "test/component/service/test_retired_config.py",
         "test/component/service/test_transition.py"
       ]
     },
@@ -660,6 +664,7 @@
       "test/component/service/test_machines.py",
       "test/component/service/test_maintenance.py",
       "test/component/service/test_management_cli.py",
+      "test/component/service/test_retired_config.py",
       "test/component/service/test_runtime.py",
       "test/component/service/test_state.py",
       "test/component/service/test_transition.py",
@@ -691,6 +696,7 @@
       "test/component/codex/test_discovery.py",
       "test/component/connections/test_connections.py",
       "test/component/service/test_checks.py",
+      "test/component/service/test_retired_config.py",
       "test/component/service/test_transition.py",
       "test/component/skills/test_resources.py",
       "test/component/tasks/test_legacy.py",
