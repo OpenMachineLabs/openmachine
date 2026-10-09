@@ -19,6 +19,7 @@ from openmachine.config import GitHubConfig
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks
+from openmachine.service import processes
 from openmachine.tasks import records
 from test.support.connections_cases import ConnectionCaseFixture
 from test.support.tasks import replace_task_record
@@ -588,7 +589,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.assertEqual(proof["state_contract"], 21)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
-            with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):
+            with patch.object(processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):
                 self.fault("incompatible_state", checks._candidate_state, Path(sys.executable), config, self.state)
         self.assertEqual((self.state / "connections.json").read_bytes(), before)
 

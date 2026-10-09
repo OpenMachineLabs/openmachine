@@ -25,6 +25,8 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
             ("openmachine.service", "from openmachine.execution.worker import worker", "must not depend"),
             ("openmachine.service.state", "from . import transition", "must not depend"),
             ("openmachine.service.runtime", "from . import install", "must not depend"),
+            ("openmachine.service.processes", "from . import checks", "must not depend"),
+            ("openmachine.service.processes", "import openmachine.service.runtime", "must not depend"),
             ("openmachine.service.transition", "import openmachine.tasks.database", "must not depend"),
             ("openmachine.service.maintenance", "from openmachine.bootstrap import create_application", "must not depend"),
             ("openmachine.tasks.index", "from . import store", "must not depend"),

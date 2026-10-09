@@ -17,6 +17,7 @@ from openmachine.execution import api, process
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from test.support.execution_cases import ExecutionCaseFixture
 
 
@@ -237,7 +238,7 @@ while True: time.sleep(0.05)
         self.assertEqual(service_checks._candidate_state(Path(sys.executable), config_path, self.state), proof)
         for delta in ({"state_contract": 19}, {"execution_reconciliations": 0},
                       {"execution_reconciliation_sha256": "f" * 64}):
-            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+            with self.subTest(delta=delta), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 with self.assertRaises(Fault) as caught:
                     service_checks._candidate_state(Path(sys.executable), config_path, self.state)

@@ -6,10 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
-import selectors
-import signal
 import stat
-import subprocess
 import sys
 import time
 
@@ -18,7 +15,7 @@ from openmachine.config import load
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 
-from . import state as service_state
+from . import processes, state as service_state
 from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
 
 
@@ -123,44 +120,6 @@ def _ssh_recovery_state(state: Path) -> dict:
             "ssh_recovery_targets": 0, "ssh_recovery_sha256": None}
 
 
-def _run(argv: list[str], timeout: float = 30, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    try:
-        with subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              cwd="/", env=env, start_new_session=True) as process:
-            completed = False
-            try:
-                buffers = {process.stdout: bytearray(), process.stderr: bytearray()}
-                deadline = time.monotonic() + timeout
-                with selectors.DefaultSelector() as selector:
-                    for stream in buffers:
-                        selector.register(stream, selectors.EVENT_READ)
-                    while selector.get_map():
-                        remaining = deadline - time.monotonic()
-                        if remaining <= 0:
-                            raise subprocess.TimeoutExpired(argv, timeout)
-                        for key, _ in selector.select(min(remaining, 0.1)):
-                            data = os.read(key.fd, 8192)
-                            if not data:
-                                selector.unregister(key.fileobj)
-                            else:
-                                buffers[key.fileobj].extend(data)
-                                if len(buffers[key.fileobj]) > 65536:
-                                    raise Fault("service_output_limit", "The service subprocess exceeded its bounded reply; inspect original state.")
-                    code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
-                completed = True
-                return subprocess.CompletedProcess(argv, code, *(bytes(buffers[stream]).decode("utf-8", errors="replace")
-                                                               for stream in (process.stdout, process.stderr)))
-            finally:
-                if not completed:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait(timeout=5)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise Fault("service_command_unverified", "The bounded service command failed or timed out; inspect status before retrying.") from error
-
-
 def machine_unused(config, state: Path, name: str, *, check_remote: bool = True) -> None:
     """Never strand a configured workspace, task reference or remote receipt."""
     from integrations.ssh import client, recovery
@@ -261,7 +220,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
 
 def _candidate_state_once(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
                           *, env: dict[str, str] | None = None) -> dict:
-    result = _run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
+    result = processes.run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
                   **({"env": env} if env is not None else {}))
     try:
         value = json.loads(result.stdout)
@@ -435,7 +394,7 @@ def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None 
         raise Fault("service_unready", "The MCP readiness attempt exceeded its deadline.")
     if type(ready["pid"]) is not int or ready["pid"] <= 0:
         raise Fault("service_identity_mismatch", "The MCP process identity is invalid.")
-    relationship = _run(["/bin/ps", "-o", "ppid=", "-p", str(ready["pid"])], timeout=min(1, remaining))
+    relationship = processes.run(["/bin/ps", "-o", "ppid=", "-p", str(ready["pid"])], timeout=min(1, remaining))
     if relationship.returncode or relationship.stdout.strip() != str(parent):
         raise Fault("service_identity_mismatch", "The MCP process is not a child of the selected managed service.")
     return {**ready, "supervisor_pid": parent}
@@ -444,7 +403,7 @@ def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None 
 def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
     """Ask that exact installed controller and pinned endpoint to validate target history."""
     target = load(config_path).machines[name]
-    result = _run([str(python), "-I", "-m", "openmachine.cli", "--config", str(config_path),
+    result = processes.run([str(python), "-I", "-m", "openmachine.cli", "--config", str(config_path),
                    "doctor", "--machine", name], timeout=35)
     try:
         value = json.loads(result.stdout)

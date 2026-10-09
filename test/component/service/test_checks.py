@@ -11,6 +11,7 @@ from openmachine import service, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
@@ -27,7 +28,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(proof["execution_reconciliations"], 0)
         previous = {key: value for key, value in proof.items() if not key.startswith("execution_reconcil")}
         previous["state_contract"] = 19
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(previous), "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(previous), "")):
             self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), previous)
 
     def legacy_task_fixture(self, request=None):
@@ -47,11 +48,11 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                       {"task_storage": storage | {"fenced": False}},
                       {"task_storage": storage | {"active": False}},
                       {"sqlite_runtime": proof["sqlite_runtime"] | {"supported": False}}):
-            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+            with self.subTest(delta=delta), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")):
             self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), proof)
         self.assertEqual(tasks.storage_state(self.state), storage)
 
@@ -68,7 +69,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         legacy = {key: item for key, item in proof.items() if key != "events_retired"}
         for candidate in (legacy, proof | {"events_retired": False}, proof | {"events_retired": 1},
                           proof | {"events_sha256": "0" * 64}, proof | {"events_present": False}):
-            with self.subTest(candidate=candidate), patch.object(service_checks, "_run",
+            with self.subTest(candidate=candidate), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, json.dumps(candidate), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
@@ -111,7 +112,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_managed_probe_binds_child_parent_and_overall_deadline(self):
         with patch.object(service_checks, "probe_service", return_value={"status": "ready", "pid": 123}) as probe, \
-                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "456\n", "")):
+                patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "456\n", "")):
             self.assertEqual(service_checks._managed_probe(self.state, self.record, 456)["supervisor_pid"], 456)
             self.assertEqual(probe.call_args.kwargs["timeout_seconds"], 5)
             self.assert_fault("service_identity_mismatch", lambda: service_checks._managed_probe(self.state, self.record, 999))
@@ -147,7 +148,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                        {"task_store_present": 1}, {"structured_task_read_formats": [True]},
                        {"structured_task_read_formats": [1, 1]}, {"task_index_coverage": "incomplete"},
                        {"task_index_generation": proof["task_index_generation"] - 1}):
-            with self.subTest(change=change), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
+            with self.subTest(change=change), patch.object(service_processes, "run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | change), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
         self.assertEqual(path.read_bytes(), raw)
@@ -169,7 +170,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             return subprocess.CompletedProcess([], 0, json.dumps(value), "")
 
         selection = service_state._record(self.state)
-        with patch.object(service_checks, "_run", side_effect=candidate) as run, \
+        with patch.object(service_processes, "run", side_effect=candidate) as run, \
                 patch.object(service_checks.time, "sleep") as sleep:
             observed = service_checks._candidate_state(Path(sys.executable), self.config, self.state)
         self.assertEqual(observed, service.check_state(self.config, self.state))
@@ -192,7 +193,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             return subprocess.CompletedProcess([], 0, json.dumps(old), "")
 
         selection = service_state._record(self.state)
-        with patch.object(service_checks, "_run", side_effect=moving_candidate) as run, \
+        with patch.object(service_processes, "run", side_effect=moving_candidate) as run, \
                 patch.object(service_checks.time, "sleep") as sleep:
             self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                 Path(sys.executable), self.config, self.state))
@@ -237,7 +238,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
                       {"structured_task_formats_present": []}, {"structured_task_formats_present": [3]},
                       {"structured_task_formats_present": [4.0]}, {"structured_task_formats_present": [4, 4]}):
-            with self.subTest(delta=delta), patch.object(service_checks, "_run",
+            with self.subTest(delta=delta), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
@@ -258,7 +259,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         proof = service.check_state(self.config, self.state)
         older = proof | {"state_contract": 15, "structured_task_read_formats": [1, 2, 3]}
         self.assertEqual(proof["structured_task_formats_present"], [3])
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(older), "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(older), "")):
             self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, 15), older)
         self.assertEqual(path.read_bytes(), before)
 
@@ -270,7 +271,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         save_json(path, service_state._json(path) | {"state_contract": 6})
         ignored = subprocess.CompletedProcess([], 0, json.dumps({"protocol": 1, "state_contract": 6}), "")
         original = (self.state / "tasks/structured-one/task.json").read_bytes()
-        with patch.object(service_install, "_verify_candidate"), patch.object(service_checks, "_run", return_value=ignored), \
+        with patch.object(service_install, "_verify_candidate"), patch.object(service_processes, "run", return_value=ignored), \
                 patch.object(service_runtime, "_stop") as stop, patch.object(service_runtime, "_start") as start:
             self.assert_fault("incompatible_state", lambda: service_transition._activate(self.state, self.record, self.b))
             stop.assert_not_called()
@@ -290,7 +291,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
                       {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
                       {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
-            with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(service_checks, "_run",
+            with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")), \
                     patch.object(service_runtime, "_stop") as stop:
                 self.assert_fault("incompatible_state", lambda: service_transition._activate(self.state, self.record, self.b))
@@ -306,7 +307,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_candidate_state_rejects_failure_or_protocol_drift(self):
         for value, code in (({"error": "unsupported_task_format"}, 1),
                             ({"protocol": 2, "state_contract": 1}, 0)):
-            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], code, json.dumps(value), "")):
+            with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], code, json.dumps(value), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
 
     def test_directional_metadata_and_candidate_contract_are_explicit(self):
@@ -318,7 +319,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             reply = {"protocol": 1, "state_contract": contract}
             if contract >= 18:
                 reply.update(task_storage=tasks.storage_state(self.state), sqlite_runtime=tasks.sqlite_runtime())
-            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(reply), "")):
+            with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(reply), "")):
                 self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, contract), reply)
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state, 1 if contract != 1 else 3))
@@ -336,17 +337,17 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                  "workspace_change_store_present": True, "legacy_workspace_compatible": True,
                  "unavailable_workspaces": []}
         python = self.root / "candidate/bin/python"
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")) as call:
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")) as call:
             self.assertEqual(service_checks._remote_workspace_state(python, self.config, "remote"), proof)
             self.assertEqual(call.call_args.args[0], [str(python), "-I", "-m", "openmachine.cli", "--config", str(self.config),
                                                        "doctor", "--machine", "remote"])
         for delta in ({"workspace_change_format": True}, {"workspace_change_store_present": False},
                       {"target_identity": "f" * 64}, {"legacy_workspace_compatible": None}):
-            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+            with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_remote_state", lambda: service_checks._remote_workspace_state(python, self.config, "remote"))
         # Missing unrelated source is not unreadable target history or a reason to disrupt a healthy service.
         missing = proof | {"unavailable_workspaces": ["unrelated"]}
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 1, json.dumps(missing), "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 1, json.dumps(missing), "")):
             self.assertEqual(service_checks._remote_workspace_state(python, self.config, "remote"), missing)
 
     def test_actual_local_change_reader_blocks_old_candidate_that_ignores_store(self):
@@ -363,7 +364,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         record = self.state / "workspace-changes" / ("d" * 32) / "record.json"
         retained = record.read_bytes()
         ignored = subprocess.CompletedProcess([], 0, json.dumps({"protocol": 1, "state_contract": 1}), "")
-        with patch.object(service_install, "_verify_candidate"), patch.object(service_checks, "_run", return_value=ignored), \
+        with patch.object(service_install, "_verify_candidate"), patch.object(service_processes, "run", return_value=ignored), \
              patch.object(service_runtime, "_stop") as stop, patch.object(service_runtime, "_start") as start:
             self.assert_fault("incompatible_state", lambda: service_transition._activate(self.state, self.record, self.b))
             stop.assert_not_called()
@@ -384,20 +385,20 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(first["format"],1)
         legacy = {"protocol":1,"state_contract":4,"workspace_change_format":1,
                   "workspace_change_store_present":True,"workspace_change_records":1}
-        with patch.object(service_checks,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
+        with patch.object(service_processes,"run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
             self.assertEqual(service_checks._candidate_state(Path(sys.executable),self.config,self.state),legacy)
         second = workspace.apply_patch(config,self.state,"local","project",
             "*** Begin Patch\n*** Add File: new\n+x\n*** End Patch\n",read["context"]["workspace_identity"],"",
             [{"path":"new","expected_sha256":""}],change_id="2"*32)
         self.assertEqual(second["format"],2)
         legacy["workspace_change_records"] = 2
-        with patch.object(service_checks,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
+        with patch.object(service_processes,"run",return_value=subprocess.CompletedProcess([],0,json.dumps(legacy),"")):
             self.assert_fault("incompatible_state",lambda:service_checks._candidate_state(Path(sys.executable),self.config,self.state))
         current = service.check_state(self.config,self.state)
         self.assertEqual(current["workspace_change_formats_present"],[1,2])
         records = list((self.state / "workspace-changes").glob("*/record.json"))
         before = [path.read_bytes() for path in records]
-        with patch.object(service_checks,"_run",return_value=subprocess.CompletedProcess([],0,json.dumps(current),"")):
+        with patch.object(service_processes,"run",return_value=subprocess.CompletedProcess([],0,json.dumps(current),"")):
             service_checks._candidate_state(Path(sys.executable),self.config,self.state)
         self.assertEqual([path.read_bytes() for path in records],before)
 

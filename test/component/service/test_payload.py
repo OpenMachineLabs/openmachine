@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 from openmachine.foundation.state import private_directory
-from openmachine.service import checks, install, payload
+from openmachine.service import checks, install, payload, processes
 from test.support.payload_cases import PayloadCaseFixture
 
 
@@ -50,7 +50,7 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
         with patch.object(payload.platform, "mac_ver", return_value=("12.7", (), "")):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
-        with patch.object(checks, "_run") as run:
+        with patch.object(processes, "run") as run:
             self.fault("invalid_runtime_payload", lambda: install.prepare_payload(self.config, self.state, self.source, "0" * 64))
             run.assert_not_called()
         self.assertFalse((self.state / "service").exists())

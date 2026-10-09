@@ -23,7 +23,7 @@ from openmachine.config import Settings, initialize, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-from . import checks, install, payload, runtime, state as service_state, transition
+from . import checks, install, payload, processes, runtime, state as service_state, transition
 from .state import _configuration_digest as _digest
 
 MAX_OPERATIONS = 128
@@ -374,7 +374,7 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         if record["phase"] == "accepted":
             record = _save(state, record, "retaining")
             retained, manifest = payload.retain(state, Path(request["source"]), request["payload_sha256"])
-            incoming = checks._run([str(retained / "python/bin/python3"), "-I", "-B", "-m", "openmachine.service",
+            incoming = processes.run([str(retained / "python/bin/python3"), "-I", "-B", "-m", "openmachine.service",
                                    "check-state", str(snapshot), str(state)], env=payload.environment(retained))
             try:
                 proof = json.loads(incoming.stdout)
