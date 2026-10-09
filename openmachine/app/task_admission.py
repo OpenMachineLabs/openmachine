@@ -127,9 +127,10 @@ class TaskAdmission:
 
     def _check_abandon(self, record: dict) -> None:
         """Only terminal uncertainty may be abandoned; original effect scopes survive."""
-        for operation in record["operations"]:
-            if not effects.unresolved(operation):
-                continue
+        unresolved = [item for item in record["operations"] if effects.unresolved(item)]
+        if not unresolved:
+            raise Fault("task_abandon_not_needed", "Use cancel when no original effect is unresolved.")
+        for operation in unresolved:
             if (operation["result"] or {}).get("status") not in {"unknown", "partial"}:
                 raise Fault("task_effect_active", "Observe or cancel active original effects before abandonment.")
             locator = operation["locator"]

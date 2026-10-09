@@ -138,6 +138,8 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             finish_record(record, "cancelled", [], "Explicit cancellation does not undo prior effects.", now_ms)
         return
     if action == "abandon":
+        if not any(effects.unresolved(item) for item in record["operations"]):
+            raise Fault("task_abandon_not_needed", "Use cancel when no original effect is unresolved.")
         if any(effects.unresolved(item) and (item["result"] is None
                 or item["result"]["status"] == "running") for item in record["operations"]):
             raise Fault("task_effect_active", "Stop and observe active original effects before abandonment.")

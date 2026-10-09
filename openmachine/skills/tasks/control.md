@@ -41,6 +41,8 @@ effects. It requires observed uncertainty, never a known-running command; local
 executions require an observed original leader exit and changes require terminal
 publication evidence. Original receipts, unresolved rows and cross-Task GitHub
 resource exclusions survive. The terminal `abandoned` state records the reason.
+Use normal `cancel` for planned Tasks or Tasks with no unresolved original effects;
+abandonment is reserved for retained `unknown` or `partial` outcomes.
 Restart separately in an isolated worktree with independent effect scope; do not
 replay unknown operations, override active leases or delete historical records.
 Late results do not clear pause or reopen terminal history. Resume does not claim

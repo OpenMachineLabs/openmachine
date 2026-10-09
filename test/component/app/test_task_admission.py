@@ -151,6 +151,20 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(current["record"]["operations"], original)
         self.assertEqual(self.app.read_task("structured-one")["counts"]["unknown_count"], 2)
 
+    def test_abandon_requires_uncertain_effect_and_keeps_normal_cancellation(self):
+        self.accept_plan()
+        original = self.task_bytes()
+        self.fault("task_abandon_not_needed", self.control, "abandon",
+                   reason="A newly planned Task should use normal cancellation.")
+        self.assertEqual(self.task_bytes(), original)
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+        completed = self.task_bytes()
+        self.fault("task_abandon_not_needed", self.control, "abandon",
+                   reason="A Task with all verified effects should use cancel.")
+        self.assertEqual(self.task_bytes(), completed)
+        cancelled = self.control("cancel", reason="Stop verified work normally.")
+        self.assertEqual(cancelled["record"]["terminal"]["outcome"], "cancelled")
+
     def test_unverified_live_execution_cannot_be_force_abandoned(self):
         self.accept_plan()
         self.retained_local_operation(status="unknown")
