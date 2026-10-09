@@ -3,8 +3,10 @@
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
+import stat
 
 from openmachine.foundation.sanitize import Fault
 from openmachine.workspace import worktrees
@@ -120,6 +122,11 @@ def _validate_facts(record: dict) -> None:
         raise ValueError("invalid cleanup")
     if cleanup["error"] is not None and (not isinstance(cleanup["error"], str) or len(cleanup["error"]) > 128):
         raise ValueError("invalid cleanup error")
+    if "session_id" in cleanup or "boot_id" in cleanup:
+        if (is_remote(record) or type(cleanup.get("session_id")) is not int or cleanup["session_id"] <= 1
+                or not isinstance(cleanup.get("boot_id"), str)
+                or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", cleanup["boot_id"])):
+            raise ValueError("invalid native cleanup identity")
     if record["status"] == "succeeded":
         if not command["spawned"] or not command["exited"] or stop["reason"] or record.get("error"):
             raise ValueError("inconsistent success")
@@ -211,11 +218,46 @@ def _validate_creation(record: dict) -> None:
         raise ValueError("unverified worktree creation")
 
 
+def require_reconcilable(record: dict) -> None:
+    """Recovery can prove only missing cleanup, never a missing command result."""
+    cleanup = record.get("cleanup", {})
+    command = record.get("command", {})
+    last = (record.get("control") or {}).get("last")
+    if (is_remote(record) or record["status"] != "outcome_unknown" or cleanup.get("status") != "unverified"
+            or not command.get("spawned") or not command.get("exited") or type(record["exit_code"]) is not int
+            or record.get("error") or last and last["status"] in {"pending", "partial", "outcome_unknown"}):
+        raise Fault("cleanup_recovery_unavailable", "Recovery requires an original terminal result with only cleanup unresolved.")
+    if "session_id" not in cleanup or "boot_id" not in cleanup:
+        raise Fault("cleanup_identity_unavailable", "This historical receipt has no native session identity; preserve its unknown outcome.")
+
+
+def reconciled_record(record: dict, evidence: dict, receipt_sha256: str, execution_id: str) -> dict:
+    """Apply a bound cleanup supplement without changing the original receipt."""
+    require_reconcilable(record)
+    if (not isinstance(evidence, dict) or set(evidence) != {"format", "execution_id", "receipt_sha256", "observed_at", "created_worktree"}
+            or type(evidence["format"]) is not int or evidence["format"] != 1
+            or evidence["execution_id"] != execution_id or evidence["receipt_sha256"] != receipt_sha256
+            or not _number(evidence["observed_at"])
+            or evidence["observed_at"] < record["finished_at"]):
+        raise ValueError("invalid cleanup reconciliation")
+    status = STOP_STATUS.get(record["stop"]["reason"]) or ("succeeded" if record["exit_code"] == 0 else "failed")
+    observed = {**record, "status": status, "cleanup": {**record["cleanup"], "status": "verified",
+                "source": "native_reconciliation", "reconciled_at": evidence["observed_at"],
+                "receipt_sha256": receipt_sha256}, "context": dict(record["context"])}
+    if record["format_version"] == CREATION_FORMAT and status == "succeeded":
+        observed["context"]["created_worktree"] = evidence["created_worktree"]
+        _validate_creation(observed)
+    elif evidence["created_worktree"] is not None:
+        raise ValueError("unexpected worktree reconciliation")
+    _validate_facts(observed)
+    return observed
+
+
 def read_record(directory: Path) -> dict:
     """Validate all accepted formats without rewriting or observing the process."""
     try:
-        with (directory / "record.json").open() as stream:
-            record = json.load(stream)
+        raw = (directory / "record.json").read_bytes()
+        record = json.loads(raw)
         version = record.get("format_version", 1)
         if type(version) is not int or version not in (1, 2, 3, 4, FORMAT, CREATION_FORMAT):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
@@ -265,6 +307,17 @@ def read_record(directory: Path) -> dict:
             _validate_creation(record)
         elif "worktree_creation" in request or "creation_plan" in record["context"] or "created_worktree" in record["context"]:
             raise ValueError("unsupported worktree execution semantics")
+        path = directory / "reconciliation.json"
+        if os.path.lexists(path):
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
+                    raise ValueError("invalid reconciliation file")
+                evidence = json.loads(stream.read(65537))
+            try:
+                record = reconciled_record(record, evidence, hashlib.sha256(raw).hexdigest(), directory.name)
+            except Fault as error:
+                raise ValueError("unbound cleanup reconciliation") from error
         return record
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error

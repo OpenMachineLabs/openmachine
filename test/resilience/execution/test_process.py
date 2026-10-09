@@ -1,6 +1,8 @@
 """Tests for execution behavior at the resilience layer."""
 
 from concurrent.futures import ThreadPoolExecutor
+import json
+import subprocess
 import threading
 import signal
 import sys
@@ -9,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 from openmachine import execution
-from openmachine.execution import api
+from openmachine.execution import api, process
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.execution_cases import ExecutionCaseFixture
@@ -133,9 +135,9 @@ while True: time.sleep(0.05)
         self.assertEqual(caught.exception.code, "context_unavailable")
 
     def test_unavailable_membership_never_infers_success(self):
-        setup = 'def fail(*_): raise w.Fault("cleanup_unverified", "injected membership failure")\nw.Process.members=fail'
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected membership failure")\nw.Process.members=fail'
         with self.injected_worker(setup):
-            result = self.finish(self.start('print("known output",flush=True)'))
+            result = self.finish(self.start('print("known output",flush=True)', termination_grace_seconds=0))
         self.assertEqual(result["status"], "outcome_unknown")
         self.assertEqual(result["cleanup"]["status"], "unverified")
         self.assertTrue(result["command"]["exited"])
@@ -144,6 +146,171 @@ while True: time.sleep(0.05)
         with self.assertRaises(Fault) as caught:
             execution.cancel(self.config, self.state, "local", result["execution_id"])
         self.assertEqual(caught.exception.code, "outcome_unknown")
+
+    def test_transient_cleanup_query_failure_keeps_original_owner_until_verified(self):
+        setup = ('original=w.Process.members\ncount=0\n'
+                 'def flaky(self,deadline):\n global count\n count+=1\n'
+                 ' if count==1: raise w.Fault("cleanup_query_timeout", "injected transient query timeout")\n'
+                 ' return original(self,deadline)\nw.Process.members=flaky')
+        with self.injected_worker(setup):
+            result = self.finish(self.start('from pathlib import Path; Path("once").write_text("1")'))
+        self.assertEqual((result["status"], result["cleanup"]["status"]), ("succeeded", "verified"))
+        self.assertIsNone(result["cleanup"]["error"])
+        self.assertEqual((self.work / "once").read_text(), "1")
+
+    def test_native_query_failures_retain_specific_diagnostics_and_bounded_cleanup(self):
+        launch = subprocess.Popen
+        for code, expected in (("import time; time.sleep(5)", "cleanup_query_timeout"),
+                               ("raise SystemExit(2)", "cleanup_query_failed"),
+                               ('print("invalid")', "cleanup_query_invalid")):
+            def query(_argv, **kwargs):
+                return launch([sys.executable, "-c", code], **kwargs)
+            started = time.monotonic()
+            with self.subTest(error=expected), patch.object(process.subprocess, "Popen", side_effect=query):
+                with self.assertRaises(Fault) as caught:
+                    process._mac_states(started + .2)
+                self.assertEqual(caught.exception.code, expected)
+                self.assertLess(time.monotonic() - started, 2)
+
+    def test_original_cleanup_reconciliation_survives_lost_reply_and_fresh_reader(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_query_timeout", "injected failure")\nw.Process.members=fail'
+        code = 'from pathlib import Path; p=Path("once"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1")'
+        with self.injected_worker(setup):
+            result = self.finish(self.start(code, termination_grace_seconds=0))
+        identity = result["execution_id"]
+        self.assertEqual((result["status"], result["cleanup"]["error"]), ("outcome_unknown", "cleanup_query_timeout"))
+        path = self.state / "executions" / identity / "record.json"
+        original = path.read_bytes()
+        publish = api.save_json
+
+        def lose_reply(path, value):
+            publish(path, value)
+            raise OSError("injected lost publication acknowledgement")
+
+        with patch.object(api, "save_json", side_effect=lose_reply), self.assertRaises(OSError):
+            execution.reconcile(self.config, self.state, "local", identity)
+        evidence = (path.parent / "reconciliation.json").read_bytes()
+        with patch.object(api, "session_members", side_effect=AssertionError("Never repeat verified recovery")):
+            recovered = execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual((recovered["status"], recovered["cleanup"]["source"]), ("succeeded", "native_reconciliation"))
+        self.assertEqual((path.parent / "reconciliation.json").read_bytes(), evidence)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.start(code, execution_id=identity, termination_grace_seconds=0)["status"], "succeeded")
+        self.assertEqual((self.work / "once").read_text(), "1")
+        script = ('import sys; from pathlib import Path; from openmachine.execution.records import read_record; '
+                  'print(read_record(Path(sys.argv[1]))["status"])')
+        output = subprocess.check_output([sys.executable, "-I", "-c", script, str(path.parent)], text=True)
+        self.assertEqual(output.strip(), "succeeded")
+
+    def test_cleanup_reconciliation_rejects_missing_identity_changed_boot_and_uncertain_control(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected failure")\nw.Process.members=fail'
+        with self.injected_worker(setup):
+            result = self.finish(self.start('pass', termination_grace_seconds=0))
+        identity = result["execution_id"]
+        path = self.state / "executions" / identity / "record.json"
+        original = path.read_bytes()
+        legacy = json.loads(original)
+        del legacy["cleanup"]["session_id"]
+        del legacy["cleanup"]["boot_id"]
+        path.write_text(json.dumps(legacy))
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "cleanup_identity_unavailable")
+        self.assertEqual(execution.read(self.config, self.state, "local", identity)["status"], "outcome_unknown")
+        path.write_bytes(original)
+        with patch.object(api, "boot_identity", return_value="different-boot"), self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "cleanup_identity_unavailable")
+        unknown_exit = json.loads(original)
+        unknown_exit["exit_code"] = None
+        unknown_exit["command"].update(exited=False, exited_at=None, exit_signal=None)
+        path.write_text(json.dumps(unknown_exit))
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "cleanup_recovery_unavailable")
+        path.write_bytes(original)
+        uncertain = json.loads(original)
+        uncertain["control"] = {"protocol": 1, "seq": 1, "last": {"seq": 1, "action": "interrupt",
+            "request_sha256": "a" * 64, "status": "outcome_unknown", "bytes_written": None,
+            "accepted_at": result["created_at"], "completed_at": result["finished_at"], "error": "lost_reply"}}
+        path.write_text(json.dumps(uncertain))
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "cleanup_recovery_unavailable")
+        path.write_bytes(original)
+        for name in ("worker.lock", "control.lock"):
+            with lease(path.parent / name), self.assertRaises(Fault) as caught:
+                execution.reconcile(self.config, self.state, "local", identity)
+            self.assertEqual(caught.exception.code, "resource_busy")
+        self.assertFalse((path.parent / "reconciliation.json").exists())
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_cleanup_reconciliation_never_signals_remaining_session_members(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected failure")\nw.Process.members=fail'
+        child = 'import time; time.sleep(3)'
+        code = 'import subprocess,sys; subprocess.Popen([sys.executable,"-c",' + repr(child) + '])'
+        with self.injected_worker(setup):
+            result = self.finish(self.start(code, termination_grace_seconds=0))
+        identity = result["execution_id"]
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "cleanup_unverified")
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                recovered = execution.reconcile(self.config, self.state, "local", identity)
+                break
+            except Fault as error:
+                self.assertEqual(error.code, "cleanup_unverified")
+                if time.monotonic() >= deadline:
+                    self.fail("Disposable original child did not exit within its deadline")
+                time.sleep(.05)
+        self.assertEqual(recovered["status"], "succeeded")
+        self.assertTrue(recovered["output_incomplete"])
+
+    def test_cleanup_reconciliation_keeps_known_failure_and_binds_original_bytes(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected failure")\nw.Process.members=fail'
+        with self.injected_worker(setup):
+            result = self.finish(self.start('raise SystemExit(7)', termination_grace_seconds=0))
+        identity = result["execution_id"]
+        path = self.state / "executions" / identity / "record.json"
+        original = path.read_bytes()
+        recovered = execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual((recovered["status"], recovered["exit_code"]), ("failed", 7))
+        path.write_bytes(original + b" ")
+        with self.assertRaises(Fault) as caught:
+            execution.read(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "corrupt_state")
+
+        path.write_bytes(original)
+        evidence = path.parent / "reconciliation.json"
+        changed = json.loads(evidence.read_text())
+        changed["execution_id"] = "f" * 32
+        evidence.write_text(json.dumps(changed))
+        with self.assertRaises(Fault) as caught:
+            execution.read(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "corrupt_state")
+        evidence.write_text('{"format":1}')
+        with self.assertRaises(Fault) as caught:
+            execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(caught.exception.code, "corrupt_state")
+
+    def test_cleanup_reconciliation_preserves_cancel_reason_with_zero_exit(self):
+        setup = ('w.FORCE_SECONDS=.05\noriginal=w.Process.members\n'
+                 'def fail_after_exit(self,deadline):\n'
+                 ' if self.exited: raise w.Fault("cleanup_query_failed", "injected failure")\n'
+                 ' return original(self,deadline)\nw.Process.members=fail_after_exit')
+        with self.injected_worker(setup):
+            started = self.start('import signal,time; signal.signal(signal.SIGTERM,lambda *_:exit(0)); print("ready",flush=True); time.sleep(30)',
+                                 termination_grace_seconds=.2)
+        identity = started["execution_id"]
+        self.until(identity, lambda item: "ready" in item["output"])
+        execution.cancel(self.config, self.state, "local", identity)
+        result = self.finish(started)
+        self.assertEqual((result["status"], result["exit_code"], result["stop"]["reason"]), ("outcome_unknown", 0, "cancel"))
+        recovered = execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual((recovered["status"], recovered["exit_code"]), ("cancelled", 0))
+        self.assertEqual(recovered["stop"], result["stop"])
 
     def test_command_budget_starts_at_launch_not_receipt_publication(self):
         setup = ('original=w._publish\n'

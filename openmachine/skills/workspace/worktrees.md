@@ -58,6 +58,13 @@ daemon is introduced. Explicit safe Git removal remains a native command after
 checking task references, uncommitted/unpushed work and current users; there is no
 automatic deletion or force removal.
 
+If a local creation has a known exit but unverified cleanup, use the original-ID
+[cleanup reconciliation](../execution/terminal.md) only when its receipt retains
+the native session identity. Reconciliation preserves the original receipt and
+verifies the pinned creation result before publishing success. Historical
+receipts without that identity remain unknown; a registered clean tree alone
+does not supply the missing process evidence.
+
 ## Task target binding
 
 Omitting `worktree` retains the configured root. Empty selectors stay absent from

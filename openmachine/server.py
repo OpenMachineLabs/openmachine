@@ -461,6 +461,12 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         operation = partial(_reply, lambda: application.cancel_execution(machine, execution_id, _task_context(task_context)), execution_output=True)
         return await asyncio.wrap_future(_submit_owned(operation))
 
+    @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
+    async def reconcile_execution(machine: str, execution_id: str) -> CallToolResult:
+        """Verify cleanup for an original local execution with a known exit and retained native identity. Append bound evidence without rewriting its receipt, replaying commands, signaling processes or accepting Task stages. Missing identity or incomplete evidence remains unknown; read the original ID after a lost reply."""
+        operation = partial(_reply, lambda: application.reconcile_execution(machine, execution_id), execution_output=True)
+        return await asyncio.wrap_future(_submit_owned(operation))
+
     @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=has_ssh))
     async def control_execution(machine: str, execution_id: str,
                                 expected_control_seq: Annotated[int, Field(strict=True, ge=0, le=MAX_CONTROL_SEQ - 1)],

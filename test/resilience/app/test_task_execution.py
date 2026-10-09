@@ -13,10 +13,36 @@ from openmachine.tasks import database, store as task_store
 from openmachine.bootstrap import create_application
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract
+from test.support.execution import ExecutionFixture
 
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_original_cleanup_recovery_unblocks_task_observation_without_accepting_or_replaying(self):
+        self.accept_plan()
+        args = self.start_arguments('from pathlib import Path; Path("once").write_text("1")', termination_grace_seconds=0)
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_query_timeout", "injected failure")\nw.Process.members=fail'
+        with ExecutionFixture.injected_worker(self, setup):
+            terminal = self.wait(self.app.start_execution(**args))
+        self.assertEqual(terminal["status"], "outcome_unknown")
+        observed = self.app.task_admission.reconcile(self.view())["record"]
+        self.assertEqual(observed["operations"][0]["state"], "unknown")
+        revision = dict(contract=observed["contract"], stages=self.request["stages"],
+                        invalidated_stage_ids=["verify"], reason="Continue with original cleanup evidence.")
+        self.fault("task_effect_unresolved", self.control, "revise_plan", **revision)
+        before = self.task_bytes()
+        recovered = self.app.reconcile_execution("desktop", args["execution_id"])
+        self.assertEqual(recovered["status"], "succeeded")
+        self.assertEqual(self.task_bytes(), before)
+        current = self.app.task_admission.reconcile(self.view())["record"]
+        self.assertEqual(current["operations"][0]["result"]["status"], "succeeded")
+        self.assertEqual(current["plan"], observed["plan"])
+        self.assertIsNone(current["terminal"])
+        self.assertEqual((self.work / "once").read_text(), "1")
+        revised = self.control("revise_plan", **revision)["record"]
+        self.assertEqual(revised["plan"]["revision"], current["plan"]["revision"] + 1)
+        self.assertEqual(revised["operations"], current["operations"])
+
     def test_committed_head_can_reattach_but_requires_revision_before_new_effects(self):
         git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"]
         subprocess.run(["git", "init", "-q", str(self.work)], check=True, capture_output=True)

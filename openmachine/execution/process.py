@@ -4,6 +4,7 @@ import errno
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import selectors
 import signal
@@ -16,6 +17,22 @@ import time
 from openmachine.foundation.sanitize import Fault
 
 MAX_PROCESSES = 65536
+
+
+def boot_identity() -> str:
+    """Bind a retained local session to this boot, never to a reused PID alone."""
+    try:
+        if sys.platform == "darwin":
+            value = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, timeout=1, check=True).stdout.decode("ascii").strip()
+        else:
+            value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value):
+            raise ValueError("invalid boot identity")
+        return value.lower()
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise Fault("cleanup_identity_unavailable", "The native boot identity could not be verified.") from error
 
 
 def supported() -> None:
@@ -41,7 +58,7 @@ def _mac_states(deadline: float, pid: int | None = None) -> list[tuple[int, str]
                 while selector.get_map():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        raise Fault("cleanup_unverified", "The owned-session query exceeded its deadline.")
+                        raise Fault("cleanup_query_timeout", "The owned-session query exceeded its deadline.")
                     for key, _ in selector.select(min(0.05, remaining)):
                         chunk = os.read(key.fd, 65536)
                         if not chunk:
@@ -49,21 +66,54 @@ def _mac_states(deadline: float, pid: int | None = None) -> list[tuple[int, str]
                         else:
                             data.extend(chunk)
                             if len(data) > MAX_PROCESSES * 32:
-                                raise Fault("cleanup_unverified", "The process query exceeded its bound.")
+                                raise Fault("cleanup_query_limit", "The process query exceeded its bound.")
             code = query.wait(timeout=max(0.01, deadline - time.monotonic()))
             if code not in ((0, 1) if pid is not None else (0,)):
-                raise Fault("cleanup_unverified", "The owned-session query failed.")
+                raise Fault("cleanup_query_failed", "The owned-session query failed.")
+        except subprocess.TimeoutExpired as error:
+            raise Fault("cleanup_query_timeout", "The owned-session query exceeded its deadline.") from error
         finally:
             if query.poll() is None:
                 query.kill()
             query.wait()
     lines = data.splitlines()
     if len(lines) > MAX_PROCESSES:
-        raise Fault("cleanup_unverified", "The process query exceeded its entry bound.")
+        raise Fault("cleanup_query_limit", "The process query exceeded its entry bound.")
     try:
         return [(int(parts[0]), parts[1].decode("ascii")) for line in lines if (parts := line.split())]
     except (ValueError, IndexError, UnicodeError) as error:
-        raise Fault("cleanup_unverified", "The process query returned invalid state.") from error
+        raise Fault("cleanup_query_invalid", "The process query returned invalid state.") from error
+
+
+def session_members(session: int, deadline: float) -> dict[int, int]:
+    """Observe a native session; this function never adopts or signals its PIDs."""
+    if sys.platform == "darwin":
+        candidates = _mac_states(deadline)
+    else:
+        with os.scandir("/proc") as entries:
+            candidates = []
+            for entry in entries:
+                if time.monotonic() >= deadline or len(candidates) >= MAX_PROCESSES:
+                    raise Fault("cleanup_query_limit", "Session enumeration exceeded its bound.")
+                if entry.name.isdecimal():
+                    candidates.append((int(entry.name), ""))
+    members = {}
+    for pid, state in candidates:
+        if time.monotonic() >= deadline:
+            raise Fault("cleanup_query_timeout", "Session enumeration exceeded its deadline.")
+        if state.startswith("Z"):
+            continue
+        try:
+            if os.getsid(pid) != session:
+                continue
+            if sys.platform == "linux":
+                state = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[0]
+                if state == "Z":
+                    continue
+            members[pid] = os.getpgid(pid)
+        except (ProcessLookupError, FileNotFoundError):
+            continue
+    return members
 
 
 class Process:
@@ -236,33 +286,7 @@ class Process:
             return {}
         if self.reaped:
             raise Fault("cleanup_unverified", "Session identity has already been released.")
-        if sys.platform == "darwin":
-            candidates = _mac_states(deadline)
-        else:
-            with os.scandir("/proc") as entries:
-                candidates = []
-                for entry in entries:
-                    if time.monotonic() >= deadline or len(candidates) >= MAX_PROCESSES:
-                        raise Fault("cleanup_unverified", "Session enumeration exceeded its bound.")
-                    if entry.name.isdecimal():
-                        candidates.append((int(entry.name), ""))
-        members = {}
-        for pid, state in candidates:
-            if time.monotonic() >= deadline:
-                raise Fault("cleanup_unverified", "Session enumeration exceeded its deadline.")
-            if state.startswith("Z"):
-                continue
-            try:
-                if os.getsid(pid) != self.session:
-                    continue
-                if sys.platform == "linux":
-                    state = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[0]
-                    if state == "Z":
-                        continue
-                members[pid] = os.getpgid(pid)
-            except (ProcessLookupError, FileNotFoundError):
-                continue
-        return members
+        return session_members(self.session, deadline)
 
     def signal_groups(self, members: dict[int, int], signum: int) -> set[int]:
         if self.reaped:

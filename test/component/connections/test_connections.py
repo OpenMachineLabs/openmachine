@@ -585,7 +585,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 19)
+        self.assertEqual(proof["state_contract"], 20)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

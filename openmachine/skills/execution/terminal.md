@@ -29,6 +29,28 @@ verified POSIX session (Linux waitid/WNOWAIT, macOS kqueue), not deliberately
 detached sessions or an OS sandbox. SSH uses a separate systemd scope boundary.
 Unknown ownership/cleanup never becomes success or arbitrary PID adoption.
 
+Native cleanup queries may retry within the original cleanup deadline while the
+worker retains its unreaped child. A persistent failure retains a specific query
+error and an unknown result. New local workers retain their boot and session
+identity for later observation; this does not authorize signaling a reused PID.
+
+For an original local terminal `outcome_unknown` caused only by cleanup, call
+`reconcile_execution(machine, execution_id)`. It requires a known command exit,
+the retained native identity from the same boot, no unresolved terminal control,
+free original worker/workspace/resource locks, and an observed empty session.
+Worktree creation also rechecks the pinned Git result. It never launches a
+command, signals a process, changes an exit/stop reason, or accepts a Task stage.
+It appends hash-bound `reconciliation.json` evidence and preserves `record.json`
+byte-for-byte. Subsequent ordinary reads and Task observation use that evidence;
+repeating the same ID after a missing reply returns the original recovery.
+
+Historical receipts without the native identity, a changed boot, unknown exit,
+live members, lost ownership or failed result verification remain unresolved.
+Do not infer cleanup from an empty output, exit zero, a clean checkout, or a free
+lock alone. Reads never perform or persist this recovery. SSH retains its
+original systemd-scope observation and cancellation routes. Service contract 20
+protects the new writer and retained recovery evidence across managed updates.
+
 Output rotates through four 1 MiB segments without killing commands. Absolute raw
 byte cursors survive rotation; expired data reports `output_gap` and the oldest
 retained offset. Keep full output in explicit producer artifacts, not this cache.

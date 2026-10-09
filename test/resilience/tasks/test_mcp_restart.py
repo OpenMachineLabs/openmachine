@@ -65,7 +65,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((decision.structured_content["items"][0]["state"],
                                   decision.structured_content["items"][0]["evidence"]), ("pending", []))
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 19)
+                self.assertEqual(caps["lifecycle"]["state_contract"], 20)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

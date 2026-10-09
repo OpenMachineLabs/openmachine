@@ -93,6 +93,11 @@
       "base_commit": "8b282087c38fb16496638ba7dfaf2615fecf20c0",
       "change": "Remove the Chat recovery MCP operation, creation policy and receiver-read input. Preserve all unrelated tool contracts.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/114"
+    },
+    {
+      "approval": "Current maintainer request on 2026-10-09 authorizes native cleanup verification and original-ID recovery.",
+      "base_commit": "e1094f385875b5c9656d2040d4047274e52490ba",
+      "change": "Add local-only reconcile_execution(machine, execution_id), an idempotent evidence writer that never launches or signals processes. Existing tool schemas and annotations are unchanged. This expectation is manually authored, not regenerated from candidate discovery."
     }
   ],
   "baseline": {
@@ -3492,6 +3497,32 @@
           "path"
         ],
         "title": "read_workspace_fileArguments",
+        "type": "object"
+      }
+    },
+    "reconcile_execution": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "execution_id": {
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "execution_id"
+        ],
+        "title": "reconcile_executionArguments",
         "type": "object"
       }
     },
