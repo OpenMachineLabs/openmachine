@@ -16,8 +16,8 @@ from openmachine.foundation.state import private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
-# Contract 20 adds original-ID native cleanup reconciliation evidence.
-STATE_CONTRACT = 20
+# Contract 21 retains abandonment with original unresolved Task effect evidence.
+STATE_CONTRACT = 21
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

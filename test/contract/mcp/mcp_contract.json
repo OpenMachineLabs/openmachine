@@ -98,6 +98,11 @@
       "approval": "Current maintainer request on 2026-10-09 authorizes native cleanup verification and original-ID recovery.",
       "base_commit": "e1094f385875b5c9656d2040d4047274e52490ba",
       "change": "Add local-only reconcile_execution(machine, execution_id), an idempotent evidence writer that never launches or signals processes. Existing tool schemas and annotations are unchanged. This expectation is manually authored, not regenerated from candidate discovery."
+    },
+    {
+      "approval": "Current maintainer Chat on 2026-10-09 authorizes one reviewed PR for safe Task abandonment and restart.",
+      "base_commit": "c170190bb551a5e61d36e4e4746408428b84117d",
+      "change": "Add only abandon to the existing control_task ReasonedControl action enum and tagged discriminator. Retain every other tool name, argument, annotation and frozen expected schema. An abandoned Task preserves unresolved original effects and audit evidence."
     }
   ],
   "baseline": {
@@ -870,7 +875,8 @@
                   "release",
                   "pause",
                   "resume",
-                  "cancel"
+                  "cancel",
+                  "abandon"
                 ],
                 "title": "Action",
                 "type": "string"
@@ -1180,6 +1186,7 @@
           "transition": {
             "discriminator": {
               "mapping": {
+                "abandon": "#/$defs/ReasonedControl",
                 "bind_effect_scope": "#/$defs/BindEffectScope",
                 "cancel": "#/$defs/ReasonedControl",
                 "claim": "#/$defs/Claim",

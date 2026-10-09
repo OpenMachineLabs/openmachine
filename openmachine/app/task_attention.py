@@ -55,7 +55,8 @@ def _foreground(view: dict, timestamp: int) -> dict:
         return {**common, "status": "terminal", "reason": terminal["outcome"],
                 "summary": terminal["summary"], "since_ms": terminal["finished_at_ms"],
                 "age_ms": max(0, timestamp - terminal["finished_at_ms"]),
-                "original_work_running": False, "stop_foreground": True}
+                "original_work_running": None if terminal["outcome"] == "abandoned" else False,
+                "stop_foreground": True}
 
     if control["stop_intent"] != "none" or timestamp >= record["contract"]["expires_at_ms"]:
         stopped = control["stop_intent"] != "none"

@@ -8,6 +8,30 @@ from openmachine.tasks import records, transitions
 
 
 class TaskTransitionTests(unittest.TestCase):
+    def test_explicit_abandonment_is_distinct_from_success_and_cancel(self):
+        original = self.record()
+        original["operations"].append(self.operation(original, "3" * 32, status="unknown", local=True))
+        retained = deepcopy(original["operations"][0])
+        self.fault("task_effect_unresolved", self.control, deepcopy(original), "finish",
+                   outcome="failed", acceptance=[], limitations="Unknown work cannot be finished.")
+        self.assertEqual(records.normalize_control({"task_id": "fixture", "expected_revision": 20,
+            "expected_plan_revision": 1, "expected_epoch": 1, "update_id": "9" * 32,
+            "transition": {"action": "abandon", "reason": "Stop this failed attempt."}})["transition"]["action"],
+            "abandon")
+        self.control(original, "abandon", reason="Use a separate isolated task.")
+        self.assertEqual(original["terminal"]["outcome"], "abandoned")
+        self.assertEqual(original["control"]["stop_intent"], "cancel")
+        self.assertEqual(original["terminal"]["acceptance"], [])
+        self.assertIn("Use a separate isolated task.", original["terminal"]["limitations"])
+        self.assertEqual(original["operations"], [retained])
+        records.Record.model_validate(original)
+        self.fault("task_terminal", self.control, original, "resume", reason="Do not reactivate.")
+
+        active = self.record()
+        active["operations"].append(self.operation(active, "4" * 32, status="running", local=True))
+        self.fault("task_effect_active", self.control, active, "abandon", reason="Must stop first.")
+        self.assertIsNone(active["terminal"])
+
     def test_merge_binding_is_optional_bounded_and_only_for_a_numbered_merge(self):
         locator = {"kind": "github", "repository": "Owner/repo", "object_type": "merge", "number": 7,
                    "parent_number": None, "anchor": "om-task:fixture:" + "a" * 32}
