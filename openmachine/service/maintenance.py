@@ -19,7 +19,7 @@ from openmachine import __version__
 from pydantic import ValidationError
 
 from integrations.ssh import client as ssh_client
-from openmachine.config import Settings, initialize, load
+from openmachine.config import Settings, _retired_chat_recovery, initialize, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
@@ -210,7 +210,8 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
     # product artifact, never a feed-selected command or an arbitrary executable.
     payload.verify(source, sha256)
     selected_config = candidate_config or config_path
-    config_hash, candidate_hash = _digest(config_path), _digest(selected_config)
+    config_hash = _digest(config_path, retired_compatible=action == "update")
+    candidate_hash = _digest(selected_config, retired_compatible=action == "update" and candidate_config is None)
     state = private_directory(state)
     root = private_directory(state / "service")
     private_directory(state / "locks")
@@ -219,10 +220,12 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
             return {"status": "busy", "operation": _read(state, identity)}
         _available(state)
         if expected_config_sha256 is not None:
-            if _digest(config_path) != expected_config_sha256 or config_hash != expected_config_sha256:
+            if (_digest(config_path, retired_compatible=action == "update") != expected_config_sha256
+                    or config_hash != expected_config_sha256):
                 raise Fault("configuration_changed", "Configuration changed; test the exact connection again before saving.")
-            digest = service_state._snapshot_configuration(state, selected_config)
-            selected_config = service_state._saved_configuration(state, digest)
+            if action == "install" or candidate_config is not None:
+                digest = service_state._snapshot_configuration(state, selected_config)
+                selected_config = service_state._saved_configuration(state, digest)
         if action == "install":
             if candidate_config is not None or not workspace or not path:
                 raise Fault("invalid_service_request", "Installation requires the configured probe workspace/path, without a replacement configuration.")
@@ -232,6 +235,23 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
             _bound(config_path, state, record)
             if record["pending"] is not None:
                 raise Fault("activation_pending", "Read the original transition before submitting another update.")
+            if candidate_config is None:
+                original = config_path.read_bytes()
+                _, updated = _retired_chat_recovery(original)
+                if hashlib.sha256(original).hexdigest() != config_hash:
+                    raise Fault("configuration_changed", "The retained configuration changed while preparing the update.")
+                if updated != original:
+                    fd, filename = tempfile.mkstemp(prefix=".retired-config-", dir=root)
+                    temporary = Path(filename)
+                    try:
+                        with os.fdopen(fd, "wb") as output:
+                            output.write(updated)
+                            output.flush()
+                            os.fsync(output.fileno())
+                        candidate_hash = service_state._snapshot_configuration(state, temporary)
+                        selected_config = service_state._saved_configuration(state, candidate_hash)
+                    finally:
+                        temporary.unlink(missing_ok=True)
         private_directory(root / "operations")
         request = {"action": action, "config": str(config_path), "source": str(source), "payload_sha256": sha256,
                    "candidate_config": str(selected_config), "config_sha256": config_hash, "candidate_sha256": candidate_hash,
@@ -303,7 +323,7 @@ def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
             if selected["pending"] is not None:
                 raise Fault("activation_pending", "Read the original pending transition before retiring maintenance.")
             if (_selection(state) != request["selection_sha256"]
-                    or _digest(Path(request["config"])) != request["config_sha256"]):
+                    or _digest(Path(request["config"]), retired_compatible=True) != request["config_sha256"]):
                 raise Fault("maintenance_input_changed",
                             "Original selection, policy or configuration changed; preserve the operation.")
             if selected["current"] == prepared["identity"]:
@@ -317,7 +337,7 @@ def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
                 raise Fault("maintenance_retirement_unverified",
                             "The selected service is not stably ready or stopped; preserve the deferred operation.")
             if (_selection(state) != request["selection_sha256"]
-                    or _digest(Path(request["config"])) != request["config_sha256"]
+                    or _digest(Path(request["config"]), retired_compatible=True) != request["config_sha256"]
                     or _read(state, identity) != record):
                 raise Fault("maintenance_retirement_unverified",
                             "Maintenance inputs changed during retirement verification; preserve the original operation.")
@@ -344,7 +364,7 @@ def _bound(config_path: Path, state: Path, record: dict) -> None:
 def _inputs_unchanged(state: Path, record: dict) -> Path:
     request = record["request"]
     if (_selection(state) != request["selection_sha256"]
-            or _digest(Path(request["config"])) != request["config_sha256"]):
+            or _digest(Path(request["config"]), retired_compatible=request["action"] == "update") != request["config_sha256"]):
         raise Fault("maintenance_input_changed", "Original selection, policy or configuration changed; this operation cannot be rebased or replayed.")
     snapshot = state / "service/configurations" / (request["candidate_sha256"] + ".toml")
     if not os.path.lexists(snapshot):

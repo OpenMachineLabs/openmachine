@@ -9,7 +9,7 @@ import stat
 import sys
 import tempfile
 
-from openmachine.config import load
+from openmachine.config import _retired_chat_recovery, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory, save_json
 
@@ -276,13 +276,17 @@ def _save_recovery(state: Path, episode: dict | None) -> None:
         raise Fault("runtime_recovery_unverified", "Recovery accounting was not verified; no further attempt is safe.")
 
 
-def _configuration_digest(path: Path) -> str:
+def _configuration_digest(path: Path, *, retired_compatible: bool = False) -> str:
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
             or info.st_size > 65536):
         raise Fault("invalid_service_configuration", "Select an owned regular configuration of at most 64 KiB.")
-    load(path)
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    data = path.read_bytes()
+    if retired_compatible:
+        _retired_chat_recovery(data)
+    else:
+        load(path)
+    return hashlib.sha256(data).hexdigest()
 
 
 def _saved_configuration(state: Path, digest: str) -> Path:
@@ -298,9 +302,12 @@ def _saved_configuration(state: Path, digest: str) -> Path:
     return path
 
 
-def _snapshot_configuration(state: Path, source: Path) -> str:
-    load(source)
+def _snapshot_configuration(state: Path, source: Path, *, retired_compatible: bool = False) -> str:
     data = source.read_bytes()
+    if retired_compatible:
+        _retired_chat_recovery(data)
+    else:
+        load(source)
     if len(data) > 65536:
         raise Fault("invalid_service_configuration", "Managed configuration snapshots are bounded to 64 KiB.")
     digest = hashlib.sha256(data).hexdigest()

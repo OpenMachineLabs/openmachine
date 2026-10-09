@@ -82,6 +82,19 @@ same task/execution/control identities afterward, never repeat input or work mer
 because a response disappeared. Original workers retain their own interpreter,
 session, receipts and immutable files; software rollback does not undo effects.
 
+When upgrading a managed installation that still has the retired v0.2.16
+`[chat_recovery]` section, a plain `update` automatically prepares a private
+candidate with only that validated historical table removed. The installed
+configuration remains unchanged until activation succeeds, and the prior exact
+bytes remain the rollback target. This is a migration reader, not a supported
+Chat recovery setting: new configurations and ordinary readers reject the section;
+no Chat recovery runtime or API is reenabled. Invalid historical fields or
+unexpected settings fail closed before activation. A concurrent configuration
+edit is never overwritten by the automatic candidate; recheck before retrying.
+This applies to both the wheel-based update path and managed product update
+admission; neither requires an intermediate old-version configuration update.
+Retained Task recovery-era metadata is still read only for historical integrity.
+
 For explicitly changed configuration or SSH routes, leave the active file unchanged
 and pass `update --candidate-config /absolute/new.toml`. The owner snapshots exact
 bytes and includes them in the prepared installation identity, so the same wheel

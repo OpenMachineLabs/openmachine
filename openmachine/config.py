@@ -142,6 +142,50 @@ def load(path: Path) -> Settings:
         raise Fault("config_unavailable", "Cannot read configuration; run init or select an existing --config file.") from error
 
 
+def _retired_chat_recovery(raw: bytes) -> tuple[Settings, bytes]:
+    """Validate an old stored profile and remove only its retired TOML table.
+
+    This private conversion is for an existing managed installation's transition;
+    the normal config reader still rejects every Chat recovery option.
+    """
+    try:
+        if len(raw) > 65536:
+            raise ValueError("legacy configuration exceeds the managed bound")
+        original = raw.decode("utf-8")
+        document = tomllib.loads(original)
+        profile = document.pop("chat_recovery", None)
+        settings = Settings.model_validate(document)
+        if profile is None:
+            return settings, raw
+        required = {"workspace", "connection", "browser_workspace", "model"}
+        if (type(profile) is not dict or not required <= profile.keys()
+                or profile.keys() - required - {"browser_account"}):
+            raise ValueError("unknown retired recovery fields")
+        workspace = profile["workspace"]
+        if (type(workspace) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", workspace) is None
+                or workspace not in settings.workspaces
+                or settings.machines[settings.workspaces[workspace].machine].transport != "local"):
+            raise ValueError("retired recovery selected an invalid controller")
+        labels = required - {"workspace"} | ({"browser_account"} if "browser_account" in profile else set())
+        for key in labels:
+            label = profile[key]
+            if (type(label) is not str or not 1 <= len(label) <= 200 or not label.strip()
+                    or any(ord(char) < 32 or ord(char) == 127 for char in label)):
+                raise ValueError("invalid retained recovery label")
+        section = re.search(r"(?m)^[ \t]*\[chat_recovery\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)", original)
+        if section is None:
+            raise ValueError("retired recovery is not a standalone TOML table")
+        following = re.search(r"(?m)^[ \t]*\[", original[section.end():])
+        end = section.end() + following.start() if following else len(original)
+        candidate = original[:section.start()] + original[end:]
+        if tomllib.loads(candidate) != document:
+            raise ValueError("retired table removal changed another setting")
+        return settings, candidate.encode("utf-8")
+    except (UnicodeError, ValueError, TypeError, KeyError) as error:
+        raise Fault("invalid_config", "The retained Chat recovery configuration cannot be safely migrated.") from error
+
+
 def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
                workspace_writes: bool = False,
                verify_existing: bool = False) -> dict:

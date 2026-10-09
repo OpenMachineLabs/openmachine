@@ -1,13 +1,15 @@
 """Serialize service operations, activate candidates and restore prior selections."""
 
 from collections.abc import Callable
+import hashlib
 import os
 from pathlib import Path
 import plistlib
 import sys
+import tempfile
 
 from openmachine import tasks
-from openmachine.config import load
+from openmachine.config import _retired_chat_recovery, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
@@ -19,9 +21,10 @@ from .state import LAUNCHER
 
 
 def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None, *,
-              before_change: Callable[[], None] | None = None, require_safe: bool = False) -> dict:
+              before_change: Callable[[], None] | None = None, require_safe: bool = False,
+              expected_original_sha256: str | None = None) -> dict:
     candidate_path = candidate_config or service_state._configuration_for(state, record, target)
-    candidate_digest = service_state._snapshot_configuration(state, candidate_path)
+    candidate_digest = service_state._snapshot_configuration(state, candidate_path, retired_compatible=True)
     candidate_path = service_state._saved_configuration(state, candidate_digest)
     candidate_record = record | {"config": str(candidate_path)}
     install._verify_candidate(state, candidate_record, target)
@@ -47,9 +50,10 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
                             raise Fault("incompatible_remote_state", "Retained target changes or live root leases require a W1-compatible controller; no service was stopped.")
         # The actual candidate MCP/SSH readers must also accept all retained remote
         # records under the admission lock, including completed newer-format records.
-        if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
+        if any(item.transport == "ssh" for item in _retired_chat_recovery(candidate_path.read_bytes())[0].machines.values()):
             install._verify_candidate(state, candidate_record, target, check_remote=True)
-        original_settings, candidate_settings = load(Path(record["config"])), load(candidate_path)
+        original_settings = _retired_chat_recovery(Path(record["config"]).read_bytes())[0]
+        candidate_settings = _retired_chat_recovery(candidate_path.read_bytes())[0]
         for name, machine in original_settings.machines.items():
             if machine.transport == "ssh" and name not in candidate_settings.machines:
                 checks.machine_unused(original_settings, state, name)
@@ -69,7 +73,10 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         # A normal update snapshots the current registered bytes, including valid
         # edits since the last activation. Recovery uses the already saved intent.
         prior_path = config_path if pending is None else service_state._configuration_for(state, record, previous)
-        prior_digest = service_state._snapshot_configuration(state, prior_path)
+        if (expected_original_sha256 is not None
+                and hashlib.sha256(config_path.read_bytes()).hexdigest() != expected_original_sha256):
+            raise Fault("configuration_changed", "The original configuration changed during automatic migration; retry with a reviewed candidate.")
+        prior_digest = service_state._snapshot_configuration(state, prior_path, retired_compatible=True)
         configurations = {**record.get("configurations", {}), previous: prior_digest, target: candidate_digest}
         allowed = {prior_digest, candidate_digest}
         if pending is not None and pending["to"] in configurations:
@@ -124,7 +131,7 @@ def _task_cutover(state: Path, record: dict, *, committed: bool = False) -> bool
         return False
     digest = record.get("configurations", {}).get(target)
     if (service_state._installed(state, target)["state_contract"] < 18 or digest is None
-            or service_state._configuration_digest(Path(record["config"])) != digest):
+            or service_state._configuration_digest(Path(record["config"]), retired_compatible=True) != digest):
         return False
     service_state._saved_configuration(state, digest)
     storage = tasks.storage_state(state)
@@ -278,13 +285,35 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             if wheel is None or requirements is None:
                 raise Fault("invalid_service_request", "Update requires a trusted local wheel and pinned requirements.")
             selected_config = candidate_config.resolve(strict=True) if candidate_config is not None else config_path
-            selected_config = service_state._saved_configuration(state, service_state._snapshot_configuration(state, selected_config))
-            target = install._prepare(state, wheel, requirements, selected_config)
-            if target == record["current"]:
-                if selected_config.read_bytes() != config_path.read_bytes():
-                    raise Fault("same_installation", "Configuration changes require an explicit distinct candidate installation.")
-                return runtime.status(config_path, state)
-            return _activate(state, record, target, selected_config, require_safe=require_safe)
+            temporary = None
+            original_sha256 = None
+            try:
+                if candidate_config is None:
+                    original = config_path.read_bytes()
+                    _, updated = _retired_chat_recovery(original)
+                    if updated != original:
+                        # Never modify the registered configuration before verified
+                        # activation. This private candidate is discarded afterward.
+                        original_sha256 = hashlib.sha256(original).hexdigest()
+                        fd, filename = tempfile.mkstemp(prefix=".retired-config-", dir=root)
+                        temporary = Path(filename)
+                        with os.fdopen(fd, "wb") as output:
+                            output.write(updated)
+                            output.flush()
+                            os.fsync(output.fileno())
+                        selected_config = temporary
+                selected_config = service_state._saved_configuration(
+                    state, service_state._snapshot_configuration(state, selected_config))
+                target = install._prepare(state, wheel, requirements, selected_config)
+                if target == record["current"]:
+                    if selected_config.read_bytes() != config_path.read_bytes():
+                        raise Fault("same_installation", "Configuration changes require an explicit distinct candidate installation.")
+                    return runtime.status(config_path, state)
+                return _activate(state, record, target, selected_config, require_safe=require_safe,
+                                 expected_original_sha256=original_sha256)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
         with lease(state / "locks/lifecycle.lock"):
             record = service_state._record(state)
             if action in ("start", "restart"):
