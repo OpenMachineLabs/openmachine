@@ -102,7 +102,7 @@ def _project_item(project_id: str, item_id: str, *, transport) -> dict:
     if not isinstance(item_id, str) or not 1 <= len(item_id) <= 200:
         raise Fault("invalid_github_request", "Select an observed Project item ID.")
     query = """query($id:ID!){node(id:$id){... on ProjectV2Item{
-      id project{id} content{... on Issue{id number title url} ... on PullRequest{id number title url}}
+      id project{id} content{... on Issue{id number title url repository{nameWithOwner}} ... on PullRequest{id number title url repository{nameWithOwner}}}
       fieldValues(first:100){nodes{
         ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2Field{id}}}
         ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2Field{id}}}
@@ -294,7 +294,7 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
             else:
                 fields = """nodes{... on ProjectV2Field{id name dataType}
                     ... on ProjectV2SingleSelectField{id name options{id name}}
-                    ... on ProjectV2IterationField{id name}}""" if action == "project_fields" else (
+                    ... on ProjectV2IterationField{id name configuration{iterations{id title}}}}""" if action == "project_fields" else (
                     "nodes{id type content{... on Issue{id number title url} ... on PullRequest{id number title url}}}")
                 field = "fields" if action == "project_fields" else "items"
                 query = ("query($owner:String!,$number:Int!,$limit:Int!,$cursor:String){organization(login:$owner)"
@@ -402,6 +402,11 @@ def project(settings: Settings, action: Literal["add_item", "update_field"], rep
             query = "mutation($input:AddProjectV2ItemByIdInput!){addProjectV2ItemById(input:$input){item{id}}}"
         else:
             existing = _project_item(selected["id"], item_id, transport=transport)
+            content = existing["content"]
+            source = content.get("repository") if isinstance(content, dict) else None
+            if (not isinstance(source, dict) or not isinstance(source.get("nameWithOwner"), str)
+                    or source["nameWithOwner"].casefold() != repository.casefold()):
+                raise Fault("github_not_allowed", "Project item content is outside the authorized repository or is a draft.")
             if not existing["fields_complete"]:
                 raise Fault("github_evidence_unavailable", "Project field evidence is incomplete.")
             current = next((field for field in existing["field_values"] if field["field_id"] == field_id), None)
@@ -435,7 +440,11 @@ def project(settings: Settings, action: Literal["add_item", "update_field"], rep
     try:
         observed = _project_item(selected["id"], returned_id, transport=transport)
         if action == "add_item":
-            verified = (observed["content"] or {}).get("id") == content_id
+            content = observed["content"]
+            source = content.get("repository") if isinstance(content, dict) else None
+            verified = (isinstance(content, dict) and content.get("id") == content_id
+                        and isinstance(source, dict) and isinstance(source.get("nameWithOwner"), str)
+                        and source["nameWithOwner"].casefold() == repository.casefold())
         else:
             current = next((field for field in observed["field_values"] if field["field_id"] == field_id), None)
             value_key = {"singleSelectOptionId": "optionId"}.get(key, key)

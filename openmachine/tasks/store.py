@@ -386,8 +386,13 @@ def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list
             if os.path.lexists(state / "tasks"):
                 raise Fault("task_migration_required", "Migrate retained conflict authority before new effects.")
             return []
-        rows = connection.execute("SELECT * FROM operations WHERE repository=? AND unresolved=1",
-                                  (proposed["locator"]["repository"].casefold(),))
+        repository = proposed["locator"]["repository"].casefold()
+        if proposed["locator"].get("object_type") == "project":
+            # Organization Projects can be reached through different repositories.
+            rows = connection.execute("SELECT * FROM operations WHERE repository LIKE ? AND unresolved=1",
+                                      (repository.split("/", 1)[0] + "/%",))
+        else:
+            rows = connection.execute("SELECT * FROM operations WHERE repository=? AND unresolved=1", (repository,))
         for row in rows:
             if row["id"] == proposed.get("id"):
                 continue

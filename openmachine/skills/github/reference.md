@@ -46,9 +46,11 @@ number is the Project number, and project_item uses ref=item node ID. Project li
 use next_cursor (not page). github_project(action="add_item", project_number,
 issue_number) adds a repository Issue to the organization Project. action="update_field"
 takes project_number, item_id, field_id, and one value key: text, number, date,
-singleSelectOptionId or iterationId. Pass expected_value to detect an observed
-field change. Both writes require scoped repository and Project permissions,
-perform destination/account readback and never replay uncertain mutations.
+singleSelectOptionId or iterationId. Iteration choices are returned under
+project_fields configuration.iterations. Pass expected_value to detect an observed
+field change. Field updates reject draft or other-repository items, and uncertain
+Project writes exclude further writes to the same organization Project across
+repository aliases. Both writes require scoped permissions and verified readback.
 
 Read Releases with github_read(action="releases") or action="release", ref=exact
 tag name; use action="file_history", path=relative document path, optional ref

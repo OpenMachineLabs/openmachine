@@ -58,14 +58,18 @@ def operation_scope(record: dict, operation: dict) -> dict | None:
                         if item["operation_id"] == operation["id"]), None)
         declared = witness["scope"] if witness is not None else None
     if declared is not None:
-        value = dict(declared, repository=locator["repository"].casefold())
+        repository = locator["repository"].casefold()
+        if declared["resource"] == "project":
+            repository = repository.split("/", 1)[0]
+        value = dict(declared, repository=repository)
         # A later verified destination can narrow an unknown creation's target.
         if value["number"] is None and locator.get("number") is not None:
             value["number"] = locator["number"]
         return value
     kind = locator["object_type"]
-    return {"repository": locator["repository"].casefold(),
-            "resource": kind if kind in {"comment", "review"} else "object",
+    repository = locator["repository"].casefold()
+    return {"repository": repository.split("/", 1)[0] if kind == "project" else repository,
+            "resource": kind if kind in {"comment", "review", "project"} else "object",
             "number": locator.get("number"),
             "parent_number": locator.get("parent_number") if kind == "review" else None,
             "fields": ["*"]}

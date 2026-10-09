@@ -1094,8 +1094,11 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
                     "fieldValues": {"nodes": [{"text": "triage", "field": {"id": "PVTF_1"}}],
                                     "pageInfo": {"hasNextPage": False}}}}}
             if "fields(first:" in query:
+                self.assertIn("configuration{iterations{id title}}", query)
                 return {"data": {"organization": {"projectV2": {"fields": {
-                    "nodes": [{"id": "PVTF_1", "name": "Status"}],
+                    "nodes": [{"id": "PVTF_1", "name": "Status"},
+                              {"id": "PVTF_2", "name": "Sprint",
+                               "configuration": {"iterations": [{"id": "ITER_1", "title": "Sprint 1"}]}}],
                     "pageInfo": {"hasNextPage": False}}}}}}
             return {"data": {"organization": {"projectV2": {
                 "id": "PVT_1", "number": 1, "title": "Dashboard", "url": "https://example.invalid/project"}}}}
@@ -1108,6 +1111,7 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
                               REPO, number=1, page=2, transport=self.transport)
         self.assertEqual(listing["next_cursor"], "next")
         self.assertEqual(fields["data"][0]["id"], "PVTF_1")
+        self.assertEqual(fields["data"][1]["configuration"]["iterations"][0]["id"], "ITER_1")
         self.assertEqual(item["data"]["field_values"][0]["text"], "triage")
         self.assertTrue(item["data"]["fields_complete"])
         self.assertEqual(requests[0]["owner"], "Owner")
@@ -1129,7 +1133,7 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
                 return {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_1"}}}}
             if "fieldValues(first:100)" in query:
                 return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
-                    "content": {"id": "ISSUE_1"}, "fieldValues": {
+                    "content": {"id": "ISSUE_1", "repository": {"nameWithOwner": REPO}}, "fieldValues": {
                         "nodes": [{"text": field["text"], "field": {"id": "PVTF_1"}}],
                         "pageInfo": {"hasNextPage": False}}}}}
             return {"data": {"organization": {"projectV2": {"id": "PVT_1", "number": 1}}}}
@@ -1150,6 +1154,29 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual(len(mutations), 2)
         self.assertEqual(mutations[1]["variables"]["input"]["fieldId"], "PVTF_1")
         self.assertEqual(field, {"text": "done"})
+
+    def test_project_update_rejects_items_from_other_repositories_and_drafts(self):
+        for content in ({"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Owner/other"}},
+                        {"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Other/repo"}},
+                        None):
+            writes = []
+
+            def api(method, endpoint, payload=None):
+                if endpoint != "graphql":
+                    return self.response(method, endpoint, payload)
+                if "mutation(" in payload["query"]:
+                    writes.append(payload)
+                    self.fail("No mutation is allowed for foreign-repository or draft items.")
+                if "fieldValues(first:100)" in payload["query"]:
+                    return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                        "content": content, "fieldValues": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}
+                return {"data": {"organization": {"projectV2": {"id": "PVT_1"}}}}
+
+            with self.subTest(content=content), patch.object(self, "transport", side_effect=api):
+                self.assert_fault("github_not_allowed", github.project, settings(), "update_field",
+                                  REPO, 1, item_id="PVTI_1", field_id="PVTF_1",
+                                  value={"text": "changed"}, transport=self.transport)
+            self.assertEqual(writes, [])
 
     def test_project_lost_mutation_acknowledgment_is_not_retried(self):
         self.issue_value["node_id"] = "ISSUE_1"

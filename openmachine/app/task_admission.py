@@ -315,6 +315,9 @@ class TaskAdmission:
             # aliases, share this short lease through result publication. The
             # persistent exclusion below remains field-scoped, not repo-wide.
             names.add("task-github-repository-" + records.digest(locator["repository"].casefold()))
+            if method == "github_project":
+                names.add("task-github-project-" + records.digest([
+                    locator["repository"].split("/", 1)[0].casefold(), arguments["project_number"]]))
         if context is not None:
             names.add("task-operation-" + context["operation_id"])
         with ExitStack() as locks:
