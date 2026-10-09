@@ -242,7 +242,7 @@ class GitHubMergeBinding(Model):
 class GitHubLocator(Model):
     kind: Literal["github"]
     repository: Repository
-    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge"]
+    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge", "project"]
     number: Revision | None
     parent_number: Revision | None
     anchor: Annotated[Text128, Field(min_length=1)]
@@ -272,7 +272,7 @@ class GitHubLocator(Model):
 
 
 class GitHubEffectScope(Model):
-    resource: Literal["object", "comment", "review"]
+    resource: Literal["object", "comment", "review", "project"]
     number: Revision | None
     parent_number: Revision | None
     fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "threads", "create"]], Field(min_length=1, max_length=5)]
@@ -632,7 +632,7 @@ class Renew(Model):
 class BindEffectScope(Model):
     action: Literal["bind_effect_scope"]
     operation_id: ID
-    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"]
+    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project"]
     arguments: dict[str, object]
     reason: Annotated[Text512, Field(min_length=1)]
 

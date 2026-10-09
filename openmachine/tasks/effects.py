@@ -11,7 +11,9 @@ def github_scope(method: str, arguments: dict) -> dict:
     positive = lambda value: value if type(value) is int and value > 0 else None
     scope = {"resource": "object",
              "number": positive(number), "parent_number": None, "fields": ["*"]}
-    if kind in {"issue", "pull_request"}:
+    if kind == "project":
+        scope.update(resource="project", number=positive(arguments.get("project_number")))
+    elif kind in {"issue", "pull_request"}:
         if action == "create":
             scope.update(number=None, fields=["create"])
             if kind == "issue":
@@ -73,6 +75,8 @@ def github_conflict(first: dict, second: dict) -> bool:
     if first["repository"].casefold() != second["repository"].casefold():
         return False
     left, right = first["resource"], second["resource"]
+    if left == right == "project":
+        return first["number"] is None or second["number"] is None or first["number"] == second["number"]
     unnumbered = [item for item in (first, second)
                   if item["resource"] == "object" and item["number"] is None]
     if unnumbered:

@@ -15,7 +15,7 @@ from . import task_attention, task_observation, task_receipts
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
 EXECUTION_METHODS = {"start_execution", "create_worktree"}
-GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge"}
+GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project"}
 METHODS = FILE_METHODS | EXECUTION_METHODS | GITHUB_METHODS | {"control_execution", "cancel_execution"}
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
@@ -211,7 +211,8 @@ class TaskAdmission:
             match = MARKER.search(arguments.get("body") or "")
             anchor = f"om-task:{context['task_id']}:{context['operation_id']}" if context else match[1] if match else ""
             kind = method.removeprefix("github_")
-            number = arguments.get("comment_id" if kind == "comment" else "review_id" if kind == "review" else "number", 0)
+            number = (arguments.get("project_number") if kind == "project" else
+                      arguments.get("comment_id" if kind == "comment" else "review_id" if kind == "review" else "number", 0))
             return {"kind": "github", "repository": arguments["repository"], "object_type": kind,
                     "number": number or None, "parent_number": arguments.get("number") or None if kind in {"comment", "review"} else None,
                     "anchor": anchor, **({"thread_id": arguments["thread_id"],

@@ -19,9 +19,11 @@ CREATED_FOOTER = f"---\n\nCreated via [Open Machine]({ATTRIBUTION_URL})."
 POSTED_FOOTER = f"---\n\nPosted via [Open Machine]({ATTRIBUTION_URL})."
 FOOTERS = (CREATED_FOOTER, POSTED_FOOTER)
 MAX_RESULT_BYTES = 256 * 1024
-ReadAction = Literal["status", "repository", "branch", "commit", "file", "issue", "issues",
-                     "pull_request", "pull_requests", "files", "comments", "reviews",
-                     "review_comments", "threads", "checks", "merge_context"]
+ReadAction = Literal["status", "repository", "branch", "commit", "file", "file_history",
+                     "release", "releases", "projects", "project", "project_fields",
+                     "project_items", "project_item", "issue", "issues", "pull_request",
+                     "pull_requests", "files", "comments", "reviews", "review_comments",
+                     "threads", "checks", "merge_context"]
 FIELDS = {
     "repository": "id full_name private default_branch archived permissions html_url",
     "issue": "id number title body state state_reason html_url created_at updated_at closed_at user assignees labels comments pull_request",
@@ -63,6 +65,69 @@ def _public(value: dict) -> dict:
     if len(json.dumps(result).encode()) > MAX_RESULT_BYTES:
         raise Fault("github_output_too_large", "The observation exceeds 256 KiB after JSON escaping. Reduce the list limit, or use fixed-SHA file pages; this is incomplete evidence.")
     return result
+
+
+def _graphql(query: str, variables: dict, *, transport) -> dict:
+    response = object_response(transport("POST", "graphql", {"query": query, "variables": variables}))
+    if response.get("errors") or not isinstance(response.get("data"), dict):
+        raise Fault("github_evidence_unavailable", "GitHub Projects returned incomplete GraphQL evidence.")
+    return response["data"]
+
+
+def _project_node(repository: str, number: int, *, transport) -> dict:
+    if type(number) is not int or number < 1:
+        raise Fault("invalid_github_request", "Select a positive organization Project number.")
+    query = "query($owner:String!,$number:Int!){organization(login:$owner){projectV2(number:$number){id number title url}}}"
+    organization = _graphql(query, {"owner": repository.split("/")[0], "number": number}, transport=transport).get("organization")
+    project = organization.get("projectV2") if isinstance(organization, dict) else None
+    if not isinstance(project, dict) or not isinstance(project.get("id"), str):
+        raise Fault("github_not_found", "The organization Project is not accessible.")
+    return project
+
+
+def _project_page(value: dict) -> tuple[list, str | None]:
+    connection_page = object_response(value)
+    nodes = connection_page.get("nodes")
+    paging = object_response(connection_page.get("pageInfo"))
+    if (not isinstance(nodes, list) or any(not isinstance(node, dict) for node in nodes)
+            or type(paging.get("hasNextPage")) is not bool):
+        raise Fault("github_evidence_unavailable", "Project pagination is incomplete.")
+    cursor = paging.get("endCursor") if paging["hasNextPage"] else None
+    if paging["hasNextPage"] and (not isinstance(cursor, str) or not 1 <= len(cursor) <= 1024):
+        raise Fault("github_evidence_unavailable", "The next Project cursor is missing or invalid.")
+    return nodes, cursor
+
+
+def _project_item(project_id: str, item_id: str, *, transport) -> dict:
+    if not isinstance(item_id, str) or not 1 <= len(item_id) <= 200:
+        raise Fault("invalid_github_request", "Select an observed Project item ID.")
+    query = """query($id:ID!){node(id:$id){... on ProjectV2Item{
+      id project{id} content{... on Issue{id number title url} ... on PullRequest{id number title url}}
+      fieldValues(first:100){nodes{
+        ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2Field{id}}}
+        ... on ProjectV2ItemFieldNumberValue{number field{... on ProjectV2Field{id}}}
+        ... on ProjectV2ItemFieldDateValue{date field{... on ProjectV2Field{id}}}
+        ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}
+        ... on ProjectV2ItemFieldIterationValue{iterationId field{... on ProjectV2IterationField{id}}}
+      } pageInfo{hasNextPage}}}}}"""
+    item = _graphql(query, {"id": item_id}, transport=transport).get("node")
+    if (not isinstance(item, dict) or item.get("id") != item_id
+            or (item.get("project") or {}).get("id") != project_id):
+        raise Fault("github_not_found", "The item does not belong to the requested Project.")
+    values = object_response(item.get("fieldValues"))
+    nodes = values.get("nodes")
+    if not isinstance(nodes, list) or any(not isinstance(value, dict) for value in nodes):
+        raise Fault("github_evidence_unavailable", "Project field values are incomplete.")
+    fields = [{**{key: value[key] for key in ("text", "number", "date", "optionId", "iterationId") if key in value},
+               "field_id": (value.get("field") or {}).get("id")} for value in nodes]
+    return {"id": item_id, "content": item.get("content"), "field_values": fields,
+            "fields_complete": (values.get("pageInfo") or {}).get("hasNextPage") is False}
+
+
+def _release(value: dict) -> dict:
+    release = object_response(value)
+    return {key: release[key] for key in ("id", "tag_name", "name", "body", "html_url", "draft",
+            "prerelease", "created_at", "published_at", "target_commitish") if key in release}
 
 
 def _metadata_fields(labels: list[str] | None, assignees: list[str] | None) -> dict:
@@ -187,6 +252,59 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
                 raise
     elif action == "file":
         result["data"] = evidence.read_file(repository, ref, path, offset, transport=transport)
+    elif action in {"release", "releases"}:
+        if action == "release":
+            if not ref or len(ref) > 255 or any(ord(c) < 32 for c in ref):
+                raise Fault("invalid_github_request", "Select an explicit Release tag.")
+            result["data"] = _release(transport("GET", f"{root}/releases/tags/{quote(ref, safe='')}"))
+        else:
+            items, following = client.list_page(f"{root}/releases", page, limit, transport=transport)
+            result.update(data=[_release(item) for item in items], page=page,
+                          next_page=following, has_more=following is not None)
+    elif action == "file_history":
+        if not path or path.startswith("/") or ".." in path.split("/") or len(path) > 1024 or any(ord(c) < 32 for c in path):
+            raise Fault("invalid_github_request", "Select a bounded repository-relative document path.")
+        if len(ref) > 255 or any(ord(c) < 32 for c in ref):
+            raise Fault("invalid_github_request", "Select a bounded history ref or omit it for the default branch.")
+        endpoint = f"{root}/commits?path={quote(path, safe='')}"
+        if ref:
+            endpoint += f"&sha={quote(ref, safe='')}"
+        items, following = client.list_page(endpoint, page, limit, transport=transport)
+        result.update(data=[{"sha": item.get("sha"), "html_url": item.get("html_url"),
+                             "message": (item.get("commit") or {}).get("message"),
+                             "date": ((item.get("commit") or {}).get("committer") or {}).get("date")} for item in items],
+                      page=page, next_page=following, has_more=following is not None)
+    elif action in {"projects", "project", "project_fields", "project_items", "project_item"}:
+        if page != 1:
+            raise Fault("invalid_github_request", "Projects use cursor pagination, not page numbers.")
+        owner = repository.split("/")[0]
+        if action == "projects":
+            query = "query($owner:String!,$limit:Int!,$cursor:String){organization(login:$owner){projectsV2(first:$limit,after:$cursor){nodes{id number title url} pageInfo{hasNextPage endCursor}}}}"
+            organization = _graphql(query, {"owner": owner, "limit": limit, "cursor": cursor or None}, transport=transport).get("organization")
+            if not isinstance(organization, dict):
+                raise Fault("github_not_found", "Organization Projects are not accessible.")
+            nodes, following = _project_page(organization.get("projectsV2"))
+            result.update(data=nodes, next_cursor=following, has_more=following is not None)
+        else:
+            project = _project_node(repository, number, transport=transport)
+            if action == "project":
+                result["data"] = project
+            elif action == "project_item":
+                result["data"] = _project_item(project["id"], ref, transport=transport)
+            else:
+                fields = """nodes{... on ProjectV2Field{id name dataType}
+                    ... on ProjectV2SingleSelectField{id name options{id name}}
+                    ... on ProjectV2IterationField{id name}}""" if action == "project_fields" else (
+                    "nodes{id type content{... on Issue{id number title url} ... on PullRequest{id number title url}}}")
+                field = "fields" if action == "project_fields" else "items"
+                query = ("query($owner:String!,$number:Int!,$limit:Int!,$cursor:String){organization(login:$owner)"
+                         "{projectV2(number:$number){" + field + "(first:$limit,after:$cursor){"
+                         + fields + " pageInfo{hasNextPage endCursor}}}}}")
+                organization = object_response(_graphql(query, {"owner": owner, "number": number,
+                    "limit": limit, "cursor": cursor or None}, transport=transport).get("organization"))
+                selected = object_response(organization.get("projectV2"))
+                nodes, following = _project_page(selected.get(field))
+                result.update(project=project, data=nodes, next_cursor=following, has_more=following is not None)
     elif action == "branch":
         if not ref or len(ref) > 255 or any(ord(char) < 32 for char in ref):
             raise Fault("invalid_github_request", "Select an explicit branch name.")
@@ -249,6 +367,88 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     return _public(result)
 
 
+def project(settings: Settings, action: Literal["add_item", "update_field"], repository: str,
+            project_number: int, issue_number: int = 0, item_id: str = "", field_id: str = "",
+            value: dict | None = None, expected_value: dict | None = None, *, transport) -> dict:
+    """Add an Issue to an organization Project or update one Project item field."""
+    with connection.preflight():
+        if action not in {"add_item", "update_field"}:
+            raise Fault("invalid_github_request", "Select add_item or update_field.")
+        if action == "add_item":
+            if type(issue_number) is not int or issue_number < 1 or item_id or field_id or value is not None or expected_value is not None:
+                raise Fault("invalid_github_request", "Adding an Issue requires its number and the Project number.")
+        else:
+            if issue_number or not item_id or not field_id or not isinstance(value, dict) or len(value) != 1:
+                raise Fault("invalid_github_request", "Updating a Project field requires an item, a field and one value.")
+            key, entry = next(iter(value.items()))
+            allowed = {"text", "number", "date", "singleSelectOptionId", "iterationId"}
+            if (key not in allowed or
+                    (key in {"text", "date", "singleSelectOptionId", "iterationId"}
+                     and (not isinstance(entry, str) or not 1 <= len(entry) <= 1024))
+                    or (key == "number" and (type(entry) not in {int, float} or not -1e100 < entry < 1e100))
+                    or not isinstance(field_id, str) or not 1 <= len(field_id) <= 200):
+                raise Fault("invalid_github_request", "Use a bounded text, number, date, select option or iteration ID.")
+            if expected_value is not None and (not isinstance(expected_value, dict) or len(expected_value) != 1):
+                raise Fault("invalid_github_request", "Expected value must contain one observed field value.")
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        selected = _project_node(repository, project_number, transport=transport)
+        if action == "add_item":
+            issue = object_response(transport("GET", f"repos/{repository}/issues/{issue_number}"))
+            if "pull_request" in issue or not isinstance(issue.get("node_id"), str):
+                raise Fault("invalid_github_request", "Select an Issue in the configured repository.")
+            content_id = issue["node_id"]
+            mutation = "addProjectV2ItemById"
+            inputs = {"projectId": selected["id"], "contentId": content_id}
+            query = "mutation($input:AddProjectV2ItemByIdInput!){addProjectV2ItemById(input:$input){item{id}}}"
+        else:
+            existing = _project_item(selected["id"], item_id, transport=transport)
+            if not existing["fields_complete"]:
+                raise Fault("github_evidence_unavailable", "Project field evidence is incomplete.")
+            current = next((field for field in existing["field_values"] if field["field_id"] == field_id), None)
+            if expected_value is not None and (current is None or not all(current.get(k) == v for k, v in expected_value.items())):
+                raise Fault("github_object_changed", "Project field changed since the observed value.")
+            mutation = "updateProjectV2ItemFieldValue"
+            inputs = {"projectId": selected["id"], "itemId": item_id, "fieldId": field_id, "value": value}
+            query = ("mutation($input:UpdateProjectV2ItemFieldValueInput!)"
+                     "{updateProjectV2ItemFieldValue(input:$input){projectV2Item{id}}}")
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The account changed before the Project mutation.")
+
+    try:
+        response = object_response(connection.mutation_request(
+            "POST", "graphql", {"query": query, "variables": {"input": inputs}}, transport=transport))
+    except Fault as error:
+        if error.effect == "known_no_effect":
+            raise
+        return _public({"status": "write_outcome_unknown", "repository": repository, "error_code": error.code})
+    except OSError:
+        return _public({"status": "write_outcome_unknown", "repository": repository,
+                        "error_code": "github_response_unknown"})
+    if response.get("errors") or not isinstance(response.get("data"), dict):
+        return _public({"status": "write_outcome_unknown", "repository": repository,
+                        "error_code": "github_graphql_error"})
+    payload = response["data"].get(mutation)
+    acknowledged = payload.get("item" if action == "add_item" else "projectV2Item") if isinstance(payload, dict) else None
+    returned_id = acknowledged.get("id") if isinstance(acknowledged, dict) else None
+    if not isinstance(returned_id, str) or (action == "update_field" and returned_id != item_id):
+        return _public({"status": "write_unverified", "repository": repository, "error_code": "github_response_unknown"})
+    try:
+        observed = _project_item(selected["id"], returned_id, transport=transport)
+        if action == "add_item":
+            verified = (observed["content"] or {}).get("id") == content_id
+        else:
+            current = next((field for field in observed["field_values"] if field["field_id"] == field_id), None)
+            value_key = {"singleSelectOptionId": "optionId"}.get(key, key)
+            verified = (observed["fields_complete"] and current is not None
+                        and current.get(value_key) == entry)
+        verified &= connection.read_actor(settings, transport=transport) == actor
+    except (Fault, OSError, KeyError, TypeError):
+        verified = False
+    return _public({"status": "verified" if verified else "write_unverified", "repository": repository,
+                    "actor": actor, "receipt": {"id": returned_id, "project_number": project_number},
+                    "fields_verified": bool(verified)})
+
+
 def _merge_destination(root: str, sha: str, base_ref: str, *, transport) -> tuple[dict, str] | None:
     """Verify the original commit in the destination without any mutation."""
     commit = object_response(transport("GET", f"{root}/commits/{sha}"))
@@ -267,7 +467,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
-    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge"}
+    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge", "project"}
             or not isinstance(anchor, str) or not re.fullmatch(r"om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}", anchor)
             or any(value is not None and (type(value) is not int or value < 1) for value in (number, parent))):
         raise Fault("invalid_github_request", "Reconciliation requires the original bounded publication locator.")
@@ -275,6 +475,8 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     root, marker = f"repos/{repository}", f"<!-- {anchor} -->"
     unknown = {"status": "write_outcome_unknown", "repository": repository,
                "detail": "Original destination is unresolved; no publication was repeated."}
+    if kind == "project":
+        return _public(unknown)  # Project writes without original acknowledgments are never replayed.
     if kind == "review_thread":
         thread_id, head = locator.get("thread_id"), locator.get("expected_head_sha")
         if (number is None or parent is not None or not isinstance(thread_id, str)
