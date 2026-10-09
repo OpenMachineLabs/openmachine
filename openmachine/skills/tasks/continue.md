@@ -107,6 +107,11 @@ in the current Chat turn, not an automatic renewal or a new execution:
 Honor `foreground.stop_foreground=true` and `task_attention_required` as mandatory
 end-of-turn boundaries. Pause/cancel, expired task authority, changed ownership,
 unverified execution and platform/provider refusals are not lease recovery.
+A separate subsequent Chat request explicitly authorizing `abandon` is task
+administration, not a continuation of stopped work. Read the original receipts
+and apply the terminal-uncertainty guards in [control](control.md) without
+claiming, renewing or replaying the stopped Task. An in-turn foreground stop
+still ends the current turn; it is not a license to call `abandon` mid-wait.
 Renewal never resets command timeouts, foreground wait limits or observation budgets. Do not repeat renewal to hide an unchanged blocker or
 extend work without progress. Neither renewal nor reattachment replays an effect.
 

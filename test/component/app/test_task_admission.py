@@ -87,6 +87,17 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         original = self.view()["record"]["operations"][0].copy()
         legacy = {"status": "outcome_unknown", "execution_id": old_id, "exit_code": 0,
                   "command": {"exited": True}, "cleanup": {"status": "unverified"}}
+        separate = self.root / "isolated"
+        separate.mkdir()
+        self.config.workspaces["isolated"] = type(self.config.workspaces["project"])(
+            machine="desktop", root=separate)
+        new_context = self.app.read_workspace_file("desktop", "isolated", "AGENTS.md")["context"]
+        replacement = task_contract(new_context, "replacement")
+        replacement["anchors"] = self.request["anchors"]
+        replacement["contract"]["targets"][0]["workspace"] = "isolated"
+        replacement["contract"]["tools"] = ["read_task", "write_workspace_file"]
+        created = self.create(replacement)["record"]
+        # The replacement may be accepted before the original Task is abandoned.
         with patch.object(self.app.machines, "read_execution", return_value=legacy):
             request = self.control_arguments("abandon", reason="Replace the blocked Spec attempt.")
             abandoned = self.app.control_task(**request)
@@ -98,16 +109,6 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(tasks.read(self.state, "structured-one")["counts"]["unknown_count"], 1)
         self.fault("task_terminal", self.control, "resume", reason="A new task is required.")
 
-        separate = self.root / "isolated"
-        separate.mkdir()
-        self.config.workspaces["isolated"] = type(self.config.workspaces["project"])(
-            machine="desktop", root=separate)
-        new_context = self.app.read_workspace_file("desktop", "isolated", "AGENTS.md")["context"]
-        replacement = task_contract(new_context, "replacement")
-        replacement["anchors"] = self.request["anchors"]
-        replacement["contract"]["targets"][0]["workspace"] = "isolated"
-        replacement["contract"]["tools"] = ["read_task", "write_workspace_file"]
-        created = self.create(replacement)["record"]
         next_task = self.app.control_task(task_id="replacement", expected_revision=created["revision"],
             expected_plan_revision=1, expected_epoch=0, update_id=uuid.uuid4().hex,
             transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
@@ -121,6 +122,34 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(result["status"], "applied")
         self.assertEqual((separate / "continued.txt").read_text(), "new isolated work\\n")
         self.assertEqual(self.app.read_task("structured-one")["record"]["terminal"]["outcome"], "abandoned")
+
+    def test_cancelled_legacy_task_with_two_unknown_operations_can_be_abandoned(self):
+        self.accept_plan()
+        original_id = self.retained_local_operation(status="unknown")
+        cancellation_id = uuid.uuid4().hex
+
+        def interrupted(record, now):
+            record["control"].update(state="paused", stop_intent="cancel", owner=None, epoch=2,
+                                     pending_decision="Await original operation outcomes.")
+            record["handoff"] = None
+            cancellation = json.loads(json.dumps(record["operations"][0]))
+            cancellation.update(id=cancellation_id, epoch=2, admitted_at_ms=now,
+                                observed_at_ms=now, request_sha256="f" * 64)
+            record["operations"].append(cancellation)
+
+        tasks.update(self.state, "structured-one", interrupted)
+        original = tasks.read(self.state, "structured-one",
+                              operation_ids=[original_id, cancellation_id])["record"]["operations"]
+        self.assertEqual(len(original), 2)
+        with patch.object(self.app.machines, "read_execution",
+                          return_value={"status": "outcome_unknown", "command": {"exited": True},
+                                        "cleanup": {"status": "unverified"}, "exit_code": 0}) as reader:
+            abandoned = self.control("abandon", reason="Retire stopped legacy Spec attempt.")
+        self.assertEqual(reader.call_count, 2)
+        self.assertEqual(abandoned["record"]["terminal"]["outcome"], "abandoned")
+        current = tasks.read(self.state, "structured-one", operation_ids=[original_id, cancellation_id])
+        self.assertEqual(current["record"]["operations"], original)
+        self.assertEqual(current["counts"]["unknown_count"], 2)
 
     def test_unverified_live_execution_cannot_be_force_abandoned(self):
         self.accept_plan()
