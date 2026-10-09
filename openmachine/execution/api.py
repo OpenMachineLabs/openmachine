@@ -572,7 +572,7 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
                 raise Fault("cleanup_unverified", "The original session still has live members; no signals or recovery were issued.")
             raw = (directory / "record.json").read_bytes()
             evidence = {"format": 1, "execution_id": execution_id, "receipt_sha256": hashlib.sha256(raw).hexdigest(),
-                        "observed_at": time.time(), "created_worktree": None}
+                        "observed_at": max(time.time(), record["finished_at"]), "created_worktree": None}
             if record["format_version"] == CREATION_FORMAT and record["exit_code"] == 0 and record["stop"]["reason"] is None:
                 evidence["created_worktree"] = worktrees.verify_creation(record["context"]["creation_plan"])
             reconciled_record(record, evidence, evidence["receipt_sha256"], execution_id)

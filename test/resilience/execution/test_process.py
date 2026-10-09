@@ -244,6 +244,20 @@ while True: time.sleep(0.05)
                 self.assertEqual(caught.exception.code, "incompatible_state")
         self.assertEqual(path.read_bytes(), original)
 
+    def test_cleanup_reconciliation_survives_wall_clock_rollback(self):
+        setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_query_timeout", "injected failure")\nw.Process.members=fail'
+        with self.injected_worker(setup):
+            result = self.finish(self.start('print("original")', termination_grace_seconds=0))
+        identity = result["execution_id"]
+        path = self.state / "executions" / identity / "record.json"
+        original = path.read_bytes()
+        with patch.object(api.time, "time", return_value=result["finished_at"] - 60):
+            recovered = execution.reconcile(self.config, self.state, "local", identity)
+        self.assertEqual(recovered["status"], "succeeded")
+        self.assertEqual(recovered["cleanup"]["reconciled_at"], result["finished_at"])
+        self.assertEqual(execution.read(self.config, self.state, "local", identity)["status"], "succeeded")
+        self.assertEqual(path.read_bytes(), original)
+
     def test_cleanup_reconciliation_rejects_missing_identity_changed_boot_and_uncertain_control(self):
         setup = 'w.FORCE_SECONDS=.05\ndef fail(*_): raise w.Fault("cleanup_unverified", "injected failure")\nw.Process.members=fail'
         with self.injected_worker(setup):
