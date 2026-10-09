@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 from openmachine import tasks
-from openmachine.mcp_protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT,
+from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT,
                                       _reply, _result, _submit_owned)
 
 def register_task_tools(application, guided_tool, waiting):

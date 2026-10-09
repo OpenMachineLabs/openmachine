@@ -23,11 +23,11 @@ from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
-from openmachine.mcp_protocol import READ, _reply, _result, MAX_WAITERS
-from openmachine.mcp_tools_connections import register_connections, register_github_tools
-from openmachine.mcp_tools_workspace import register_workspace_tools
-from openmachine.mcp_tools_tasks import register_task_tools
-from openmachine.mcp_tools_execution import register_execution_tools
+from openmachine.mcp.protocol import READ, _reply, _result, MAX_WAITERS
+from openmachine.mcp.connections import register_connections, register_github_tools
+from openmachine.mcp.workspace import register_workspace_tools
+from openmachine.mcp.tasks import register_task_tools
+from openmachine.mcp.execution import register_execution_tools
 
 
 def create_server(config: Settings, state: Path) -> MCPServer:

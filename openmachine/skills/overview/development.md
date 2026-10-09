@@ -6,7 +6,8 @@
 
 | Owner | Responsibility |
 | --- | --- |
-| `server.py`, `cli.py` | Explicit schemas, serialization and command entries. |
+| `server.py`, `cli.py` | MCP assembly, middleware, lifespan, socket serving and command entries. |
+| `mcp/` | Shared wire schemas/replies and direct Connections, Workspace, Task and Execution tool registration. |
 | `bootstrap.py`, `app/` | Enabled-component assembly, lifecycle/task admission and target routing. |
 | `execution/` | Original commands, pipe/PTY controls, cleanup, receipts and bounded logs. |
 | `workspace/` | Source/Git observations, preparation, change records and guarded publication. |

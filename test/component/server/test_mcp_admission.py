@@ -12,7 +12,8 @@ import unittest
 from unittest.mock import Mock, patch
 import httpx2 as httpx
 from mcp.server.mcpserver.exceptions import ToolError
-from openmachine import mcp_protocol, server, tasks
+from openmachine import server, tasks
+from openmachine.mcp import protocol
 from openmachine.config import Settings
 
 
@@ -34,7 +35,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.structured_content, payload)
             self.assertEqual(json.loads(result.content[0].text), payload)
             self.assertLess(len(json.dumps(result.model_dump(mode="json", by_alias=True)).encode()),
-                            mcp_protocol.MAX_TASK_RESULT_BYTES)
+                            protocol.MAX_TASK_RESULT_BYTES)
             # Modern HTTP escapes non-ASCII twice across text and structured
             # content; a valid maximum data item must still be retrievable.
             application.connections.running.return_value = nullcontext()
@@ -57,8 +58,8 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(wire["isError"])
             self.assertEqual(wire["structuredContent"]["items"], [large])
             self.assertEqual(json.loads(wire["content"][0]["text"]), wire["structuredContent"])
-            self.assertLess(len(response.content), mcp_protocol.MAX_TASK_RESULT_BYTES)
-            application.read_task.return_value = {**payload, "items": [{"summary": "x" * mcp_protocol.MAX_TASK_RESULT_BYTES}]}
+            self.assertLess(len(response.content), protocol.MAX_TASK_RESULT_BYTES)
+            application.read_task.return_value = {**payload, "items": [{"summary": "x" * protocol.MAX_TASK_RESULT_BYTES}]}
             result = await mcp.call_tool("read_task", arguments)
             self.assertTrue(result.is_error)
             self.assertEqual(result.structured_content["task_id"], "wire-bound")
@@ -92,7 +93,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "create_application", return_value=application):
                 mcp = server.create_server(config, root / "state")
             args = {"machine": "local", "execution_id": "a" * 32, "wait_seconds": 5}
-            with patch.object(mcp_protocol, "ThreadPoolExecutor", side_effect=OSError("fixture unavailable")):
+            with patch.object(protocol, "ThreadPoolExecutor", side_effect=OSError("fixture unavailable")):
                 with self.assertRaises(ToolError):
                     await mcp.call_tool("read_execution", args)
             readers = [asyncio.create_task(mcp.call_tool("read_execution", args)) for _ in range(16)]

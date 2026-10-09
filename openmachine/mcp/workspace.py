@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 from openmachine import tasks
-from openmachine.mcp_protocol import (READ, MAX_SOURCE, ExactEdit, PatchPrecondition,
+from openmachine.mcp.protocol import (READ, MAX_SOURCE, ExactEdit, PatchPrecondition,
                                       _reply, _submit_owned, _task_context)
 
 def register_workspace_tools(application, guided_tool, machine_read, file_write):
