@@ -149,21 +149,6 @@ class Contract(Model):
         return self
 
 
-class RetainedContract(Contract):
-    """Read retired recovery policy from original Task authority, never new input."""
-
-    recovery_policy: Literal["task_chat", "disabled"] | None = None
-
-    @model_serializer(mode="wrap")
-    def serialized(self, handler):
-        value = handler(self)
-        if not self.github_connections:
-            value.pop("github_connections", None)
-        if self.recovery_policy is None:
-            value.pop("recovery_policy", None)
-        return value
-
-
 class StageDefinition(Model):
     id: TaskID
     depends_on: Annotated[list[TaskID], Field(max_length=16)]
@@ -418,13 +403,6 @@ class LastUpdate(Model):
     request_sha256: SHA
 
 
-def _retained_recovery_fields(version: int, contract: RetainedContract, has_registration: bool) -> None:
-    """Keep original format-3/4 fields paired without granting retired recovery."""
-    retired = contract.recovery_policy is not None or has_registration
-    if retired and (version < 3 or contract.recovery_policy is None or not has_registration):
-        raise ValueError("retired recovery metadata must retain its original format and pair")
-
-
 class Current(Model):
     format: Annotated[int, Field(strict=True, ge=1, le=4)]
     task_id: TaskID
@@ -434,21 +412,18 @@ class Current(Model):
     created_at_ms: Integer
     updated_at_ms: Integer
     origin: Origin
-    contract: RetainedContract
+    contract: Contract
     plan: Plan
     control: Control
     handoff: Handoff | None
     recovery: Recovery | None
     terminal: Terminal | None
     last_update: LastUpdate
-    chat_registration: ID | None = None
     control_revision: Revision | None = None
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
-        if "chat_registration" not in self.model_fields_set:
-            value.pop("chat_registration", None)
         if self.format < 4:
             value.pop("control_revision", None)
             value.pop("effect_scopes", None)
@@ -457,7 +432,6 @@ class Current(Model):
     @model_validator(mode="after")
     def references(self):
         _stages(self.contract, self.plan.stages)
-        _retained_recovery_fields(self.format, self.contract, "chat_registration" in self.model_fields_set)
         if self.format < 4:
             if self.control_revision is not None:
                 raise ValueError("scoped supervision requires format 4")
@@ -516,7 +490,6 @@ class Record(Current):
     @model_validator(mode="after")
     def references(self):
         _stages(self.contract, self.plan.stages)
-        _retained_recovery_fields(self.format, self.contract, "chat_registration" in self.model_fields_set)
         if self.format < 4:
             if self.control_revision is not None or self.effect_scopes or any(
                     op.effect_scope is not None or op.result is not None and (

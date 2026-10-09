@@ -501,7 +501,8 @@
         "openmachine/tasks/migration.py",
         "openmachine/tasks/records.py",
         "openmachine/tasks/store.py",
-        "openmachine/tasks/transitions.py"
+        "openmachine/tasks/transitions.py",
+        "scripts/retire_chat_recovery_once.py"
       ],
       "tests": [
         "test/component/tasks/test_legacy.py",
