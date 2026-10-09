@@ -7,7 +7,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 from openmachine.foundation.state import lease
-from openmachine.service import checks, install, payload
+from openmachine.service import checks, install, payload, processes
 from test.support.payload_cases import PayloadCaseFixture
 
 
@@ -21,7 +21,7 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         def state(python, *_args, **kwargs):
             self.assertIn(str(self.state / "service/payloads"), kwargs["env"]["PATH"])
             return {"version": "0.2.8", "prefix": str(python.parent.parent), "protocol": 1, "state_contract": 13}
-        with patch.object(checks, "_run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
+        with patch.object(processes, "run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
             result = install.prepare_payload(self.config, self.state, self.source, self.digest)
             again = install.prepare_payload(self.config, self.state, self.source, self.digest)
             with lease(self.state / "service/operation.lock"):
@@ -46,7 +46,7 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         self.assertEqual(record["payload_sha256"], self.digest)
         candidate = self.root / "candidate.toml"
         candidate.write_bytes(self.config.read_bytes() + b"# configuration-only update\n")
-        with patch.object(checks, "_run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
+        with patch.object(processes, "run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):
             changed = install.prepare_payload(candidate, self.state, self.source, self.digest)
             self.assertEqual(install.prepare_payload(candidate, self.state, self.source, self.digest), changed)
         self.assertEqual(changed["payload_sha256"], result["payload_sha256"])
@@ -54,14 +54,14 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         self.assertFalse((self.state / "service/service.json").exists())
 
     def test_failed_installation_is_retained_without_an_online_fallback(self):
-        with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 1, "", "")):
+        with patch.object(processes, "run", return_value=subprocess.CompletedProcess([], 1, "", "")):
             self.fault("installation_failed", lambda: install._prepare(
                 self.state, self.wheel, self.source / "requirements.lock", self.config,
                 offline=(self.source, self.digest, self.manifest)))
         versions = list((self.state / "service/versions").iterdir())
         self.assertEqual(len(versions), 1)
         self.assertFalse((versions[0] / "installation.json").exists())
-        with patch.object(checks, "_run") as run:
+        with patch.object(processes, "run") as run:
             self.fault("service_state_invalid", lambda: install._prepare(
                 self.state, self.wheel, self.source / "requirements.lock", self.config,
                 offline=(self.source, self.digest, self.manifest)))
@@ -71,7 +71,7 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
     def test_same_python_version_with_different_payload_has_different_identity(self):
         def state(python, *_args, **kwargs):
             return {"version": "0.2.8", "prefix": str(python.parent.parent), "protocol": 1, "state_contract": 13}
-        with patch.object(checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+        with patch.object(processes, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
                 patch.object(checks, "_candidate_state", side_effect=state):
             first = install._prepare(self.state, self.wheel, self.source / "requirements.lock", self.config,
                                      offline=(self.source, self.digest, self.manifest))

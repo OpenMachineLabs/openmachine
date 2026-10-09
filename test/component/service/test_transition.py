@@ -10,6 +10,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
@@ -302,7 +303,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(sys, "platform", "darwin"), patch.object(service_runtime, "_verify_files"), \
                 patch.object(service_runtime, "socket_alive", return_value=False), \
                 patch.object(service_runtime, "status", return_value={"status": "ready"}), \
-                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, \
+                patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, \
                 patch.object(service_checks, "_candidate_state", side_effect=observed):
             first = service_install._prepare(self.state, wheel, requirements, self.config)
             self.save(self.record | {"current": first})

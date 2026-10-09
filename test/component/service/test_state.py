@@ -9,6 +9,7 @@ from unittest.mock import patch
 from openmachine import service
 from openmachine.foundation.state import save_json
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from test.support.service_cases import ServiceCaseFixture
@@ -51,7 +52,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), proof)
         for delta in ({"state_contract": 13}, {"service_policy_present": False},
                       {"service_policy_sha256": "0" * 64}, {"service_policy_format": True}):
-            with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+            with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
         self.save(record | {"format": 1})
         self.assert_fault("service_state_invalid", lambda: service_state._record(self.state))

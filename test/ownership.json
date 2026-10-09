@@ -278,7 +278,6 @@
       "tests": [
         "test/component/service/test_checks.py",
         "test/component/service/test_workspace_compatibility.py",
-        "test/resilience/service/test_subprocess.py",
         "test/resilience/service_checks/test_mcp_readiness.py"
       ]
     },
@@ -320,6 +319,22 @@
       "tests": [
         "test/component/service/test_payload.py",
         "test/component/service/test_payload_builder.py"
+      ]
+    },
+    "service_processes": {
+      "boundary_tests": [
+        "test/component/service/test_checks.py",
+        "test/component/service/test_install.py",
+        "test/component/service/test_maintenance.py",
+        "test/component/service/test_runtime.py",
+        "test/component/service/test_transition.py",
+        "test/resilience/service/test_maintenance_process.py"
+      ],
+      "sources": [
+        "openmachine/service/processes.py"
+      ],
+      "tests": [
+        "test/resilience/service/test_subprocess.py"
       ]
     },
     "service_runtime": {

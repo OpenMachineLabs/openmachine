@@ -12,6 +12,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
 from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from test.support.service_cases import ServiceCaseFixture
@@ -42,7 +43,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
         for delta in ({"state_contract": 7}, {"runtime_recovery_present": False},
                       {"runtime_recovery_format": True}, {"runtime_recovery_sha256": "e" * 64}):
-            with self.subTest(delta=delta), patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess(
+            with self.subTest(delta=delta), patch.object(service_processes, "run", return_value=subprocess.CompletedProcess(
                     [], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
         self.assertEqual((self.state / "service/service.json").read_bytes(), before)
@@ -239,11 +240,11 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertNotEqual(service_runtime._label(self.state), service_runtime._label(self.root / "other-state"))
 
     def test_missing_and_unverifiable_native_states_are_distinct(self):
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 3, "", "Could not find service fixture")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 3, "", "Could not find service fixture")):
             self.assertFalse(service_runtime._native(self.state)["loaded"])
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 1, "", "Unknown GUI domain")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 1, "", "Unknown GUI domain")):
             self.assert_fault("user_service_unavailable", lambda: service_runtime._native(self.state))
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "path = /other/job.plist\npid = 123\n", "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "path = /other/job.plist\npid = 123\n", "")):
             self.assert_fault("service_identity_mismatch", lambda: service_runtime._native(self.state))
 
     def test_product_definition_selects_retained_git_and_accepts_exact_prior_profile(self):
@@ -298,12 +299,12 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         label = service_runtime._label(self.state)
         def reply(disabled):
             return subprocess.CompletedProcess([], 0, f'disabled services = {{\n "{label}" => {disabled}\n}}', "")
-        with patch.object(service_checks, "_run", return_value=reply("true")):
+        with patch.object(service_processes, "run", return_value=reply("true")):
             self.assertFalse(service_runtime._startup(self.state)["enabled"])
             self.assert_fault("startup_denied", lambda: service_runtime._set_startup(self.state, True))
-        with patch.object(service_checks, "_run", return_value=reply("false")):
+        with patch.object(service_processes, "run", return_value=reply("false")):
             self.assertTrue(service_runtime._startup(self.state)["enabled"])
-        with patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "unrecognized", "")):
+        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "unrecognized", "")):
             self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
 
     def test_idle_stopped_login_reports_stopped_and_start_reloads_disabled_job(self):
@@ -319,7 +320,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 patch.object(service_runtime, "_stop") as stop, patch.object(service_runtime, "_sync_definition"), \
                 patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
                 patch.object(service_runtime, "_set_startup") as startup, \
-                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
                 patch.object(service_checks, "_managed_probe", return_value={"status": "ready"}):
             self.assertEqual(service_runtime._start(self.state, running)["status"], "ready")
         stop.assert_called_once_with(self.state)
@@ -330,12 +331,12 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         label = service_runtime._label(self.state)
         for spelling, enabled in (("true", False), ("false", True), ("disabled", False), ("enabled", True)):
             output = 'disabled services = {\n    "' + label + '" => ' + spelling + '\n}\n'
-            with self.subTest(spelling=spelling), patch.object(service_checks, "_run",
+            with self.subTest(spelling=spelling), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, output, "")):
                 self.assertEqual(service_runtime._startup(self.state)["enabled"], enabled)
         for spelling in ("unknown", "true extra", "", "enabled unexpected"):
             output = 'disabled services = {\n    "' + label + '" => ' + spelling + '\n}\n'
-            with self.subTest(spelling=spelling), patch.object(service_checks, "_run",
+            with self.subTest(spelling=spelling), patch.object(service_processes, "run",
                     return_value=subprocess.CompletedProcess([], 0, output, "")):
                 self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
 
@@ -347,7 +348,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 patch.object(service_runtime, "_sync_definition"), \
                 patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
                 patch.object(service_runtime, "_set_startup") as startup, \
-                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
                 patch.object(service_checks, "_managed_probe", return_value={"status": "ready"}):
             self.assertEqual(service_runtime._start(self.state, self.record)["status"], "ready")
         self.assertEqual(startup.call_args_list, [call(self.state, True), call(self.state, False)])

@@ -21,8 +21,7 @@ from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 
-from . import state as service_state
-from . import checks
+from . import checks, processes, state as service_state
 from .state import HEALTH_INTERVAL_SECONDS, LAUNCHER, READINESS_SECONDS, RECOVERY_ATTEMPTS, RECOVERY_MS
 
 
@@ -109,7 +108,7 @@ def _verify_files(state: Path, record: dict) -> None:
 
 
 def _startup(state: Path) -> dict:
-    result = checks._run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"])
+    result = processes.run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"])
     if result.returncode:
         raise Fault("startup_unknown", "The effective user-service startup registration could not be observed.")
     match = re.search(r'^\s*"' + re.escape(_label(state)) + r'"[ \t]*=>[ \t]*(.*)$', result.stdout, re.MULTILINE)
@@ -122,7 +121,7 @@ def _startup(state: Path) -> dict:
 
 
 def _set_startup(state: Path, enabled: bool) -> dict:
-    result = checks._run(["/bin/launchctl", "enable" if enabled else "disable", f"gui/{os.getuid()}/{_label(state)}"])
+    result = processes.run(["/bin/launchctl", "enable" if enabled else "disable", f"gui/{os.getuid()}/{_label(state)}"])
     observed = _startup(state)
     if result.returncode or observed["enabled"] != enabled:
         raise Fault("startup_denied", "The requested startup registration was not verified; read effective OS policy.")
@@ -152,7 +151,7 @@ def _sync_definition(state: Path, record: dict) -> None:
 
 
 def _native(state: Path) -> dict:
-    result = checks._run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{_label(state)}"])
+    result = processes.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{_label(state)}"])
     if result.returncode:
         if "Could not find service" in result.stderr:
             return {"loaded": False, "pid": None}
@@ -184,7 +183,7 @@ def socket_alive(path: Path) -> bool:
 def _stop(state: Path) -> None:
     observed = _native(state)
     if observed["loaded"]:
-        checks._run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{_label(state)}"])
+        processes.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
     while True:
         if not _native(state)["loaded"] and not socket_alive(state / "mcp.sock"):
@@ -214,12 +213,12 @@ def _start(state: Path, record: dict) -> dict:
         try:
             if disabled:
                 _set_startup(state, True)
-            checks._run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(_plist_path(state))])
+            processes.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(_plist_path(state))])
         finally:
             if disabled:
                 _set_startup(state, False)
     elif observed["pid"] is None:
-        checks._run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{_label(state)}"])
+        processes.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         observed = _native(state)

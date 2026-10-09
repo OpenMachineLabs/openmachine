@@ -15,9 +15,8 @@ from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
+from . import checks, payload, processes
 from . import state as service_state
-from . import checks
-from . import payload
 
 
 def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path, *,
@@ -79,7 +78,7 @@ def _prepare(state: Path, wheel: Path, requirements: Path, config_path: Path, *,
     for argv in ([python, "-I", "-m", "venv", str(destination)],
                  [*pip, *install, "-r", str(requirements)],
                  [*pip, *install, str(wheel)], [*pip, "check"]):
-        if checks._run(argv, timeout=180, **isolated).returncode:
+        if processes.run(argv, timeout=180, **isolated).returncode:
             raise Fault("installation_failed", "Candidate installation failed; the active runtime is untouched and the candidate is retained.")
     observed = checks._candidate_state(destination / "bin/python", config_path, state, **isolated)
     if observed["version"] != version or observed["prefix"] != str(destination):
@@ -111,9 +110,9 @@ def _prepare_payload(config_path: Path, state: Path, source: Path, expected_sha2
     retained, manifest = payload.retain(state, source, expected_sha256)
     env = payload.environment(retained)
     python = retained / "python/bin/python3"
-    observed_python = checks._run([str(python), "-I", "-B", "-c",
+    observed_python = processes.run([str(python), "-I", "-B", "-c",
         "import platform; print(platform.python_version())"], env=env)
-    observed_git = checks._run([str(retained / "bin/git"), "--version"], env=env)
+    observed_git = processes.run([str(retained / "bin/git"), "--version"], env=env)
     if (observed_python.returncode or observed_python.stdout.strip() != manifest["python"]["version"]
             or observed_git.returncode or observed_git.stdout.strip() != "git version " + manifest["git"]["version"]):
         raise Fault("installation_identity_mismatch", "The retained Python or Git does not match the payload declaration.")

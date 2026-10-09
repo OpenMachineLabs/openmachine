@@ -12,6 +12,7 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
+from openmachine.service import processes as service_processes
 from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
@@ -180,7 +181,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_operation_same_id_reads_original_and_conflicting_ids_are_busy(self):
         record = self.operation_fixture()
-        with patch.object(maintenance, "_spawn") as spawn, patch.object(service_checks, "_run") as run:
+        with patch.object(maintenance, "_spawn") as spawn, patch.object(service_processes, "run") as run:
             result = maintenance.submit(self.config, self.state, "update", record["operation_id"], Path("missing"), "wrong")
             self.assertEqual(result["operation"], record)
             self.assertEqual(result["status"], "continuation_required")
@@ -479,7 +480,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertTrue(os.get_inheritable(int(argv[-1])))
             raise SystemExit(0)
         with patch.object(maintenance.payload, "retain", return_value=(retained, {"core": {"version": "next"}})), \
-                patch.object(service_checks, "_run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")), \
+                patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")), \
                 patch.object(maintenance.os, "execve", side_effect=handoff), \
                 patch.object(service_install, "_prepare_payload") as prepare, lease(self.state / "service/operation.lock") as lock:
             with self.assertRaises(SystemExit):
