@@ -6,7 +6,7 @@ import subprocess
 import unittest
 import uuid
 from mcp import ClientSession
-from openmachine import server
+from openmachine import mcp_protocol
 from test.support.mcp import MCPFixture
 
 
@@ -137,7 +137,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     result = await session.call_tool("inspect_workspace", scope | {"offset": offset, "expected_snapshot": snapshot})
                     self.assertFalse(result.is_error, result)
                     encoded = json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()
-                    self.assertLessEqual(len(encoded), server.MAX_WORKSPACE_RESULT - 1024)
+                    self.assertLessEqual(len(encoded), mcp_protocol.MAX_WORKSPACE_RESULT - 1024)
                     page = result.structured_content
                     self.assertEqual(json.loads(result.content[0].text), page)
                     lines.extend(item["line"] for item in page["matches"])
@@ -163,7 +163,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     result = await session.call_tool("read_workspace_file", scope | {"offset": offset})
                     self.assertFalse(result.is_error, result)
                     self.assertLessEqual(len(json.dumps(result.model_dump(mode="json", by_alias=True, exclude_none=True)).encode()),
-                                         server.MAX_WORKSPACE_RESULT - 1024)
+                                         mcp_protocol.MAX_WORKSPACE_RESULT - 1024)
                     page = result.structured_content
                     parts.append(page["text"])
                     if not page["has_more"]:

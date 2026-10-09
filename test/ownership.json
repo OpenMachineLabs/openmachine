@@ -253,7 +253,12 @@
         "test/resilience/github/test_mcp_connection.py"
       ],
       "sources": [
-        "openmachine/server.py"
+        "openmachine/server.py",
+        "openmachine/mcp_protocol.py",
+        "openmachine/mcp_tools_connections.py",
+        "openmachine/mcp_tools_workspace.py",
+        "openmachine/mcp_tools_tasks.py",
+        "openmachine/mcp_tools_execution.py"
       ],
       "tests": [
         "test/component/server/test_mcp_admission.py",

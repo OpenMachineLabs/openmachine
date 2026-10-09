@@ -5,7 +5,7 @@ import sys
 import unittest
 import uuid
 from mcp import ClientSession
-from openmachine import server
+from openmachine import mcp_protocol
 from test.support.mcp import MCPFixture
 
 
@@ -33,7 +33,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.structured_content["change_id"],identity)
                 self.assertEqual(len(result.structured_content["effects"]),1)
                 self.assertEqual(json.loads(result.content[0].text),result.structured_content)
-                self.assertLessEqual(len(json.dumps(result.model_dump(mode="json",by_alias=True,exclude_none=True)).encode()),server.MAX_WORKSPACE_RESULT-1024)
+                self.assertLessEqual(len(json.dumps(result.model_dump(mode="json",by_alias=True,exclude_none=True)).encode()),mcp_protocol.MAX_WORKSPACE_RESULT-1024)
                 denied = await session.call_tool("start_execution",{"machine":"desktop","execution_id":uuid.uuid4().hex,
                     "cwd":str(self.work),"argv":[sys.executable,"-c","pass"]})
                 self.assertEqual(denied.structured_content["error"]["code"],"execution_disabled")
