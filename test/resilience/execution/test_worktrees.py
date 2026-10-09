@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from openmachine import execution
 from openmachine.config import Workspace
-from openmachine.execution import api
+from openmachine.execution import api, observation
 from openmachine.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
@@ -198,7 +198,7 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
             raise Fault("context_mismatch", "The dispatched receipt can no longer be verified.")
 
         try:
-            with patch.object(api, "read", side_effect=disappear), self.assertRaises(Fault) as caught:
+            with patch.object(observation, "read", side_effect=disappear), self.assertRaises(Fault) as caught:
                 self.create(execution_id=identity)
             self.assertEqual(caught.exception.effect, "effect_unknown")
             self.assertTrue(Path(self.arguments()["destination"]).is_dir())

@@ -11,7 +11,7 @@ import uuid
 from openmachine import workspace
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace import changes, change_records, files
+from openmachine.workspace import changes, change_records, change_schema, files
 from test.support.workspace import WorkspaceFixture
 
 
@@ -331,7 +331,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         path = self.directory(identity) / "record.json"
         record = path.read_bytes()
         (self.work / "first").write_text("later\n")
-        with patch.object(change_records, "_record_budget", side_effect=AssertionError("No new admission")):
+        with patch.object(change_schema, "check_record_budget", side_effect=AssertionError("No new admission")):
             recovered = self.patch_apply(args, change_id=identity)
         self.assertEqual((recovered["created_at"], recovered["revision"]),
                          (original["created_at"], original["revision"]))
@@ -346,11 +346,11 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         self.fault("request_limit", lambda: patcher.parse(body))
         original = self.file.read_bytes()
         args = self.patch_arguments(self.patch_document("*** Update File: source.py\n@@\n-answer = 41\n+answer = 42\n"))
-        with patch.object(change_records, "MAX_PREPARED", len(original) * 2 - 1):
+        with patch.object(change_schema, "MAX_PREPARED", len(original) * 2 - 1):
             result = self.patch_apply(args)
         self.assertEqual((result["status"], result["error"]), ("rejected", "source_limit"))
         self.assertEqual(self.file.read_bytes(), original)
-        with patch.object(change_records, "MAX_RECORD", 3000):
+        with patch.object(change_schema, "MAX_RECORD", 3000):
             result = self.patch_apply(args)
         self.assertEqual((result["status"], result["error"]), ("rejected", "request_limit"))
         self.assertEqual(self.file.read_bytes(), original)
@@ -415,7 +415,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
 
     def test_patch_preview_enforces_record_budget_without_state(self):
         args = self.patch_arguments(self.patch_document("*** Add File: nested/new\n+new\n"), create_parents=True)
-        with patch.object(change_records, "MAX_RECORD", 3000):
+        with patch.object(change_schema, "MAX_RECORD", 3000):
             self.fault("request_limit", lambda: self.app.apply_workspace_patch(**args, dry_run=True))
         self.assertFalse(self.state.exists())
         self.assertFalse((self.work / "nested").exists())

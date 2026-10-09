@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 from integrations.ssh import MAX_MESSAGE, bundle, client, endpoint
 from openmachine import __version__, execution
-from openmachine.execution import api as execution_api
+from openmachine.execution import observation
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from test.support.ssh_cases import SSHCaseFixture
@@ -128,11 +128,11 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
                                   "argv": ["true"], "timeout_seconds": 10}}
             save_json(directory / "record.json", record)
         config = endpoint._RemoteConfig(self.identity, {}, False, False)
-        with patch.object(execution_api, "_scope_state", return_value="active"):
+        with patch.object(observation, "_scope_state", return_value="active"):
             self.assertEqual(execution.read(config, state, self.identity, directory.name)["status"], "finishing")
-        with patch.object(execution_api, "_scope_state", return_value="not-found"):
+        with patch.object(observation, "_scope_state", return_value="not-found"):
             self.assertEqual(execution.read(config, state, self.identity, directory.name)["status"], "succeeded")
-        with patch.object(execution_api, "_scope_state", side_effect=Fault("scope_unavailable", "No user manager")):
+        with patch.object(observation, "_scope_state", side_effect=Fault("scope_unavailable", "No user manager")):
             self.assertEqual(execution.read(config, state, self.identity, directory.name)["status"], "outcome_unknown")
         record["scope_unit"] = "unrelated.scope"
         save_json(directory / "record.json", record)
@@ -181,12 +181,12 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
             def inspect_scope(*args, **kwargs):
                 with lease(directory / "control.lock", create=False):
                     return observed
-            with patch.object(execution_api, "_scope_state", side_effect=inspect_scope):
+            with patch.object(observation, "_scope_state", side_effect=inspect_scope):
                 result = execution.read(config, state, self.identity, directory.name)
             self.assertEqual((result["status"], result["cleanup"]["status"]), (status, cleanup))
             self.assertEqual(result["exit_code"], 0)
             self.assertEqual((directory / "record.json").read_bytes(), original)
-        with patch.object(execution_api, "_scope_state", side_effect=Fault("scope_unavailable", "fixture")):
+        with patch.object(observation, "_scope_state", side_effect=Fault("scope_unavailable", "fixture")):
             result = execution.read(config, state, self.identity, directory.name)
         self.assertEqual((result["status"], result["cleanup"]["status"]), ("outcome_unknown", "unverified"))
         self.assertEqual((directory / "record.json").read_bytes(), original)
@@ -224,7 +224,7 @@ class SSHTests(SSHCaseFixture, unittest.TestCase):
             save_json(directory / "record.json", record)
         before = (directory / "record.json").read_bytes()
         config = endpoint._RemoteConfig(self.identity, {}, False, False)
-        with patch.object(execution_api, "_scope_state", return_value="active"):
+        with patch.object(observation, "_scope_state", return_value="active"):
             observed = execution.read(config, state, self.identity, directory.name)
             self.assertEqual(observed["status"], "outcome_unknown")
             self.assertEqual(observed["control"]["last"]["status"], "outcome_unknown")
