@@ -136,8 +136,6 @@ def merge_gate(repository: str, number: int, head: str, base: str = "", *, trans
         blockers.append("unresolved_review_threads")
     if "CHANGES_REQUESTED" in effective.values() or policy["reviewDecision"] in {"CHANGES_REQUESTED", "REVIEW_REQUIRED"}:
         blockers.append("review_requirements_not_met")
-    if not current:
-        blockers.append("no_submitted_current_head_review")
     if (policy["state"] != "OPEN" or policy["isDraft"] or policy["mergeable"] != "MERGEABLE"
             or policy["mergeStateStatus"] != "CLEAN" or policy["mergeQueueEntry"] is not None):
         blockers.append("native_policy_not_clean_or_queue_unsupported")

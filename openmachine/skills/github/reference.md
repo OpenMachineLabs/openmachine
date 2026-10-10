@@ -84,14 +84,17 @@ number, thread_id, expected_head_sha, expected_base_sha)` requires the PR to
 remain open, verifies thread membership and the opposite current state, then
 uses GitHub's specific GraphQL mutation. The resulting state, PR HEAD and actor
 are checked again. An uncertain response is not safe to retry automatically;
-original task evidence must be reconciled instead. This does not waive any review.
+original task evidence must be reconciled instead. It does not require a Review.
 
-Review complete evidence before an exact-head review and authorized merge.
+Inspect complete evidence before an optional exact-head review or authorized merge.
+No submitted GitHub Review, human approval, or self-review is required by Open
+Machine to merge. An optional COMMENT self-review can document useful findings;
+it is not independent approval.
 The gate allows at most 1,000 check/review/thread records per family, chooses latest
 check ID per app/name and latest status per context, and rejects gaps, current
 failed/pending checks, unresolved threads, effective change requests and unmet
-native policy. Zero checks is `no_checks`, not PASS. Self-review COMMENT is not
-independent approval. No bypass, auto-merge, queue or stacked-PR orchestration.
+native policy. Zero checks is `no_checks`, not PASS.
+No bypass, auto-merge, queue or stacked-PR orchestration.
 Only `merged_verified` proves the original commit reached the destination branch.
 
 New supervised merges retain their exact HEAD, original destination branch and

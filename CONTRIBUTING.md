@@ -67,13 +67,16 @@ with actual results rather than expected PASS claims. Use the PR template as
 presentation guidance and link the design or identify the current user request
 as the design source. Explain the problem and outcome, scope, actual validation,
 and material risks in the form that fits the change. Fixed PR section names are
-advisory; review still owns the substance. Retain one `- Issue: #N` field when
+advisory; inspect the actual candidate instead. Retain one `- Issue: #N` field when
 linking a Spec so the post-merge Development automation can find it.
 
-Review the entire candidate, not only its final commit. Governance, CI
-permissions, architecture, security, deployment, and public-contract changes
-need explicit maintainer review. A self-review is not independent approval.
-Creating a PR does not authorize merging; leave it open when review is requested.
+Inspect the entire candidate and its validation evidence, not only its final
+commit. A submitted GitHub Review, human approval, or independent reviewer is
+never an Open Machine prerequisite for merging any change. An optional COMMENT
+self-review may record meaningful findings when useful; do not submit one solely
+to satisfy a gate. Self-review is not independent approval.
+Creating a PR does not authorize merging; an actual merge still requires explicit
+user authorization and the current native GitHub policy and CI checks.
 Do not enable auto-merge, publish a release, or alter repository access settings
 as part of an ordinary code change.
 

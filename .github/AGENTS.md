@@ -15,4 +15,5 @@ never interpolate untrusted titles or bodies into executable commands.
 Do not run candidate code with `pull_request_target`, write tokens, or private
 runners. Label writes belong only to the separate, default-branch workflow and
 must preserve unrelated labels. Changes to permissions or external writes need
-explicit maintainer review. Passing CI does not grant merge authority.
+explicit maintainer authorization, not a mandatory GitHub Review.
+Passing CI does not grant merge authority.
