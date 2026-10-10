@@ -21,6 +21,8 @@ inspect_context(machine="local", workspace_name="project",
 The default sections are `workspace`, `activity`, and `runtime`; add `worktrees`
 for isolation decisions. `limit` defaults to 10 and accepts 1..50 per source page.
 Omitted sections make no reads. Target identity is always observed and rechecked.
+Explicit selectors are compared using their resolved canonical path; the raw
+request remains visible. Worktree listing preserves all configured root grants.
 
 | Section | Meaning |
 | --- | --- |

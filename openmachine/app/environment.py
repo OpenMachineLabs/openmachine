@@ -59,7 +59,7 @@ def _git_section(app, selection: dict, context: dict, action: str, limit: int) -
 
 def _binding(targets: list[dict], selection: dict, context: dict) -> dict:
     expected = {"machine": selection["machine"], "workspace": selection["workspace_name"],
-                "worktree": selection.get("worktree", ""),
+                "worktree": context["worktree"] if selection.get("worktree") else "",
                 "workspace_identity": context.get("workspace_identity"), "head_sha": context.get("head_sha")}
     comparisons = []
     for target in targets:

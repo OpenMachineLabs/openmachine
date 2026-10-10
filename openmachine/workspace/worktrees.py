@@ -175,10 +175,11 @@ def select(config, machine: str, workspace: str, worktree: str = ""):
 
 
 def list_worktrees(config, machine: str, workspace: str, offset: int = 0, limit: int = 100,
-                  expected_snapshot: str = "") -> dict:
+                  expected_snapshot: str = "", *, worktree: str = "") -> dict:
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 200:
         raise Fault("invalid_range", "Use a nonnegative offset and a limit from 1 to 200.")
-    root = _root(config, machine, workspace)
+    # Resolve the selected root without replacing any configured path grants.
+    root = resolve_root(config, machine, workspace, worktree)
     observed = _repository(root)
     entries, raw = _registered(root)
     for item in entries:

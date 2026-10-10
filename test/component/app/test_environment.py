@@ -60,10 +60,30 @@ class ContextTests(TaskFixture, unittest.TestCase):
         self.git("worktree", "add", "-b", "other", str(tree))
         self.config.workspaces["other"] = type(self.config.workspaces["project"])(machine="desktop", root=str(tree))
         selected = self.observe(worktree=str(tree), sections=["workspace", "worktrees"])
+        grants = {item["worktree"]: item["authorized"] for item in selected["sections"]["worktrees"]["data"]["entries"]}
+        self.assertTrue(grants[str(self.work)])
+        self.assertTrue(grants[str(tree)])
         self.assertEqual(selected["target"]["branch"], "other")
         self.assertEqual(selected["target"]["cwd"], str(tree))
         self.assertEqual(selected["sections"]["workspace"]["data"]["entries"], [])
         self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_noncanonical_selector_matches_the_observed_task_target(self):
+        self.repository()
+        tree = self.root / "other"
+        self.git("worktree", "add", "-b", "other", str(tree))
+        self.config.workspaces["other"] = type(self.config.workspaces["project"])(machine="desktop", root=str(tree))
+        context = self.app.read_workspace_file("desktop", "project", "AGENTS.md", worktree=str(tree))["context"]
+        request = deepcopy(self.request)
+        request["contract"]["targets"] = [{"machine": "desktop", "workspace": "project", "worktree": str(tree),
+            "workspace_identity": context["workspace_identity"], "head_sha": context["head_sha"]}]
+        self.create(request)
+        raw_selector = str(tree.parent) + "//other"
+        result = self.observe(worktree=raw_selector, task_id="structured-one", sections=["activity"])
+        self.assertEqual(result["target"]["requested_worktree"], raw_selector)
+        self.assertEqual(result["target"]["worktree"], str(tree))
+        self.assertTrue(result["sections"]["activity"]["data"]["target_binding"]["matches"])
+        self.assertEqual(self.config.workspaces["project"].root, str(self.work))
 
     def test_git_failure_and_skipped_coverage_are_not_cleanliness(self):
         self.repository()
