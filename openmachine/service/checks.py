@@ -14,7 +14,6 @@ from openmachine import __version__, execution, tasks, workspace
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
-from openmachine.tasks import records as task_records
 
 from . import processes, state as service_state
 from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
@@ -183,7 +182,7 @@ def activation_safe(state: Path, *, config=None, guards=None) -> None:
             if record.get("cleanup", {}).get("source") == "native_reconciliation":
                 original = execution.read_record(directory, original_reconciled=True)
                 historical[directory.name] = (original["request"]["machine"],
-                    task_records.execution_receipt_digest(original | {"execution_id": directory.name}))
+                    tasks.execution_receipt_digest(original | {"execution_id": directory.name}))
             if (record["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
@@ -197,7 +196,7 @@ def activation_safe(state: Path, *, config=None, guards=None) -> None:
             raise Fault("activation_deferred", "Original execution command, control or resource ownership remains unverified; no service was stopped.") from error
         for identity, record in records.items():
             historical[identity] = (record["request"]["machine"],
-                task_records.execution_receipt_digest(record | {"execution_id": identity}))
+                tasks.execution_receipt_digest(record | {"execution_id": identity}))
     try:
         # Exhaust the owning iterator so Task storage readers close before cutover.
         blocked = False
