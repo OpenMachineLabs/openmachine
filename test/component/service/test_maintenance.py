@@ -95,6 +95,62 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
         return maintenance._read(self.state, record["operation_id"])
 
+    def test_native_reconciliation_admits_frozen_task_unknown_without_reboot(self):
+        directory, historical, _ = self.historical_execution_fixture(
+            boot_id="11111111-1111-1111-1111-111111111111")
+        operations = self.historical_task_fixture(directory, historical)
+        original = (directory / "record.json").read_bytes()
+        task_bytes = (self.state / "tasks/structured-one/task.json").read_bytes()
+        evidence = {"format": 1, "execution_id": directory.name,
+            "receipt_sha256": hashlib.sha256(original).hexdigest(), "observed_at": 1004.0,
+            "created_worktree": None}
+        save_json(directory / "reconciliation.json", evidence)
+        self.assertEqual(execution.read_record(directory)["status"], "succeeded")
+        self.assertEqual(execution.read_record(directory, original_reconciled=True), historical)
+        installed = self.state / "service/versions" / self.b / "installation.json"
+        save_json(installed, service_state._json(installed) | {"state_contract": service_state.STATE_CONTRACT})
+        operation = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        with patch.object(maintenance, "_bound"), patch.object(service_runtime, "socket_alive", return_value=False), \
+                patch.object(execution_api, "boot_identity", side_effect=AssertionError("No boot check needed")) as boot:
+            completed = self.run_maintenance(operation)
+        self.assertEqual(completed["phase"], "completed")
+        self.assertNotIn("execution_boots", completed["outcome"])
+        boot.assert_not_called()
+        stop.assert_called_once()
+        start.assert_called_once()
+        self.assertEqual((directory / "record.json").read_bytes(), original)
+        self.assertEqual(service_state._json(directory / "reconciliation.json"), evidence)
+        archived = list(self.state.glob("tasks-legacy-*/structured-one/task.json"))
+        self.assertEqual(len(archived), 1)
+        self.assertEqual(archived[0].read_bytes(), task_bytes)
+        self.assertEqual(list(tasks.activation_blockers(self.state)), operations)
+
+    def test_native_reconciliation_requires_bound_proof_and_exact_old_task_digest(self):
+        directory, historical, _ = self.historical_execution_fixture(
+            boot_id="11111111-1111-1111-1111-111111111111")
+        operation = self.historical_task_fixture(directory, historical)[0]
+        self.assert_fault("corrupt_state", lambda: execution.read_record(directory, original_reconciled=True))
+        raw = (directory / "record.json").read_bytes()
+        evidence = {"format": 1, "execution_id": directory.name,
+            "receipt_sha256": hashlib.sha256(raw).hexdigest(), "observed_at": 1004.0,
+            "created_worktree": None}
+        save_json(directory / "reconciliation.json", evidence)
+        record = self.operation_fixture()
+        _, stop, start = self.activation_mocks()
+        mismatched = operation | {"result": operation["result"] | {"receipt_sha256": "0" * 64}}
+        with patch.object(maintenance, "_bound"), patch.object(execution_api, "boot_identity",
+                side_effect=AssertionError("Do not substitute a boot witness")) as boot, \
+                patch.object(tasks, "activation_blockers", return_value=iter([mismatched])):
+            self.assertEqual(self.run_maintenance(record)["phase"], "deferred")
+        boot.assert_not_called()
+        stop.assert_not_called()
+        start.assert_not_called()
+        save_json(directory / "reconciliation.json", evidence | {"receipt_sha256": "0" * 64})
+        self.assert_fault("corrupt_state", lambda: execution.read_record(directory))
+        self.assert_fault("corrupt_state", lambda: execution.read_record(directory, original_reconciled=True))
+        self.assertEqual((directory / "record.json").read_bytes(), raw)
+
     def test_historical_creation_waits_for_bound_kernel_boot_without_repairing_history(self):
         directory, historical, _ = self.historical_execution_fixture(creation=True)
         original = (directory / "record.json").read_bytes()

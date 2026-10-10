@@ -318,8 +318,17 @@ command is safe. Some retained receipts predate persisted session and kernel boo
 identities. `reconcile_execution` cannot reconstruct those missing identities;
 preserve `cleanup_identity_unavailable` and the original unknown outcome.
 
-For a known command exit with only native cleanup unresolved, the incoming
-manager can admit a compatible update after a verified kernel boot boundary:
+An original-ID `reconcile_execution` can instead verify native cleanup on the
+same boot when the receipt already contains its original session and boot IDs.
+If a frozen Task still holds the earlier `unknown` observation, activation can
+match that original receipt fingerprint to a valid, receipt-hash-bound native
+reconciliation. This is a lifecycle-only allowance: the original Task operation
+remains unknown, while the effective execution cleanup is already verified.
+No boot boundary, Task rewrite or command replay is needed in this case. A
+missing original session or boot ID cannot qualify for reconciliation.
+
+Otherwise, for a known command exit with only native cleanup unresolved, the
+incoming manager can admit a compatible update after a verified kernel boot boundary:
 
 - A valid original `cleanup.boot_id` must differ from the current kernel boot ID.
 - If that identity was never retained, the first managed activation attempt

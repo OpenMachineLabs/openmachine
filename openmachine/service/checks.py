@@ -181,6 +181,12 @@ def activation_safe(state: Path, *, config=None, locks=None, execution_boots: di
     if root.exists():
         for directory in root.iterdir():
             record = execution.read_record(directory)
+            if record.get("cleanup", {}).get("source") == "native_reconciliation":
+                # Reconciliation proves cleanup, but a frozen Task may still
+                # carry the original unknown receipt fingerprint.
+                original = execution.read_record(directory, original_reconciled=True)
+                historical[directory.name] = (original["request"]["machine"],
+                    tasks.execution_receipt_digest(original | {"execution_id": directory.name}))
             if (record["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):

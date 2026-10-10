@@ -320,13 +320,15 @@ def validate_record(record: dict, execution_id: str) -> None:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error
 
 
-def read_record(directory: Path) -> dict:
-    """Validate all accepted formats without rewriting or observing the process."""
+def read_record(directory: Path, *, original_reconciled: bool = False) -> dict:
+    """Validate effective evidence, or return the bound original of a reconciliation."""
     try:
         raw = (directory / "record.json").read_bytes()
         record = json.loads(raw)
         validate_record(record, directory.name)
         path = directory / "reconciliation.json"
+        if original_reconciled and not os.path.lexists(path):
+            raise ValueError("missing native reconciliation proof")
         if os.path.lexists(path):
             with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
                 info = os.fstat(stream.fileno())
@@ -334,7 +336,9 @@ def read_record(directory: Path) -> dict:
                     raise ValueError("invalid reconciliation file")
                 evidence = json.loads(stream.read(65537))
             try:
-                record = reconciled_record(record, evidence, hashlib.sha256(raw).hexdigest(), directory.name)
+                reconciled = reconciled_record(record, evidence, hashlib.sha256(raw).hexdigest(), directory.name)
+                if not original_reconciled:
+                    record = reconciled
             except Fault as error:
                 raise ValueError("unbound cleanup reconciliation") from error
         return record
