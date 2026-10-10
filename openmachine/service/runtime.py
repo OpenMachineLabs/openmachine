@@ -418,8 +418,9 @@ def status(config_path: Path, state: Path) -> dict:
         raise Fault("service_configuration_mismatch", "Use the configuration registered with this state directory.")
     _verify_files(state, record)
     observed = _native(state)
+    installed = service_state._installed(state, record["current"])
     result = {"status": "unready" if observed["loaded"] else "stopped", **observed, "current": record["current"], "previous": record["previous"],
-              "pending": record["pending"], "version": service_state._installed(state, record["current"])["version"],
+              "pending": record["pending"], "version": installed["version"], "commit": installed.get("commit"),
               "tunnel": "not_probed", "chatgpt": "not_probed"}
     recovery = service_state._read_recovery(state)
     result["recovery"] = recovery["episode"] if recovery else None

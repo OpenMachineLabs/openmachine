@@ -16,6 +16,35 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def test_running_commit_is_bound_to_the_loaded_installation(self):
+        prefix = service_state._runtime(self.state, self.a)
+        path = prefix / "installation.json"
+        original = service_state._json(path)
+        version = original["version"]
+        save_json(path, original | {"commit": "c" * 40})
+        with patch.object(sys, "prefix", str(prefix)):
+            self.assertIsNone(service_state.running_commit(version))  # This checkout is outside the selected prefix.
+            with patch.object(service_state, "__file__", str(prefix / "lib/openmachine/service/state.py")):
+                self.assertEqual(service_state.running_commit(version), "c" * 40)
+                self.save(self.record | {"current": self.b})
+                self.assertEqual(service_state.running_commit(version), "c" * 40)
+                save_json(path, original)
+                self.assertIsNone(service_state.running_commit(version))
+                for delta in ({"commit": "bad"}, {"commit": None}, {"commit": 123},
+                              {"identity": self.b}, {"version": "0.0.0"}):
+                    save_json(path, original | {"commit": "c" * 40} | delta)
+                    self.assertIsNone(service_state.running_commit(version))
+                path.unlink()
+                self.assertIsNone(service_state.running_commit(version))
+
+    def test_malformed_recorded_commit_is_rejected_by_state_operations(self):
+        path = service_state._runtime(self.state, self.a) / "installation.json"
+        original = service_state._json(path)
+        for commit in ("short", "g" * 40, None, 123):
+            with self.subTest(commit=commit):
+                save_json(path, original | {"commit": commit})
+                self.assert_fault("installation_identity_mismatch", lambda: service_state._installed(self.state, self.a))
+
     def test_pending_and_wrong_runtime_block_new_writes(self):
         self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}
         self.save(self.record)

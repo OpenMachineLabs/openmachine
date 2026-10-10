@@ -11,8 +11,9 @@ from openmachine.foundation.sanitize import Fault
 
 
 def main() -> int:
+    from openmachine.service import running_commit
     parser = argparse.ArgumentParser(prog="openmachine")
-    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--version", action="version", version=f"{__version__} ({running_commit(__version__) or 'unknown'})")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--state-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -48,9 +49,11 @@ def main() -> int:
         operation = service_commands.add_parser(action)
         if action == "restart":
             operation.add_argument("--reset-recovery", action="store_true", help="Explicitly renew a verified readiness recovery budget after stop")
-    update = commands.add_parser("update", help="Verify and activate an explicit wheel; retain the original installation")
-    update.add_argument("--wheel", type=Path, required=True)
-    update.add_argument("--requirements", type=Path, required=True)
+    update = commands.add_parser("update", help="Build an exact commit or activate an explicit wheel; retain the original installation")
+    update_source = update.add_mutually_exclusive_group(required=True)
+    update_source.add_argument("--wheel", type=Path)
+    update_source.add_argument("--commit", help="Full 40-character lowercase SHA from the official Open Machine repository")
+    update.add_argument("--requirements", type=Path, help="Required with --wheel; commit updates use their source lock")
     update.add_argument("--candidate-config", type=Path, help="Explicit candidate configuration; preserve and restore the original on activation failure")
     commands.add_parser("rollback", help="Verify and restore the retained compatible installation, never user work")
     manage = commands.add_parser("manage", help="Typed product management; explicit config/state binding and original operation readback")
@@ -92,6 +95,9 @@ def main() -> int:
             operation.add_argument("--operation-id", required=True)
             operation.add_argument("--config-sha256", required=True)
     args = parser.parse_args()
+    if args.command == "update" and ((args.wheel is not None and args.requirements is None)
+                                     or (args.commit is not None and args.requirements is not None)):
+        parser.error("--requirements is required with --wheel and cannot be combined with --commit")
     if args.command == "manage" and (args.config is None or args.state_dir is None):
         parser.error("manage requires explicit --config and --state-dir before the subcommand")
     args.config = args.config if args.config is not None else DEFAULT_CONFIG
@@ -146,7 +152,7 @@ def main() -> int:
                              args.service_action if args.command == "service" else args.command,
                              wheel=getattr(args, "wheel", None), requirements=getattr(args, "requirements", None),
                              workspace=getattr(args, "probe_workspace", ""), path=getattr(args, "probe_path", ""),
-                             candidate_config=getattr(args, "candidate_config", None),
+                             candidate_config=getattr(args, "candidate_config", None), commit=getattr(args, "commit", None),
                              reset_recovery=getattr(args, "reset_recovery", False))
             print(json.dumps(result))
             return int(result["status"] in {"unready", "recovering", "blocked", "activation_pending"})
@@ -178,7 +184,7 @@ def main() -> int:
                 return int(not result["identity_verified"] or bool(result["unavailable_workspaces"]))
             unavailable = [name for name, item in config.workspaces.items()
                            if config.machine(item.machine).transport == "local" and not Path(item.root).is_dir()]
-            print(json.dumps({"version": __version__, "configuration": "valid", "unavailable_workspaces": unavailable,
+            print(json.dumps({"version": __version__, "commit": running_commit(__version__), "configuration": "valid", "unavailable_workspaces": unavailable,
                               "state_directory_exists": args.state_dir.is_dir(),
                               "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed",
                               "github": "not_probed" if config.github is not None else "disabled",

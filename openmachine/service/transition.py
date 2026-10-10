@@ -169,7 +169,8 @@ def _finish_activation(state: Path, record: dict, ready: dict, *, bind_managemen
     if bind_management and installed.get("management_contract") == service_state.MANAGEMENT_CONTRACT and installed.get("payload_sha256"):
         record = service_state._bind_management(state, record, target)
     _commit_ready(state, record)
-    return {**ready, "current": target, "previous": record["previous"], "workers": "preserved"}
+    return {**ready, "current": target, "previous": record["previous"], "workers": "preserved",
+            "version": installed["version"], "commit": installed.get("commit")}
 
 
 def _start_selected(state: Path, record: dict) -> dict:
@@ -235,13 +236,15 @@ def _register(config_path: Path, state: Path, identity: str, workspace: str, pat
 def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None = None,
             requirements: Path | None = None, workspace: str = "", path: str = "",
             candidate_config: Path | None = None, reset_recovery: bool = False,
-            require_safe: bool = False) -> dict:
+            require_safe: bool = False, commit: str | None = None) -> dict:
     if sys.platform != "darwin" or os.getuid() == 0:
         raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serve and SSH workers remain separate.")
     if not config_path.is_absolute() or not state.is_absolute():
         raise Fault("invalid_service_path", "Use absolute configuration and state paths for a managed service.")
     if reset_recovery and action != "restart":
         raise Fault("invalid_service_request", "Explicit recovery renewal requires service restart --reset-recovery.")
+    if commit is not None and (action != "update" or wheel is not None or requirements is not None):
+        raise Fault("invalid_service_request", "Commit updates cannot be combined with local wheel or requirements inputs.")
     config_path = config_path.resolve()
     if action == "status":
         return runtime.status(config_path, state.resolve())
@@ -275,11 +278,12 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                 return _resume_activation(state, record)
             raise Fault("activation_pending", "Read the original transition; explicitly resume a verified Task cutover or restore a compatible prior installation.")
         if action == "update":
-            if wheel is None or requirements is None:
-                raise Fault("invalid_service_request", "Update requires a trusted local wheel and pinned requirements.")
+            if commit is None and (wheel is None or requirements is None):
+                raise Fault("invalid_service_request", "Update requires an exact commit or a trusted local wheel and pinned requirements.")
             selected_config = candidate_config.resolve(strict=True) if candidate_config is not None else config_path
             selected_config = service_state._saved_configuration(state, service_state._snapshot_configuration(state, selected_config))
-            target = install._prepare(state, wheel, requirements, selected_config)
+            target = (install._prepare_commit(state, commit, selected_config) if commit is not None
+                      else install._prepare(state, wheel, requirements, selected_config))
             if target == record["current"]:
                 if selected_config.read_bytes() != config_path.read_bytes():
                     raise Fault("same_installation", "Configuration changes require an explicit distinct candidate installation.")

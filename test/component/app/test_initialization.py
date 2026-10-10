@@ -2,11 +2,21 @@
 
 import os
 import unittest
+from unittest.mock import patch
+from openmachine import __version__, service
 from openmachine.bootstrap import create_application
 from test.support.continuity_cases import ContinuityCaseFixture
 
 
 class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
+    def test_capabilities_keep_version_and_report_running_commit(self):
+        app = create_application(self.config, self.state)
+        for commit in ("c" * 40, None):
+            with patch.object(service, "running_commit", return_value=commit):
+                capabilities = app.get_capabilities()
+                self.assertEqual(capabilities["version"], __version__)
+                self.assertEqual(capabilities["commit"], commit)
+
     def test_application_initializes_private_state_before_admission_locks(self):
         app = create_application(self.config, self.state)
         previous_umask = os.umask(0o022)
