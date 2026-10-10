@@ -55,7 +55,8 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             if machine.transport == "ssh" and name not in candidate_settings.machines:
                 checks.machine_unused(original_settings, state, name)
         if require_safe:
-            checks.activation_safe(state, config=original_settings, guards=activation_guards)
+            checks.activation_safe(state, config=original_settings, candidate_config=candidate_settings,
+                                   guards=activation_guards)
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
@@ -153,7 +154,9 @@ def _resume_activation(state: Path, record: dict) -> dict:
                     and not (ready.get("status") == "stopped" and service_state.stopped(record))):
                 raise Fault("service_state_unverified", "The original committed selection is not verifiably ready or deliberately stopped.")
             return ready
-        checks.activation_safe(state, config=load(Path(record["config"])), guards=activation_guards)
+        prior_config = service_state._configuration_for(state, record, record["pending"]["from"])
+        checks.activation_safe(state, config=load(prior_config),
+                               candidate_config=load(Path(record["config"])), guards=activation_guards)
         runtime._stop(state)
         tasks.migrate(state)
         install._verify_candidate(state, record, target, check_remote=True)

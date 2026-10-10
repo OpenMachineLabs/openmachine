@@ -56,7 +56,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             finally:
                 events.append("guard_released")
 
-        def admit(state, *, config, guards):
+        def admit(state, *, config, candidate_config, guards):
+            self.assertEqual(candidate_config.machines["local"].transport, "local")
             guards.enter_context(original_guard())
 
         def stopped(state):
@@ -78,6 +79,29 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                               service_transition._activate(self.state, self.record, self.b, require_safe=True))
         self.assertEqual(events, ["guard_acquired", "stop", "new_start",
                                   "stop", "old_start", "guard_released"])
+        self.assertEqual(service_state._record(self.state), self.record)
+
+    def test_candidate_removing_original_local_machine_defers_before_stop(self):
+        _, stop, start = self.activation_mocks()
+        identity = "d" * 32
+        private_directory(self.state / "executions" / identity)
+        candidate = self.root / "candidate.toml"
+        candidate.write_text('schema_version=1\n[machines.replacement]\ntransport="local"\n')
+        unsettled = {"status": "outcome_unknown", "request": {"machine": "local"},
+                     "cleanup": {"status": "unverified"}}
+
+        @contextmanager
+        def original_guard(config, state, identities):
+            self.assertEqual(identities, [identity])
+            yield {identity: unsettled}
+
+        with patch.object(service_checks.execution, "read_record", return_value=unsettled), \
+                patch.object(service_checks.execution, "activation_guard", side_effect=original_guard), \
+                patch.object(service_checks.tasks, "activation_blockers", return_value=[]):
+            self.assert_fault("activation_deferred", lambda: service_transition._activate(
+                self.state, self.record, self.b, candidate_config=candidate, require_safe=True))
+        stop.assert_not_called()
+        start.assert_not_called()
         self.assertEqual(service_state._record(self.state), self.record)
 
     def test_task_migration_before_cutover_failure_restores_original_selection(self):

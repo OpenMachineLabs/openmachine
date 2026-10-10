@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from openmachine import __version__, execution
 from openmachine.app import task_receipts
+from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks
@@ -71,9 +72,10 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
             "execution_id": original_id, "control_seq": None}, "result": result}
         return directory, original, task_operation
 
-    def admit(self, operations):
+    def admit(self, operations, *, candidate_config=None):
         with ExitStack() as guards, patch.object(checks.tasks, "activation_blockers", return_value=operations):
-            checks.activation_safe(self.state, config=self.config, guards=guards)
+            checks.activation_safe(self.state, config=self.config,
+                                   candidate_config=candidate_config or self.config, guards=guards)
 
     def test_cleanup_only_unknown_upgrade_requires_no_reboot_and_retains_original_history(self):
         directory, before, task = self.cleanup_unknown()
@@ -82,7 +84,8 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
                 checks.activation_safe(self.state)
             self.assertEqual(error.exception.code, "activation_deferred")
             with ExitStack() as guards:
-                checks.activation_safe(self.state, config=self.config, guards=guards)
+                checks.activation_safe(self.state, config=self.config,
+                                       candidate_config=self.config, guards=guards)
                 root = json.loads(before)["context"]["workspace_lock_root"]
                 workspace_lock = self.state / "locks" / (
                     "workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")
@@ -108,6 +111,29 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
             self.admit([task])
         self.assertEqual(error.exception.code, "activation_deferred")
         self.assertFalse(resource.exists())
+
+    def test_candidate_must_retain_local_machine_for_unknown_execution_and_task(self):
+        directory, original, task = self.cleanup_unknown()
+        candidates = {
+            "removed": Settings.model_validate({
+                "schema_version": 1, "machines": {"replacement": {"transport": "local"}}}),
+            "rebound_to_ssh": Settings.model_validate({
+                "schema_version": 1,
+                "machines": {"my-laptop": {"transport": "ssh", "ssh_alias": "replacement",
+                             "ssh_worker": "/workers/" + "a" * 64 + ".pyz",
+                             "ssh_identity": "b" * 64}}}),
+        }
+        for name, candidate in candidates.items():
+            with self.subTest(name=name), self.assertRaises(Fault) as error:
+                self.admit([task], candidate_config=candidate)
+            self.assertEqual(error.exception.code, "activation_deferred")
+        # Disabling future command admission must not invalidate read-only
+        # access to an existing local execution.
+        readonly_candidate = Settings.model_validate({
+            "schema_version": 1, "machines": {"my-laptop": {"transport": "local"}},
+            "workspaces": {"project": {"machine": "my-laptop", "root": str(self.work)}}})
+        self.admit([task], candidate_config=readonly_candidate)
+        self.assertEqual((directory / "record.json").read_bytes(), original)
 
     def test_wrong_execution_digest_machine_or_control_cannot_waive_task_blocker(self):
         directory, original, task = self.cleanup_unknown()
@@ -144,7 +170,14 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
             "observed_at": max(time.time(), record["finished_at"]),
             "created_worktree": None,
         })
+        removed = Settings.model_validate({"schema_version": 1, "machines": {"other": {"transport": "local"}}})
+        with self.assertRaises(Fault) as error:
+            self.admit([task], candidate_config=removed)
+        self.assertEqual(error.exception.code, "activation_deferred")
         self.admit([task])
+        # Once Task no longer retains an unknown observation, a reconciled
+        # terminal receipt should not block an unrelated configuration change.
+        self.admit([], candidate_config=removed)
         self.assertEqual((directory / "record.json").read_bytes(), original)
         self.assertEqual(execution.read(self.config, self.state, "my-laptop", "d" * 32)["status"], "succeeded")
 

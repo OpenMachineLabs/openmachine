@@ -91,6 +91,9 @@ is recognized by its exact original execution receipt digest. The controller can
 then update without a machine reboot, even if older receipts lack a native session
 identity. No execution or Task result is changed, no command is replayed, and
 the process or its descendants are **not** claimed to have exited.
+The candidate configuration must retain each affected local machine name as a
+local machine so the new controller can still read its original execution and
+Task evidence. Removing or changing that binding defers activation before stop.
 
 Active workers, busy or missing original leases, unknown command/control results,
 changed/malformed receipts, unbound Task uncertainty, incompatible retained-state
