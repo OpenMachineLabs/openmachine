@@ -952,7 +952,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                               number=2, expected_head_sha=HEAD, transport=self.transport)
             mutate.assert_not_called()
 
-    def test_changed_candidate_self_approval_and_absent_review_cannot_merge(self):
+    def test_changed_candidate_self_approval_and_optional_review(self):
         with patch.object(operations, "_mutate") as mutate:
             self.assert_fault("github_candidate_changed", github.review, settings(), "create", REPO, "review",
                               number=2, expected_head_sha=BASE, transport=self.transport)
@@ -960,7 +960,10 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                               number=2, expected_head_sha=HEAD, event="APPROVE", transport=self.transport)
             mutate.assert_not_called()
         self.reviews = []
-        self.assertIn("no_submitted_current_head_review", github.merge(settings(), REPO, 2, HEAD, transport=self.transport)["gate"]["blockers"])
+        gate = evidence.merge_gate(REPO, 2, HEAD, transport=self.transport)
+        self.assertEqual(gate["review_count"], 0)
+        self.assertEqual(gate["current_head_reviews"], [])
+        self.assertEqual(gate["blockers"], [])
         self.reviews = [{"id": 9, "user": ACTOR, "state": "COMMENTED", "commit_id": HEAD, "submitted_at": STAMP}]
         self.policy["mergeQueueEntry"] = {"id": "queue"}
         self.assertIn("native_policy_not_clean_or_queue_unsupported", github.merge(settings(), REPO, 2, HEAD, transport=self.transport)["gate"]["blockers"])
@@ -989,6 +992,18 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             self.assertEqual(result["status"], "merged_verified")
             self.assertEqual(result["merge_commit_sha"], MERGE)
             self.assertEqual(len(writes), 1)
+
+        # A real merge can proceed with passing CI and zero submitted reviews.
+        self.reviews = []
+        self.runs = [{"id": 1, "name": "ci", "app": {"id": 42}, "head_sha": HEAD,
+                      "status": "completed", "conclusion": "success"}]
+        self.pr.update(state="open", merged=False)
+        writes.clear()
+        merge_method = "squash"
+        with patch.object(self, "transport", side_effect=merging):
+            result = github.merge(settings(), REPO, 2, HEAD, BASE, method=merge_method, transport=self.transport)
+        self.assertEqual((result["status"], result["checks_state"]), ("merged_verified", "passed"))
+        self.assertEqual(len(writes), 1)
 
     def test_merge_unknown_and_unverified_are_not_success(self):
         for behavior, expected in (("timeout", "merge_outcome_unknown"), ("wrong_destination", "merge_unverified")):

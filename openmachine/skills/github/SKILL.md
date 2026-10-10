@@ -16,8 +16,9 @@ second connector. Keep branch, commit and push in authorized native execution.
 - Read [GitHub operations](reference.md) before paged review, publication, field
   replacement, review-thread changes, merge, attribution or uncertain-write recovery.
 
-Follow every relevant page and coverage flag. A self-review COMMENT is not
-independent approval. Merge needs explicit authority, current protections and
-verified destination evidence. Preserve original locators after uncertainty;
+Follow every relevant page and coverage flag. Self-review COMMENT is optional
+and does not represent independent approval. Merge needs explicit authority,
+current protections and verified destination evidence. Preserve original locators
+after uncertainty;
 creates and other non-idempotent writes must not be automatically repeated.
 Structured effects retain the [original task context](../tasks/continue.md).
