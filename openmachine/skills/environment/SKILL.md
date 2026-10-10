@@ -30,6 +30,10 @@ request remains visible. Worktree listing preserves all configured root grants.
 | `worktrees` | One registration page, not proof of ownership, cleanliness or idleness. |
 | `activity` | Explicit task contract and original operation index, not a fresh process inventory. |
 | `runtime` | Controller provenance and configured target grants/support, not live backend health. |
+| `environment` | Target observer runtime and requested executable paths, never project execution. |
+| `project` | Guarded root declarations and lock fingerprints, not evaluated configuration. |
+| `resources` | Scoped CPU, memory, filesystem and supported display-adapter samples. |
+| `services` | Requested TCP port listener counts, not connections or health probes. |
 
 `status` and `complete` are different. An observed page can be incomplete; no task
 selected means `not_selected`, not zero activity. A confirmed non-Git root is
@@ -62,3 +66,43 @@ replay uncertain effects, accept stages, or infer safe parallelism from this rea
 There is no context cache, incremental baseline, background monitoring or Chat
 wake-up. The tool does not prove that Chat retained an earlier response. Source
 implementation, installed runtime and a client's tool catalog can differ.
+
+## Opt-in target observation
+
+Keep `runtime` for controller/configuration metadata. Select `environment` for
+actual observer facts and optionally supply `executables=["python3", "./bin/tool"]`.
+Names resolve against the observer PATH; relative entries resolve under the selected
+cwd. Resolution never runs the program or reports a guessed version. The account
+login shell is a declaration, not the shell used for an argv execution.
+
+Select `services` with `ports=[8000]` for a passive TCP listener-table observation.
+Omitted ports mean not selected, not a scan. Selectors are distinct and bounded
+by `min(limit, 20)`; ports are strict integers from 1 to 65535. Nonempty selectors
+require their matching section. Existing defaults do not trigger these collectors.
+
+Project signals examine only the listed root markers, at most 32 KiB per source,
+with raw hashes, examined/unexamined names and original read references. Malformed,
+linked, oversized or unreadable sources stay unavailable. Scripts, hooks, includes
+and environment activation are never evaluated; lockfiles are fingerprints only.
+
+Resource samples carry their own scope, units, source and clock times. Linux
+procfs totals are not cgroup allocations. Visible cgroup-v2 ancestor limits and
+calling-thread affinity are separate observations; v1 or hidden limits are not
+inferred. macOS reports total memory and native VM page counters, not a fabricated
+available-byte estimate. GPU coverage is macOS display-adapter metadata or Linux
+DRM PCI identifiers, not utilization, compute-only inventory or reserved VRAM.
+Zero TCP listeners proves neither UDP coverage, port reservation nor service health.
+
+The controller and SSH endpoint share the standard-library collectors. The additive
+`inspect_environment` RPC uses observation version 1 within protocol 7 and verifies
+the pinned worker/account identity. Older workers return unsupported; never fall
+back to controller facts, arbitrary remote commands or implicit worker updates.
+`controller` and `worker_endpoint` describe the observing process, not a future
+command or virtual environment. Target timestamps are from that target's clock.
+
+OS reads cap each source/output at 64 KiB. Fixed absolute macOS readers have
+five-second process bounds and a minimal environment; Linux reads procfs/sysfs.
+DRM discovery has a 256-entry bound and visible cgroup traversal at most
+`min(limit, 16)` ancestors. Existing filesystem/SSH deadlines still apply; this is
+not a new end-to-end cancellation guarantee. Use original execution tools and
+receipts for separately authorized active diagnosis. No installation or new grants.

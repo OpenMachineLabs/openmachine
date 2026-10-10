@@ -109,6 +109,12 @@
       "base_commit": "aa312648e0552f97f8e992a050722606af4bb350",
       "change": "PR1 adds only inspect_context with bounded section selection and passive target-dependent read annotations. Existing tools remain unchanged; the independently authored addition is checked against installed discovery in all integration configurations.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/138"
+    },
+    {
+      "approval": "Maintainer request on 2026-10-10 authorizes Spec #138 PR2, self-review, merge and Spec finalization.",
+      "base_commit": "e6caf18b88d19fc4b732981f3ad6fd57cdcd66c3",
+      "change": "Extend inspect_context only: four opt-in target sections, executables and TCP ports. Preserve default selection and all other tool contracts. Target RPC observation version 1 is additive within protocol 7.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/138#classification"
     }
   ],
   "baseline": {
@@ -3224,11 +3230,15 @@
                     "workspace",
                     "worktrees",
                     "activity",
-                    "runtime"
+                    "runtime",
+                    "environment",
+                    "project",
+                    "resources",
+                    "services"
                   ],
                   "type": "string"
                 },
-                "maxItems": 4,
+                "maxItems": 8,
                 "minItems": 1,
                 "type": "array"
               },
@@ -3254,6 +3264,42 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "executables": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executables"
+          },
+          "ports": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 65535,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ports"
           }
         },
         "required": [

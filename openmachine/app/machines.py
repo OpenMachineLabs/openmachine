@@ -25,6 +25,14 @@ class Machines:
         self.config.machine(machine)
         return self._ssh(machine, "probe")
 
+    def inspect_environment(self, machine: str, workspace_name: str, section: str, worktree: str = "",
+                            executables=None, ports=None, limit: int = 10) -> dict:
+        arguments = dict(workspace_name=workspace_name, section=section, worktree=worktree,
+                         executables=executables, ports=ports, limit=limit)
+        if self.config.machine(machine).transport == "ssh":
+            return self._ssh(machine, "inspect_environment", observation_version=execution.OBSERVATION_VERSION, **arguments)
+        return execution.inspect_environment(self.config, machine, **arguments)
+
     def inspect_workspace(self, machine: str, workspace_name: str, action: str, path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
                           expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:

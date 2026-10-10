@@ -22,8 +22,17 @@ class ContextWireTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(value["target"]["cwd"], str(self.work))
                 self.assertEqual(value["sections"]["activity"]["status"], "not_selected")
                 self.assertLess(len(json.dumps(result).encode()), 1024 * 1024)
+                observed = await self.wire_call(client, "tools/call", {"name": "inspect_context", "arguments": base |
+                    {"sections": ["environment", "project"], "executables": ["python3"]}})
+                target = observed.json()["result"]
+                self.assert_wire_tool_result(target, version)
+                self.assertFalse(target.get("isError", False), target)
+                self.assertEqual(target["structuredContent"]["sections"]["environment"]["scope"], "controller")
+                self.assertIn("interpreter", target["structuredContent"]["sections"]["environment"]["data"]["value"])
                 for extra in ({"limit": True}, {"limit": 51}, {"sections": []}, {"surplus": 1},
-                              {"sections": ["runtime", "runtime"]}, {"sections": ["unsupported"]}):
+                              {"sections": ["runtime", "runtime"]}, {"sections": ["unsupported"]},
+                              {"sections": ["services"], "ports": [True]}, {"ports": [80]},
+                              {"sections": ["environment"], "executables": ["../invalid"]}):
                     response = await self.wire_call(client, "tools/call", {"name": "inspect_context", "arguments": base | extra})
                     error = response.json()["result"]
                     self.assert_wire_tool_result(error, version)

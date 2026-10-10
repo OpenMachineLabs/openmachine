@@ -109,6 +109,14 @@ def _dispatch(request: dict, archive: Path) -> dict:
                   "unavailable_workspaces": [name for name, item in config.workspaces.items() if not Path(item.root).is_dir()]}
     elif not expected:
         raise Fault("identity_required", "Probe and explicitly pin this identity before workspace access.")
+    elif operation == "inspect_environment":
+        if (set(arguments) - {"observation_version", "workspace_name", "section", "worktree", "executables", "ports", "limit"}
+                or not {"workspace_name", "section"} <= set(arguments)):
+            raise Fault("invalid_request", "Use only the required target observation fields and supported selectors.")
+        if type(arguments.get("observation_version")) is not int or arguments["observation_version"] != execution.OBSERVATION_VERSION:
+            raise Fault("unsupported_operation", "The target observation contract is unsupported; use a matching pinned worker.")
+        selected = {key: value for key, value in arguments.items() if key != "observation_version"}
+        result = execution.inspect_environment(config, identity, **selected, scope="worker_endpoint")
     elif operation == "start_execution":
         if set(arguments) - {"execution_id", "cwd", "argv", "timeout_seconds", "expected_head_sha",
                              "workspace_access", "resource_keys", "task_id", "termination_grace_seconds", "tty", "terminal_size"}:

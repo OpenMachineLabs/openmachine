@@ -4,9 +4,10 @@ import json
 import re
 import time
 
+from openmachine import execution
 from openmachine.foundation.sanitize import Fault
 
-SECTIONS = ("workspace", "worktrees", "activity", "runtime")
+SECTIONS = ("workspace", "worktrees", "activity", "runtime") + execution.TARGET_SECTIONS
 DEFAULT_SECTIONS = ("workspace", "activity", "runtime")
 MAX_LIMIT = 50
 MAX_PAYLOAD = 65536
@@ -16,7 +17,9 @@ IDENTITY_FIELDS = ("cwd", "worktree", "workspace_identity", "head_sha", "branch"
 def capabilities() -> dict:
     return {"schema_version": 1, "sections": list(SECTIONS), "default_sections": list(DEFAULT_SECTIONS),
             "default_limit": 10, "max_limit": MAX_LIMIT, "payload_bytes": MAX_PAYLOAD,
-            "active_probes": False, "incremental": False}
+            "active_probes": False, "incremental": False, "target_observation_version": execution.OBSERVATION_VERSION,
+            "max_selectors": execution.MAX_SELECTORS, "target_platforms": ["darwin", "linux"],
+            "target_scope": "observer_process_not_future_command", "service_protocol": "TCP_listeners_only"}
 
 
 def _ref(tool: str, **arguments) -> dict:
@@ -125,8 +128,27 @@ def _runtime(app, machine: str) -> dict:
                      "Controller version/limits are not remote worker or command-process measurements."))
 
 
+def _target_section(app, selection: dict, context: dict, section: str, executables: list[str], ports: list[int], limit: int) -> dict:
+    options = {"executables": executables} if section == "environment" else {"ports": ports} if section == "services" else {}
+    reference = _ref("inspect_context", **selection, sections=[section], limit=limit, **options)
+    page = app.machines.inspect_environment(**selection, section=section, limit=limit, **options)
+    _same_target(context, page["context"])
+    result = _section(reference, "current_read", status=page["status"], complete=page["complete"], data=page["data"],
+                      limitations=("Target observer facts do not establish a future command environment, reservation or application health.",))
+    result.update(scope=page["scope"], started_at_ms=page["started_at_ms"], observed_at_ms=page["finished_at_ms"])
+    for key in ("target_identity", "worker_sha256", "observation_version"):
+        if key in page:
+            result[key] = page[key]
+    if section == "project":
+        for item in result["data"]["entries"]:
+            item["evidence_ref"] = _ref("read_workspace_file", **selection, path=item["path"],
+                                        **({"expected_sha256": item["sha256"]} if item.get("sha256") else {}))
+    return result
+
+
 def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", task_id: str = "",
-                    sections: list[str] | None = None, limit: int = 10) -> dict:
+                    sections: list[str] | None = None, limit: int = 10,
+                    executables: list[str] | None = None, ports: list[int] | None = None) -> dict:
     selected = list(DEFAULT_SECTIONS) if sections is None else sections
     if (type(selected) is not list or not 1 <= len(selected) <= len(SECTIONS)
             or any(type(item) is not str or item not in SECTIONS for item in selected)
@@ -139,6 +161,9 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
         raise Fault("invalid_context_request", "Use an original task ID or leave it empty.")
     if not isinstance(worktree, str) or len(worktree) > 4096:
         raise Fault("invalid_context_request", "Use a bounded worktree selector.")
+    executables, ports = execution.validate_observation_inputs(executables, ports, limit)
+    if executables and "environment" not in selected or ports and "services" not in selected:
+        raise Fault("invalid_context_request", "Select environment for executables and services for TCP ports explicitly.")
     target_machine = app.config.machine(machine)
     workspace = app.config.workspaces.get(workspace_name)
     if workspace is None or workspace.machine != machine:
@@ -161,17 +186,22 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
                 value = _git_section(app, selection, context, "status" if section == "workspace" else "worktrees", limit)
             elif section == "activity":
                 value = _activity(app, selection, context, task_id, limit)
-            else:
+            elif section == "runtime":
                 value = _runtime(app, machine)
+            else:
+                value = _target_section(app, selection, context, section, executables, ports, limit)
         except (Fault, OSError) as error:
             # A mixed workspace is invalid as a whole; task-page drift is local to activity.
             if isinstance(error, Fault) and section != "activity" and error.code in {
-                    "source_changed", "context_mismatch", "path_denied", "unknown_worktree", "identity_mismatch"}:
+                    "source_changed", "context_mismatch", "path_denied", "unknown_worktree", "identity_mismatch", "ssh_protocol_error"}:
                 raise
             code = error.code if isinstance(error, Fault) else "source_unavailable"
             source = (_ref("read_task", task_id=task_id) if section == "activity" else
                       _ref("get_capabilities") if section == "runtime" else
                       _ref("inspect_workspace", **selection, action="status" if section == "workspace" else "worktrees", limit=limit))
+            if section in execution.TARGET_SECTIONS:
+                options = {"executables": executables} if section == "environment" else {"ports": ports} if section == "services" else {}
+                source = _ref("inspect_context", **selection, sections=[section], limit=limit, **options)
             value = _section(source, "retained_evidence" if section == "activity" else
                              "configuration_not_health" if section == "runtime" else "current_read",
                              status="unavailable", complete=False)
