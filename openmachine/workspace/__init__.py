@@ -9,3 +9,4 @@ from .git import MAX_CAPTURE
 from .inspect import MAX_MATCHES, MAX_SCAN_BYTES, inspect
 from .patch import LANGUAGE as PATCH_LANGUAGE, MAX_HUNKS, MAX_PATHS
 from .worktrees import select as select_worktree
+from .signals import read_signals

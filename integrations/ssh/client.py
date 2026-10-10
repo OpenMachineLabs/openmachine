@@ -142,6 +142,14 @@ def call(config: "Settings", machine: str, operation: str, *,
             or not isinstance(response.get("result"), dict)):
         raise Fault("outcome_unknown" if mutating else "ssh_protocol_error", "The remote response identity was not verified.", identity_evidence)
     result = response["result"]
+    if operation == "inspect_environment" and (
+            type(result.get("observation_version")) is not int or result["observation_version"] != 1
+            or result.get("section") != arguments.get("section") or result.get("scope") != "worker_endpoint"
+            or any(type(result.get(key)) is not int for key in ("started_at_ms", "finished_at_ms"))
+            or not isinstance(result.get("context"), dict)
+            or not isinstance(result.get("data"), dict) or type(result.get("complete")) is not bool
+            or result.get("status") not in {"observed", "unavailable", "not_selected"}):
+        raise Fault("ssh_protocol_error", "The pinned worker did not return the requested target observation contract.")
     if "machine" in result:
         result["machine"] = machine
     items = result.get("executions", [])

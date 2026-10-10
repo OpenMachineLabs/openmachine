@@ -169,8 +169,9 @@ class Application:
         }
 
     def inspect_context(self, machine: str, workspace_name: str, worktree: str = "", task_id: str = "",
-                        sections: list[str] | None = None, limit: int = 10) -> dict:
-        return environment.inspect_context(self, machine, workspace_name, worktree, task_id, sections, limit)
+                        sections: list[str] | None = None, limit: int = 10,
+                        executables: list[str] | None = None, ports: list[int] | None = None) -> dict:
+        return environment.inspect_context(self, machine, workspace_name, worktree, task_id, sections, limit, executables, ports)
 
     def inspect_workspace(self, machine: str, workspace_name: str,
                           action: Literal["files", "read", "search", "status", "diff", "worktrees"], path: str = ".",

@@ -16,6 +16,50 @@ from test.support.ssh_cases import SSHCaseFixture
 
 
 class SSHTests(SSHCaseFixture, unittest.TestCase):
+    def test_target_observation_routes_same_collectors_without_execution_grants(self):
+        from openmachine.app.machines import Machines
+        self.settings.machines["build-machine"].execution_enabled = False
+        def exchange(argv, raw, **kwargs):
+            payload = json.loads(raw)
+            self.assertEqual(payload["operation"], "inspect_environment")
+            self.assertEqual(payload["arguments"]["observation_version"], 1)
+            response = endpoint._dispatch(payload, self.archive)
+            self.assertEqual(payload, json.loads(raw))
+            return 0, json.dumps(response).encode()
+        with patch.object(endpoint, "_identity", return_value=(self.identity, self.root)), \
+             patch.object(endpoint, "_scope_ready", side_effect=AssertionError("No command admission")), \
+             patch.object(client, "_exchange", side_effect=exchange):
+            result = Machines(self.settings, self.root / "state", client.call).inspect_environment(
+                "build-machine", "project", "environment")
+        self.assertEqual(result["scope"], "worker_endpoint")
+        self.assertEqual(result["target_identity"], self.identity)
+        self.assertEqual(result["worker_sha256"], self.digest)
+        self.assertEqual(result["context"]["cwd"], str(self.project))
+        self.assertEqual(result["data"]["value"]["interpreter"]["path"], sys.executable)
+        self.assertFalse((self.root / ".local").exists())
+        for version in (0, True, 2):
+            with self.subTest(version=version), self.assertRaises(Fault) as caught:
+                self.dispatch("inspect_environment", workspace_name="project", section="environment", observation_version=version)
+            self.assertEqual(caught.exception.code, "unsupported_operation")
+        for altered in (result | {"scope": "controller"}, result | {"observation_version": 2}, result | {"finished_at_ms": None}):
+            with patch.object(client, "_exchange", return_value=self.response(altered)), self.assertRaises(Fault) as caught:
+                client.call(self.settings, "build-machine", "inspect_environment", section="environment", observation_version=1)
+            self.assertEqual(caught.exception.code, "ssh_protocol_error")
+        with patch.object(client, "_exchange", return_value=(0, b'{"error":{"code":"unsupported_operation","message":"Old worker"}}')) as exchange:
+            with self.assertRaises(Fault) as caught:
+                client.call(self.settings, "build-machine", "inspect_environment", section="environment", observation_version=1)
+        self.assertEqual(caught.exception.code, "unsupported_operation")
+        self.assertEqual(exchange.call_count, 1)
+
+    def test_standard_library_archive_collects_without_controller_dependencies(self):
+        artifact = bundle.build_bundle(self.root / "workers")
+        program = "import json,sys;sys.path.insert(0,sys.argv[1]);from integrations.ssh.endpoint import _RemoteConfig;from openmachine.execution import inspect_environment;c=_RemoteConfig('fixture',{'project':sys.argv[2]},False,False);r=inspect_environment(c,'fixture','project','project');assert 'openmachine.app' not in sys.modules and 'pydantic' not in sys.modules;print(json.dumps(r))"
+        result = subprocess.run([sys.executable, "-I", "-S", "-c", program, artifact["path"], str(self.project)],
+                                capture_output=True, text=True, timeout=10, check=True)
+        self.assertEqual(json.loads(result.stdout)["section"], "project")
+        self.assertEqual(json.loads(result.stdout)["context"]["cwd"], str(self.project))
+
+
     def test_configuration_requires_explicit_alias_worker_and_identity_for_execution(self):
         target = self.settings.machines["build-machine"]
         for delta in ({"ssh_alias": "-bad"}, {"ssh_worker": "/tmp/mutable.pyz"}, {"ssh_identity": ""},
