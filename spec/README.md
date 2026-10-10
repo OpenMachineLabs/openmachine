@@ -8,6 +8,7 @@ acceptance receipts remain in the linked Issues, not this index.
 
 | Spec Issue | Binding | Current scope |
 | --- | --- | --- |
+| [#138](https://github.com/OpenMachineLabs/openmachine/issues/138) | `direct_issue_contract`, [current first-increment authority](https://github.com/OpenMachineLabs/openmachine/issues/138#classification) | Two coherent increments: first-PR context composition is authorized, including self-review and merge; target runtime/resource collectors require separate authorization. No deployment. |
 | [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [current increment authorization](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Closed: standalone runtime and managed lifecycle baseline. |
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [implementation authorization and acceptance](https://github.com/OpenMachineLabs/openmachine/issues/6) | Closed: configurable GitHub attribution. |
 | [#18](https://github.com/OpenMachineLabs/openmachine/issues/18) | `direct_issue_contract`, [approved architecture and increments](https://github.com/OpenMachineLabs/openmachine/issues/18#classification) | Closed: module ownership and dependency direction; service extraction is in PR #60. |

@@ -27,12 +27,12 @@ MAX_MATCHES = 1000
 def inspect(config: "Settings", machine: str, workspace: str, action: str,
             path: str = ".", offset: int = 0, limit: int = 100, *, query: str = "",
             staged: bool = False, expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
-    if worktree:
-        config = select(config, machine, workspace, worktree)
     if action == "worktrees":
         if path != "." or query or staged or path_glob:
             raise Fault("invalid_filter", "Worktree discovery accepts only pagination and snapshot inputs.")
-        return list_worktrees(config, machine, workspace, offset, limit, expected_snapshot)
+        return list_worktrees(config, machine, workspace, offset, limit, expected_snapshot, worktree=worktree)
+    if worktree:
+        config = select(config, machine, workspace, worktree)
     root = root_for(config, machine, workspace)
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts or excluded(relative):

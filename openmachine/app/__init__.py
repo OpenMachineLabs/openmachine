@@ -16,7 +16,7 @@ from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_P
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
-from . import task_attention
+from . import environment, task_attention
 from .machines import Machines
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
@@ -101,6 +101,7 @@ class Application:
     def get_capabilities(self) -> dict:
         has_ssh = any(item.transport == "ssh" for item in self.config.machines.values())
         return {
+            "environment_observation": environment.capabilities(),
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
             "machines": {name: {**item.model_dump(), "workspace_write_effective": item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled,
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
@@ -166,6 +167,10 @@ class Application:
                        "task_result_bytes": MAX_TASK_RESULT_BYTES},
             "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
         }
+
+    def inspect_context(self, machine: str, workspace_name: str, worktree: str = "", task_id: str = "",
+                        sections: list[str] | None = None, limit: int = 10) -> dict:
+        return environment.inspect_context(self, machine, workspace_name, worktree, task_id, sections, limit)
 
     def inspect_workspace(self, machine: str, workspace_name: str,
                           action: Literal["files", "read", "search", "status", "diff", "worktrees"], path: str = ".",
@@ -315,7 +320,7 @@ class Application:
                              check_identity: bool = True) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
-        known = {"get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
+        known = {"inspect_context", "get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_issue",

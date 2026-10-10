@@ -103,6 +103,12 @@
       "approval": "Current maintainer Chat on 2026-10-09 authorizes one reviewed PR for safe Task abandonment and restart.",
       "base_commit": "c170190bb551a5e61d36e4e4746408428b84117d",
       "change": "Add only abandon to the existing control_task ReasonedControl action enum and tagged discriminator. Retain every other tool name, argument, annotation and frozen expected schema. An abandoned Task preserves unresolved original effects and audit evidence."
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/138#classification",
+      "base_commit": "aa312648e0552f97f8e992a050722606af4bb350",
+      "change": "PR1 adds only inspect_context with bounded section selection and passive target-dependent read annotations. Existing tools remain unchanged; the independently authored addition is checked against installed discovery in all integration configurations.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/138"
     }
   ],
   "baseline": {
@@ -3187,6 +3193,74 @@
           "expected_head_sha"
         ],
         "title": "github_review_threadArguments",
+        "type": "object"
+      }
+    },
+    "inspect_context": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 10,
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "workspace",
+                    "worktrees",
+                    "activity",
+                    "runtime"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sections"
+          },
+          "task_id": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          },
+          "worktree": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Worktree",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine",
+          "workspace_name"
+        ],
+        "title": "inspect_contextArguments",
         "type": "object"
       }
     },
