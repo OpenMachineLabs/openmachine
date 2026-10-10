@@ -9,15 +9,18 @@
         "test/component/app/test_task_observer.py",
         "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
+        "test/contract/mcp/environment/test_context.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/tasks/test_schema.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/resilience/tasks/test_mcp_restart.py"
       ],
       "sources": [
-        "openmachine/app/__init__.py"
+        "openmachine/app/__init__.py",
+        "openmachine/app/environment.py"
       ],
       "tests": [
+        "test/component/app/test_environment.py",
         "test/component/app/test_execution_dispatch.py",
         "test/component/app/test_github_dispatch.py",
         "test/component/app/test_initialization.py",
@@ -209,6 +212,7 @@
     },
     "machine_routes": {
       "boundary_tests": [
+        "test/component/app/test_environment.py",
         "test/component/app/test_execution_dispatch.py",
         "test/component/app/test_workspace_dispatch.py",
         "test/component/app/test_worktree_admission.py",
@@ -255,17 +259,19 @@
         "test/resilience/github/test_mcp_connection.py"
       ],
       "sources": [
-        "openmachine/server.py",
         "openmachine/mcp/__init__.py",
-        "openmachine/mcp/protocol.py",
         "openmachine/mcp/connections.py",
-        "openmachine/mcp/workspace.py",
+        "openmachine/mcp/environment.py",
+        "openmachine/mcp/execution.py",
+        "openmachine/mcp/protocol.py",
         "openmachine/mcp/tasks.py",
-        "openmachine/mcp/execution.py"
+        "openmachine/mcp/workspace.py",
+        "openmachine/server.py"
       ],
       "tests": [
         "test/component/server/test_mcp_admission.py",
         "test/component/server/test_mcp_workspace.py",
+        "test/contract/mcp/environment/test_context.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
         "test/unit/server/test_mcp_reply.py"
@@ -400,6 +406,7 @@
         "openmachine/skills/browser/SKILL.md",
         "openmachine/skills/browser/reference.md",
         "openmachine/skills/catalog.py",
+        "openmachine/skills/environment/SKILL.md",
         "openmachine/skills/execution/SKILL.md",
         "openmachine/skills/execution/terminal.md",
         "openmachine/skills/github/SKILL.md",
@@ -531,6 +538,7 @@
     },
     "tasks": {
       "boundary_tests": [
+        "test/component/app/test_environment.py",
         "test/component/app/test_scoped_supervision.py",
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_dispatch.py",
@@ -568,6 +576,7 @@
     },
     "workspace": {
       "boundary_tests": [
+        "test/component/app/test_environment.py",
         "test/component/app/test_workspace_dispatch.py",
         "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
@@ -662,6 +671,7 @@
     ],
     "test/support/mcp.py": [
       "test/component/server/test_mcp_workspace.py",
+      "test/contract/mcp/environment/test_context.py",
       "test/contract/mcp/execution/test_schema.py",
       "test/contract/mcp/github/test_scope.py",
       "test/contract/mcp/server/test_catalog.py",
@@ -731,6 +741,7 @@
       "test/resilience/app/test_observer_process.py"
     ],
     "test/support/tasks.py": [
+      "test/component/app/test_environment.py",
       "test/component/app/test_github_admission.py",
       "test/component/app/test_initialization.py",
       "test/component/app/test_lifecycle.py",

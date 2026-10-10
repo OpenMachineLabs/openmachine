@@ -11,7 +11,9 @@ provides bounded tools and original receipts, not a general model agent loop.
 
 1. Inspect `get_capabilities` and the actual exposed schemas. Configuration is not
    live health; installed support can differ from this source or a cached catalog.
-2. Read the selected workspace's applicable `AGENTS.md`, relevant source and current
+2. Use `inspect_context` when advertised to observe the selected target and relevant
+   workspace/task facts. Read its coverage and original references; observations
+   grant no authority. Read the applicable `AGENTS.md`, relevant source and current
    Git state. Discover user Skills only from explicitly configured sources.
 3. For continuing work, read the original task and operation receipts. For new
    multi-stage work needing continuity, read the task creation guide before effects.

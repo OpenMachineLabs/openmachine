@@ -1,5 +1,6 @@
 get_capabilities: {skill: om.overview}
 inspect_skills: {skill: om.overview}
+inspect_context: {skill: om.environment}
 inspect_workspace: {skill: om.workspace}
 create_worktree: {skill: om.workspace, path: worktrees.md}
 read_workspace_file: {skill: om.workspace, path: files.md}

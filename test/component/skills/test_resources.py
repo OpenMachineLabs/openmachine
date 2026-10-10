@@ -46,7 +46,8 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         self.assertEqual(self.config.skills.roots, [])
         _, selected = self.skill_fixture()
         listed = skills.inspect(self.config)
-        self.assertEqual(len(listed["skills"]), 8)
+        self.assertEqual(len(listed["skills"]), 9)
+        self.assertIn("om.environment", {item["skill"] for item in listed["skills"]})
         self.assertTrue(listed["warnings"])
         source = str(selected / "SKILL.md")
         first = skills.inspect(self.config, "read", source)
@@ -84,7 +85,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         listed = skills.inspect(self.config)
         identities = {item["skill"] for item in listed["skills"]}
         self.assertEqual(identities, {f"om.{name}" for name in
-                                    ("overview", "workspace", "execution", "tasks", "github", "browser", "service")})
+                                    ("overview", "workspace", "execution", "tasks", "github", "browser", "service", "environment")})
         self.assertEqual([item["skill"] for item in skills.inspect(self.config, query="om.tasks")["skills"]], ["om.tasks"])
         first = skills.inspect(self.config, limit=2)
         second = skills.inspect(self.config, offset=first["next_offset"], limit=2,
