@@ -224,8 +224,8 @@ def _validate_creation(record: dict) -> None:
         raise ValueError("unverified worktree creation")
 
 
-def require_reconcilable(record: dict) -> None:
-    """Recovery can prove only missing cleanup, never a missing command result."""
+def require_cleanup_only_unknown(record: dict) -> None:
+    """Classify settled command/control evidence without claiming descendant cleanup."""
     cleanup = record.get("cleanup", {})
     command = record.get("command", {})
     last = (record.get("control") or {}).get("last")
@@ -233,7 +233,12 @@ def require_reconcilable(record: dict) -> None:
             or not command.get("spawned") or not command.get("exited") or type(record["exit_code"]) is not int
             or record.get("error") or last and last["status"] in {"pending", "partial", "outcome_unknown"}):
         raise Fault("cleanup_recovery_unavailable", "Recovery requires an original terminal result with only cleanup unresolved.")
-    if "session_id" not in cleanup or "boot_id" not in cleanup:
+
+
+def require_reconcilable(record: dict) -> None:
+    """Recovery can prove cleanup only with retained native identity in the same boot."""
+    require_cleanup_only_unknown(record)
+    if "session_id" not in record["cleanup"] or "boot_id" not in record["cleanup"]:
         raise Fault("cleanup_identity_unavailable", "This historical receipt has no native session identity; preserve its unknown outcome.")
 
 
@@ -315,13 +320,15 @@ def validate_record(record: dict, execution_id: str) -> None:
         raise Fault("corrupt_state", "The original execution receipt is missing or invalid; do not relaunch.") from error
 
 
-def read_record(directory: Path) -> dict:
-    """Validate all accepted formats without rewriting or observing the process."""
+def read_record(directory: Path, *, original_reconciled: bool = False) -> dict:
+    """Validate effective evidence, or return its bound original before reconciliation."""
     try:
         raw = (directory / "record.json").read_bytes()
         record = json.loads(raw)
         validate_record(record, directory.name)
         path = directory / "reconciliation.json"
+        if original_reconciled and not os.path.lexists(path):
+            raise ValueError("missing original reconciliation evidence")
         if os.path.lexists(path):
             with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
                 info = os.fstat(stream.fileno())
@@ -329,7 +336,9 @@ def read_record(directory: Path) -> dict:
                     raise ValueError("invalid reconciliation file")
                 evidence = json.loads(stream.read(65537))
             try:
-                record = reconciled_record(record, evidence, hashlib.sha256(raw).hexdigest(), directory.name)
+                reconciled = reconciled_record(record, evidence, hashlib.sha256(raw).hexdigest(), directory.name)
+                if not original_reconciled:
+                    record = reconciled
             except Fault as error:
                 raise ValueError("unbound cleanup reconciliation") from error
         return record

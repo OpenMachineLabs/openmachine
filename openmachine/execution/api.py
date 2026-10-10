@@ -1,7 +1,7 @@
 """Execution admission and mutations under original identity, rights and leases."""
 
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import hashlib
 import os
 from pathlib import Path
@@ -21,7 +21,8 @@ from openmachine.workspace import worktrees
 from . import control as controls, observation
 from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
-                      effective_request, is_remote, read_record, reconciled_record, record_directory, require_reconcilable,
+                      effective_request, is_remote, read_record, reconciled_record, record_directory,
+                      require_cleanup_only_unknown, require_reconcilable,
                       resolve_terminal_size, termination_grace)
 
 if TYPE_CHECKING:
@@ -324,6 +325,62 @@ def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = Fals
                 pass
         except (Fault, OSError) as error:
             raise Fault("legacy_workspace_busy", "An original non-Git cwd lease is busy or unavailable; let its owner finish before changing the lock domain.") from error
+
+
+def _activation_resources(config: "Settings", state: Path, record: dict) -> dict[Path, bool]:
+    """Recover only existing, originally named local workspace/resource leases."""
+    machine = record["request"]["machine"]
+    if config.machine(machine).transport != "local":
+        raise Fault("unsupported_operation", "Historical local cleanup is not an SSH scope.")
+    request = effective_request(record)
+    validate_start(request["cwd"], request["argv"], request["timeout_seconds"], request["expected_head_sha"],
+                   request["workspace_access"], request["resource_keys"], request["task_id"],
+                   request["termination_grace_seconds"], request["tty"], request["terminal_size"])
+    root = record["context"].get("workspace_lock_root", record["context"].get("worktree"))
+    if not isinstance(root, str) or not Path(root).is_absolute() or ".." in Path(root).parts:
+        raise Fault("corrupt_state", "The original execution workspace identity is invalid.")
+    targets = [Path(root)]
+    if record["format_version"] == CREATION_FORMAT:
+        targets.append(Path(record["context"]["creation_plan"]["source_root"]))
+    if any(not any(target.is_absolute() and target.is_relative_to(Path(item.root).resolve())
+                   for item in config.workspaces.values() if item.machine == machine) for target in targets):
+        raise Fault("invalid_cwd", "Original execution workspaces no longer match the configured local grants.")
+    resources = {state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock"): False}
+    if record["format_version"] == CREATION_FORMAT:
+        for parent in _creation_parent_roots(config, machine, Path(root)):
+            if parent != root:
+                path = state / "locks" / ("workspace-" + hashlib.sha256(parent.encode()).hexdigest() + ".lock")
+                resources[path] = True
+    for key in request["resource_keys"]:
+        path = state / "locks" / ("resource-" + hashlib.sha256(key.encode()).hexdigest() + ".lock")
+        resources[path] = False
+    return resources
+
+
+@contextmanager
+def activation_guard(config: "Settings", state: Path, execution_ids: list[str]):
+    """Hold settled cleanup-only records and original leases across service cutover.
+
+    This guards controller replacement, not descendant termination or business success.
+    Unknown execution and Task results stay unknown after the guard is released.
+    """
+    with ExitStack() as locks:
+        records, resources = {}, {}
+        for execution_id in sorted(set(execution_ids)):
+            directory = record_directory(state, execution_id)
+            locks.enter_context(lease(state / "locks" / f"{execution_id}.lock", create=False))
+            locks.enter_context(lease(directory / "control.lock", create=False))
+            locks.enter_context(lease(directory / "worker.lock", create=False))
+            record = read_record(directory)
+            require_cleanup_only_unknown(record)
+            for path, shared in _activation_resources(config, state, record).items():
+                # Shared histories reserve each original path once, exclusively
+                # when any history requires exclusive access.
+                resources[path] = resources.get(path, True) and shared
+            records[execution_id] = record
+        for path, shared in sorted(resources.items()):
+            locks.enter_context(lease(path, shared=shared, create=False))
+        yield records
 
 
 def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:

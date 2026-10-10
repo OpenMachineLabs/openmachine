@@ -109,6 +109,26 @@ same task/execution/control identities afterward, never repeat input or work mer
 because a response disappeared. Original workers retain their own interpreter,
 session, receipts and immutable files; software rollback does not undo effects.
 
+For a managed Core update, old **local cleanup-only** uncertainty is not itself
+evidence that a controller replacement is unsafe. If the original command leader
+has a settled exit result and no pending/unknown terminal control, activation
+rechecks and holds the original execution, worker, control, workspace and resource
+leases through cutover and any restoration. A matching unknown Task observation
+is recognized by its exact original execution receipt digest. The controller can
+then update without a machine reboot, even if older receipts lack a native session
+identity. No execution or Task result is changed, no command is replayed, and
+the process or its descendants are **not** claimed to have exited.
+The candidate configuration must retain each affected local machine name as a
+local machine so the new controller can still read its original execution and
+Task evidence. Removing or changing that binding defers activation before stop.
+
+Active workers, busy or missing original leases, unknown command/control results,
+changed/malformed receipts, unbound Task uncertainty, incompatible retained-state
+readers, lost permissions and other lifecycle gates still defer safely. The
+original cleanup reconciliation tool remains stricter because changing an
+execution result requires actual native cleanup proof. The selected Core's
+service process may restart; macOS itself need not reboot for this case.
+
 For explicitly changed configuration or SSH routes, leave the active file unchanged
 and pass `update --candidate-config /absolute/new.toml`. The owner snapshots exact
 bytes and includes them in the prepared installation identity, so the same wheel

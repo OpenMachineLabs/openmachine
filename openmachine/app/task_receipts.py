@@ -60,8 +60,8 @@ def observation(operation: dict, observed: dict) -> tuple[dict, dict]:
     if outcome in {"succeeded", "failed", "cancelled"} and (observed.get("cleanup", {}).get("status") != "verified"
             or outcome == "succeeded" and observed.get("exit_code") != 0):
         outcome = "unknown"
-    facts = {key: observed.get(key) for key in ("execution_id", "created_at", "status", "exit_code", "command", "stop", "cleanup", "error")}
-    result = receipt_result(outcome, facts)
+    result = receipt_result(outcome)
+    result["receipt_sha256"] = records.execution_receipt_digest(observed)
     result["log_offset"] = (operation["result"] or {}).get("log_offset") or 0
     return result, locator
 

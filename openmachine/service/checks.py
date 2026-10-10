@@ -149,7 +149,19 @@ _HISTORICAL_CHANGE_NO_EFFECT = frozenset(
     f"Domain failure: {code}." for code in PRE_EFFECT_REQUEST_FAILURES)
 
 
-def _task_operation_blocks_activation(operation: dict) -> bool:
+def _cleanup_task_machine(operation: dict, historical: dict | None) -> str | None:
+    locator, result = operation.get("locator") or {}, operation.get("result") or {}
+    machine = locator.get("machine")
+    if (operation.get("state") == "unknown" and result.get("status") == "unknown"
+            and locator.get("kind") == "execution" and locator.get("control_seq") is None
+            and locator.get("target_identity") is None and result.get("receipt_sha256")
+            and (historical or {}).get(locator.get("execution_id")) ==
+                (machine, result["receipt_sha256"])):
+        return machine
+    return None
+
+
+def _task_operation_blocks_activation(operation: dict, historical: dict | None = None) -> bool:
     result = operation.get("result")
     pending = (operation.get("state") != "observed" or result is None
                or result.get("status") in {"running", "unknown"})
@@ -158,6 +170,9 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
     if operation.get("state") != "unknown":
         return True
     locator = operation.get("locator") or {}
+    if _cleanup_task_machine(operation, historical) is not None:
+        # Replacing the controller never resolves or repeats original work.
+        return False
     if locator.get("kind") == "github":
         # Provider uncertainty remains retained; switching a compatible local
         # runtime neither replays nor cancels that external operation.
@@ -166,22 +181,50 @@ def _task_operation_blocks_activation(operation: dict) -> bool:
                 and result.get("summary") in _HISTORICAL_CHANGE_NO_EFFECT)
 
 
-def activation_safe(state: Path) -> None:
-    """Conservative product admission under lifecycle.lock; no receipt repair."""
+def activation_safe(state: Path, *, config=None, candidate_config=None, guards=None) -> None:
+    """Admit controller replacement without resolving old work or releasing guards."""
+    historical, unresolved, candidate_machines = {}, [], set()
     root = state / "executions"
     if root.exists():
         for directory in root.iterdir():
             record = execution.read_record(directory)
+            if record.get("cleanup", {}).get("source") == "native_reconciliation":
+                original = execution.read_record(directory, original_reconciled=True)
+                historical[directory.name] = (original["request"]["machine"],
+                    tasks.execution_receipt_digest(original | {"execution_id": directory.name}))
             if (record["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
                     or record.get("cleanup", {}).get("status", "verified") != "verified"
                     or ((record.get("control") or {}).get("last") or {}).get("status") in {"pending", "partial", "outcome_unknown"}):
-                raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+                if config is None or candidate_config is None or guards is None:
+                    raise Fault("activation_deferred", "An original execution is active or unresolved; preserve it and continue this update explicitly later.")
+                unresolved.append(directory.name)
+    if unresolved:
+        try:
+            records = guards.enter_context(execution.activation_guard(config, state, unresolved))
+        except (Fault, OSError, ValueError) as error:
+            raise Fault("activation_deferred", "Original execution command, control or resource ownership remains unverified; no service was stopped.") from error
+        for identity, record in records.items():
+            historical[identity] = (record["request"]["machine"],
+                tasks.execution_receipt_digest(record | {"execution_id": identity}))
+            candidate_machines.add(record["request"]["machine"])
     try:
-        blocked = any(_task_operation_blocks_activation(operation) for operation in tasks.activation_blockers(state))
+        # Exhaust the owning iterator so Task storage readers close before cutover.
+        blocked = False
+        for operation in tasks.activation_blockers(state):
+            machine = _cleanup_task_machine(operation, historical)
+            if machine is not None:
+                candidate_machines.add(machine)
+            blocked |= _task_operation_blocks_activation(operation, historical)
     except Fault as error:
         raise Fault("activation_deferred", "Task history is not fully readable; activation remains unperformed.") from error
     if blocked:
         raise Fault("activation_deferred", "An original task operation is active or unresolved; no worker was stopped.")
+    if candidate_config is not None:
+        for machine in candidate_machines:
+            selected = candidate_config.machines.get(machine)
+            if selected is None or selected.transport != "local":
+                raise Fault("activation_deferred",
+                            "The candidate removes or rebinds an original local execution machine; preserve its Task read route before changing the service.")
     # The owning readers validate their records before classifying in-flight
     # writes or authentication. No service-owned copy of either schema exists.
     from integrations.connections import check_state as connections_state
