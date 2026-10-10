@@ -124,6 +124,7 @@
         "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_admission.py",
         "test/component/service/test_checks.py",
+        "test/component/service/test_rebootless_upgrade.py",
         "test/resilience/app/test_mcp_admission.py",
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/app/test_task_execution.py",
@@ -285,6 +286,7 @@
       ],
       "tests": [
         "test/component/service/test_checks.py",
+        "test/component/service/test_rebootless_upgrade.py",
         "test/component/service/test_workspace_compatibility.py",
         "test/resilience/service_checks/test_mcp_readiness.py"
       ]
@@ -703,6 +705,7 @@
       "test/component/config/test_configuration.py",
       "test/component/execution/test_admission.py",
       "test/component/execution/test_logs.py",
+      "test/component/service/test_rebootless_upgrade.py",
       "test/component/workspace/test_inspection.py",
       "test/resilience/execution/test_api.py"
     ],

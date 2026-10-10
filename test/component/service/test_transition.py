@@ -1,5 +1,6 @@
 """Tests for service behavior at the component layer."""
 
+from contextlib import contextmanager
 import subprocess
 import sys
 import unittest
@@ -37,11 +38,47 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(service_state._record(state)["pending"], {"from": self.a, "to": self.b, "previous": None})
             events.append("migrate")
         with patch.object(tasks, "migrate", side_effect=migrate), \
-                patch.object(service_checks, "activation_safe", side_effect=lambda state: events.append("gate")):
+                patch.object(service_checks, "activation_safe", side_effect=lambda state, **kwargs: events.append("gate")):
             result = service_transition._activate(self.state, self.record, self.b, require_safe=True)
         self.assertEqual(events, ["gate", "stop", "migrate", "start"])
         self.assertEqual(result["current"], self.b)
         self.assertIsNone(service_state._record(self.state)["pending"])
+
+    def test_cleanup_guard_is_retained_through_failed_cutover_and_restoration(self):
+        _, stop, start = self.activation_mocks()
+        events = []
+
+        @contextmanager
+        def original_guard():
+            events.append("guard_acquired")
+            try:
+                yield
+            finally:
+                events.append("guard_released")
+
+        def admit(state, *, config, guards):
+            guards.enter_context(original_guard())
+
+        def stopped(state):
+            self.assertNotIn("guard_released", events)
+            events.append("stop")
+
+        def started(state, record):
+            self.assertNotIn("guard_released", events)
+            events.append("new_start" if record["current"] == self.b else "old_start")
+            if record["current"] == self.b:
+                raise Fault("service_unready", "Simulated candidate failure")
+            return {"status": "ready"}
+
+        stop.side_effect = stopped
+        start.side_effect = started
+        with patch.object(service_checks, "activation_safe", side_effect=admit), \
+                patch.object(service_runtime, "_sync_definition"):
+            self.assert_fault("activation_failed_restored", lambda:
+                              service_transition._activate(self.state, self.record, self.b, require_safe=True))
+        self.assertEqual(events, ["guard_acquired", "stop", "new_start",
+                                  "stop", "old_start", "guard_released"])
+        self.assertEqual(service_state._record(self.state), self.record)
 
     def test_task_migration_before_cutover_failure_restores_original_selection(self):
         _, stop, start = self.ledger_activation_fixture()

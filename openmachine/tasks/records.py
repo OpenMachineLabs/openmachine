@@ -58,6 +58,12 @@ def digest(value: object) -> str:
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
+def execution_receipt_digest(observed: dict) -> str:
+    """Fingerprint the Task observer's original execution facts, not its result."""
+    return digest({key: observed.get(key) for key in (
+        "execution_id", "created_at", "status", "exit_code", "command", "stop", "cleanup", "error")})
+
+
 def _unique(values: list) -> None:
     if len(values) != len(set(values)):
         raise ValueError("duplicate reference")
