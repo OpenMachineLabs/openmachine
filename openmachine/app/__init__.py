@@ -101,7 +101,7 @@ class Application:
     def get_capabilities(self) -> dict:
         has_ssh = any(item.transport == "ssh" for item in self.config.machines.values())
         return {
-            "version": __version__, "configuration_sha256": self.config.configuration_sha256(),
+            "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
             "machines": {name: {**item.model_dump(), "workspace_write_effective": item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled,
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},

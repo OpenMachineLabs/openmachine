@@ -6,12 +6,37 @@ from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
-from openmachine.foundation.state import lease
+from openmachine.foundation.state import lease, save_json
 from openmachine.service import checks, install, payload, processes
 from test.support.payload_cases import PayloadCaseFixture
 
 
 class PayloadTests(PayloadCaseFixture, unittest.TestCase):
+    def test_payload_commit_identity_and_historical_metadata_reuse(self):
+        def observed(python, *_args, **_options):
+            return {"version": "0.2.8", "prefix": str(python.parent.parent), "protocol": 1, "state_contract": 13}
+        with patch.object(processes, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                patch.object(checks, "_candidate_state", side_effect=observed):
+            first = install._prepare(self.state, self.wheel, self.source / "requirements.lock", self.config,
+                                     offline=(self.source, self.digest, self.manifest))
+            path = self.state / "service/versions" / first / "installation.json"
+            original = json.loads(path.read_text())
+            self.assertEqual(original["commit"], self.manifest["core"]["commit"])
+            save_json(path, original | {"commit": "f" * 40})
+            self.fault("installation_conflict", lambda: install._prepare(
+                self.state, self.wheel, self.source / "requirements.lock", self.config,
+                offline=(self.source, self.digest, self.manifest)))
+            del original["commit"]
+            save_json(path, original)
+            self.assertEqual(install._prepare(self.state, self.wheel, self.source / "requirements.lock", self.config,
+                                              offline=(self.source, self.digest, self.manifest)), first)
+            self.assertEqual(json.loads(path.read_text()), original)
+            self.manifest["core"]["commit"] = "e" * 40
+            second = install._prepare(self.state, self.wheel, self.source / "requirements.lock", self.config,
+                                      offline=(self.source, self.seal(), self.manifest))
+            self.assertNotEqual(first, second)
+            self.assertEqual(json.loads((self.state / "service/versions" / second / "installation.json").read_text())["commit"], "e" * 40)
+
     def test_offline_preparation_reuses_installer_and_never_selects_service(self):
         calls = []
         def run(argv, **kwargs):
@@ -29,6 +54,8 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         self.assertEqual(result, again)
         self.assertEqual(result, inherited)
         self.assertEqual(result["status"], "prepared")
+        self.assertEqual(set(result), {"status", "identity", "version", "payload_sha256", "runtime",
+                                       "launch_python", "path_environment", "selection", "service"})
         self.assertEqual(result["selection"], "unchanged")
         self.assertFalse((self.state / "service/service.json").exists())
         installers = [(argv, options) for argv, options in calls if "install" in argv]
@@ -44,6 +71,7 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         self.assertEqual(venv[0][-1], result["runtime"])
         record = json.loads((Path(result["runtime"]) / "installation.json").read_text())
         self.assertEqual(record["payload_sha256"], self.digest)
+        self.assertEqual(record["commit"], self.manifest["core"]["commit"])
         candidate = self.root / "candidate.toml"
         candidate.write_bytes(self.config.read_bytes() + b"# configuration-only update\n")
         with patch.object(processes, "run", side_effect=run), patch.object(checks, "_candidate_state", side_effect=state):

@@ -64,6 +64,33 @@ persistent disable, cancellation, uninstall or rollback of user work.
 .venv/bin/openmachine doctor --service
 ```
 
+For an explicit development commit, no tag or GitHub Release is needed:
+
+```sh
+openmachine update --commit FULL_40_CHARACTER_LOWERCASE_SHA
+openmachine --version
+openmachine service status
+```
+
+This online path fetches only that commit from the official Open Machine repository,
+verifies the checked-out HEAD, builds an isolated wheel, and uses the same commit's
+`requirements.lock` with the existing installer and activation checks. It requires
+Git, pip, network access and existing noninteractive Git authentication for a private
+repository. Only fetch uses your Git credential configuration; checkout and build
+use an isolated environment. It never changes your working checkout. `--commit` and
+`--wheel` are mutually exclusive; `--requirements` is only for `--wheel`.
+Different commits remain distinct candidates even when their version and wheel
+bytes match. This command uses the invoking CLI's existing compatibility checks;
+a future state contract still requires the reviewed incoming implementation.
+
+`--version` shows `VERSION (COMMIT)`. Doctor and MCP capabilities keep the existing
+`version` field and add `commit` for the running implementation. Service status
+reports the selected installation's version and commit. Historical installations
+without recorded provenance return `null` (`unknown` in `--version`); no command
+infers an installed commit from the caller's Git checkout. Older target commits
+may not expose provenance through their own CLI or MCP; this updater's result and
+status reader still report the recorded source.
+
 Preparation snapshots the artifacts, builds at a distinct final path, validates
 dependencies/identity with installed readers, and probes private MCP/file readiness.
 A rejected candidate does not stop the healthy service. Activation takes lifecycle
@@ -164,9 +191,9 @@ workloads, for authorized transition tests.
 `--state-dir` are required, before `manage`. It does not discover, adopt or scan
 other installations. Commands emit one bounded JSON result on stdout; syntax
 errors use argparse's stderr/exit 2. Result envelopes separate
-`management_contract`, `capabilities`, `implementation_version`, and
-`implementation_state_contract`. Installed status additionally reports actual
-`product_version`, `state_contract`, selection, policy and native startup state.
+`management_contract`, `capabilities`, `implementation_version`, `implementation_commit`,
+and `implementation_state_contract`. Installed status additionally reports actual
+`product_version`, `product_commit`, `state_contract`, selection, policy and native startup state.
 Every result has `observed_at_ms`; a retained result is a timestamped observation,
 not a continuing health guarantee. Consumers must validate the contract and JSON,
 not infer support from the product version string.

@@ -217,7 +217,23 @@ def _installed(state: Path, identity: str) -> dict:
         raise Fault("installation_identity_mismatch", "The retained payload identity is invalid.")
     if "management_contract" in result and (type(result["management_contract"]) is not int or result["management_contract"] < 0):
         raise Fault("incompatible_runtime", "The retained management contract is invalid.")
+    if "commit" in result and (not isinstance(result["commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", result["commit"])):
+        raise Fault("installation_identity_mismatch", "The retained source commit is invalid.")
     return result
+
+
+def running_commit(version: str) -> str | None:
+    """Report this loaded implementation, independently of the selected service."""
+    prefix = Path(sys.prefix).resolve()
+    if (prefix.parent.name != "versions" or prefix.parent.parent.name != "service"
+            or not Path(__file__).resolve().is_relative_to(prefix)
+            or not os.path.lexists(prefix / "installation.json")):
+        return None
+    try:
+        installed = _installed(prefix.parents[2], prefix.name)
+    except Fault:
+        return None  # Diagnostics remain available; state operations still validate strictly.
+    return installed.get("commit") if installed["version"] == version else None
 
 
 def guard_writes(state: Path) -> None:

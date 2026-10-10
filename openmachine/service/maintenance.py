@@ -521,6 +521,7 @@ def observe(config_path: Path, state: Path) -> dict:
     if record["pending"] is not None:
         result["status"] = "activation_pending"
     result["product_version"] = selected["version"]
+    result["product_commit"] = selected.get("commit")
     return result
 
 
@@ -619,7 +620,8 @@ def change_machine(config_path: Path, state: Path, action: str, identity: str, n
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
                 "capabilities": [*CAPABILITIES, "configure:verify_existing"],
-                "implementation_version": __version__, "implementation_state_contract": service_state.STATE_CONTRACT}
+                "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
+                "implementation_state_contract": service_state.STATE_CONTRACT}
     try:
         if contract != service_state.MANAGEMENT_CONTRACT:
             raise Fault("incompatible_management", "This Core supports management contract 1.")

@@ -21,6 +21,23 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def test_status_separates_selected_and_running_commits(self):
+        for identity, commit in ((self.a, "c" * 40), (self.b, "d" * 40)):
+            path = service_state._runtime(self.state, identity) / "installation.json"
+            save_json(path, service_state._json(path) | {"commit": commit})
+        with patch.object(sys, "platform", "darwin"), \
+                patch.object(service_runtime, "_verify_files"), \
+                patch.object(service_runtime, "_native", return_value={"loaded": False, "pid": None}), \
+                patch.object(service_runtime, "_startup", return_value={"enabled": False}), \
+                patch.object(service_state, "running_commit", return_value="e" * 40):
+            for identity, commit in ((self.a, "c" * 40), (self.b, "d" * 40)):
+                self.save(self.record | {"current": identity})
+                result = maintenance.dispatch(self.config, self.state, "status")
+                self.assertEqual(result["status"], "stopped")
+                self.assertEqual((result["version"], result["product_version"]), ("0.1.0a7", "0.1.0a7"))
+                self.assertEqual((result["commit"], result["product_commit"]), (commit, commit))
+                self.assertEqual(result["implementation_commit"], "e" * 40)
+
     def ledger_operation_fixture(self):
         record = self.operation_fixture()
         path = self.state / "service/versions" / self.b / "installation.json"

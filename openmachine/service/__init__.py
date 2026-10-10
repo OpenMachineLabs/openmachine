@@ -3,5 +3,5 @@
 from .checks import check_state, probe_service
 from .install import prepare_payload
 from .runtime import socket_alive, status, supervise
-from .state import PROTOCOL, STATE_CONTRACT, guard_writes
+from .state import PROTOCOL, STATE_CONTRACT, guard_writes, running_commit
 from .transition import operate

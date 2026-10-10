@@ -22,6 +22,26 @@ from test.support.tasks import write_legacy_checkpoint
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def test_commit_update_reuses_activation_and_leaves_selection_on_build_failure(self):
+        with patch.object(sys, "platform", "darwin"), \
+                patch.object(service_runtime, "_verify_files"), \
+                patch.object(service_install, "_prepare_commit", return_value=self.b) as prepare, \
+                patch.object(service_transition, "_activate", return_value={"status": "ready"}) as activate:
+            self.assertEqual(service_transition.operate(self.config, self.state, "update", commit="c" * 40), {"status": "ready"})
+            self.assertEqual(prepare.call_args.args[:2], (self.state, "c" * 40))
+            self.assertEqual(prepare.call_args.args[2].read_bytes(), self.config.read_bytes())
+            self.assertEqual(activate.call_args.args[2], self.b)
+            activate.reset_mock()
+            prepare.side_effect = Fault("commit_build_failed", "Fixture build failure.")
+            self.assert_fault("commit_build_failed", lambda: service_transition.operate(
+                self.config, self.state, "update", commit="c" * 40))
+            activate.assert_not_called()
+            self.assertEqual(service_state._record(self.state), self.record)
+            for inputs in ({"wheel": self.root / "wheel.whl"}, {"requirements": self.root / "requirements.lock"}):
+                self.assert_fault("invalid_service_request", lambda: service_transition.operate(
+                    self.config, self.state, "update", commit="c" * 40, **inputs))
+            activate.assert_not_called()
+
     def ledger_activation_fixture(self):
         self.enterContext(patch.object(service_runtime, "socket_alive", return_value=False))
         path = self.state / "service/versions" / self.b / "installation.json"
