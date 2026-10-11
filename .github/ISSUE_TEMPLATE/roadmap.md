@@ -1,12 +1,12 @@
 ---
-name: "Program"
-about: "Organize a real multi-stage goal without approving architecture."
-title: "[Program] Name the program"
+name: "Roadmap"
+about: "Describe long-term direction without authorizing implementation."
+title: "[ROADMAP] Name the roadmap"
 labels: "feature"
 ---
 
 ## Classification
-- Type: Program
+- Type: Roadmap
 - Status: Draft
 
 ## Why
@@ -16,7 +16,7 @@ Explain the long-term goal and why it needs multiple independently useful stages
 Define the overall result without claiming unimplemented functionality.
 
 ## Scope
-- Stages and dependencies:
+- Proposed stages and dependencies:
 - Links to actual Surveys, Specs, and implementation tasks:
 - Non-goals:
 
@@ -28,8 +28,8 @@ Define the overall result without claiming unimplemented functionality.
 - [ ] Each completed stage links its actual acceptance evidence.
 
 ## Dependencies and boundary
-State unresolved decisions and scope boundaries. A roadmap is not a direct
-implementation contract or authorization for every downstream task.
+State unresolved decisions and scope boundaries. A roadmap describes direction, not implementation authorization.
+Each delivery increment requires separately approved scope and acceptance.
 
 ## Evidence
 Record verified progress and link evidence rather than copying Issue bodies.

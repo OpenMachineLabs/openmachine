@@ -17,7 +17,7 @@ Keep all repository-authored content in English, including commit and PR bodies.
 | Survey / Research | `[SURVEY] research(<scope>): <question>` | Investigation, comparison, or synthesis. |
 | Experiment | `[SURVEY] experiment(<scope>): <question>` | Bounded measurements and their conclusions. |
 | Benchmark | `[BENCHMARK] eval(<scope>): <comparison>` | A reproducible comparison under a frozen protocol. |
-| Program | `[Program] <name>` | An optional roadmap across several tasks. |
+| Roadmap | `[ROADMAP] <name>` | Long-term direction across separately approved Specs and tasks. |
 | Ordinary task | `<domain>(<scope>): <outcome>` | A bounded bug, improvement, or maintenance task. |
 
 Use the Issue templates. Research is covered by **Survey**; do not create a
@@ -44,7 +44,7 @@ Specs describe deltas rather than permanently mirroring the code.
 
 Keep design, implementation, and acceptance status distinct. Use `Refs #N` for
 partial work; use `Closes #N` only when all scoped acceptance is met and closure
-is authorized. A Program, Survey, Benchmark, or Feature Request does not
+is authorized. A Roadmap, Survey, Benchmark, or Feature Request does not
 authorize implementation, production changes, expensive runs, or purchases.
 
 ## Git and review
@@ -88,7 +88,7 @@ as part of an ordinary code change.
 primary label per Issue or PR: `spec`, `research`, `benchmark`, `bug`,
 `implementation`, `feature`, `feature-request`, `maintenance`, `documentation`,
 or `security`. Surveys, including experiments, use `research`; implementation
-increments use `implementation`. Programs and other feature work use `feature`;
+increments use `implementation`. Roadmaps and other feature work use `feature`;
 Feature Request issues use only `feature-request`. Labels classify work, not
 approval or completion. Check the live label during review.
 
