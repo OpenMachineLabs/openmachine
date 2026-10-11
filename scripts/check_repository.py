@@ -33,7 +33,7 @@ def title_errors(title: str, kind: str) -> list[str]:
         return ["title must not have surrounding spaces or a final period"]
     prefix = ""
     if kind == "issue" and title.startswith("["):
-        match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|Program)\] (\S.*)", title)
+        match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|Program)\] (\S.*)", title)
         if not match:
             return ["use an exact supported Issue prefix, followed by one space"]
         prefix, title = match.groups()

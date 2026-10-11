@@ -24,6 +24,7 @@ class RepositoryChecks(unittest.TestCase):
             ("pr", "ci(repository): check contribution metadata"),
             ("issue", "[SPEC] architecture(runtime): define the first behavior"),
             ("issue", "[REQUEST] runtime(workspace): support path exclusions"),
+            ("issue", "[BUG] runtime(connection): handle a failed retry"),
             ("issue", "[SURVEY] research(transport): compare current options"),
             ("issue", "[SURVEY] experiment(latency): measure overhead"),
             ("issue", "[BENCHMARK] eval(transport): compare frozen candidates"),
@@ -40,6 +41,8 @@ class RepositoryChecks(unittest.TestCase):
             ("issue", "[RESEARCH] research(repo): investigate governance"),
             ("issue", "[REQUEST]  runtime(repo): add a new capability"),
             ("issue", "[Request] runtime(repo): add a new capability"),
+            ("issue", "[BUG]  runtime(connection): handle a failed retry"),
+            ("issue", "[Bug] runtime(connection): handle a failed retry"),
             ("issue", "[SURVEY]  research(repo): investigate governance"),
             ("issue", "[SURVEY] governance(repo): change the rules"),
             ("issue", "[BENCHMARK] research(repo): compare candidates"),
@@ -112,6 +115,13 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn('\nlabels: "feature-request"\n', frontmatter)
         self.assertNotIn("- Type:", template)
         self.assertNotIn("- Status:", template)
+
+    def test_bug_template_keeps_single_existing_label(self):
+        template = (ROOT / ".github/ISSUE_TEMPLATE/bug.md").read_text()
+        frontmatter = template.split("---", 2)[1]
+        self.assertIn('title: "[BUG] ', frontmatter)
+        self.assertEqual(frontmatter.count("\nlabels:"), 1)
+        self.assertIn('\nlabels: "bug"\n', frontmatter)
 
     def test_metadata_keeps_title_language_and_nonempty_body_checks(self):
         obj = {"title": "docs(repo): explain the bounded change", "body": "Actual change and validation."}

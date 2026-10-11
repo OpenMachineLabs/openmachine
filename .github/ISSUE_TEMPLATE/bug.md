@@ -1,7 +1,7 @@
 ---
 name: "Bug"
 about: "Report an observed problem with a minimal reproduction."
-title: "runtime(scope): describe the observed problem"
+title: "[BUG] runtime(scope): describe the observed problem"
 labels: "bug"
 ---
 
