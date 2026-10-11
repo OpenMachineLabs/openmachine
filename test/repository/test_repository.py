@@ -28,7 +28,7 @@ class RepositoryChecks(unittest.TestCase):
             ("issue", "[SURVEY] research(transport): compare current options"),
             ("issue", "[SURVEY] experiment(latency): measure overhead"),
             ("issue", "[BENCHMARK] eval(transport): compare frozen candidates"),
-            ("issue", "[Program] Repository foundation"),
+            ("issue", "[ROADMAP] Repository foundation"),
         ]
         for kind, title in cases:
             with self.subTest(title=title):
@@ -39,6 +39,10 @@ class RepositoryChecks(unittest.TestCase):
             ("commit", "[SPEC] docs(repo): describe the rules"),
             ("pr", "[SURVEY] research(repo): investigate governance"),
             ("issue", "[RESEARCH] research(repo): investigate governance"),
+            ("issue", "[Program] Repository foundation"),
+            ("issue", "[PROGRAM] Repository foundation"),
+            ("issue", "[Roadmap] Repository foundation"),
+            ("issue", "[ROADMAP]  Repository foundation"),
             ("issue", "[REQUEST]  runtime(repo): add a new capability"),
             ("issue", "[Request] runtime(repo): add a new capability"),
             ("issue", "[BUG]  runtime(connection): handle a failed retry"),
@@ -115,6 +119,26 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn('\nlabels: "feature-request"\n', frontmatter)
         self.assertNotIn("- Type:", template)
         self.assertNotIn("- Status:", template)
+
+    def test_roadmap_template_keeps_existing_label(self):
+        template = (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()
+        frontmatter = template.split("---", 2)[1]
+        self.assertIn('name: "Roadmap"', frontmatter)
+        self.assertIn('title: "[ROADMAP] ', frontmatter)
+        self.assertEqual(frontmatter.count("\nlabels:"), 1)
+        self.assertIn('\nlabels: "feature"\n', frontmatter)
+
+    def test_historical_program_events_keep_editability(self):
+        issue = {"title": "[Program] Existing roadmap",
+                 "body": (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            for action, expected in (("edited", 0), ("reopened", 0), ("opened", 1)):
+                path.write_text(json.dumps({"action": action, "issue": issue}))
+                with self.subTest(action=action), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(rules.main(["--mode", "metadata", "--event-name", "issues",
+                                                 "--event-path", str(path)]), expected)
+        self.assertEqual(issue["title"], "[Program] Existing roadmap")
 
     def test_bug_template_keeps_single_existing_label(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/bug.md").read_text()

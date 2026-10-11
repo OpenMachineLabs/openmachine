@@ -42,6 +42,6 @@ Necessary machine-readable attachments may live in `spec/<issue-number>/`;
 product code must not load them. Completed Specs remain design history, while
 current code and tests describe accepted implementation.
 
-Programs are linked from the root README when one exists. Formal Benchmarks
+Roadmaps are linked from the root README when one exists. Formal Benchmarks
 are found through their prefix and `benchmark` label rather than a second index.
 See [Contributing](../CONTRIBUTING.md) for the workflow and closure rules.

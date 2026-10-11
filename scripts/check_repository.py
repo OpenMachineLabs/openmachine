@@ -33,11 +33,11 @@ def title_errors(title: str, kind: str) -> list[str]:
         return ["title must not have surrounding spaces or a final period"]
     prefix = ""
     if kind == "issue" and title.startswith("["):
-        match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|Program)\] (\S.*)", title)
+        match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|ROADMAP)\] (\S.*)", title)
         if not match:
             return ["use an exact supported Issue prefix, followed by one space"]
         prefix, title = match.groups()
-        if prefix == "Program":
+        if prefix == "ROADMAP":
             return []
     match = TITLE.fullmatch(title)
     if not match or match[3] != match[3].strip() or match[3].lower() in {"update", "misc", "todo"}:
@@ -88,6 +88,15 @@ def file_errors(path: Path, root: Path) -> list[str]:
             if not target.resolve().is_relative_to(root.resolve()) or not target.exists():
                 errors.append(f"missing or out-of-repository Markdown target: {url.path}")
     return errors
+
+
+def issue_for_metadata_event(event: dict) -> dict:
+    issue = event["issue"]
+    if (event.get("action") in {"edited", "reopened"} and isinstance(issue, dict)
+            and isinstance(issue.get("title"), str)
+            and issue["title"].startswith("[Program] ")):
+        return {**issue, "title": "[ROADMAP] " + issue["title"][len("[Program] "):]}
+    return issue
 
 
 def metadata_errors(obj: dict, kind: str) -> list[str]:
@@ -168,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("event must be a JSON object")
         if metadata_event:
             kind = "pr" if event_name == "pull_request" else "issue"
-            obj = event["pull_request" if kind == "pr" else "issue"]
+            obj = event["pull_request"] if kind == "pr" else issue_for_metadata_event(event)
             errors += metadata_errors(obj, kind)
             warnings += metadata_warnings(obj, kind)
         elif not event.get("deleted"):
