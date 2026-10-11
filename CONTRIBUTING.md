@@ -13,6 +13,7 @@ Keep all repository-authored content in English, including commit and PR bodies.
 | --- | --- | --- |
 | Spec | `[SPEC] <domain>(<scope>): <outcome>` | An implementable design delta. |
 | Feature request | `[REQUEST] <domain>(<scope>): <outcome>` | A community-proposed capability or usability improvement. |
+| Bug report | `[BUG] <domain>(<scope>): <problem>` | An observed defect with reproduction details. |
 | Survey / Research | `[SURVEY] research(<scope>): <question>` | Investigation, comparison, or synthesis. |
 | Experiment | `[SURVEY] experiment(<scope>): <question>` | Bounded measurements and their conclusions. |
 | Benchmark | `[BENCHMARK] eval(<scope>): <comparison>` | A reproducible comparison under a frozen protocol. |
