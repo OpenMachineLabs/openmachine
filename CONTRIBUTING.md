@@ -44,7 +44,10 @@ Specs describe deltas rather than permanently mirroring the code.
 
 Keep design, implementation, and acceptance status distinct. Use `Refs #N` for
 partial work; use `Closes #N` only when all scoped acceptance is met and closure
-is authorized. A Roadmap, Survey, Benchmark, or Feature Request does not
+is authorized. Historical `[Program]` Issue titles remain valid when those Issues are edited or
+reopened; new Issue submissions must use `[ROADMAP]`.
+
+A Roadmap, Survey, Benchmark, or Feature Request does not
 authorize implementation, production changes, expensive runs, or purchases.
 
 ## Git and review

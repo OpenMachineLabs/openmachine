@@ -128,6 +128,18 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(frontmatter.count("\nlabels:"), 1)
         self.assertIn('\nlabels: "feature"\n', frontmatter)
 
+    def test_historical_program_events_keep_editability(self):
+        issue = {"title": "[Program] Existing roadmap",
+                 "body": (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            for action, expected in (("edited", 0), ("reopened", 0), ("opened", 1)):
+                path.write_text(json.dumps({"action": action, "issue": issue}))
+                with self.subTest(action=action), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(rules.main(["--mode", "metadata", "--event-name", "issues",
+                                                 "--event-path", str(path)]), expected)
+        self.assertEqual(issue["title"], "[Program] Existing roadmap")
+
     def test_bug_template_keeps_single_existing_label(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/bug.md").read_text()
         frontmatter = template.split("---", 2)[1]

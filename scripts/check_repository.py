@@ -90,6 +90,15 @@ def file_errors(path: Path, root: Path) -> list[str]:
     return errors
 
 
+def issue_for_metadata_event(event: dict) -> dict:
+    issue = event["issue"]
+    if (event.get("action") in {"edited", "reopened"} and isinstance(issue, dict)
+            and isinstance(issue.get("title"), str)
+            and issue["title"].startswith("[Program] ")):
+        return {**issue, "title": "[ROADMAP] " + issue["title"][len("[Program] "):]}
+    return issue
+
+
 def metadata_errors(obj: dict, kind: str) -> list[str]:
     if not isinstance(obj, dict):
         return ["metadata must be a JSON object"]
@@ -168,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("event must be a JSON object")
         if metadata_event:
             kind = "pr" if event_name == "pull_request" else "issue"
-            obj = event["pull_request" if kind == "pr" else "issue"]
+            obj = event["pull_request"] if kind == "pr" else issue_for_metadata_event(event)
             errors += metadata_errors(obj, kind)
             warnings += metadata_warnings(obj, kind)
         elif not event.get("deleted"):
