@@ -23,6 +23,7 @@ class RepositoryChecks(unittest.TestCase):
             ("commit", "governance(repo): establish a minimal scaffold"),
             ("pr", "ci(repository): check contribution metadata"),
             ("issue", "[SPEC] architecture(runtime): define the first behavior"),
+            ("issue", "[REQUEST] runtime(workspace): support path exclusions"),
             ("issue", "[SURVEY] research(transport): compare current options"),
             ("issue", "[SURVEY] experiment(latency): measure overhead"),
             ("issue", "[BENCHMARK] eval(transport): compare frozen candidates"),
@@ -37,6 +38,8 @@ class RepositoryChecks(unittest.TestCase):
             ("commit", "[SPEC] docs(repo): describe the rules"),
             ("pr", "[SURVEY] research(repo): investigate governance"),
             ("issue", "[RESEARCH] research(repo): investigate governance"),
+            ("issue", "[REQUEST]  runtime(repo): add a new capability"),
+            ("issue", "[Request] runtime(repo): add a new capability"),
             ("issue", "[SURVEY]  research(repo): investigate governance"),
             ("issue", "[SURVEY] governance(repo): change the rules"),
             ("issue", "[BENCHMARK] research(repo): compare candidates"),
@@ -59,6 +62,7 @@ class RepositoryChecks(unittest.TestCase):
     def test_label_manifest(self):
         labels = json.loads((ROOT / ".github/labels.json").read_text())
         self.assertEqual(rules.label_errors(labels), [])
+        self.assertEqual(sum(label["name"] == "feature-request" for label in labels), 1)
         for bad in [{}, [], labels + [labels[0]], [{"name": "bug"}],
                     [{"name": "Bug", "color": "ffffff", "description": "A bug."}],
                     [{"name": "bug", "color": "red", "description": "A bug."}],
@@ -81,7 +85,7 @@ class RepositoryChecks(unittest.TestCase):
 
     def test_issue_sections_remain_required_and_pr_sections_are_advisory(self):
         templates = list((ROOT / ".github/ISSUE_TEMPLATE").glob("*.md"))
-        self.assertEqual(len(templates), 6)
+        self.assertEqual(len(templates), 7)
         for path in templates:
             self.assertEqual(rules.metadata_errors({"title": "governance(repo): propose a scoped task",
                                                     "body": path.read_text()}, "issue"), [])
@@ -99,6 +103,15 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules.metadata_errors(legacy, "pr"), [])
         self.assertEqual(rules.metadata_warnings(legacy, "pr"), [])
         self.assertTrue(rules.metadata_errors(compact, "issue"))
+
+    def test_feature_request_template_has_only_one_label_and_no_type_field(self):
+        template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
+        frontmatter = template.split("---", 2)[1]
+        self.assertIn('title: "[REQUEST] ', frontmatter)
+        self.assertEqual(frontmatter.count("\nlabels:"), 1)
+        self.assertIn('\nlabels: "feature-request"\n', frontmatter)
+        self.assertNotIn("- Type:", template)
+        self.assertNotIn("- Status:", template)
 
     def test_metadata_keeps_title_language_and_nonempty_body_checks(self):
         obj = {"title": "docs(repo): explain the bounded change", "body": "Actual change and validation."}
