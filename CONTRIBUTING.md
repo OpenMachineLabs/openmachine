@@ -12,6 +12,7 @@ Keep all repository-authored content in English, including commit and PR bodies.
 | Work | Title | Purpose |
 | --- | --- | --- |
 | Spec | `[SPEC] <domain>(<scope>): <outcome>` | An implementable design delta. |
+| Feature request | `[REQUEST] <domain>(<scope>): <outcome>` | A community-proposed capability or usability improvement. |
 | Survey / Research | `[SURVEY] research(<scope>): <question>` | Investigation, comparison, or synthesis. |
 | Experiment | `[SURVEY] experiment(<scope>): <question>` | Bounded measurements and their conclusions. |
 | Benchmark | `[BENCHMARK] eval(<scope>): <comparison>` | A reproducible comparison under a frozen protocol. |
@@ -42,8 +43,8 @@ Specs describe deltas rather than permanently mirroring the code.
 
 Keep design, implementation, and acceptance status distinct. Use `Refs #N` for
 partial work; use `Closes #N` only when all scoped acceptance is met and closure
-is authorized. A Program, Survey, or Benchmark does not authorize implementation,
-production changes, expensive runs, or purchases.
+is authorized. A Program, Survey, Benchmark, or Feature Request does not
+authorize implementation, production changes, expensive runs, or purchases.
 
 ## Git and review
 
@@ -83,11 +84,12 @@ as part of an ordinary code change.
 ## Labels and planning
 
 [labels.json](.github/labels.json) defines the small managed label set. Use one
-primary type label per Issue or PR: `spec`, `research`, `benchmark`, `bug`,
-`implementation`, `feature`, `maintenance`, `documentation`, or `security`. Surveys,
-including experiments, use `research`; implementation increments use `implementation`;
-Programs and ordinary feature requests use `feature`. Labels classify work;
-they do not imply approval or completion. Check the live label during review.
+primary label per Issue or PR: `spec`, `research`, `benchmark`, `bug`,
+`implementation`, `feature`, `feature-request`, `maintenance`, `documentation`,
+or `security`. Surveys, including experiments, use `research`; implementation
+increments use `implementation`. Programs and other feature work use `feature`;
+Feature Request issues use only `feature-request`. Labels classify work, not
+approval or completion. Check the live label during review.
 
 The label workflow creates or updates only these managed labels after the
 manifest is merged to `main`, or on an explicit manual run against `main`.

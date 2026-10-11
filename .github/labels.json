@@ -30,6 +30,11 @@
     "description": "A new product capability or a multi-stage program."
   },
   {
+    "name": "feature-request",
+    "color": "84b6eb",
+    "description": "A community-proposed feature or usability improvement."
+  },
+  {
     "name": "maintenance",
     "color": "ededed",
     "description": "Repository, tooling, or dependency maintenance."
