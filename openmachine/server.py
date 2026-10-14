@@ -67,7 +67,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
             return invalid
         # The new contract forbids extra fields before SDK argument filtering.
         guarded = {"inspect_context", "read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
-                   "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue",
+                   "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue", "github_release",
                    "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
                    "cancel_integration_login", "disconnect_integration"}

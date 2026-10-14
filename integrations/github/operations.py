@@ -660,7 +660,8 @@ def _receipt(result: dict) -> dict:
 
 
 def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback,
-            *, settings: Settings | None = None, actor: dict | None = None, transport) -> dict:
+            *, settings: Settings | None = None, actor: dict | None = None,
+            verify_author: bool = False, transport) -> dict:
     try:
         result = object_response(connection.mutation_request(method, endpoint, payload, transport=transport))
     except Fault as error:
@@ -691,6 +692,10 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
                 matches &= observed.get(key) == expected
         if settings is not None:
             matches &= connection.read_actor(settings, transport=transport) == actor
+        if verify_author:
+            author = observed.get("author")
+            matches &= (isinstance(author, dict) and actor is not None
+                        and author.get("id") == actor.get("id"))
     except (Fault, OSError, KeyError, TypeError) as error:
         return {"status": "write_unverified", "repository": repository, "receipt": receipt,
                 "error_code": error.code if isinstance(error, Fault) else "github_response_unknown",
@@ -731,7 +736,7 @@ def release(settings: Settings, action: Literal["create"], repository: str, tag_
                    "draft": draft, "prerelease": prerelease}
     result = _mutate(repository, "POST", root, payload,
                      lambda value: f"{root}/{value['id']}",
-                     settings=settings, actor=actor, transport=transport)
+                     settings=settings, actor=actor, verify_author=True, transport=transport)
     return _public(result)
 
 

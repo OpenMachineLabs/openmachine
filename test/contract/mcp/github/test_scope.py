@@ -21,3 +21,15 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     result = await session.call_tool(name, arguments)
                     self.assertTrue(result.is_error)
                     self.assertEqual(result.structured_content["error"]["code"], "github_not_allowed")
+
+    async def test_release_unknown_fields_fail_before_publication(self):
+        self.launch()
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("github_release", {
+                    "action": "create", "repository": "Example/repo",
+                    "tag_name": "v1.2.6", "body": "Notes",
+                    "draft": False, "prereleasee": True})
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "invalid_tool_call")

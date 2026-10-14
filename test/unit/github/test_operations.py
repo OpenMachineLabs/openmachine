@@ -1101,6 +1101,24 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
                                   transport=self.transport)
             api.assert_not_called()
 
+    def test_release_readback_requires_original_author(self):
+        created = {}
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint.startswith(f"{ROOT}/releases?"):
+                return []
+            if method == "POST" and endpoint == f"{ROOT}/releases":
+                created.update(id=47, author=ACTOR, **payload)
+                return copy.deepcopy(created)
+            if method == "GET" and endpoint == f"{ROOT}/releases/47":
+                return {**created, "author": {"id": ACTOR["id"] + 1}}
+            return self.response(method, endpoint, payload)
+        with patch.object(self, "transport", side_effect=api) as calls:
+            observed = github.release(settings(), "create", REPO, "v1.2.6",
+                                      body="Notes", transport=self.transport)
+            self.assertEqual(observed["status"], "write_unverified")
+            self.assertEqual(observed["receipt"]["id"], 47)
+            self.assertEqual(sum(c.args[0] == "POST" for c in calls.call_args_list), 1)
+
     def test_release_lost_response_reconciles_by_tag_with_marker(self):
         tag, published, posts = "v1.2.4", {}, []
         marker = "<!-- om-task:fixture:" + "e" * 32 + " -->"
