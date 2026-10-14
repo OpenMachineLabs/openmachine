@@ -57,15 +57,16 @@ def register_github_tools(application, config, guided_tool):
         @guided_tool(annotations=GITHUB_WRITE)
         def github_project(action: Literal["add_item", "update_field"], repository: str,
                            project_number: Annotated[int, Field(ge=1)],
-                           issue_number: Annotated[int, Field(ge=0)] = 0, item_id: str = "",
+                           issue_number: Annotated[int, Field(ge=0)] = 0,
+                           pull_request_number: Annotated[int, Field(ge=0)] = 0, item_id: str = "",
                            field_id: str = "", value: dict | None = None,
                            expected_value: dict | None = None,
                            task_context: tasks.TaskContext | None = None,
                            connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
-            """Add an Issue to a Project or change one Project item field. Read Projects first for node IDs. Writes verify readback; never replay uncertain mutations."""
+            """Add an Issue or PR to a Project or change one Project item field. Read Projects first for node IDs. Writes verify readback; never replay uncertain mutations."""
             return _reply(lambda: application.github_project(action, repository, project_number,
                 issue_number, item_id, field_id, value, expected_value,
-                _task_context(task_context), connection_id))
+                _task_context(task_context), connection_id, pull_request_number))
 
         @guided_tool(annotations=GITHUB_WRITE)
         def github_issue(action: Literal["create", "update"], repository: str,

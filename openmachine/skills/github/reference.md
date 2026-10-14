@@ -44,7 +44,8 @@ Read organization Projects via github_read actions projects, project, project_fi
 project_items and project_item. The repository owner identifies the organization;
 number is the Project number, and project_item uses ref=item node ID. Project lists
 use next_cursor (not page). github_project(action="add_item", project_number,
-issue_number) adds a repository Issue to the organization Project. action="update_field"
+issue_number) adds a repository Issue, or pull_request_number adds a repository
+PR, to the organization Project (select exactly one). action="update_field"
 takes project_number, item_id, field_id, and one value key: text, number, date,
 singleSelectOptionId or iterationId. Iteration choices are returned under
 project_fields configuration.iterations. Pass expected_value to detect an observed

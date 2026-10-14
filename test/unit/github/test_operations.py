@@ -1170,6 +1170,54 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual(mutations[1]["variables"]["input"]["fieldId"], "PVTF_1")
         self.assertEqual(field, {"text": "done"})
 
+    def test_project_add_pull_request_verifies_repository_and_destination(self):
+        self.pr["base"]["repo"] = {"full_name": REPO}
+        writes = []
+        returned_id = {"id": self.pr["node_id"]}
+
+        def api(method, endpoint, payload=None):
+            if endpoint == f"{ROOT}/issues/2":
+                return {**self.pr, "pull_request": {"url": f"{ROOT}/pulls/2"}}
+            if endpoint != "graphql":
+                return self.response(method, endpoint, payload)
+            query = payload["query"]
+            if "addProjectV2ItemById" in query:
+                writes.append(payload["variables"]["input"])
+                return {"data": {"addProjectV2ItemById": {"item": {"id": "PVTI_1"}}}}
+            if "fieldValues(first:100)" in query:
+                return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                    "content": {**returned_id, "repository": {"nameWithOwner": REPO}},
+                    "fieldValues": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}
+            return {"data": {"organization": {"projectV2": {"id": "PVT_1"}}}}
+
+        with patch.object(self, "transport", side_effect=api) as transport:
+            added = github.project(settings(), "add_item", REPO, 1,
+                                   pull_request_number=2, transport=self.transport)
+            self.assertEqual((added["status"], added["fields_verified"]), ("verified", True))
+            self.assertIn(("GET", f"{ROOT}/pulls/2"), [(c.args[0], c.args[1]) for c in transport.call_args_list])
+            self.assertNotIn(("GET", f"{ROOT}/issues/2"), [(c.args[0], c.args[1]) for c in transport.call_args_list])
+            self.assertEqual(writes, [{"projectId": "PVT_1", "contentId": self.pr["node_id"]}])
+            returned_id["id"] = "PR_wrong"
+            self.assertEqual(github.project(settings(), "add_item", REPO, 1,
+                             pull_request_number=2, transport=self.transport)["status"], "write_unverified")
+            self.assertEqual(len(writes), 2)
+
+            for arguments in ({"issue_number": 1, "pull_request_number": 2},
+                              {}, {"pull_request_number": -1},
+                              {"pull_request_number": True}, {"issue_number": 2},
+                              {"issue_number": 0, "pull_request_number": 0}):
+                with self.subTest(arguments=arguments):
+                    self.assert_fault("invalid_github_request", github.project, settings(),
+                                      "add_item", REPO, 1, transport=self.transport, **arguments)
+            self.assert_fault("invalid_github_request", github.project, settings(),
+                              "update_field", REPO, 1, pull_request_number=2, item_id="PVTI_1",
+                              field_id="PVTF_1", value={"text": "done"}, transport=self.transport)
+            self.assertEqual(len(writes), 2)
+            self.pr["base"]["repo"]["full_name"] = "Other/repo"
+            self.assert_fault("github_evidence_unavailable", github.project, settings(),
+                              "add_item", REPO, 1, pull_request_number=2, transport=self.transport)
+            self.assertEqual(len(writes), 2)
+
     def test_project_update_rejects_items_from_other_repositories_and_drafts(self):
         for content in ({"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Owner/other"}},
                         {"id": "ISSUE_OTHER", "repository": {"nameWithOwner": "Other/repo"}},
