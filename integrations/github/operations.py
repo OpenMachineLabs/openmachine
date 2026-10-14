@@ -369,16 +369,20 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
 
 def project(settings: Settings, action: Literal["add_item", "update_field"], repository: str,
             project_number: int, issue_number: int = 0, item_id: str = "", field_id: str = "",
-            value: dict | None = None, expected_value: dict | None = None, *, transport) -> dict:
-    """Add an Issue to an organization Project or update one Project item field."""
+            value: dict | None = None, expected_value: dict | None = None,
+            pull_request_number: int = 0, *, transport) -> dict:
+    """Add an Issue or PR to an organization Project or update one Project item field."""
     with connection.preflight():
         if action not in {"add_item", "update_field"}:
             raise Fault("invalid_github_request", "Select add_item or update_field.")
         if action == "add_item":
-            if type(issue_number) is not int or issue_number < 1 or item_id or field_id or value is not None or expected_value is not None:
-                raise Fault("invalid_github_request", "Adding an Issue requires its number and the Project number.")
+            if (type(issue_number) is not int or type(pull_request_number) is not int
+                    or (issue_number > 0) == (pull_request_number > 0)
+                    or issue_number < 0 or pull_request_number < 0 or item_id or field_id
+                    or value is not None or expected_value is not None):
+                raise Fault("invalid_github_request", "Select exactly one Issue or PR number to add.")
         else:
-            if issue_number or not item_id or not field_id or not isinstance(value, dict) or len(value) != 1:
+            if issue_number or pull_request_number or not item_id or not field_id or not isinstance(value, dict) or len(value) != 1:
                 raise Fault("invalid_github_request", "Updating a Project field requires an item, a field and one value.")
             key, entry = next(iter(value.items()))
             allowed = {"text", "number", "date", "singleSelectOptionId", "iterationId"}
@@ -393,10 +397,19 @@ def project(settings: Settings, action: Literal["add_item", "update_field"], rep
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
         selected = _project_node(repository, project_number, transport=transport)
         if action == "add_item":
-            issue = object_response(transport("GET", f"repos/{repository}/issues/{issue_number}"))
-            if "pull_request" in issue or not isinstance(issue.get("node_id"), str):
-                raise Fault("invalid_github_request", "Select an Issue in the configured repository.")
-            content_id = issue["node_id"]
+            if pull_request_number:
+                content = object_response(transport("GET", f"repos/{repository}/pulls/{pull_request_number}"))
+                base = (content.get("base") or {}).get("repo") or {}
+                if (content.get("number") != pull_request_number
+                        or not isinstance(base.get("full_name"), str)
+                        or base["full_name"].casefold() != repository.casefold()
+                        or not isinstance(content.get("node_id"), str)):
+                    raise Fault("github_evidence_unavailable", "The PR does not match the configured repository.")
+            else:
+                content = object_response(transport("GET", f"repos/{repository}/issues/{issue_number}"))
+                if "pull_request" in content or not isinstance(content.get("node_id"), str):
+                    raise Fault("invalid_github_request", "Select an Issue in the configured repository.")
+            content_id = content["node_id"]
             mutation = "addProjectV2ItemById"
             inputs = {"projectId": selected["id"], "contentId": content_id}
             query = "mutation($input:AddProjectV2ItemByIdInput!){addProjectV2ItemById(input:$input){item{id}}}"

@@ -2794,6 +2794,12 @@
             "title": "Project Number",
             "type": "integer"
           },
+          "pull_request_number": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Pull Request Number",
+            "type": "integer"
+          },
           "repository": {
             "title": "Repository",
             "type": "string"

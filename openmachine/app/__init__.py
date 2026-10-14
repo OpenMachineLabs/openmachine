@@ -461,12 +461,14 @@ class Application:
     def github_project(self, action: Literal["add_item", "update_field"], repository: str, project_number: int,
                        issue_number: int = 0, item_id: str = "", field_id: str = "",
                        value: dict | None = None, expected_value: dict | None = None,
-                       task_context: dict | None = None, connection_id: str = "") -> dict:
+                       task_context: dict | None = None, connection_id: str = "",
+                       pull_request_number: int = 0) -> dict:
         with self._admit():
             return self.task_admission.run("github_project", dict(
                 action=action, repository=repository, project_number=project_number,
                 issue_number=issue_number, item_id=item_id, field_id=field_id,
                 value=value, expected_value=expected_value,
+                **({"pull_request_number": pull_request_number} if pull_request_number else {}),
                 **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_issue(self, action: Literal["create", "update"], repository: str, title: str | None = None,
