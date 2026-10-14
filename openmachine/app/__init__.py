@@ -324,7 +324,7 @@ class Application:
         known = {"inspect_context", "get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
-                 "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_issue",
+                 "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_release", "github_issue",
                  "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
                  "disconnect_integration", "start_codex_task", "read_codex_task"}
@@ -350,7 +350,7 @@ class Application:
             if (check_identity and observed.get("workspace_identity") != target["workspace_identity"]
                     or check_head and (observed.get("head_sha") or None) != target["head_sha"]):
                 raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")
-        github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project"})
+        github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release"})
         if any(name.startswith("github_") for name in tools):
             self._provider()
         if github_write and not contract["repositories"]:
@@ -457,6 +457,18 @@ class Application:
         return self._github_call("read", dict(action=action, repository=repository, number=number, ref=ref,
             path=path, page=page, limit=limit, cursor=cursor, expected_head_sha=expected_head_sha,
             expected_base_sha=expected_base_sha, offset=offset, connection_id=connection_id))
+
+    def github_release(self, action: Literal["create"], repository: str, tag_name: str,
+                       name: str = "", body: str = "", draft: bool = True,
+                       prerelease: bool = False, task_context: dict | None = None,
+                       connection_id: str = "") -> dict:
+        if not isinstance(body, str) or not body.strip():
+            raise Fault("invalid_github_request", "Release notes must contain nonempty text.")
+        with self._admit():
+            return self.task_admission.run("github_release", dict(
+                action=action, repository=repository, tag_name=tag_name, name=name, body=body,
+                draft=draft, prerelease=prerelease,
+                **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_project(self, action: Literal["add_item", "update_field"], repository: str, project_number: int,
                        issue_number: int = 0, item_id: str = "", field_id: str = "",

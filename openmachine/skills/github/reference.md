@@ -53,6 +53,18 @@ field change. Field updates reject draft or other-repository items, and uncertai
 Project writes exclude further writes to the same organization Project across
 repository aliases. Both writes require scoped permissions and verified readback.
 
+Create a Release document with `github_release(action="create", repository, tag_name,
+name, body, draft=True, prerelease=False)`. Notes must be nonempty; the default
+is a draft, and `draft=False` explicitly publishes. The operation checks
+bounded authorized Release listings (including drafts), rejects used tags or
+incomplete absence evidence, retains task markers, and verifies the created
+Release ID, tag, notes, flags and acting account via destination readback. A lost
+response is not permission to call create again: use the original task/operation
+ID and read the original tag. It does not deploy or update an OM runtime.
+GitHub may create a missing Git tag at the repository default branch on creation;
+check the intended tag/commit before authorizing the call.
+No update/delete/upload-assets interface is exposed.
+
 Read Releases with github_read(action="releases") or action="release", ref=exact
 tag name; use action="file_history", path=relative document path, optional ref
 for a branch/tag, to enumerate past commits. Read an old document with
@@ -184,6 +196,7 @@ dispatches again.
 | Merge | Another merge or dependent state change; omitted commit messages also depend on PR title/body |
 | Comment mutation | The same comment or unresolved parent collection; an unchecked parent argument cannot narrow a comment ID |
 | Missing GitHub creation destination | A conservative repository exclusion until original evidence identifies the destination |
+| Release creation | The exact repository and tag; other Release tags are independent |
 | Uncertain execution or partial workspace effect | Conflicting work on its original target; existing worker and workspace leases remain authoritative |
 
 An old operation without a scope stays conservative. The explicit

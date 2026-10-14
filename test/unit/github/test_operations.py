@@ -1065,6 +1065,99 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
 
 
 class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
+    def test_create_release_verifies_draft_and_prevents_duplicate(self):
+        published, posts = {}, []
+        tag = "v1.2.3"
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint.startswith(f"{ROOT}/releases?"):
+                return [copy.deepcopy(published)] if published else []
+            if method == "POST" and endpoint == f"{ROOT}/releases":
+                posts.append(payload)
+                published.update(id=42, html_url="https://example.invalid/release/42",
+                                 author=ACTOR, **payload)
+                return copy.deepcopy(published)
+            if method == "GET" and endpoint == f"{ROOT}/releases/42":
+                return copy.deepcopy(published)
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=api):
+            result = github.release(settings(), "create", REPO, tag, name="Release 1.2.3",
+                                    body="Release notes", transport=self.transport)
+            self.assertEqual(result["status"], "verified")
+            self.assertEqual((result["receipt"]["id"], result["receipt"]["draft"]), (42, True))
+            self.assertTrue(result["body_verified"])
+            self.assertIn(CREATED, posts[0]["body"])
+            self.assert_fault("github_conflict", github.release, settings(), "create",
+                              REPO, tag, body="Different notes", transport=self.transport)
+        self.assertEqual(len(posts), 1)
+
+    def test_release_create_invalid_inputs_do_not_touch_provider(self):
+        with patch.object(self, "transport") as api:
+            for tag, body, draft in (("", "Notes", True), ("v..1", "Notes", True),
+                                     ("v1", "", True), ("v1", "Notes", "no")):
+                self.assert_fault("invalid_github_request", github.release, settings(),
+                                  "create", REPO, tag, body=body, draft=draft,
+                                  transport=self.transport)
+            api.assert_not_called()
+
+    def test_release_readback_requires_original_author(self):
+        created = {}
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint.startswith(f"{ROOT}/releases?"):
+                return []
+            if method == "POST" and endpoint == f"{ROOT}/releases":
+                created.update(id=47, author=ACTOR, **payload)
+                return copy.deepcopy(created)
+            if method == "GET" and endpoint == f"{ROOT}/releases/47":
+                return {**created, "author": {"id": ACTOR["id"] + 1}}
+            return self.response(method, endpoint, payload)
+        with patch.object(self, "transport", side_effect=api) as calls:
+            observed = github.release(settings(), "create", REPO, "v1.2.6",
+                                      body="Notes", transport=self.transport)
+            self.assertEqual(observed["status"], "write_unverified")
+            self.assertEqual(observed["receipt"]["id"], 47)
+            self.assertEqual(sum(c.args[0] == "POST" for c in calls.call_args_list), 1)
+
+    def test_release_lost_response_reconciles_by_tag_with_marker(self):
+        tag, published, posts = "v1.2.4", {}, []
+        marker = "<!-- om-task:fixture:" + "e" * 32 + " -->"
+        body = "Changelog.\n\n" + marker
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint.startswith(f"{ROOT}/releases?"):
+                return [copy.deepcopy(published)] if published else []
+            if method == "POST" and endpoint == f"{ROOT}/releases":
+                posts.append(payload)
+                published.update(id=73, html_url="https://example.invalid/release/73",
+                                 author=ACTOR, **payload)
+                raise OSError("Response lost after publication")
+            return self.response(method, endpoint, payload)
+
+        locator = dict(self.task_locator("release"), tag_name=tag)
+        request = dict(action="create", tag_name=tag, name="", body=body, draft=True, prerelease=False)
+        with patch.object(self, "transport", side_effect=api):
+            unknown = github.release(settings(), "create", REPO, tag, body=body, transport=self.transport)
+            self.assertEqual(unknown["status"], "write_outcome_unknown")
+            observed = github.reconcile(settings(), locator, request, transport=self.transport)
+            self.assertEqual((observed["status"], observed["receipt"]["id"]), ("verified", 73))
+            self.assertEqual(github.reconcile(settings(), locator, dict(request, draft=False),
+                                              transport=self.transport)["status"], "observed")
+            self.assertEqual(github.reconcile(settings(), locator, transport=self.transport)["status"], "observed")
+            self.assert_fault("github_conflict", github.release, settings(), "create",
+                              REPO, tag, body=body, transport=self.transport)
+        self.assertEqual(len(posts), 1)
+
+    def test_release_create_fails_closed_after_bounded_incomplete_lookup(self):
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint.startswith(f"{ROOT}/releases?"):
+                return [{"id": i + 1, "tag_name": f"other-{i}"} for i in range(100)]
+            return self.response(method, endpoint, payload)
+        with patch.object(self, "transport", side_effect=api) as calls:
+            self.assert_fault("github_evidence_unavailable", github.release, settings(),
+                              "create", REPO, "v1.2.3", body="Notes", transport=self.transport)
+            self.assertTrue(all(call.args[0] == "GET" for call in calls.call_args_list))
+
     def test_release_tags_and_document_history_use_bounded_rest(self):
         calls = []
 

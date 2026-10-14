@@ -248,10 +248,11 @@ class GitHubMergeBinding(Model):
 class GitHubLocator(Model):
     kind: Literal["github"]
     repository: Repository
-    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge", "project"]
+    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release"]
     number: Revision | None
     parent_number: Revision | None
     anchor: Annotated[Text128, Field(min_length=1)]
+    tag_name: Annotated[str, Field(min_length=1, max_length=255)] | None = None
     thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")] | None = None
     expected_head_sha: Head | None = None
     connection: GitHubBinding | None = None
@@ -259,6 +260,8 @@ class GitHubLocator(Model):
 
     @model_validator(mode="after")
     def effect_binding(self):
+        if (self.object_type == "release") != (self.tag_name is not None):
+            raise ValueError("Release locators require only their original exact tag")
         if self.merge is not None and (self.object_type != "merge" or self.number is None or self.parent_number is not None):
             raise ValueError("merge evidence requires an original pull request")
         if self.object_type == "review_thread":
@@ -271,14 +274,14 @@ class GitHubLocator(Model):
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
-        for key in ("connection", "thread_id", "expected_head_sha", "merge"):
+        for key in ("connection", "thread_id", "expected_head_sha", "merge", "tag_name"):
             if value[key] is None:
                 value.pop(key)
         return value
 
 
 class GitHubEffectScope(Model):
-    resource: Literal["object", "comment", "review", "project"]
+    resource: Literal["object", "comment", "review", "project", "release"]
     number: Revision | None
     parent_number: Revision | None
     fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "threads", "create"]], Field(min_length=1, max_length=5)]
@@ -290,7 +293,7 @@ class GitHubEffectScope(Model):
             raise ValueError("effect fields need a unique canonical set")
         if self.resource == "object" and self.parent_number is not None:
             raise ValueError("object scopes have no parent")
-        if self.creation_key is not None and (self.resource != "object" or self.number is not None or self.fields != ["create"]):
+        if self.creation_key is not None and (self.resource not in {"object", "release"} or self.number is not None or self.fields != ["create"]):
             raise ValueError("creation identity belongs only to an unnumbered object creation")
         return self
 
@@ -638,7 +641,7 @@ class Renew(Model):
 class BindEffectScope(Model):
     action: Literal["bind_effect_scope"]
     operation_id: ID
-    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project"]
+    method: Literal["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release"]
     arguments: dict[str, object]
     reason: Annotated[Text512, Field(min_length=1)]
 

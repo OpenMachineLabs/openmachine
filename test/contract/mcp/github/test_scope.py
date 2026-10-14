@@ -15,8 +15,21 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     ("github_read", {"action": "repository", "repository": "Other/repo"}),
                     ("github_issue", {"action": "create", "repository": "Other/repo", "title": "not submitted"}),
                     ("github_merge", {"repository": "Other/repo", "number": 1, "expected_head_sha": "a" * 40}),
+                    ("github_release", {"action": "create", "repository": "Other/repo", "tag_name": "v1", "body": "Notes"}),
                     ("github_review_thread", {"action": "resolve", "repository": "Other/repo", "number": 1, "thread_id": "PRRT_fixture", "expected_head_sha": "a" * 40}),
                 ):
                     result = await session.call_tool(name, arguments)
                     self.assertTrue(result.is_error)
                     self.assertEqual(result.structured_content["error"]["code"], "github_not_allowed")
+
+    async def test_release_unknown_fields_fail_before_publication(self):
+        self.launch()
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool("github_release", {
+                    "action": "create", "repository": "Example/repo",
+                    "tag_name": "v1.2.6", "body": "Notes",
+                    "draft": False, "prereleasee": True})
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "invalid_tool_call")
