@@ -174,7 +174,12 @@ Review remains responsible for English content, meaningful acceptance,
 authorization and the live primary label. Local link checks validate file
 targets, not URL availability or heading anchors.
 
-Quality CI uses GitHub-hosted runners, pinned action revisions, read-only
+Quality and metadata CI use a repository-restricted private Linux runner only
+when the repository is private and CORE_CI_RUNNER is configured; otherwise they
+use GitHub-hosted Ubuntu. Public visibility always selects hosted Ubuntu, even
+if CORE_CI_RUNNER remains configured. Revoke the private runner registration
+and access before making Core public. Cross-repository PRs select hosted
+Ubuntu even while Core is private. These jobs retain pinned actions, read-only
 permissions, no credentials supplied to candidate code, and a five-minute
 budget. Its code checks use the same premerge pipeline and exact GitHub event
 candidate with explicit source mode. PR and Issue metadata checks run only in
@@ -188,7 +193,7 @@ candidate.
 Only separate default-branch metadata workflows have write access: label sync
 and post-merge Spec Development linking use `issues: write`. Never use
 `pull_request_target` to execute candidate code, interpolate Issue or PR text
-into shell commands, or introduce self-hosted machines for these checks.
+into shell commands, or route write-privileged jobs to private self-hosted runners.
 Branch protection remains a separate maintainer setting.
 
 Add focused tests for actual product behavior; do not create empty suites or
