@@ -21,14 +21,14 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}, "base": {"ref": "main"}}}),
             reconcile=Mock(return_value={"status": "write_outcome_unknown"}))
-        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge", "project"):
+        for name in ("issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release"):
             setattr(self.provider, name, Mock(return_value={"status": "write_outcome_unknown"}))
         self.app.github = self.provider
         self.app.connections.select = Mock(return_value=SimpleNamespace(binding=lambda: {
             "connection_id": "d" * 32, "account_id": 1, "authorization_revision": 1}))
         self.app.connections.request = Mock()
         self.request["contract"]["repositories"] = ["Owner/repo"]
-        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project",
+        self.accept_plan(tools=["github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release",
                                "write_workspace_file", "start_execution", "read_task", "control_task"])
 
     def update_pr(self, **values):
@@ -59,6 +59,34 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
             update_id=uuid.uuid4().hex, transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
         return {"task_id": "second-task", "task_revision": claimed["revision"], "plan_revision": claimed["plan"]["revision"],
                 "continuation_epoch": claimed["control"]["epoch"], "operation_id": uuid.uuid4().hex}
+
+    def test_release_requires_original_nonempty_notes_before_task_marker(self):
+        self.fault("invalid_github_request", self.app.github_release,
+                   action="create", repository="Owner/repo", tag_name="v1.2.3",
+                   body=" ", task_context=self.context_for(uuid.uuid4().hex))
+        self.provider.release.assert_not_called()
+
+    def test_release_creation_replays_original_id_and_scopes_exact_tag(self):
+        identity = uuid.uuid4().hex
+        args = dict(action="create", repository="Owner/repo", tag_name="v1.2.3",
+                    body="Original notes", task_context=self.context_for(identity))
+        self.assertEqual(self.app.github_release(**args)["status"], "write_outcome_unknown")
+        first = deepcopy(self.view()["record"]["operations"][0])
+        self.assertEqual(first["locator"]["tag_name"], "v1.2.3")
+        self.assertEqual((first["effect_scope"]["resource"], first["effect_scope"]["fields"]),
+                         ("release", ["create"]))
+        self.assertIn("<!-- om-task:", self.provider.release.call_args.kwargs["body"])
+        self.assertFalse(self.app.github_release(**args)["task_operation_replayed"])
+        self.assertEqual(self.provider.release.call_count, 1)
+        self.assertEqual(self.view()["record"]["operations"][0], first)
+        self.fault("task_effect_unresolved", self.app.github_release,
+                   action="create", repository="Owner/repo", tag_name="v1.2.3",
+                   body="Changed", task_context=self.context_for(uuid.uuid4().hex))
+        other = self.app.github_release(action="create", repository="Owner/repo",
+                                        tag_name="v1.2.4", body="Other notes",
+                                        task_context=self.context_for(uuid.uuid4().hex))
+        self.assertEqual(other["status"], "write_outcome_unknown")
+        self.assertEqual(self.provider.release.call_count, 2)
 
     def test_unknown_project_write_blocks_alias_across_same_organization(self):
         result = self.app.github_project(

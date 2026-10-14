@@ -1,7 +1,7 @@
 ---
 id: om.github
 name: openmachine-github
-description: Connect native GitHub accounts and read or publish scoped Issues, PRs, comments, reviews and merges with exact-head verification.
+description: Connect native GitHub accounts and read or publish scoped Issues, PRs, comments, reviews, Release documents and merges with exact-head verification.
 ---
 
 # GitHub collaboration

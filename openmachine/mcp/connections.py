@@ -55,6 +55,17 @@ def register_github_tools(application, config, guided_tool):
             return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id))
 
         @guided_tool(annotations=GITHUB_WRITE)
+        def github_release(action: Literal["create"], repository: str, tag_name: str,
+                           name: Annotated[str, Field(max_length=256)] = "",
+                           body: Annotated[str, Field(max_length=60000)] = "",
+                           draft: bool = True, prerelease: bool = False,
+                           task_context: tasks.TaskContext | None = None,
+                           connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+            """Create one Release document for an exact tag; draft by default. Reject existing tags, verify destination and account, and reconcile uncertain creations without a second POST."""
+            return _reply(lambda: application.github_release(action, repository, tag_name, name, body, draft,
+                prerelease, _task_context(task_context), connection_id))
+
+        @guided_tool(annotations=GITHUB_WRITE)
         def github_project(action: Literal["add_item", "update_field"], repository: str,
                            project_number: Annotated[int, Field(ge=1)],
                            issue_number: Annotated[int, Field(ge=0)] = 0,

@@ -130,6 +130,20 @@ def _release(value: dict) -> dict:
             "prerelease", "created_at", "published_at", "target_commitish") if key in release}
 
 
+def _release_by_tag(root: str, tag_name: str, *, transport) -> tuple[dict | None, bool]:
+    """Find drafts as well as published Releases using bounded authorized listings."""
+    for page in range(1, 6):
+        items, following = client.list_page(f"{root}/releases", page, 100, transport=transport)
+        matches = [item for item in items if item.get("tag_name") == tag_name]
+        if len(matches) > 1:
+            raise Fault("github_evidence_unavailable", "Multiple Releases share the requested tag.")
+        if matches:
+            return matches[0], True
+        if following is None:
+            return None, True
+    return None, False
+
+
 def _metadata_fields(labels: list[str] | None, assignees: list[str] | None) -> dict:
     result = {}
     for key, values in (("labels", labels), ("assignees", assignees)):
@@ -489,7 +503,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
-    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge", "project"}
+    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release"}
             or not isinstance(anchor, str) or not re.fullmatch(r"om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}", anchor)
             or any(value is not None and (type(value) is not int or value < 1) for value in (number, parent))):
         raise Fault("invalid_github_request", "Reconciliation requires the original bounded publication locator.")
@@ -497,6 +511,39 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     root, marker = f"repos/{repository}", f"<!-- {anchor} -->"
     unknown = {"status": "write_outcome_unknown", "repository": repository,
                "detail": "Original destination is unresolved; no publication was repeated."}
+    if kind == "release":
+        tag_name = locator.get("tag_name")
+        if (not isinstance(tag_name, str) or not tag_name or len(tag_name) > 255
+                or parent is not None):
+            raise Fault("invalid_github_request", "Release recovery needs its original exact tag.")
+        try:
+            if number is None:
+                value, complete = _release_by_tag(root, tag_name, transport=transport)
+                if value is None:
+                    return _public({**unknown, "coverage": "complete" if complete else "incomplete"})
+            else:
+                value = object_response(transport("GET", f"{root}/releases/{number}"))
+        except Fault as error:
+            if error.code == "github_not_found":
+                return _public(unknown)
+            raise
+        if (value.get("tag_name") != tag_name or type(value.get("id")) is not int
+                or value["id"] < 1 or number is not None and value["id"] != number):
+            return _public(unknown)
+        matches = (request is not None and request.get("action") == "create"
+                   and request.get("tag_name") == tag_name
+                   and (value.get("author") or {}).get("id") == actor["id"]
+                   and marker in (value.get("body") or ""))
+        if request is not None:
+            submitted = request.get("body", "")
+            matches &= (value.get("body") in {submitted, *(_append(submitted, footer) for footer in FOOTERS)}
+                        and value.get("name") == (request.get("name") or tag_name)
+                        and value.get("draft") is request.get("draft", True)
+                        and value.get("prerelease") is request.get("prerelease", False))
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The acting account changed during Release recovery.")
+        return _public({"status": "verified" if matches else "observed", "repository": repository,
+                        "actor": actor, "receipt": _receipt(value), "fields_verified": bool(matches)})
     if kind == "project":
         return _public(unknown)  # Project writes without original acknowledgments are never replayed.
     if kind == "review_thread":
@@ -609,7 +656,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
 
 
 def _receipt(result: dict) -> dict:
-    return {key: result[key] for key in ("id", "number", "html_url", "state", "submitted_at", "updated_at", "commit_id", "merged", "merge_commit_sha") if key in result}
+    return {key: result[key] for key in ("id", "number", "html_url", "state", "submitted_at", "updated_at", "commit_id", "merged", "merge_commit_sha", "tag_name", "name", "draft", "prerelease") if key in result}
 
 
 def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback,
@@ -654,6 +701,38 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
                 "detail": "Destination fields, object identity, or acting account did not match. Read before retrying."}
     return {"status": "verified", "repository": repository, "actor": actor, "receipt": _receipt(observed) or receipt,
             "verified_fields": list(payload), "fields_verified": True, "body_verified": "body" not in payload or observed.get("body") == payload["body"]}
+
+
+def release(settings: Settings, action: Literal["create"], repository: str, tag_name: str,
+            name: str = "", body: str = "", draft: bool = True, prerelease: bool = False,
+            *, transport) -> dict:
+    """Create one Release document, defaulting to a draft. Never retry an uncertain POST."""
+    with connection.preflight():
+        if (action != "create" or not isinstance(tag_name, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+/-]{0,254}", tag_name)
+                or ".." in tag_name or tag_name.endswith(("/", ".lock"))
+                or any(part in {"", ".", ".."} for part in tag_name.split("/"))):
+            raise Fault("invalid_github_request", "Select one valid exact Release tag.")
+        if (not isinstance(name, str) or len(name) > 256
+                or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                or not isinstance(body, str) or not body.strip() or len(body) > 60000
+                or type(draft) is not bool or type(prerelease) is not bool):
+            raise Fault("invalid_github_request", "Release name, nonempty notes and draft flags must be valid.")
+        actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        root = f"repos/{repository}/releases"
+        existing, complete = _release_by_tag(f"repos/{repository}", tag_name, transport=transport)
+        if existing is not None:
+            raise Fault("github_conflict", "A Release already exists for this tag, including drafts.")
+        if not complete:
+            raise Fault("github_evidence_unavailable",
+                        "The bounded Release listing cannot prove this tag is unused; creation was not sent.")
+        payload = {"tag_name": tag_name, "name": name or tag_name,
+                   "body": _attribute(settings, body, CREATED_FOOTER),
+                   "draft": draft, "prerelease": prerelease}
+    result = _mutate(repository, "POST", root, payload,
+                     lambda value: f"{root}/{value['id']}",
+                     settings=settings, actor=actor, transport=transport)
+    return _public(result)
 
 
 def _update_fields(current: dict, title: str | None, body: str | None, state: str | None,

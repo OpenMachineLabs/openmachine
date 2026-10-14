@@ -59,7 +59,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 discovered = await session.list_tools()
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
-                self.assertEqual(set(tools), {"get_capabilities", "inspect_context", "inspect_workspace", "inspect_skills", "start_execution", "create_worktree", "read_execution", "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_read", "github_merge", "github_project", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration", "start_codex_task", "read_codex_task"})
+                self.assertEqual(set(tools), {"get_capabilities", "inspect_context", "inspect_workspace", "inspect_skills", "start_execution", "create_worktree", "read_execution", "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_read", "github_merge", "github_project", "github_release", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration", "start_codex_task", "read_codex_task"})
                 self.assertFalse(tools["start_execution"].annotations.read_only_hint)
                 self.assertTrue(tools["start_execution"].annotations.destructive_hint)
                 self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)
@@ -70,7 +70,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(tools["github_issue"].annotations.read_only_hint)
                 self.assertTrue(tools["github_read"].annotations.read_only_hint)
                 self.assertTrue(tools["github_read"].annotations.open_world_hint)
-                for name in ("github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project"):
+                for name in ("github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release"):
                     self.assertFalse(tools[name].annotations.idempotent_hint)
                 self.assertNotIn("endpoint", tools["github_read"].input_schema["properties"])
                 timeout = tools["start_execution"].input_schema["properties"]["timeout_seconds"]

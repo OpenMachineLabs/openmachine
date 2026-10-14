@@ -15,6 +15,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     ("github_read", {"action": "repository", "repository": "Other/repo"}),
                     ("github_issue", {"action": "create", "repository": "Other/repo", "title": "not submitted"}),
                     ("github_merge", {"repository": "Other/repo", "number": 1, "expected_head_sha": "a" * 40}),
+                    ("github_release", {"action": "create", "repository": "Other/repo", "tag_name": "v1", "body": "Notes"}),
                     ("github_review_thread", {"action": "resolve", "repository": "Other/repo", "number": 1, "thread_id": "PRRT_fixture", "expected_head_sha": "a" * 40}),
                 ):
                     result = await session.call_tool(name, arguments)
