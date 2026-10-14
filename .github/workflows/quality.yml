@@ -19,7 +19,7 @@ jobs:
   repository:
     name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'repository-metadata-edit' || 'repository' }}
     if: github.event.action != 'edited' || github.event.changes.base
-    runs-on: ${{ github.event.repository.private && (vars.CORE_CI_RUNNER || 'ubuntu-24.04') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.CORE_CI_RUNNER || 'ubuntu-24.04') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,7 +37,7 @@ jobs:
     # A skipped metadata job has a different name from the required code check.
     name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'runtime-metadata-edit' || 'runtime' }}
     if: github.event.action != 'edited' || github.event.changes.base
-    runs-on: ${{ github.event.repository.private && (vars.CORE_CI_RUNNER || 'ubuntu-24.04') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.CORE_CI_RUNNER || 'ubuntu-24.04') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

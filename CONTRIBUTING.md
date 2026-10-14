@@ -178,7 +178,8 @@ Quality and metadata CI use a repository-restricted private Linux runner only
 when the repository is private and CORE_CI_RUNNER is configured; otherwise they
 use GitHub-hosted Ubuntu. Public visibility always selects hosted Ubuntu, even
 if CORE_CI_RUNNER remains configured. Revoke the private runner registration
-and access before making Core public. These jobs retain pinned actions, read-only
+and access before making Core public. Cross-repository PRs select hosted
+Ubuntu even while Core is private. These jobs retain pinned actions, read-only
 permissions, no credentials supplied to candidate code, and a five-minute
 budget. Its code checks use the same premerge pipeline and exact GitHub event
 candidate with explicit source mode. PR and Issue metadata checks run only in
