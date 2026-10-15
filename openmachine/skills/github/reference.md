@@ -106,6 +106,7 @@ are checked again. An uncertain response is not safe to retry automatically;
 original task evidence must be reconciled instead. It does not require a Review.
 
 Inspect complete evidence before an optional exact-head review or authorized merge.
+For an authorized PR merge, default to `squash` unless the user explicitly requests another method.
 No submitted GitHub Review, human approval, or self-review is required by Open
 Machine to merge. An optional COMMENT self-review can document useful findings;
 it is not independent approval.
