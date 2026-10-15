@@ -39,8 +39,14 @@ def pending(record: dict) -> list[dict]:
             and item["locator"]["kind"] in {"execution", "change"}]
 
 
+def active_target(record: dict) -> str | None:
+    """Keep a task's single recovery owner on its first outstanding target."""
+    outstanding = pending(record)
+    return outstanding[0]["locator"]["target_identity"] if outstanding else None
+
+
 def remote(record: dict) -> bool:
-    return any(item["locator"]["target_identity"] is not None for item in pending(record))
+    return active_target(record) is not None
 
 
 def blocked(recovery: dict, now: int) -> bool:
@@ -63,11 +69,12 @@ def error_code(error: Exception) -> str:
     return "observer_internal_error"
 
 
-def fail_observation(record: dict, started: int, now: int, code: str, connection: dict | None = None) -> None:
+def fail_observation(record: dict, started: int, now: int, code: str, connection: dict | None = None,
+                     *, ssh: bool | None = None) -> None:
     """Record one failed read/retry in the existing bounded recovery episode."""
     if record["terminal"] is not None or not pending(record):
         return
-    ssh = remote(record)
+    ssh = remote(record) if ssh is None else ssh
     category = "ssh_observation" if ssh else "local_observation"
     recovery = record["recovery"]
     if recovery is not None and recovery["category"] != category:
@@ -111,6 +118,7 @@ def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, 
     """Pure result/handoff transition shared with the revision-checked observer."""
     if record["terminal"] is not None:
         return
+    previous_target = active_target(record)
     changed = []
     for operation_id, result, locator in observations:
         operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
@@ -133,8 +141,9 @@ def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, 
     if not changed:
         return
     recovery = record["recovery"]
-    if recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"} and not any(
-            records.pending(item) and item["locator"]["kind"] in {"execution", "change"} for item in record["operations"]):
+    if (recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"}
+            and (active_target(record) != previous_target or not pending(record))):
+        # A settled target's retry episode must not follow the next target.
         record["recovery"] = None
     control = record["control"]
     if control["stop_intent"] == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):
@@ -160,7 +169,7 @@ def project(view: dict, snapshot: dict, ssh_supported: bool) -> dict:
     ssh = remote(record)
     interval = SSH_INTERVAL_MS if ssh else INTERVAL_MS
     recovery = record["recovery"]
-    target = next((item["locator"]["target_identity"] for item in pending(record) if item["locator"]["target_identity"]), None)
+    target = active_target(record)
     connection = snapshot.get("connections", {}).get(target)
     if connection is not None:
         recovery = dict(connection, category="ssh_observation")
