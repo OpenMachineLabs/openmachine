@@ -223,10 +223,7 @@ class TaskObserver:
                     self._active.pop(identity, None)
                     self._last.pop(identity, None)
                     continue
-                targets = {item["locator"]["target_identity"] for item in observation.pending(record)}
-                if len(targets) != 1:
-                    raise Fault("task_observation_scope", "Outstanding receipts must retain one original target.")
-                target = next(iter(targets))
+                target = observation.active_target(record)
                 ssh = target is not None
                 interval = observation.SSH_INTERVAL_MS if ssh else observation.INTERVAL_MS
                 if sum((item.target is not None) == ssh for item in self._reads.values()) >= (observation.SSH_MAX_READERS if ssh else observation.MAX_READERS):
@@ -309,6 +306,8 @@ class TaskObserver:
     def _read(self, read: _Read) -> None:
         try:
             for operation in observation.pending(read.record):
+                if operation["locator"]["target_identity"] != read.target:
+                    continue
                 if read.stop.is_set():
                     read.error = "ssh_observation_timeout" if read.target else "observation_timeout"
                     break
@@ -356,7 +355,8 @@ class TaskObserver:
                 observation.apply_observations(record, timestamp, read.observations)
             if code:
                 shared = dict(connection, connection_ref=read.target) if connection is not None else None
-                observation.fail_observation(record, read.started_at_ms, timestamp, code, shared)
+                observation.fail_observation(record, read.started_at_ms, timestamp, code, shared,
+                                             ssh=read.target is not None)
             else:
                 observation.clear_observation(record)
         with self.app._admit():

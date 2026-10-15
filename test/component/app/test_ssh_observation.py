@@ -23,6 +23,70 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
             record["operations"][0]["locator"].update(machine=machine, target_identity=target)
         return self.seed(count, configure=configure)
 
+    def mixed_task(self):
+        from copy import deepcopy
+
+        identity = self.remote_tasks(routes={0: ("desktop", None)})[0]
+
+        def append_targets(record, now):
+            original = record["operations"][0]
+            for number, machine, target in ((2, "remote", "a" * 64), (3, "healthy", "b" * 64)):
+                operation = deepcopy(original)
+                operation["id"] = f"{number:032x}"
+                operation["locator"].update(machine=machine, target_identity=target,
+                                            execution_id=operation["id"])
+                record["operations"].append(operation)
+
+        tasks.update(self.state, identity, append_targets)
+        return identity
+
+    def completed_operations(self, identity):
+        operations = tasks.public_read(self.state, identity, section="operations")["items"]
+        return operations if len(operations) == 3 and all(
+            (item["result"] or {}).get("status") == "succeeded" for item in operations) else None
+
+    def test_one_task_observes_local_and_two_ssh_targets_without_replay(self):
+        identity = self.mixed_task()
+        observed = []
+        def read(operation, **kwargs):
+            observed.append(operation["locator"]["machine"])
+            return self.fixture_result(operation)
+
+        with patch.object(self.app.task_receipts, "read", side_effect=read), \
+                patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No replay")), \
+                self.app.task_observer.running():
+            completed = self.until(lambda: self.completed_operations(identity))
+
+        record = self.raw(identity)
+        self.assertEqual(observed, ["desktop", "remote", "healthy"])
+        self.assertEqual(len(completed), 3)
+        self.assertEqual(record["handoff"]["reason"], "result_ready")
+        self.assertIsNone(record["recovery"])
+        self.assertIsNone(record["terminal"])
+        self.assertEqual(record["plan"]["stages"][0]["state"], "running")
+
+    def test_local_observation_retries_without_becoming_ssh_recovery(self):
+        identity = self.mixed_task()
+        observed = []
+        def read(operation, **kwargs):
+            machine = operation["locator"]["machine"]
+            observed.append(machine)
+            if machine == "desktop" and observed.count(machine) == 1:
+                raise Fault("source_unavailable", "Disposable local receipt outage")
+            return self.fixture_result(operation)
+
+        with patch.object(self.app.task_receipts, "read", side_effect=read), \
+                patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No replay")), \
+                self.app.task_observer.running():
+            recovery = self.until(lambda: self.raw(identity)["recovery"])
+            self.assertEqual(recovery["category"], "local_observation")
+            self.assertEqual(recovery["reason_code"], "source_unavailable")
+            completed = self.until(lambda: self.completed_operations(identity))
+
+        self.assertEqual(observed, ["desktop", "desktop", "remote", "healthy"])
+        self.assertIsNone(self.raw(identity)["recovery"])
+        self.assertIsNone(self.app.machines.ssh_recovery.read(self.state)["targets"].get("a" * 64))
+
     def test_shared_outage_recovers_original_results_without_effect_dispatch(self):
         identities = self.remote_tasks(3)
         attempts = []
