@@ -71,6 +71,12 @@ for a branch/tag, to enumerate past commits. Read an old document with
 action="file", ref=the selected full commit SHA, path=same document. REST lists
 use numbered pages.
 
+Top-level Issue/PR comments also support `github_comment(action="delete")` with
+a positive Issue/PR `number` and exact `comment_id`, no body, and optional
+`expected_updated_at`. It verifies the comment's parent and expects HTTP 204
+plus a missing comment on readback. An uncertain deletion is never retried;
+existing create/update behavior remains unchanged.
+
 Writes verify all submitted fields, object identity and acting account. Prefer observed
 `expected_updated_at` and exact PR HEAD; preflight/write is not atomic CAS, and
 legacy omission retains its weaker contract. Use `expected_fields` for every

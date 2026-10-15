@@ -276,6 +276,77 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             result = operations._mutate(REPO, "POST", f"{ROOT}/issues", {"body": expected}, lambda value: f"{ROOT}/issues/{value['number']}", transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
 
+    def test_delete_comment_requires_exact_parent_and_confirms_204_and_absence(self):
+        endpoint = f"{ROOT}/issues/comments/9"
+        comment = {"id": 9, "body": "Old progress", "updated_at": STAMP,
+                   "issue_url": f"https://api.github.com/{ROOT}/issues/1"}
+        removed = False
+
+        def api(method, target, payload=None):
+            nonlocal removed
+            if method == "GET" and target == f"{ROOT}/issues/comments/8":
+                return dict(comment)
+            if target == endpoint:
+                if method == "GET":
+                    if removed:
+                        raise Fault("github_not_found", "Deleted comment.")
+                    return dict(comment)
+                if method == "DELETE":
+                    self.assertIsNone(payload)
+                    removed = True
+                    return {"http_status": 204}
+            return self.response(method, target, payload)
+
+        with patch.object(self, "transport", side_effect=api) as transport:
+            for number, comment_id, stamp, code in (
+                (2, 9, STAMP, "github_wrong_object_type"),
+                (1, 8, STAMP, "github_wrong_object_type"),
+                (1, 9, "stale", "github_object_changed"),
+            ):
+                self.assert_fault(code, github.comment, settings(), "delete", REPO,
+                                  number=number, comment_id=comment_id,
+                                  expected_updated_at=stamp, transport=self.transport)
+            for extra in ({"body": "accidental"}, {"expected_fields": {"body": "Old progress"}}):
+                self.assert_fault("invalid_github_request", github.comment, settings(), "delete",
+                                  REPO, number=1, comment_id=9, transport=self.transport, **extra)
+            self.assertFalse(any(call.args[0] == "DELETE" for call in transport.call_args_list))
+            result = github.comment(settings(), "delete", REPO, number=1, comment_id=9,
+                                    expected_updated_at=STAMP, transport=self.transport)
+        self.assertEqual((result["status"], result["deleted"], result["fields_verified"]),
+                         ("verified", True, True))
+        self.assertEqual(result["receipt"], {"id": 9, "number": 1})
+        self.assertEqual(sum(call.args[0] == "DELETE" for call in transport.call_args_list), 1)
+
+    def test_delete_unverified_or_lost_reply_is_never_reported_success(self):
+        endpoint = f"{ROOT}/issues/comments/9"
+        comment = {"id": 9, "body": "Old progress", "updated_at": STAMP,
+                   "issue_url": f"https://api.github.com/{ROOT}/issues/1"}
+        for mode, expected in (("wrong_status", "write_unverified"),
+                               ("still_visible", "write_unverified"),
+                               ("lost_reply", "write_outcome_unknown"),
+                               ("changed_actor", "write_unverified")):
+            removed = False
+            def api(method, target, payload=None):
+                nonlocal removed
+                if method == "GET" and target == endpoint:
+                    if removed and mode != "still_visible":
+                        raise Fault("github_not_found", "Deleted.")
+                    return dict(comment)
+                if method == "DELETE" and target == endpoint:
+                    removed = True
+                    if mode == "lost_reply":
+                        raise OSError("Lost response after DELETE.")
+                    return {"http_status": 200 if mode == "wrong_status" else 204}
+                if target == "user" and removed and mode == "changed_actor":
+                    return {"id": 12, "login": "Other"}
+                return self.response(method, target, payload)
+            with self.subTest(mode=mode), patch.object(self, "transport", side_effect=api) as transport:
+                result = github.comment(settings(), "delete", REPO, number=1, comment_id=9,
+                                        transport=self.transport)
+                self.assertEqual(result["status"], expected)
+                self.assertNotEqual(result.get("deleted"), True)
+                self.assertEqual(sum(call.args[0] == "DELETE" for call in transport.call_args_list), 1)
+
     def test_unconfigured_repository_fails_closed(self):
         self.assert_fault("github_not_allowed", github.issue, settings(True), "create", "Other/repo", "title", "body", transport=self.transport)
         self.transport.assert_not_called()

@@ -3,11 +3,26 @@
 import unittest
 from unittest.mock import patch
 from integrations.github import auth
+import httpx2 as httpx
 from openmachine.foundation.sanitize import Fault
 
 
 
 class GitHubDeviceWireTests(unittest.TestCase):
+    def test_http_delete_accepts_only_204_no_content(self):
+        calls = []
+        def response(request):
+            calls.append((request.method, request.content))
+            return httpx.Response(204)
+        clients = [httpx.Client(transport=httpx.MockTransport(response)) for _ in range(2)]
+        with patch.object(auth.httpx, "Client", side_effect=clients):
+            self.assertEqual(auth._exchange("DELETE", "https://api.github.com/fixture"),
+                             {"http_status": 204})
+            with self.assertRaises(Fault) as caught:
+                auth._exchange("GET", "https://api.github.com/fixture")
+        self.assertEqual(caught.exception.code, "github_response_unknown")
+        self.assertEqual(calls, [("DELETE", b""), ("GET", b"")])
+
     def test_device_intervals_and_definitive_denials(self):
         with patch.object(auth, "CLIENT_ID", "Iv1.fixture"), patch.object(
                 auth, "_post", return_value={"error": "slow_down", "interval": 75}):

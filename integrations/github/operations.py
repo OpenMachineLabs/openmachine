@@ -911,11 +911,13 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
     return result
 
 
-def comment(settings: Settings, action: Literal["create", "update"], repository: str,
-            body: str, number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *,
+def comment(settings: Settings, action: Literal["create", "update", "delete"], repository: str,
+            body: str = "", number: int = 0, comment_id: int = 0, expected_updated_at: str = "", *,
             expected_fields: dict | None = None, transport) -> dict:
     with connection.preflight():
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
+        if action in {"create", "update"} and not body:
+            raise Fault("invalid_github_request", "Creating or updating a comment requires a body.")
         if action == "create":
             if number < 1 or expected_fields is not None:
                 raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number; expected_fields is update-only.")
@@ -924,6 +926,17 @@ def comment(settings: Settings, action: Literal["create", "update"], repository:
             method, endpoint = "POST", f"repos/{repository}/issues/{number}/comments"
             payload = {"body": submitted}
             readback = lambda result: f"repos/{repository}/issues/comments/{result['id']}"
+        elif action == "delete":
+            if (type(comment_id) is not int or comment_id < 1
+                    or type(number) is not int or number < 1 or body != "" or expected_fields is not None):
+                raise Fault("invalid_github_request", "Delete requires a positive parent number and comment ID, without body or expected_fields.")
+            endpoint = f"repos/{repository}/issues/comments/{comment_id}"
+            current = object_response(transport("GET", endpoint))
+            parent = str(current.get("issue_url", ""))
+            if current.get("id") != comment_id or not parent.casefold().endswith(f"/repos/{repository}/issues/{number}".casefold()):
+                raise Fault("github_wrong_object_type", "The comment does not belong to the requested Issue or PR.")
+            if expected_updated_at and current.get("updated_at") != expected_updated_at:
+                raise Fault("github_object_changed", "The comment changed since the observed version.")
         else:
             if action != "update" or comment_id < 1:
                 raise Fault("invalid_github_request", "Updating a comment requires its positive ID.")
@@ -931,6 +944,33 @@ def comment(settings: Settings, action: Literal["create", "update"], repository:
             current = object_response(transport("GET", endpoint))
             payload = _update_fields(current, None, body, None, expected_updated_at, expected_fields=expected_fields)
             readback = lambda _: endpoint
+    if action == "delete":
+        receipt = {"id": comment_id, "number": number}
+        try:
+            response = connection.mutation_request("DELETE", endpoint, None, transport=transport)
+        except (Fault, OSError) as error:
+            if isinstance(error, Fault) and error.effect == "known_no_effect":
+                raise
+            return {"status": "write_outcome_unknown", "repository": repository, "receipt": receipt,
+                    "error_code": error.code if isinstance(error, Fault) else "github_response_unknown"}
+        if response != {"http_status": 204}:
+            return {"status": "write_unverified", "repository": repository, "receipt": receipt,
+                    "error_code": "github_response_unknown"}
+        try:
+            transport("GET", endpoint)
+            absent = False
+        except Fault as error:
+            absent = error.code == "github_not_found"
+        except OSError:
+            absent = False
+        try:
+            same_actor = connection.read_actor(settings, transport=transport) == actor
+        except (Fault, OSError):
+            same_actor = False
+        verified = absent and same_actor
+        return {"status": "verified" if verified else "write_unverified",
+                "repository": repository, "actor": actor, "receipt": receipt,
+                "deleted": verified, "fields_verified": verified}
     return _mutate(repository, method, endpoint, payload, readback, settings=settings, actor=actor, transport=transport)
 
 
