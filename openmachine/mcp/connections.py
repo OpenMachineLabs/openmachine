@@ -106,12 +106,12 @@ def register_github_tools(application, config, guided_tool):
             return _reply(lambda: application.github_pull_request(action, repository, title, body, number, head, base, draft, state, expected_updated_at, expected_head_sha, labels, assignees, _task_context(task_context), connection_id=connection_id, expected_fields=expected_fields))
 
         @guided_tool(annotations=GITHUB_WRITE)
-        def github_comment(action: Literal["create", "update"], repository: str,
-                           body: Annotated[str, Field(max_length=60000)], number: Annotated[int, Field(ge=0)] = 0,
+        def github_comment(action: Literal["create", "update", "delete"], repository: str,
+                           body: Annotated[str, Field(max_length=60000)] = "", number: Annotated[int, Field(ge=0)] = 0,
                            comment_id: Annotated[int, Field(ge=0)] = 0, expected_updated_at: str = "",
                            task_context: tasks.TaskContext | None = None, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
                            expected_fields: dict | None = None) -> CallToolResult:
-            """Create/update a top-level Issue/PR comment and verify its fields. Inline comments are outside this writer. Preserve the original comment identity after uncertainty; do not post it again. On update, expected_fields contains only the observed body value. Supplied expected_updated_at remains an additional whole-object guard. These detect observed edit conflicts without promising atomic CAS."""
+            """Create, update or delete a top-level Issue/PR comment. Delete requires its positive parent number and comment ID, with optional expected_updated_at; it verifies GitHub's 204 and a missing destination. Other writes retain their existing guards and uncertain effects must not be retried."""
             return _reply(lambda: application.github_comment(action, repository, body, number, comment_id, expected_updated_at, _task_context(task_context), connection_id=connection_id, expected_fields=expected_fields))
 
         @guided_tool(annotations=GITHUB_WRITE)

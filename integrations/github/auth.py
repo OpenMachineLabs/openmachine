@@ -65,6 +65,8 @@ def _exchange(method: str, url: str, *, token: str = "", data=None, payload=None
         raise Fault("github_network_unavailable", "GitHub could not be reached before the request was sent.") from None
     except httpx.TransportError:
         raise Fault("github_response_unknown", "The GitHub response was lost; do not repeat a possibly executed write.") from None
+    if method == "DELETE" and code == 204 and not raw:
+        return {"http_status": 204}
     try:
         value = json.loads(raw)
         if not isinstance(value, (dict, list)):

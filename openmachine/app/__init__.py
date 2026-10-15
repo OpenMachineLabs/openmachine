@@ -508,7 +508,7 @@ class Application:
                 labels=labels, assignees=assignees, **({"connection_id": connection_id} if connection_id else {}),
                 **({"expected_fields": expected_fields} if expected_fields is not None else {})), task_context)
 
-    def github_comment(self, action: Literal["create", "update"], repository: str, body: str, number: int = 0,
+    def github_comment(self, action: Literal["create", "update", "delete"], repository: str, body: str = "", number: int = 0,
                        comment_id: int = 0, expected_updated_at: str = "", task_context: dict | None = None, connection_id: str = "",
                        expected_fields: dict | None = None) -> dict:
         with self._admit():

@@ -2079,7 +2079,8 @@
           "action": {
             "enum": [
               "create",
-              "update"
+              "update",
+              "delete"
             ],
             "title": "Action",
             "type": "string"
@@ -2087,7 +2088,8 @@
           "body": {
             "maxLength": 60000,
             "title": "Body",
-            "type": "string"
+            "type": "string",
+            "default": ""
           },
           "comment_id": {
             "default": 0,
@@ -2143,8 +2145,7 @@
         },
         "required": [
           "action",
-          "repository",
-          "body"
+          "repository"
         ],
         "title": "github_commentArguments",
         "type": "object"
