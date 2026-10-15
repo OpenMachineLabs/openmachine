@@ -10,6 +10,9 @@ Save one original execution ID before starting an authorized command. Use the
 configured machine, exact workspace/cwd, project interpreter and inspected argv
 and preconditions. Native commands are not sandboxed by reader scopes.
 
+For single-repository work, set `cwd` directly to that repository or worktree.
+A configured parent root is an access grant, not a required launch directory.
+
 Read [terminal execution and controls](terminal.md) for timeouts, leases, output
 cursors, PTY input, stop/cleanup states and lost-response recovery. Read the
 [task continuation guide](../tasks/continue.md) when carrying structured context or

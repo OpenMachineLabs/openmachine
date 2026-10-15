@@ -55,7 +55,7 @@ def register_execution_tools(application, guided_tool, waiting, machine_read, ha
                         tty: Annotated[bool, Field(strict=True)] = False,
                         terminal_size: TerminalSize | None = None,
                         task_context: tasks.TaskContext | None = None) -> CallToolResult:
-        """Start one explicitly authorized native command. Save its ID before launch and query that ID after uncertainty. Optional task_id is a legacy checkpoint association, not permission. Structured work requires current task_context; the original execution_id must equal operation_id. Check task_feedback for verified association or unavailable task status. Admission precedes dispatch; unknown outcomes never permit a new ID."""
+        """Start one explicitly authorized native command. For single-repository work, set cwd to its actual repository/worktree, not a shared parent. The launch cwd selects the lock; cd or -C inside argv does not change it. Save its ID before launch and query that ID after uncertainty. Optional task_id is a legacy checkpoint association, not permission. Structured work requires current task_context; the original execution_id must equal operation_id. Check task_feedback for verified association or unavailable task status. Admission precedes dispatch; unknown outcomes never permit a new ID."""
         return _reply(lambda: application.start_execution(machine, execution_id, cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size.model_dump() if terminal_size is not None else None, _task_context(task_context)), execution_output=True)
 
     @guided_tool(annotations=machine_read)

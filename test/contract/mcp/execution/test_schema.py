@@ -1,15 +1,38 @@
 """contract mcp execution test_schema behavior."""
 
+import hashlib
 import json
 import sys
 import unittest
 import uuid
 from mcp import ClientSession
-from openmachine.foundation.state import save_json
+from openmachine.foundation.state import lease, save_json
 from test.support.mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_workspace_conflict_keeps_error_code_and_exposes_selected_paths(self):
+        nested = self.work / "nested"
+        nested.mkdir()
+        self.launch()
+        async with self.client() as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                identity = uuid.uuid4().hex
+                key = hashlib.sha256(str(self.work).encode()).hexdigest()
+                with lease(self.state / "locks" / f"workspace-{key}.lock"):
+                    result = await session.call_tool("start_execution", {
+                        "machine": "desktop", "execution_id": identity, "cwd": str(nested),
+                        "argv": [sys.executable, "-c", "raise SystemExit('must not launch')"]})
+                self.assertTrue(result.is_error)
+                value = result.structured_content
+                self.assertEqual(value["error"]["code"], "resource_busy")
+                self.assertEqual(value["cwd"], str(nested))
+                self.assertEqual(value["workspace_lock_root"], str(self.work))
+                self.assertIn("cd or -C", value["error"]["message"])
+                self.assertEqual(json.loads(result.content[0].text), value)
+                self.assertFalse((self.state / "executions" / identity).exists())
+
     async def test_original_cleanup_reconciliation_round_trip_keeps_original_receipt(self):
         self.launch()
         async with self.client() as (reader, writer):

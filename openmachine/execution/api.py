@@ -223,7 +223,16 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                 check_workspace_leases(config, state, scope=Path(creation_plan["destination"]))
                 observed.update(workspace_lock_root=creation_plan["destination"], creation_plan=creation_plan)
             key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
-            owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            try:
+                owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+            except Fault as error:
+                if error.code != "resource_busy" or creation_plan is not None:
+                    raise
+                raise Fault("resource_busy", "The selected workspace lock is busy. "
+                            "For single-repository work, use its actual repository/worktree as cwd; "
+                            "cd or -C inside argv does not change the lock. "
+                            "Stay within the accepted task scope and do not bypass conflicts with shared access.",
+                            {"cwd": str(working), "workspace_lock_root": observed["workspace_lock_root"]}) from error
             if creation_plan is not None:
                 for root in _creation_parent_roots(config, machine, Path(creation_plan["destination"])):
                     digest = hashlib.sha256(root.encode()).hexdigest()
