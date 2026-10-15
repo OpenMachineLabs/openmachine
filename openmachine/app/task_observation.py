@@ -118,6 +118,7 @@ def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, 
     """Pure result/handoff transition shared with the revision-checked observer."""
     if record["terminal"] is not None:
         return
+    previous_target = active_target(record)
     changed = []
     for operation_id, result, locator in observations:
         operation = next((item for item in record["operations"] if item["id"] == operation_id), None)
@@ -140,8 +141,9 @@ def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, 
     if not changed:
         return
     recovery = record["recovery"]
-    if recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"} and not any(
-            records.pending(item) and item["locator"]["kind"] in {"execution", "change"} for item in record["operations"]):
+    if (recovery is not None and recovery["category"] in {"local_observation", "ssh_observation"}
+            and (active_target(record) != previous_target or not pending(record))):
+        # A settled target's retry episode must not follow the next target.
         record["recovery"] = None
     control = record["control"]
     if control["stop_intent"] == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):

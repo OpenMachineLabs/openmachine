@@ -87,6 +87,36 @@ class SSHObservationTests(ObserverFixture, unittest.TestCase):
         self.assertIsNone(self.raw(identity)["recovery"])
         self.assertIsNone(self.app.machines.ssh_recovery.read(self.state)["targets"].get("a" * 64))
 
+    def test_foreground_reconciliation_releases_recovery_on_target_switch(self):
+        identity = self.mixed_task()
+
+        with patch.object(self.app.task_admission, "_dispatch", side_effect=AssertionError("No replay")):
+            for machine, next_target, ssh, reason in (
+                    ("desktop", "a" * 64, False, "source_unavailable"),
+                    ("remote", "b" * 64, True, "execution_not_found")):
+                with self.subTest(machine=machine):
+                    tasks.update(self.state, identity, lambda record, now:
+                                 self.observer_module.fail_observation(record, now, now, reason, ssh=ssh))
+                    self.assertEqual(self.raw(identity)["recovery"]["category"],
+                                     "ssh_observation" if ssh else "local_observation")
+
+                    def read(operation, **kwargs):
+                        if operation["locator"]["machine"] != machine:
+                            raise Fault("execution_not_found", "Fixture target not yet ready")
+                        return self.fixture_result(operation)
+
+                    with patch.object(self.app.task_receipts, "read", side_effect=read):
+                        self.app.task_admission.reconcile(tasks.read(self.state, identity))
+                    self.assertEqual(self.observer_module.active_target(self.raw(identity)), next_target)
+                    self.assertIsNone(self.raw(identity)["recovery"])
+
+            with patch.object(self.app.task_receipts, "read",
+                              side_effect=lambda operation, **kwargs: self.fixture_result(operation)), \
+                    self.app.task_observer.running():
+                self.until(lambda: self.completed_operations(identity))
+
+        self.assertIsNone(self.raw(identity)["recovery"])
+
     def test_shared_outage_recovers_original_results_without_effect_dispatch(self):
         identities = self.remote_tasks(3)
         attempts = []
