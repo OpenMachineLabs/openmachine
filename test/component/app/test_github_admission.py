@@ -78,7 +78,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(sum(call.args[0] == "PUT" for call in transport.call_args_list), 1)
         self.fault("task_operation_conflict", self.app.github_merge, **dict(arguments, commit_message="Different intent"))
 
-    def github_fixture(self):
+    def github_fixture(self, tools=None):
         provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,
             read=Mock(return_value={"configured_write": True, "data": {"permissions": {"push": True}}}),
             issue=Mock(return_value={"status": "write_outcome_unknown"}),
@@ -90,8 +90,25 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.app.connections.request = Mock()
         self.request["contract"]["targets"] = []
         self.request["contract"]["repositories"] = ["Owner/repo"]
-        self.accept_plan(tools=["github_issue", "read_task", "control_task"])
+        self.accept_plan(tools=tools or ["github_issue", "read_task", "control_task"])
         return provider
+
+    def test_supervised_comment_delete_remains_bodyless_and_keeps_exact_identity(self):
+        provider = self.github_fixture(tools=["github_comment", "read_task", "control_task"])
+        provider.comment = Mock(return_value={
+            "status": "verified", "receipt": {"id": 9, "number": 1},
+            "deleted": True, "fields_verified": True})
+        identity = uuid.uuid4().hex
+        args = dict(action="delete", repository=REPO, number=1, comment_id=9,
+                    task_context=self.context_for(identity))
+        outcome = self.app.github_comment(**args)
+        self.assertEqual(outcome["status"], "verified")
+        self.assertEqual(provider.comment.call_args.kwargs["body"], "")
+        self.assertEqual(provider.comment.call_args.kwargs["action"], "delete")
+        self.assertEqual(provider.comment.call_count, 1)
+        stored = self.view()["record"]["operations"][0]
+        self.assertEqual((stored["locator"]["number"], stored["locator"]["parent_number"]), (9, 1))
+        self.assertEqual(stored["result"]["status"], "succeeded")
 
     def test_provider_unknown_write_keeps_original_identity_and_never_resubmits(self):
         provider = self.github_fixture()

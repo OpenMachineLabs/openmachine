@@ -252,7 +252,8 @@ class TaskAdmission:
                 raise Fault("task_operation_conflict", "A control or cancellation has its own operation ID; retain the original execution ID.")
             if method == "control_execution":
                 value.update(execution.control_request(value["expected_control_seq"], value["action"], value["text"], value["terminal_size"]))
-        elif method in GITHUB_METHODS and (value.get("body") is not None or value.get("action") == "create"):
+        elif (method in GITHUB_METHODS and value.get("action") != "delete"
+              and (value.get("body") is not None or value.get("action") == "create")):
             marker = f"<!-- om-task:{context['task_id']}:{context['operation_id']} -->"
             value["body"] = value.get("body") or ""
             if marker not in value["body"]:
