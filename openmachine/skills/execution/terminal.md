@@ -20,6 +20,19 @@ closed stdin and combined stdout/stderr. Exclusive canonical-workspace leases
 remain default; `shared` is only a cooperating read-only declaration, not enforced
 isolation. Up to 16 stable named resources coordinate across workspaces.
 
+The launch `cwd` selects the lock: Git directories use their canonical worktree;
+non-Git directories use the unambiguous configured root. A shell `cd`, `git -C`
+or `codex -C` inside `argv` does not change that original lock. Independent Git
+repositories inside one configured parent can run concurrently when each command
+selects its own repository/worktree as `cwd`. Non-Git or cross-repository work
+may still need the configured parent scope.
+
+A command's workspace-lock conflict retains `resource_busy` and reports `cwd`
+and `workspace_lock_root`. Check those paths and conflicting work before choosing
+a narrower directory within the accepted task scope. Other `resource_busy`
+causes, including execution-ID and named-resource conflicts, do not carry this
+workspace guidance. Never use `shared` to bypass a writer conflict.
+
 The worker alone publishes lifecycle facts. Stop requests retain the first reason
 and cannot relabel an already-observed natural exit. `stopping` differs from
 command-exited-but-cleanup-pending `finishing`. A TERM handler returning zero can

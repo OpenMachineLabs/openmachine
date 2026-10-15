@@ -49,6 +49,25 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         finally:
             self.assertEqual(self.wait(first)["status"], "succeeded")
 
+    def test_git_repositories_under_one_parent_can_run_independently(self):
+        first_repo, second_repo = self.work / "first", self.work / "second"
+        for repo in (first_repo, second_repo):
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+        first = self.start("from pathlib import Path\nimport time\n"
+                           "while not Path('release').exists(): time.sleep(0.01)",
+                           cwd=first_repo, timeout_seconds=5)
+        try:
+            with self.assertRaises(Fault) as caught:
+                self.start('print("conflict")', cwd=first_repo)
+            self.assertEqual(caught.exception.code, "resource_busy")
+            self.assertEqual(caught.exception.evidence["workspace_lock_root"], str(first_repo))
+            second = self.wait(self.start('print("independent")', cwd=second_repo))
+            self.assertEqual(second["status"], "succeeded")
+        finally:
+            (first_repo / "release").touch()
+            self.assertEqual(self.wait(first)["status"], "succeeded")
+
     def test_log_limit_does_not_kill_command_and_pages_remain_bounded(self):
         result = self.wait(self.start('import sys; sys.stdout.write("x" * (4*1024*1024+100))'))
         self.assertEqual(result["status"], "succeeded")
