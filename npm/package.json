@@ -1,0 +1,35 @@
+{
+  "name": "openmachine",
+  "version": "0.1.0",
+  "description": "Install and manage Open Machine Core on Apple Silicon Macs",
+  "license": "MIT",
+  "private": false,
+  "type": "commonjs",
+  "bin": {
+    "openmachine": "bin/openmachine.cjs"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenMachineLabs/openmachine.git",
+    "directory": "npm"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "LICENSE",
+    "scripts/assert-payload.cjs",
+    "runtime.tar.gz",
+    "runtime.sha256",
+    "runtime.archive.sha256",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test ../test/repository/npm_installer.test.cjs",
+    "prepublishOnly": "node scripts/assert-payload.cjs"
+  }
+}

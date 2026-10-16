@@ -299,11 +299,11 @@ class RepositoryChecks(unittest.TestCase):
             self.assertNotIn("pull_request_target:", workflow)
             self.assertNotIn(": write", workflow)
 
-    def test_all_workflows_use_github_hosted_ubuntu(self):
+    def test_all_workflows_use_explicit_github_hosted_runners(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
-                         "documentation.yml": 2, "auto-metadata.yml": 1,
-                         "review-policy-signal.yml": 1,
+                         "documentation.yml": 2, "npm-package.yml": 1,
+                         "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}
         workflows = {path.name: path.read_text()
                      for path in (ROOT / ".github/workflows").glob("*.yml")}
@@ -311,9 +311,14 @@ class RepositoryChecks(unittest.TestCase):
         for name, expected_count in expected_jobs.items():
             with self.subTest(workflow=name):
                 workflow = workflows[name]
-                self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), expected_count)
+                runner = "macos-15" if name == "npm-package.yml" else "ubuntu-24.04"
+                self.assertEqual(workflow.count("    runs-on: " + runner), expected_count)
                 self.assertNotIn("CORE_CI_RUNNER", workflow)
                 self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
+                if name == "npm-package.yml":
+                    self.assertIn("workflow_dispatch:", workflow)
+                    self.assertIn("test \"$(uname -m)\" = \"arm64\"", workflow)
+                    self.assertNotIn("npm publish", workflow)
 
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
