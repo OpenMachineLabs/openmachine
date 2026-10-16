@@ -50,6 +50,8 @@ def title_errors(title: str, kind: str) -> list[str]:
         return [f"title must be printable ASCII and at most {limit} characters"]
     if title != title.strip() or title.endswith("."):
         return ["title must not have surrounding spaces or a final period"]
+    if kind == "pr":
+        return []  # PR title style is advisory; baseline hygiene still applies.
     prefix = ""
     if kind == "issue" and title.startswith("["):
         match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|ROADMAP)\] (\S.*)", title)
@@ -140,13 +142,19 @@ def metadata_errors(obj: dict, kind: str) -> list[str]:
 
 
 def metadata_warnings(obj: dict, kind: str) -> list[str]:
-    """PR headings are presentation guidance, not evidence of meaningful acceptance."""
+    """PR presentation advice does not establish meaningful acceptance."""
     if kind != "pr" or not isinstance(obj, dict) or not isinstance(obj.get("body"), str):
         return []
     body = obj["body"]
     headings = re.findall(r"^## (.+)$", body, flags=re.M)
-    return [f"presentation: consider one '{heading}' section" for heading in PR_HEADINGS
-            if headings.count(heading) != 1]
+    warnings = [f"presentation: consider one '{heading}' section" for heading in PR_HEADINGS
+                if headings.count(heading) != 1]
+    title = obj.get("title")
+    if isinstance(title, str) and not title_errors(title, "pr"):
+        match = TITLE.fullmatch(title)
+        if not match or match[3] != match[3].strip() or match[3].lower() in {"update", "misc", "todo"}:
+            warnings.append("presentation: consider domain(scope): concrete English outcome")
+    return warnings
 
 
 def git(root: Path, *args: str) -> str:
