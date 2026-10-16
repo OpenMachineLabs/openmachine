@@ -34,7 +34,7 @@
 
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
-[Documentation](docs/index.md) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md)
+[Documentation](docs/index.md) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## What you can do
 
@@ -94,13 +94,13 @@ The [operating Skill](openmachine/skills/overview/SKILL.md) and [Skills director
 
 ## Security
 
-Open Machine is a trusted, single-operator native runtime, **not an OS sandbox** or multi-tenant executor. Native commands can access resources beyond read-only tool scopes. Keep the listener private, grant access deliberately, and remember that files and logs returned to an AI client may leave your machine. Cancellation and software rollback do not undo completed effects. Read [Security and data](docs/configuration/security.md) before enabling execution or remote access; never put secrets in prompts, command arguments or committed configuration.
+Open Machine is a trusted, single-operator native runtime, **not an OS sandbox** or multi-tenant executor. Native commands can access resources beyond read-only tool scopes. Keep the listener private, grant access deliberately, and remember that files and logs returned to an AI client may leave your machine. Cancellation and software rollback do not undo completed effects. Read [Security and data](docs/configuration/security.md) before enabling execution or remote access; never put secrets in prompts, command arguments or committed configuration. Report vulnerabilities privately via the [Security Policy](SECURITY.md).
 
 ## Contributors
 
 Thanks to everyone who contributes to Open Machine.
 
-[View GitHub contributors](https://github.com/OpenMachineLabs/openmachine/graphs/contributors) · [Contribute to Open Machine](CONTRIBUTING.md)
+[View GitHub contributors](https://github.com/OpenMachineLabs/openmachine/graphs/contributors) · [Contribute to Open Machine](CONTRIBUTING.md) · [Maintainer guide](MAINTAINERS.md)
 
 ## License
 

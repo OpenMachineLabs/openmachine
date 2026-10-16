@@ -33,4 +33,5 @@ State severity, known limitations, and any unsafe operation the fix must avoid.
 
 ## Evidence
 Attach redacted errors or synthetic fixtures. Never include secrets or
-private machine configuration. Report sensitive vulnerabilities privately.
+private machine configuration. For suspected vulnerabilities, follow [SECURITY.md](../../SECURITY.md) instead;
+never publish exploit details here.

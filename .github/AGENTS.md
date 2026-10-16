@@ -1,7 +1,8 @@
 # GitHub Configuration Instructions
 
-Read the root [AGENTS.md](../AGENTS.md) and
-[CONTRIBUTING.md](../CONTRIBUTING.md) first.
+Read the root [AGENTS.md](../AGENTS.md),
+[CONTRIBUTING.md](../CONTRIBUTING.md), and
+[MAINTAINERS.md](../MAINTAINERS.md) first.
 
 Keep templates and automation in English. Reuse the managed label manifest;
 do not add status, priority, or architecture taxonomies without a current need.
