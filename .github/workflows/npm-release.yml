@@ -138,9 +138,27 @@ jobs:
             --access public --provenance --registry https://registry.npmjs.org/
       - name: Verify registry artifact
         if: github.event_name == 'release'
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
           expected="$(shasum -a 1 "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz" | cut -d ' ' -f1)"
-          actual="$(npm view "openmachine@$VERSION" dist.shasum --registry https://registry.npmjs.org/)"
-          test "$expected" = "$actual"
+          for attempt in {1..20}; do
+            if actual="$(npm view "openmachine@$VERSION" dist.shasum --registry https://registry.npmjs.org/ \
+                --prefer-online --fetch-retries=0 --fetch-timeout=10000 2>"$RUNNER_TEMP/registry-error.log")"; then
+              if test "$expected" != "$actual"; then
+                echo "::error::Registry artifact digest differs from the published tarball."
+                exit 1
+              fi
+              echo "Verified openmachine@$VERSION registry artifact."
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/registry-error.log" >&2
+            grep -q 'E404' "$RUNNER_TEMP/registry-error.log" || exit 1
+            if test "$attempt" -lt 20; then
+              echo "Registry version not visible yet (attempt $attempt/20); retrying in 15 seconds."
+              sleep 15
+            fi
+          done
+          echo "::error::Registry version still unavailable after 20 attempts."
+          exit 1
