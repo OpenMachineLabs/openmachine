@@ -84,33 +84,6 @@ Inspect the entire candidate and its validation evidence, not only its final
 commit. Internal Open Machine review evidence is separate from the repository's
 GitHub approval policy. An optional COMMENT self-review cannot satisfy approval.
 
-### Trusted maintainer approval gate
-
-The immutable GitHub user IDs 70309026 (LuozhuZhang) and 191080179 (bella-chai)
-are the only trusted maintainer reviewers. Their own PRs from branches in this
-repository need no human approval. Every other PR, including a fork opened by a
-maintainer, needs an APPROVED review from at least one of these IDs for its exact
-current HEAD commit. An approval of an older HEAD or a dismissed review is not
-valid. An outstanding trusted CHANGES_REQUESTED review blocks the gate.
-
-The default-branch workflow publishes commit status om/trusted-review-gate.
-GitHub Rulesets must require that status from the GitHub Actions integration,
-as well as the independent repository/runtime/metadata CI checks. Configure
-zero ordinary required approvals and disable required Code Owner review: otherwise
-maintainer-owned PRs would be forced into unnecessary human review. Never put
-maintainers or bots on a broad bypass list. A separate unprivileged PR/review
-workflow only sends a signal; a privileged default-branch workflow independently
-re-reads GitHub's PR author, HEAD and reviews. A 15-minute scheduled sweep
-reconciles missed events, and workflow_dispatch can re-evaluate one PR. External
-PR code, workflow definitions, artifacts, descriptions and labels are never
-executed or accepted as review authority in the privileged job.
-
-Review exemption never exempts any PR from CI or other rules. GitHub Auto-merge
-may be used once repository policy and required checks are active, but no
-Actions GITHUB_TOKEN workflow is authorized to merge PRs. An Open Machine
-merge remains subject to its separately required user authorization and current
-native checks. This policy does not authorize releases or deployments.
-
 Creating a PR does not authorize merging; an actual merge still requires explicit
 user authorization and the current native GitHub policy and CI checks.
 Do not enable auto-merge, publish a release, or alter repository access settings
