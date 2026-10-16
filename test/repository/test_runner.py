@@ -71,6 +71,15 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
 
+    def test_community_policy_documents_select_repository_checks(self):
+        for path in ("CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
+                     "CODE_OF_CONDUCT.md"):
+            with self.subTest(path=path):
+                self.write(path, "# Community policy\n")
+                plan = runner.make_plan(self.root, self.base)
+                self.assertFalse(plan["runtime_required"])
+                self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+
     def test_repository_execution_is_independent_of_ambient_pr_metadata(self):
         for path in ("scripts/run_tests.py", "scripts/check_repository.py"):
             self.write(path, (ROOT / path).read_text())

@@ -1,202 +1,168 @@
-# Contributing
+# Contributing to Open Machine
 
-## Repository boundary
+Thank you for helping improve Open Machine. We welcome bug reports, focused
+fixes, documentation improvements, tests, and well-scoped feature proposals.
+You do not need to be a maintainer or use an AI agent to contribute.
 
-The Spec index binds approved implementation slices. Add files, dependencies
-and tests only for the current approved behavior. The first runtime slice uses
-Python; later scope remains subject to explicit approval.
-Keep all repository-authored content in English, including commit and PR bodies.
+Start here for the contributor workflow. Maintainers and automated contributors
+should also read [MAINTAINERS.md](MAINTAINERS.md) for design approval, labels,
+CI ownership, and merge authority. All repository-authored text, code comments,
+Issues, commit messages, and PR descriptions must be in English.
 
-## Design and research
+## Choose a contribution
 
-| Work | Title | Purpose |
-| --- | --- | --- |
-| Spec | `[SPEC] <domain>(<scope>): <outcome>` | An implementable design delta. |
-| Feature request | `[REQUEST] <domain>(<scope>): <outcome>` | A community-proposed capability or usability improvement. |
-| Bug report | `[BUG] <domain>(<scope>): <problem>` | An observed defect with reproduction details. |
-| Survey / Research | `[SURVEY] research(<scope>): <question>` | Investigation, comparison, or synthesis. |
-| Experiment | `[SURVEY] experiment(<scope>): <question>` | Bounded measurements and their conclusions. |
-| Benchmark | `[BENCHMARK] eval(<scope>): <comparison>` | A reproducible comparison under a frozen protocol. |
-| Roadmap | `[ROADMAP] <name>` | Long-term direction across separately approved Specs and tasks. |
-| Ordinary task | `<domain>(<scope>): <outcome>` | A bounded bug, improvement, or maintenance task. |
+- **Questions and usage help:** ask in the [community Discord](https://discord.gg/TAxEWV7fgZ).
+  Avoid putting credentials, private machine data, or sensitive logs in messages.
+- **Bug reports:** use the [Bug template](.github/ISSUE_TEMPLATE/bug.md).
+  Include the version or commit, platform, minimal safe reproduction, expected and
+  observed results, and redacted diagnostic information.
+- **Small fixes, tests, and documentation:** check existing
+  [Issues](https://github.com/OpenMachineLabs/openmachine/issues), then open a
+  scoped PR. For material changes, open a Task Issue to align the scope first.
+- **Feature ideas:** use the
+  [Feature Request template](.github/ISSUE_TEMPLATE/feature-request.md).
+  A request is a proposal, not permission to implement a large new capability.
+- **Security vulnerabilities:** follow [SECURITY.md](SECURITY.md), **not** a public
+  Issue, PR, or Discord message containing exploit details.
 
-Use the Issue templates. Research is covered by **Survey**; do not create a
-parallel `[RESEARCH]` workflow or a separate results Issue for the same question.
-A Survey records sources and revisions, facts, inference, unknowns, a budget,
-a stopping condition, and conclusions. `keep`, `adapt`, `reject`, and `unknown`
-are valid conclusions when supported; an unstarted investigation is not complete.
-A Benchmark additionally freezes inputs, candidates, scorer, metrics and
-denominators, environment, and invalidation rules before comparison.
+Check existing Issues and PRs before duplicating a report or starting major work.
+A maintainer may ask for an approved Spec before a change to public interfaces,
+architecture, permissions, persistent state, or security boundaries. Routine
+documentation corrections and narrowly scoped existing-behavior fixes do not
+automatically require a new Spec. Do not treat an unapproved design as approval
+to implement it.
 
-A Spec states requirements, non-goals, affected interfaces and paths, acceptance,
-important failure behavior, open questions, and stopping conditions. Mark
-irrelevant fields as not applicable rather than inventing architecture. It gains
-design authority only when a maintainer explicitly approves its scope and its
-row in [spec/README.md](spec/README.md) records `direct_issue_contract` and the
-approval link. A complete current user design may authorize a small change
-without another Spec. Never invent an approval or a placeholder Issue number.
+Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Keep Spec and Survey bodies in GitHub Issues; the repository holds only their
-stable index. Add `spec/<issue-number>/` only for necessary design attachments;
-product code must not consume these attachments as runtime configuration.
-After acceptance and merge, code and tests own implemented behavior. Subsequent
-Specs describe deltas rather than permanently mirroring the code.
+## Development setup
 
-Keep design, implementation, and acceptance status distinct. Use `Refs #N` for
-partial work; use `Closes #N` only when all scoped acceptance is met and closure
-is authorized. Historical `[Program]` Issue titles remain valid when those Issues are edited or
-reopened; new Issue submissions must use `[ROADMAP]`.
+The current runtime is Python and supports macOS and Linux; Windows is not
+currently supported. Use **Python 3.12+**, Git, and a compatible SQLite version.
+See [setup requirements](openmachine/skills/overview/setup.md#install) for
+SQLite compatibility and platform limitations.
 
-A Roadmap, Survey, Benchmark, or Feature Request does not
-authorize implementation, production changes, expensive runs, or purchases.
+This is a development checkout, **not** the pinned release installation from
+the [README quick start](README.md#quick-start). Do not experiment with native
+execution, service changes, or GitHub credentials on a production machine.
+Use disposable workspaces for tests. Command execution and workspace writes are
+separately disabled by default; do not enable them just to edit documentation.
 
-## Git and review
+If you fork the repository, `origin` is **your fork** and `upstream` is the
+official repository:
 
-Commit subjects, PR titles, and ordinary Issue titles use printable ASCII:
+```sh
+git clone https://github.com/YOUR-USERNAME/openmachine.git
+cd openmachine
+git remote add upstream https://github.com/OpenMachineLabs/openmachine.git
+git fetch upstream main
+git switch -c docs/contributor-onboarding upstream/main
+
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.lock
+```
+
+Substitute your GitHub username and a branch name describing your actual change.
+If you cloned the official repository directly, the base is normally
+`origin/main`, and you do not need to add `upstream`. Use only your own fork
+or an authorized branch for publication. If the lockfile installation fails,
+consult the exact environment requirements rather than silently installing
+different versions.
+
+[Development ownership notes](openmachine/skills/overview/development.md) and
+[test/README.md](test/README.md) explain module boundaries, fixtures, and
+independent wheel verification. Keep tests under `test/`.
+
+## Make and validate a change
+
+Keep each PR focused. Include regression coverage for changed behavior, use
+existing owners and fixtures, and update affected documentation. Never add
+secrets, private infrastructure details, real execution logs, or personal data.
+
+Run fast feedback while editing. For a documentation-only change:
+
+```sh
+python scripts/check_repository.py
+python -m unittest discover -s test/repository -p 'test_*.py'
+```
+
+For code changes, select a focused module and test layer (substitute the
+actual owner for `github`):
+
+```sh
+python scripts/run_tests.py --module github --layer unit
+```
+
+Then inspect what the full change selects and run the affected suite:
+
+```sh
+python scripts/run_tests.py --base upstream/main --plan
+python scripts/run_tests.py --base upstream/main
+```
+
+The base ref must exist locally and be an ancestor of your branch. Use
+`origin/main` in the commands above for a direct, non-fork clone. The selector
+includes staged, unstaged, and ordinary untracked files, but it does not fetch
+a base on your behalf. Docs-only changes use repository checks without
+installing the product. Locked dependency, packaging, and shared runner changes
+also require full verification; see [test/README.md](test/README.md).
+
+Before requesting review, commit your changes and run the clean-candidate gate:
+
+```sh
+git add path/to/changed-file
+git commit -m "docs(contributing): explain the contributor workflow"
+python scripts/premerge.py --base upstream/main
+```
+
+Replace the staged path, message, and base with your actual values. The
+premerge gate requires a **clean committed worktree**. Report actual PASS, FAIL,
+SKIP, or NOT RUN evidence; do not describe an unexecuted check as passing.
+Local tests and hosted CI provide different evidence and do not prove that a
+real-client deployment is safe.
+
+## Submit a pull request
+
+Push the branch to your fork, then open a PR targeting
+`OpenMachineLabs/openmachine:main`:
+
+```sh
+git push -u origin docs/contributor-onboarding
+```
+
+Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md). Explain why the
+change is needed, what is included and excluded, how it was verified, known
+risks, and any rollback considerations. Link a real Issue when applicable.
+For incomplete work, use `Refs #N`; use `Closes #N` only when the complete
+Issue acceptance is met and closure is authorized.
+
+Use concise, English, printable-ASCII commit subjects and PR titles:
 
 ```text
 <domain>(<scope>): <concrete English outcome>
 ```
 
-Use lowercase kebab-case for domain and scope. Choose a meaningful domain such
-as `governance`, `docs`, `ci`, `test`, `architecture`, `runtime`, `security`, or
-`refactor`; `eval` is reserved for Benchmark Issues. Do not use vague outcomes
-such as "update" or append a period. Subjects are at most 72 characters; Issue
-and PR titles are at most 100. The bracketed prefixes above are Issue-only.
-A maintainer-authorized squash uses `<PR title> (#<number>)`, at most 72 characters.
+Use lowercase kebab-case for domain and scope (for example, `docs`, `test`,
+`runtime`, or `security`). Commit subjects are at most **72** characters;
+PR titles at most **100**. Do not add a final period or use vague outcomes
+such as `update`. Issue titles follow their selected Issue template.
+Choose a descriptive branch name; Open Machine-operated tasks use an
+`agent/<domain>-<scope>-<outcome>` branch convention.
 
-Use `agent/<domain>-<scope>-<outcome>` for a task branch. Keep related changes
-reviewable and atomic; do not rewrite published history to meet a commit count.
-Commit bodies briefly state `Why`, `Scope`, `Validation`, `Boundary`, and `Lane`,
-with actual results rather than expected PASS claims. Use the PR template as
-presentation guidance and link the design or identify the current user request
-as the design source. Explain the problem and outcome, scope, actual validation,
-and material risks in the form that fits the change. Fixed PR section names are
-advisory; inspect the actual candidate instead. Retain one `- Issue: #N` field when
-linking a Spec so the post-merge Development automation can find it.
+CI checks repository rules, PR metadata, and applicable code or test behavior.
+Fork PRs run on GitHub-hosted runners and do not receive private infrastructure
+credentials. Respond to review findings with focused changes; avoid force-pushing
+or rewriting published history merely to satisfy a commit count.
 
-Inspect the entire candidate and its validation evidence, not only its final
-commit. A submitted GitHub Review, human approval, or independent reviewer is
-never an Open Machine prerequisite for merging any change. An optional COMMENT
-self-review may record meaningful findings when useful; do not submit one solely
-to satisfy a gate. Self-review is not independent approval.
-Creating a PR does not authorize merging; an actual merge still requires explicit
-user authorization and the current native GitHub policy and CI checks.
-Do not enable auto-merge, publish a release, or alter repository access settings
-as part of an ordinary code change.
+A passing CI result or an opened PR does not guarantee acceptance or authorize a
+merge, release, deployment, or access-setting change. Maintainers decide whether
+the design, safety boundaries, and verification are sufficient. Internal review,
+approval, and merge procedures are documented in
+[MAINTAINERS.md](MAINTAINERS.md).
 
-## Labels and planning
+## Community and safety
 
-[labels.json](.github/labels.json) defines the small managed label set. Use one
-primary label per Issue or PR: `spec`, `research`, `benchmark`, `bug`,
-`implementation`, `feature`, `feature-request`, `maintenance`, `documentation`,
-or `security`. Surveys, including experiments, use `research`; implementation
-increments use `implementation`. Roadmaps and other feature work use `feature`;
-Feature Request issues use only `feature-request`. Labels classify work, not
-approval or completion. Check the live label during review.
-
-The label workflow creates or updates only these managed labels after the
-manifest is merged to `main`, or on an explicit manual run against `main`.
-It never deletes unrelated labels. Templates and label synchronization become
-available through GitHub's default-branch mechanisms after merge; merely opening
-this scaffold PR does not install them on `main`.
-
-No external Project, release field, milestone, assignee, or private organization
-workflow is assumed. Add planning integration only when it has an actual owner.
-Do not add an assignee or rewrite unrelated metadata merely to fill a template.
-
-## Checks and evidence
-
-Use a module's focused tests while editing, then the shared premerge entry point
-for the clean committed candidate:
-
-```sh
-python3 scripts/run_tests.py --module github --layer unit
-python3 scripts/run_tests.py --base origin/main --plan
-python3 scripts/premerge.py --base origin/main
-```
-
-The focused unit command verifies current checkout source. The default module
-and premerge paths select the affected module's layers and explicit boundaries,
-build one independent wheel, and test that candidate outside its checkout.
-Repository and whitespace checks run before environment preparation. See
-[test/README.md](test/README.md) for ownership, fixture, deletion and layer rules.
-
-The base must exist locally and be an ancestor of the candidate. Development
-selection includes staged, unstaged and ordinary untracked changes; premerge
-requires a clean committed worktree. Unknown source ownership, invalid mappings,
-missing retained coverage and zero required tests fail before expensive work.
-A documentation-only plan runs repository checks without product installation.
-
-Use `--full` for complete verification. Dependency, packaging and global runner
-changes also require the full suite. Ordinary module/test additions and ownership
-edits use the affected entries, including old and new boundaries. `--force`
-invalidates cache reuse for the selected scope; it does not expand that scope.
-
-A local PASS is reusable only for the exact HEAD, resolved base, test selection,
-scope and verification fingerprint. Source-only and dirty-worktree results are
-not cached. Full and affected evidence cannot be confused, and hosted CI obtains
-its own result. Pull-request-internal commit subjects are not a merge gate;
-published history should not be rewritten to satisfy presentation policy. The
-final commit landing on main is still validated by the push event.
-
-The dependency-free repository-only checks remain:
-
-```sh
-python3 -m unittest discover -s test/repository -p 'test_*.py'
-python3 scripts/check_repository.py
-```
-
-Before publishing a PR, check its exact draft title and body with the same
-metadata validator used by CI:
-
-```sh
-python3 scripts/check_repository.py --mode metadata --event-name pull_request --event-path /absolute/pr-event.json
-```
-
-The JSON file contains `{"pull_request": {"title": "...", "body": "..."}}`, with
-the actual draft strings. Both explicit event arguments are required together;
-`issues` uses an `issue` object. Metadata mode reads only that event data and
-does not run source checks, contact GitHub, or publish anything. PR titles,
-English text and a nonempty valid body remain hard checks; suggested section
-names produce presentation warnings. A passing body is not proof of meaningful
-acceptance, sufficient review or authorization.
-
-The repository suite tests the checker, selector and runner and verifies source
-dependency direction. The checker validates candidate text hygiene, relative
-Markdown file links, the label manifest, and naming and English-language rules
-for supported GitHub events. `--mode source` checks repository files and the
-final commit range for a push event, without reading PR or Issue metadata.
-The default `--mode all` preserves the combined local entry point. The checker
-rejects CJK text as a common accidental language switch; it does not detect all
-non-English prose or prove English grammar.
-Review remains responsible for English content, meaningful acceptance,
-authorization and the live primary label. Local link checks validate file
-targets, not URL availability or heading anchors.
-
-Quality and metadata CI use a repository-restricted private Linux runner only
-when the repository is private and CORE_CI_RUNNER is configured; otherwise they
-use GitHub-hosted Ubuntu. Public visibility always selects hosted Ubuntu, even
-if CORE_CI_RUNNER remains configured. Revoke the private runner registration
-and access before making Core public. Cross-repository PRs select hosted
-Ubuntu even while Core is private. These jobs retain pinned actions, read-only
-permissions, no credentials supplied to candidate code, and a five-minute
-budget. Its code checks use the same premerge pipeline and exact GitHub event
-candidate with explicit source mode. PR and Issue metadata checks run only in
-their separate workflow and concurrency identity, including each new PR head; a
-metadata-only edit cannot replace a failed code check with a same-named skipped
-result or cancel code verification. A missing PR heading does not block code
-verification, and a corrected body can pass metadata checks without a new source
-commit. Changing a PR's base still requires code verification against the new
-candidate.
-
-Only separate default-branch metadata workflows have write access: label sync
-and post-merge Spec Development linking use `issues: write`. Never use
-`pull_request_target` to execute candidate code, interpolate Issue or PR text
-into shell commands, or route write-privileged jobs to private self-hosted runners.
-Branch protection remains a separate maintainer setting.
-
-Add focused tests for actual product behavior; do not create empty suites or
-directories. Record measured timings and actual PASS, FAIL, SKIP and NOT RUN
-results. A local pass is not a hosted-CI pass, and neither proves runtime,
-provider, security, performance or production acceptance.
+Be respectful and constructive; see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Use public Issues for nonsensitive defects and proposals, Discord for general
+help, and [SECURITY.md](SECURITY.md) for sensitive vulnerabilities. Do not post
+private security details in public discussion.

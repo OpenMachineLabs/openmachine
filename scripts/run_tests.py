@@ -26,7 +26,8 @@ GLOBAL_PATHS = {
     "scripts/premerge.py", ".github/workflows/quality.yml",
 }
 REPOSITORY_PATHS = {
-    "AGENTS.md", "CONTRIBUTING.md", "README.md", "LICENSE", ".gitignore",
+    "AGENTS.md", "CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
+    "CODE_OF_CONDUCT.md", "README.md", "LICENSE", ".gitignore",
     "examples/config.toml",
     ".github/AGENTS.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/pull_request_template.md", ".github/labels.json",
     ".github/workflows/metadata.yml", ".github/workflows/labels.yml",

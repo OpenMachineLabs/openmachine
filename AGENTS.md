@@ -10,8 +10,9 @@ only responsibility groups that contain real checks.
 Follow current user instructions, then the approved design for the requested
 delta. Current code and tests describe implemented behavior; a Survey, draft,
 old Spec, or this scaffold is not implementation approval. Read
-[CONTRIBUTING.md](CONTRIBUTING.md), the [Spec index](spec/README.md), and any
-more-specific `AGENTS.md` before changing their scope.
+[CONTRIBUTING.md](CONTRIBUTING.md), [MAINTAINERS.md](MAINTAINERS.md),
+the [Spec index](spec/README.md), and any more-specific `AGENTS.md` before
+changing their scope.
 
 ## Task model recommendation
 

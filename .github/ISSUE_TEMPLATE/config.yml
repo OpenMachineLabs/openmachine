@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Community questions and help
+    url: https://discord.gg/TAxEWV7fgZ
+    about: Ask usage questions in the community; do not share private data.
+  - name: Security reporting
+    url: https://github.com/OpenMachineLabs/openmachine/security/policy
+    about: Read the security policy before requesting a confidential reporting channel.
