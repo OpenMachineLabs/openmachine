@@ -1,0 +1,50 @@
+name: npm-package
+
+# Build a reviewable npm tarball without registering it or publishing a release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Verify Apple Silicon and test npm code
+        run: |
+          test "$(uname -m)" = "arm64"
+          node --version
+          node --test test/repository/npm_installer.test.cjs
+      - name: Build exact Core and checked offline payload
+        run: |
+          set -eu
+          python3 -m venv "$RUNNER_TEMP/builder"
+          "$RUNNER_TEMP/builder/bin/python" -m pip install -r requirements.lock hatchling==1.27.0
+          mkdir -p "$RUNNER_TEMP/wheels" "$PWD/dist"
+          "$RUNNER_TEMP/builder/bin/python" -m pip wheel --no-deps --no-build-isolation . --wheel-dir "$RUNNER_TEMP/wheels"
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' -print)"
+          test -n "$wheel"
+          test "$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' | wc -l | tr -d ' ')" = 1
+          "$RUNNER_TEMP/builder/bin/python" -m pip install --no-deps "$wheel"
+          "$RUNNER_TEMP/builder/bin/python" scripts/build_runtime_payload.py \
+            --wheel "$wheel" --requirements "$PWD/requirements.lock" \
+            --commit "$(git rev-parse HEAD)" \
+            --cache "$RUNNER_TEMP/runtime-inputs" \
+            --output "$RUNNER_TEMP/runtime-macos-arm64"
+          node npm/scripts/package.cjs "$RUNNER_TEMP/runtime-macos-arm64" "$PWD/dist"
+      - name: Upload unpublished npm tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openmachine-npm-macos-arm64
+          path: dist/openmachine-*.tgz
+          if-no-files-found: error
+          retention-days: 7
