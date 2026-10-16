@@ -270,9 +270,10 @@ explicit configuration workflow and candidate snapshots.
 After a lost first-run configuration reply, `configure --verify-existing` with
 the original inputs only reads and verifies an exact private owned configuration.
 It never creates, overwrites or repairs a file, and rejects changed grants or
-profiles. The additive `configure:verify_existing` capability lets Desktop
-reconcile this step before submitting its original install operation. Installed
-state still rejects first-run configuration; this is not a configuration editor.
+profiles. The additive `configure:verify_existing` capability allows an
+authorized management caller to verify this step before continuing its original
+install operation. Installed state still rejects first-run configuration; this
+is not a configuration editor.
 
 ### Policy and old-Core limits
 

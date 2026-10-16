@@ -20,7 +20,7 @@ Workspace preparation and record ownership are separate from application.
 Task models remain in `records.py`; pure decisions live in `transitions.py`.
 `app/task_observer.py` owns threads/leases; `task_observation.py` owns receipt
 observation facts, and `task_attention.py` derives bounded foreground stop views.
-Service remains independent of Desktop. Existing
+Service remains independent of consuming applications. Existing
 `python -m openmachine.execution` and `python -m openmachine.service check-state`
 entries remain intact.
 
