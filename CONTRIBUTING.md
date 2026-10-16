@@ -174,3 +174,5 @@ Be respectful and constructive; see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Use public Issues for nonsensitive defects and proposals, Discord for general
 help, and [SECURITY.md](SECURITY.md) for sensitive vulnerabilities. Do not post
 private security details in public discussion.
+
+Temporary review-gate smoke test for the governance workflow. This change must not be merged.
