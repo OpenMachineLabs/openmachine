@@ -34,7 +34,7 @@
 
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
-[Documentation](docs/index.md) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Documentation](https://openmachinelabs.github.io/openmachine/) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## What you can do
 
@@ -86,7 +86,7 @@ The **Personal Context layer and automatic context updates** in the diagram illu
 
 ## Documentation
 
-The [user documentation](docs/index.md) covers every important released Core capability. Start with [requirements](docs/introduction/requirements.md), [installation](docs/getting-started/installation.md), [configuration](docs/getting-started/configuration.md) and [layer-by-layer verification](docs/getting-started/verification.md).
+The [user documentation](https://openmachinelabs.github.io/openmachine/) covers every important released Core capability. Start with [requirements](docs/introduction/requirements.md), [installation](docs/getting-started/installation.md), [configuration](docs/getting-started/configuration.md) and [layer-by-layer verification](docs/getting-started/verification.md).
 
 For existing installations, use [updates](docs/getting-started/updates.md), the [configuration reference](docs/configuration/reference.md) and [troubleshooting](docs/troubleshooting.md). The [CLI](docs/reference/cli.md) and [MCP tools](docs/reference/tools.md) references link to detailed operating contracts without duplicating them.
 
