@@ -100,12 +100,6 @@ Open Machine is a trusted, single-operator native runtime, **not an OS sandbox**
 
 Thanks to everyone who contributes to Open Machine.
 
-<p align="center">
-  <a href="https://github.com/OpenMachineLabs/openmachine/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=OpenMachineLabs/openmachine" alt="Open Machine contributors" />
-  </a>
-</p>
-
 [View GitHub contributors](https://github.com/OpenMachineLabs/openmachine/graphs/contributors) · [Contribute to Open Machine](CONTRIBUTING.md)
 
 ## License
