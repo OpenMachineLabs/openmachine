@@ -1,0 +1,97 @@
+site_name: OpenMachine
+site_url: !ENV [DOCS_SITE_URL, ""]
+site_description: User guides for the local-first OpenMachine Core runtime.
+repo_url: https://github.com/OpenMachineLabs/openmachine
+repo_name: OpenMachineLabs/openmachine
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+# Deployment uses the base URL returned by GitHub Pages, never an invented URL.
+# Local/PR builds use relative links without advertising a published website.
+# Markdown in docs/ is the sole source; packaged Skills remain linked references.
+theme:
+  name: material
+  language: en
+  font: false
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: grey
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: grey
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search:
+      lang: en
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+extra_css:
+  - stylesheets/extra.css
+
+# Missing navigation entries, files and anchors fail local builds and PR checks.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+nav:
+  - Overview: index.md
+  - Introduction:
+      - Architecture: introduction/architecture.md
+      - Requirements and platforms: introduction/requirements.md
+      - Current limitations: introduction/limitations.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Initial configuration: getting-started/configuration.md
+      - Connect to ChatGPT: getting-started/connect-chatgpt.md
+      - First task: getting-started/first-task.md
+      - Verify each layer: getting-started/verification.md
+      - Updates: getting-started/updates.md
+  - Features:
+      - Local machine: features/local-machine.md
+      - Context and environment: features/context.md
+      - Workspace and worktrees: features/workspace.md
+      - Command execution: features/execution.md
+      - Remote SSH: features/ssh.md
+      - Persistent tasks: features/tasks.md
+      - GitHub: features/github.md
+      - Browser: features/browser.md
+      - Skills: features/skills.md
+      - Service and runtime: features/service.md
+  - Configuration and security:
+      - Configuration reference: configuration/reference.md
+      - Security and data: configuration/security.md
+  - Troubleshooting: troubleshooting.md
+  - Reference:
+      - CLI: reference/cli.md
+      - MCP tools: reference/tools.md
