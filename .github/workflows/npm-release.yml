@@ -95,7 +95,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/builder"
           "$RUNNER_TEMP/builder/bin/python" -m pip install -r tagged/requirements.lock hatchling==1.27.0
           mkdir -p "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/dist"
-          "$RUNNER_TEMP/builder/bin/python" -m pip wheel --no-deps --no-build-isolation tagged --wheel-dir "$RUNNER_TEMP/wheels"
+          "$RUNNER_TEMP/builder/bin/python" -m pip wheel --no-deps --no-build-isolation ./tagged --wheel-dir "$RUNNER_TEMP/wheels"
           wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' -print)"
           test "$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' | wc -l | tr -d ' ')" = 1
           test -n "$wheel"
