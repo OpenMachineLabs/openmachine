@@ -1,16 +1,13 @@
-- Issue: none, or a real linked Issue
-- Design: current-task, not-applicable, or an approved Spec
+- Related Issue or Spec (if applicable):
 
-## Why and outcome
-Explain the problem and the final result in English.
+## Why
+What problem does this change address?
 
-## Scope
-- Included:
-- Excluded:
+## Changes
+Summarize the change and its scope.
 
-## Validation
-- PASS / FAIL / NOT RUN: command, actual result, and relevant limitation
-Map the scoped acceptance to evidence and describe the full-candidate review.
+## Testing
+List commands run and actual PASS / FAIL / NOT RUN results.
 
-## Risk, boundary, and rollback
-Describe risks, evidence boundaries, and how to undo this change.
+## Risks (if applicable)
+Note significant compatibility, security or rollback concerns.

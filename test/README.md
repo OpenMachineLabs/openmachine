@@ -185,19 +185,3 @@ reject Events methods on both supported protocols and retain the frozen ordinary
 tool catalog. Service tests preserve an inert private archive and reject missing,
 unsafe or reactivating readers. Existing absent-caller, claim, no-replay and restart
 checks retain ordinary Chat task-continuation coverage without an Events adapter.
-
-Historical milestone receipts remain in Specs
-[#18](https://github.com/OpenMachineLabs/openmachine/issues/18),
-[#28](https://github.com/OpenMachineLabs/openmachine/issues/28),
-[#13](https://github.com/OpenMachineLabs/openmachine/issues/13),
-[#32](https://github.com/OpenMachineLabs/openmachine/issues/32) and
-[#29](https://github.com/OpenMachineLabs/openmachine/issues/29), with their PRs.
-Reuse applicable evidence; do not repeat completed milestones or call historical
-passes new-candidate acceptance. Source merge, release, deployment and real-client
-acceptance require their own explicit authority and verification.
-
-Managed lifecycle support advances the persistent service contract from 13 to 14 and adds management
-contract 1. The corresponding explicit state-contract assertions change; the frozen
-MCP tool catalog does not. Service tests exercise the installed management module
-and actual CLI entry, with mocked native mutations. Unix-socket or launchctl
-restrictions must be reported as blockers, not converted to native acceptance.

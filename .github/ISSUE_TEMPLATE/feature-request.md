@@ -1,30 +1,16 @@
 ---
 name: "Feature Request"
 about: "Suggest a feature or usability improvement."
-title: "[REQUEST] runtime(scope): describe the desired behavior"
+title: "[REQUEST] Briefly describe the idea"
 labels: "feature-request"
 ---
 
-## Classification
-A community feature request, not an approved implementation.
+## Problem
+What are you trying to do, and what is missing?
 
-## Why
-What are you trying to accomplish, and what is missing today?
+## Proposed behavior
+Describe the desired outcome or give an example.
 
-## Outcome
-Describe the user-visible behavior you would like.
-
-## Scope
-Mention affected workflows or commands, if known.
-
-## Project metadata
-- Primary label: feature-request
-
-## Acceptance
-Give an example of how the feature should work.
-
-## Dependencies and boundary
-Mention constraints or trade-offs, if known.
-
-## Evidence
-Link related issues or redacted examples, if available. Do not include secrets.
+## Alternatives or context (optional)
+Mention workarounds, trade-offs or related Issues. A request is a proposal,
+not authorization to implement a large new capability.

@@ -1,40 +1,22 @@
 ---
 name: "Spec"
-about: "Propose the smallest implementable design delta."
+about: "Propose a scoped design for a material change."
 title: "[SPEC] architecture(scope): describe the outcome"
 labels: "spec"
 ---
 
-## Classification
-- Type: Specification
-- Spec name: A stable English name
-- Approval: Not approved; link explicit approval when granted
-- Status: Draft
-
 ## Why
-Explain the problem, current behavior, and why a change is needed.
+What problem is this solving, and why now?
 
 ## Outcome
-Describe the observable result, not a list of speculative modules.
+Describe observable behavior and relevant user impact.
 
 ## Scope
-- Requirements and affected interfaces:
-- Allowed paths:
-- Non-goals:
-- Important failure behavior:
-
-## Project metadata
-- Primary label: spec
-- Project: not configured, unless explicitly assigned
+List requirements, affected interfaces, important failure behavior and non-goals.
 
 ## Acceptance
-- [ ] State an observable correctness check and its target environment.
-- [ ] Define what evidence completes the requested scope.
-
-## Dependencies and boundary
-Record dependencies, material open questions, resource limits, and stop
-conditions. Leave undecided architecture explicit. Creation is not approval.
+State the tests and evidence needed to accept the change.
 
 ## Evidence
-Link current code, related Surveys, alternatives, and approval when available.
-The full design lives here; approved binding is indexed in spec/README.md.
+Link relevant code, research and alternatives. Record explicit maintainer
+approval here when granted; opening a Spec does not approve implementation.

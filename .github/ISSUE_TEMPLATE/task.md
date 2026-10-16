@@ -1,34 +1,18 @@
 ---
 name: "Task"
-about: "Propose a bounded improvement, documentation, or maintenance change."
-title: "governance(scope): describe the outcome"
+about: "Propose a scoped maintenance, documentation or implementation change."
+title: "maintenance(scope): describe the outcome"
 labels: "maintenance"
 ---
 
-## Classification
-- Type: Maintenance; change the primary label if another type better fits
-- Status: Draft
-
-## Why
-Explain the current problem and why this change is useful now.
-
-## Outcome
-State one verifiable result.
+## Goal
+Describe the problem and the intended outcome.
 
 ## Scope
-- Included paths and behavior:
-- Excluded work:
+What should change, and what is out of scope?
 
-## Project metadata
-- Primary label: maintenance
-- Project: not configured, unless explicitly assigned
+## Verification
+How would you know this is complete?
 
-## Acceptance
-- [ ] Define the smallest observable completion check.
-
-## Dependencies and boundary
-Record dependencies, open questions, and stopping conditions. Link an
-approved Spec only when the change actually needs one.
-
-## Evidence
-Link relevant code or evidence; explicitly state when evidence is not yet available.
+## Related work (optional)
+Link an existing Issue or approved Spec if one is needed.

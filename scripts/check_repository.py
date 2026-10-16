@@ -15,9 +15,17 @@ CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\U00020000-\U000323af
 TITLE = re.compile(r"([a-z][a-z0-9-]*)\(([a-z][a-z0-9-]*)\): ([\x20-\x7e]+)")
 SHA = re.compile(r"[0-9a-f]{40}")
 TEXT_SUFFIXES = {".md", ".py", ".json", ".yml", ".yaml", ".toml", ".sh"}
-ISSUE_HEADINGS = ("Classification", "Why", "Outcome", "Scope", "Project metadata",
-                  "Acceptance", "Dependencies and boundary", "Evidence")
-PR_HEADINGS = ("Why and outcome", "Scope", "Validation", "Risk, boundary, and rollback")
+FORMAL_ISSUE_HEADINGS = {
+    "SPEC": ("Why", "Outcome", "Scope", "Acceptance", "Evidence"),
+    "SURVEY": ("Why", "Outcome", "Scope", "Acceptance", "Evidence"),
+    "BENCHMARK": ("Why", "Scope", "Acceptance", "Evidence"),
+    "ROADMAP": ("Why", "Outcome", "Scope"),
+}
+FORMAL_ISSUE_LABELS = {
+    "spec": "SPEC", "research": "SURVEY", "benchmark": "BENCHMARK", "feature": "ROADMAP",
+}
+COMMUNITY_ISSUE_PREFIXES = {"BUG", "REQUEST"}
+PR_HEADINGS = ("Why", "Changes", "Testing")
 
 
 def english_errors(text: str) -> list[str]:
@@ -46,20 +54,27 @@ def public_boundary_errors(text: str) -> list[str]:
 
 def title_errors(title: str, kind: str) -> list[str]:
     limit = 72 if kind == "commit" else 100
-    if not isinstance(title, str) or not title or len(title) > limit or not all(32 <= ord(c) <= 126 for c in title):
-        return [f"title must be printable ASCII and at most {limit} characters"]
+    if (not isinstance(title, str) or not title or len(title) > limit or
+            not title.isprintable()):
+        return [f"title must be printable and at most {limit} characters"]
     if title != title.strip() or title.endswith("."):
         return ["title must not have surrounding spaces or a final period"]
-    if kind == "pr":
-        return []  # PR title style is advisory; baseline hygiene still applies.
+
     prefix = ""
     if kind == "issue" and title.startswith("["):
         match = re.fullmatch(r"\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|ROADMAP)\] (\S.*)", title)
         if not match:
             return ["use an exact supported Issue prefix, followed by one space"]
         prefix, title = match.groups()
+        if prefix in COMMUNITY_ISSUE_PREFIXES:
+            return []  # Natural-language and Unicode community titles are welcome.
         if prefix == "ROADMAP":
-            return []
+            return [] if all(32 <= ord(c) <= 126 for c in title) else ["use an ASCII Roadmap title"]
+
+    if not all(32 <= ord(c) <= 126 for c in title):
+        return ["use printable ASCII for commits, PRs and formal Issue titles"]
+    if kind == "pr":
+        return []  # PR title style is advisory; baseline hygiene still applies.
     match = TITLE.fullmatch(title)
     if not match or match[3] != match[3].strip() or match[3].lower() in {"update", "misc", "todo"}:
         return ["use domain(scope): concrete English outcome"]
@@ -132,11 +147,28 @@ def metadata_errors(obj: dict, kind: str) -> list[str]:
         return errors + ["body must be nonempty text; substantive acceptance still needs review"]
     if any(ord(char) < 32 and char not in "\t\n\r" for char in body):
         errors.append("body must not contain unsupported control characters")
-    errors += english_errors(body)
+    prefix = ""
+    formal_types = set()
+    if kind == "issue" and isinstance(title, str):
+        match = re.match(r"^\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|ROADMAP)\] ", title)
+        if match:
+            prefix = match[1]
+        if prefix in FORMAL_ISSUE_HEADINGS:
+            formal_types.add(prefix)
+        labels = {label["name"] for label in obj.get("labels", [])}
+        for label, expected in FORMAL_ISSUE_LABELS.items():
+            if label in labels:
+                formal_types.add(expected)
+                if prefix and prefix != expected:
+                    errors.append(f"Issue label '{label}' conflicts with the [{prefix}] title prefix")
+    if kind != "issue" or prefix not in COMMUNITY_ISSUE_PREFIXES or formal_types:
+        errors += english_errors(body)
     errors += public_boundary_errors(body)
     if kind == "issue":
         headings = re.findall(r"^## (.+)$", body, flags=re.M)
-        errors += [f"body needs exactly one '{heading}' section" for heading in ISSUE_HEADINGS
+        required = sorted({heading for formal_type in formal_types
+                           for heading in FORMAL_ISSUE_HEADINGS[formal_type]})
+        errors += [f"body needs exactly one '{heading}' section" for heading in required
                    if headings.count(heading) != 1]
     return errors
 
