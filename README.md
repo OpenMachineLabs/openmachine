@@ -16,7 +16,7 @@
 
 <img src="assets/openmachine-banner.png" width="1200" alt="Open Machine — Your AI. Your machines. Connect any AI to your context, and get things done on your machines." />
 
-<br /><br />
+<br />
 
 <table aria-label="Open Machine community">
 <tr>
