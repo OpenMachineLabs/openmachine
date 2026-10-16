@@ -70,6 +70,7 @@ nav:
   - Overview: index.md
   - Getting started:
       - Requirements: introduction/requirements.md
+      - npm (Apple Silicon): getting-started/npm-macos.md
       - Installation: getting-started/installation.md
       - Initial configuration: getting-started/configuration.md
       - Connect to ChatGPT: getting-started/connect-chatgpt.md

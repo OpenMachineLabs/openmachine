@@ -17,16 +17,9 @@ installed runtime and a client's approved tool catalog can be different.
 
 ## Start here
 
-Follow [requirements](introduction/requirements.md),
-[installation](getting-started/installation.md),
-[initial configuration](getting-started/configuration.md), and
-[Connect to ChatGPT](getting-started/connect-chatgpt.md). Then complete the
-[first real task](getting-started/first-task.md) and its
-[verification checklist](getting-started/verification.md).
+On **Apple Silicon macOS**, [install with npm](getting-started/npm-macos.md) (macOS 13+, Node.js 20+). For **other supported macOS and Linux setups**, [build Core from source](getting-started/installation.md).
 
-Installing Core does not enroll an account in ChatGPT, publish a public plugin,
-install a tunnel or grant command execution. The connection guide explains these
-separate prerequisites before you enable changes to a machine.
+For source installations, follow [initial configuration](getting-started/configuration.md). Then [connect to ChatGPT](getting-started/connect-chatgpt.md) and [verify access](getting-started/verification.md). npm installs set up the local service, **not** the MCP tunnel or ChatGPT permissions.
 
 ## Explore the capabilities
 

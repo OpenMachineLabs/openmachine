@@ -1,6 +1,10 @@
 # Requirements and supported platforms
 
-## Controller requirements
+## npm installer (Apple Silicon macOS)
+
+Requires macOS 13+, Apple Silicon (ARM64) and Node.js 20+. The [npm installer](../getting-started/npm-macos.md) bundles Python, Git, Core and its locked dependencies. The checks below apply to manual source installations.
+
+## Manual Core requirements
 
 Use **Python 3.12 or newer**, Git and a writable private state directory under
 the account that will run Core. The Python interpreter must also provide a
@@ -24,7 +28,8 @@ under [Service and runtime](../features/service.md).
 
 | Platform | Supported path | Important condition |
 | --- | --- | --- |
-| macOS | Manual Core serving and managed user service | Managed lifecycle requires the owning logged-in GUI user. |
+| macOS Apple Silicon (npm) | npm installer and managed user service | macOS 13+, Node.js 20+; first-run setup required. |
+| macOS (source) | Manual Core serving and managed user service | Managed lifecycle requires the owning logged-in GUI user. |
 | Linux controller | Manual `openmachine serve` | No managed Linux service is provided by these commands. |
 | Linux SSH target | Explicitly prepared worker | Python 3.12+, Git, OpenSSH access and systemd 255+ user manager for command execution. |
 | Windows | Not supported by this release | Do not assume a Windows service or Windows SSH worker exists. |

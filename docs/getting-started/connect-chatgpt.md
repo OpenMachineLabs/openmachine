@@ -1,9 +1,10 @@
 # Connect to ChatGPT
 
-**Core installation and ChatGPT access are separate.** Complete
-[initial configuration](configuration.md), keep the selected `serve` process
-running, and verify that your account/workspace permits the intended MCP route.
-Do not enable machine writes to solve a connection failure.
+**Core installation and ChatGPT access are separate.** With the [npm installer](npm-macos.md),
+run `openmachine` once and check `openmachine status` for `ready`. For a
+[source installation](installation.md), complete [initial configuration](configuration.md)
+and keep `serve` running. Either way, verify that your account/workspace permits
+the intended MCP route. Do not enable machine writes to solve a connection failure.
 
 ## Select the supported route
 

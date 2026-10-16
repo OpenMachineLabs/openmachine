@@ -4,6 +4,14 @@ An update has three separate identities: the source commit, the installed
 package and the running service. A fourth is the client's approved tool catalog.
 Check each one; a merge to `main` does not update any of the others.
 
+## npm installer on Apple Silicon
+
+`npm install -g openmachine@latest` installs or updates the npm launcher, **not** an
+existing managed Core runtime. `openmachine --version` reports the launcher
+version; `openmachine core --version` reports the bundled Core CLI version, which
+may differ from the running service. Check `openmachine status` and use the
+explicit managed update process below when upgrading an existing Core installation.
+
 ## Choose the version and preserve original work
 
 Read the [release notes](https://github.com/OpenMachineLabs/openmachine/releases)

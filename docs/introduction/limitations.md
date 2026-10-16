@@ -9,9 +9,11 @@ Core is a native runtime, not a chat UI, a hosted cloud service, a general
 knowledge database or a multi-user control plane. These guides do not require
 a companion desktop application. No Windows or managed Linux service is promised.
 
-The release provides source and release notes. Do not assume a PyPI package,
-Homebrew formula, npm installer, signed DMG or attached wheel exists. Follow the
-[exact-tag installation](../getting-started/installation.md).
+The [npm installer](../getting-started/npm-macos.md) is available for Apple Silicon
+macOS 13+ with Node.js 20+. It bundles Core but does not connect ChatGPT or
+configure an MCP tunnel. For other supported platforms, use the
+[source installation](../getting-started/installation.md). Do not assume a
+PyPI package, Homebrew formula, signed DMG or attached wheel exists.
 
 The Core MIT license does not grant access to ChatGPT, Codex, GitHub or a tunnel.
 Client account eligibility, organization policy and individual tool approval
