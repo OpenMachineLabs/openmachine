@@ -12,6 +12,7 @@ const { prepareRuntime, verifyRuntime } = require('../../npm/lib/runtime.cjs');
 const { run, workspacePath, probePath, optionsOf } = require('../../npm/lib/cli.cjs');
 const { verifyReleaseSources } = require('../../npm/scripts/verify-release-sources.cjs');
 
+const VERSION = require('../../npm/package.json').version;
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const temp = () => fsp.mkdtemp(path.join(os.tmpdir(), 'om-npm-test-'));
 
@@ -24,7 +25,7 @@ async function fixturePackage(root, commit = 'c'.repeat(40)) {
   await fsp.writeFile(path.join(runtime, 'bin/git'), '#!git\n', { mode: 0o755 });
   await fsp.symlink('python3', path.join(runtime, 'python/bin/python-link'));
   const manifest = { format: 1, target: { os: 'macos', arch: 'arm64', minimum_os: '13.0' },
-    core: { version: '0.2.21', commit, wheel: 'wheels/openmachine.whl' },
+    core: { version: VERSION, commit, wheel: 'wheels/openmachine.whl' },
     files: {
       python: { directory: true }, 'python/bin': { directory: true },
       'python/bin/python3': { bytes: 9, sha256: sha('#!python\n'), executable: true },
@@ -48,7 +49,7 @@ test('runtime archive is checked, extracted privately and verified on reuse', as
   const pkg = await fixturePackage(root);
   const home = path.join(root, 'home');
   const first = await prepareRuntime(pkg, home);
-  assert.equal(first.manifest.core.version, '0.2.21');
+  assert.equal(first.manifest.core.version, VERSION);
   assert.equal(await fsp.readlink(path.join(first.root, 'python/bin/python-link')), 'python3');
   assert.equal((await prepareRuntime(pkg, home)).root, first.root);
   await fsp.writeFile(path.join(first.root, 'bin/git'), 'tampered');

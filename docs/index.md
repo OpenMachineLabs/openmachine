@@ -8,10 +8,10 @@ and explicitly configured SSH machines. You choose the machines, workspaces and
 permissions. Core carries out tool calls and retains their results; ChatGPT
 remains the controller of the conversation.
 
-These user guides target **v0.2.21**, released on October 15, 2026, at commit
-`6014a3129b989427c7053ff426424963b47e6d4f`. This is an early development release,
+These user guides target **v0.2.22**. The release tag identifies the exact
+source commit. This is an early development release,
 not a stable 1.x compatibility promise. See the
-[release](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.21)
+[release](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.22)
 and [current limitations](introduction/limitations.md). A checkout of `main`, an
 installed runtime and a client's approved tool catalog can be different.
 

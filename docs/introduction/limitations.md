@@ -1,6 +1,6 @@
 # Current limitations
 
-This guide describes released Core **v0.2.21**, not a roadmap. The release tag
+This guide describes Core **v0.2.22**, not a roadmap. The release tag
 and the live runtime's version/commit are the starting points for compatibility.
 
 ## Product and distribution
@@ -44,14 +44,10 @@ guarantee that arbitrary output contains no sensitive data.
 
 ## Release versus main
 
-At the documentation baseline, `main` contains post-v0.2.21 client-call diagnostic
-changes from PR #156. In particular, the server catalog fingerprint and enriched
-invalid-call diagnostic fields must not be required from the v0.2.21 release.
-The supported troubleshooting approach is to compare the actual client schema
-with the actual server catalog and preserve the original error.
-
-PR #158 later adds advisory release notices on `main`; those fields and settings
-are also outside the v0.2.21 baseline. A notice is not an installed update.
+Version 0.2.22 includes client-call diagnostics, catalog fingerprints and advisory
+release notices. Older runtimes may not expose those fields. Compare the actual
+client schema with the running server catalog and preserve the original error.
+A release notice does not install or activate an update.
 
 Always inspect the running version's Skills. A merged change does not update an
 installation or refresh a client's approved tools. See
