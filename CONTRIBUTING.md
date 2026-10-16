@@ -136,16 +136,21 @@ risks, and any rollback considerations. Link a real Issue when applicable.
 For incomplete work, use `Refs #N`; use `Closes #N` only when the complete
 Issue acceptance is met and closure is authorized.
 
-Use concise, English, printable-ASCII commit subjects and PR titles:
+Use concise, English, printable-ASCII commit subjects and PR titles. Commit
+subjects must use this format; it is recommended for PR titles:
 
 ```text
 <domain>(<scope>): <concrete English outcome>
 ```
 
 Use lowercase kebab-case for domain and scope (for example, `docs`, `test`,
-`runtime`, or `security`). Commit subjects are at most **72** characters;
-PR titles at most **100**. Do not add a final period or use vague outcomes
-such as `update`. Issue titles follow their selected Issue template.
+`runtime`, or `security`). Commit subjects are at most **72** characters
+and must not use vague outcomes such as `update`. PR titles are at most
+**100** characters, without surrounding spaces or a final period. CI warns
+rather than fails when a PR title does not follow the recommended format.
+Maintainers may refine PR titles before merging; the final squash commit
+subject must still satisfy the commit rules. Issue titles follow their
+selected Issue template.
 Choose a descriptive branch name; Open Machine-operated tasks use an
 `agent/<domain>-<scope>-<outcome>` branch convention.
 

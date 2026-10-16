@@ -37,7 +37,10 @@ class RepositoryChecks(unittest.TestCase):
     def test_invalid_titles(self):
         cases = [
             ("commit", "[SPEC] docs(repo): describe the rules"),
-            ("pr", "[SURVEY] research(repo): investigate governance"),
+            ("pr", " "),
+            ("pr", " docs(repo): explain the contribution"),
+            ("pr", "docs(repo): explain the contribution."),
+            ("pr", "x" * 101),
             ("issue", "[RESEARCH] research(repo): investigate governance"),
             ("issue", "[Program] Repository foundation"),
             ("issue", "[PROGRAM] Repository foundation"),
@@ -60,6 +63,32 @@ class RepositoryChecks(unittest.TestCase):
         for kind, title in cases:
             with self.subTest(title=title):
                 self.assertTrue(rules.title_errors(title, kind))
+
+    def test_nonconventional_pr_title_warns_without_blocking(self):
+        for title in ("Update README.md", "[SURVEY] research(repo): investigate governance",
+                      "docs(repo): update"):
+            with self.subTest(title=title):
+                obj = {"title": title, "body": "Explain the change, verification, and limitations."}
+                self.assertEqual(rules.metadata_errors(obj, "pr"), [])
+                self.assertIn("presentation: consider domain(scope): concrete English outcome",
+                              rules.metadata_warnings(obj, "pr"))
+        conventional = {"title": "docs(readme): clarify setup instructions",
+                        "body": (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()}
+        self.assertEqual(rules.metadata_warnings(conventional, "pr"), [])
+        self.assertTrue(rules.title_errors("Update README.md", "commit"))
+        self.assertTrue(rules.title_errors("Update README.md", "issue"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            path.write_text(json.dumps({"pull_request": {
+                "title": "Update README.md",
+                "body": "Explain the change, verification, and limitations.",
+            }}))
+            result, output, errors = self.checker([
+                "--mode", "metadata", "--event-name", "pull_request", "--event-path", str(path)])
+            self.assertEqual(result, 0)
+            self.assertIn("PASS: repository checks", output)
+            self.assertIn("WARN: presentation: consider domain(scope):", errors)
 
     def test_language_backstop_does_not_claim_ascii_is_english(self):
         self.assertEqual(rules.english_errors("English prose with a caf\u00e9 name and an em dash\u2014fine."), [])
@@ -204,7 +233,7 @@ class RepositoryChecks(unittest.TestCase):
         for body in (None, "", " \t\r\n ", [], "Embedded \0 control", "\u4e2d\u6587"):
             with self.subTest(body=body):
                 self.assertTrue(rules.metadata_errors({**obj, "body": body}, "pr"))
-        for title in (None, 3, "Invalid title"):
+        for title in (None, 3, "", " invalid", "Invalid title.", "x" * 101):
             with self.subTest(title=title):
                 self.assertTrue(rules.metadata_errors({**obj, "title": title}, "pr"))
         self.assertTrue(rules.metadata_errors([], "pr"))
