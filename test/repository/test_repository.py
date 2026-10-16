@@ -302,7 +302,7 @@ class RepositoryChecks(unittest.TestCase):
     def test_all_workflows_use_github_hosted_ubuntu(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
-                         "documentation.yml": 2,
+                         "documentation.yml": 2, "auto-metadata.yml": 1,
                          "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}
         workflows = {path.name: path.read_text()
