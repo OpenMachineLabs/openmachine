@@ -150,9 +150,10 @@ Choose a descriptive branch name; Open Machine-operated tasks use an
 `agent/<domain>-<scope>-<outcome>` branch convention.
 
 CI checks repository rules, PR metadata, and applicable code or test behavior.
-Fork PRs run on GitHub-hosted runners and do not receive private infrastructure
-credentials. Respond to review findings with focused changes; avoid force-pushing
-or rewriting published history merely to satisfy a commit count.
+All CI jobs run on GitHub-hosted runners, including fork PRs, and do not
+receive private infrastructure credentials. Respond to review findings with
+focused changes; avoid force-pushing or rewriting published history merely
+to satisfy a commit count.
 
 A passing CI result or an opened PR does not guarantee acceptance or authorize a
 merge, release, deployment, or access-setting change. Maintainers decide whether

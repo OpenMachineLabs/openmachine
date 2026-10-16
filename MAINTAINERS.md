@@ -178,14 +178,12 @@ Review remains responsible for English content, meaningful acceptance,
 authorization and the live primary label. Local link checks validate file
 targets, not URL availability or heading anchors.
 
-Quality and metadata CI use a repository-restricted private Linux runner only
-when the repository is private and CORE_CI_RUNNER is configured; otherwise they
-use GitHub-hosted Ubuntu. Public visibility always selects hosted Ubuntu, even
-if CORE_CI_RUNNER remains configured. Revoke the private runner registration
-and access before making Core public. Cross-repository PRs select hosted
-Ubuntu even while Core is private. These jobs retain pinned actions, read-only
-permissions, no credentials supplied to candidate code, and a five-minute
-budget. Its code checks use the same premerge pipeline and exact GitHub event
+All CI jobs use GitHub-hosted Ubuntu 24.04, including fork PRs, pushes,
+documentation builds and default-branch automation. Runner selection is fixed
+in the workflows instead of relying on repository variables or private machines.
+Quality and metadata jobs retain pinned actions, read-only permissions, no
+credentials supplied to candidate code, and a five-minute budget. The quality
+workflow's code checks use the same premerge pipeline and exact GitHub event
 candidate with explicit source mode. PR and Issue metadata checks run only in
 their separate workflow and concurrency identity, including each new PR head; a
 metadata-only edit cannot replace a failed code check with a same-named skipped
@@ -205,12 +203,11 @@ directories. Record measured timings and actual PASS, FAIL, SKIP and NOT RUN
 results. A local pass is not a hosted-CI pass, and neither proves runtime,
 provider, security, performance or production acceptance.
 
-## Public repository readiness
+## Public repository maintenance
 
-Before changing repository visibility, revoke access and registration for the
-private repository runner; public and fork PR checks must use GitHub-hosted
-runners. Enable GitHub private vulnerability reporting for the public repository
-and verify that the private security reporting route is visible. Check branch
+Keep all workflows on GitHub-hosted runners without private infrastructure.
+Enable GitHub private vulnerability reporting for the public repository and
+verify that the private security reporting route is visible. Check branch
 protection, required checks and community links as separate repository settings;
 merging documents alone does not configure them. See [SECURITY.md](SECURITY.md)
 and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

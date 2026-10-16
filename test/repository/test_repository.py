@@ -299,6 +299,20 @@ class RepositoryChecks(unittest.TestCase):
             self.assertNotIn("pull_request_target:", workflow)
             self.assertNotIn(": write", workflow)
 
+    def test_all_workflows_use_github_hosted_ubuntu(self):
+        expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
+                         "spec-development.yml": 1, "labels.yml": 1,
+                         "documentation.yml": 2}
+        workflows = {path.name: path.read_text()
+                     for path in (ROOT / ".github/workflows").glob("*.yml")}
+        self.assertEqual(set(workflows), set(expected_jobs))
+        for name, expected_count in expected_jobs.items():
+            with self.subTest(workflow=name):
+                workflow = workflows[name]
+                self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), expected_count)
+                self.assertNotIn("CORE_CI_RUNNER", workflow)
+                self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
+
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
         obj = {"title": "docs(repo): describe $(false) literally", "body": body + "\n`exit 1`\n"}
