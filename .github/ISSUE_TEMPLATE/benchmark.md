@@ -1,37 +1,20 @@
 ---
 name: "Benchmark"
-about: "Compare frozen candidates under a reproducible protocol."
+about: "Compare candidates under a reproducible protocol."
 title: "[BENCHMARK] eval(scope): describe the comparison"
 labels: "benchmark"
 ---
 
-## Classification
-- Type: Benchmark
-- Status: Draft
-
 ## Why
-Explain the comparison and the decision it will inform.
-
-## Outcome
-Define the reported metrics and comparison before collecting results.
+What decision will this comparison inform?
 
 ## Scope
-- Frozen input snapshot and candidate identities/configurations:
-- Candidate freeze point and scorer/reference revision:
-- Metric definitions, denominators, and environment:
-
-## Project metadata
-- Primary label: benchmark
-- Project: not configured, unless explicitly assigned
+Freeze input data, candidates, scorer, environment, metrics and denominators.
+State resource budget, invalidation conditions and stopping rules.
 
 ## Acceptance
-- [ ] Record reproducible results, failures, and limitations.
-- [ ] Preserve the frozen protocol and all relevant candidate outcomes.
-
-## Dependencies and boundary
-State budget, stop and invalidation conditions, and any blind/unblind rules.
-Changed comparison semantics require a new Benchmark, not rewritten history.
+Record reproducible results, failures and meaningful limitations.
 
 ## Evidence
-Link fixed sources, commands, run references, and actual results. A planned
-comparison is not a completed experiment or product acceptance.
+Link the exact protocol, commands, revisions and measured results. A planned
+comparison is not a completed Benchmark or product acceptance.

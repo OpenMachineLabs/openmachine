@@ -14,41 +14,6 @@ old Spec, or this scaffold is not implementation approval. Read
 the [Spec index](spec/README.md), and any more-specific `AGENTS.md` before
 changing their scope.
 
-## Task model recommendation
-
-For each new substantive task or material scope change, give exactly one startup
-recommendation in the user's language: `Current task "<task>" recommendation:
-GPT-6 Astra + <tier>. Reason: <specific quality/efficiency reason>.` Continue the
-authorized work; do not repeat it for status checks or ordinary progress.
-End substantive tasks with one equivalent next-task recommendation. Prefer the
-user's named next task; otherwise mark the smallest evidence-supported follow-up
-as candidate. When the next task is unknown, say it is not determined and the tier
-will be recommended before starting, rather than inventing a task or omitting it.
-
-Use fixed GPT-6 Astra (`gpt-6-astra`) and exactly one of the user-selected tiers,
-only when confirmed available in the session/menu. Do not guess current tier or
-availability, or repeatedly inspect settings/documentation solely for this rule.
-- Extra High (`xhigh`): concentrated, clearly scoped work with direct verification.
-- Max (`max`): tightly coupled reasoning or expensive mistakes where deeper work
-  is likely to reduce rework and improve quality/time.
-- Ultra (`ultra`): explicitly allowed parallel agents with independent subtasks
-  whose benefit exceeds coordination/merge overhead. Length alone is insufficient.
-
-The user switches manually; recommendations change no settings, pause no approved
-work and authorize no agents. Choose for uncertainty/consequences/rework, not
-lowest cost or highest tier by default. Before delivery verify a specific reason,
-known next task or explicit uncertainty, one available tier, and both required
-recommendations where applicable. Semantic examples: simple -> Extra High;
-coupled -> Max; authorized independent parallelism -> Ultra. A new task needs a
-new startup recommendation even with the same tier; these checks are not a promise
-that future model responses obey them. Reassess the range only after a later GPT-6
-release is confirmed available and the user approves expanding it.
-
-Basis: [model documentation](https://developers.openai.com/codex/models/) and
-[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra).
-Ultra denotes the Codex subagent mode, not an API reasoning-effort value; this
-policy does not claim these are the only model-supported modes.
-
 ## Write the smallest useful change
 
 - Define the outcome, allowed paths, non-goals, smallest acceptance check, and
@@ -71,9 +36,10 @@ policy does not claim these are the only model-supported modes.
 
 ## English and safety
 
-Write all repository-authored prose, comments, commit messages, Issue and PR
-content, labels, and CI text in English. Keep factual identifiers intact.
-The CI language backstop is not a substitute for an English-language review.
+Use English for repository-owned documentation, code comments, commit messages,
+PR technical descriptions and CI text. Community Bug and Feature Request Issues
+may use other languages; preserve technical identifiers. Automated language checks
+are not a substitute for content review.
 
 Never commit credentials, private infrastructure configuration, personal data,
 raw execution logs, or another organization's internal knowledge. Keep public

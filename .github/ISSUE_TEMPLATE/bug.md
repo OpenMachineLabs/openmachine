@@ -1,37 +1,19 @@
 ---
 name: "Bug"
-about: "Report an observed problem with a minimal reproduction."
-title: "[BUG] runtime(scope): describe the observed problem"
+about: "Report a reproducible problem."
+title: "[BUG] Briefly describe the problem"
 labels: "bug"
 ---
 
-## Classification
-- Type: Bug
-- Status: Draft
+## What happened?
+Describe the actual behavior and what you expected.
 
-## Why
-Describe expected and observed behavior, including the affected revision.
+## Steps to reproduce
+1. Environment and Open Machine version:
+2. Minimal safe steps:
+3. Result:
 
-## Outcome
-State the behavior that would resolve the problem.
-
-## Scope
-- Reproduction steps and relevant environment:
-- Affected behavior:
-- Unrelated work excluded:
-
-## Project metadata
-- Primary label: bug
-- Project: not configured, unless explicitly assigned
-
-## Acceptance
-- [ ] The minimal reproduction behaves as expected.
-- [ ] Relevant regression coverage is included.
-
-## Dependencies and boundary
-State severity, known limitations, and any unsafe operation the fix must avoid.
-
-## Evidence
-Attach redacted errors or synthetic fixtures. Never include secrets or
-private machine configuration. For suspected vulnerabilities, follow [SECURITY.md](../../SECURITY.md) instead;
-never publish exploit details here.
+## Logs or context (optional)
+Include redacted errors or synthetic examples. Never share credentials, private
+machine details or personal information. For vulnerabilities, follow
+[SECURITY.md](../../SECURITY.md) instead of filing a public report.

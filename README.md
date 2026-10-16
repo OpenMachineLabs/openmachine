@@ -18,17 +18,7 @@
 
 <br /><br />
 
-<table aria-label="Open Machine community">
-<tr>
-<td align="center" width="520">
-  <a href="https://discord.gg/TAxEWV7fgZ">
-    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
-    <strong>Join the Open Machine Community</strong>
-  </a><br />
-  <sub>Discord · Q&amp;A · Show and Tell</sub>
-</td>
-</tr>
-</table>
+
 
 </div>
 
@@ -56,7 +46,7 @@ Tasks preserve progress and observe admitted work; they **do not automatically w
 
 **Requirements:** Python 3.12+, Git, and a compatible SQLite version on macOS or Linux. Check the [exact SQLite requirements and platform limits](docs/introduction/requirements.md) with the Python interpreter you will use.
 
-Build from the pinned `v0.2.21` release tag. Before public repository access is enabled, cloning requires repository permission. Use a directory without an existing `openmachine` clone:
+Build from the pinned `v0.2.21` release tag in a directory without an existing `openmachine` clone:
 
 ```bash
 git clone --branch v0.2.21 --depth 1 https://github.com/OpenMachineLabs/openmachine.git

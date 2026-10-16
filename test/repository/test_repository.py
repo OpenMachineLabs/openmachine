@@ -25,6 +25,8 @@ class RepositoryChecks(unittest.TestCase):
             ("issue", "[SPEC] architecture(runtime): define the first behavior"),
             ("issue", "[REQUEST] runtime(workspace): support path exclusions"),
             ("issue", "[BUG] runtime(connection): handle a failed retry"),
+            ("issue", "[BUG] \u6587\u4ef6\u65e0\u6cd5\u6253\u5f00"),
+            ("issue", "[REQUEST] \u652f\u6301\u66f4\u591a\u5de5\u4f5c\u533a"),
             ("issue", "[SURVEY] research(transport): compare current options"),
             ("issue", "[SURVEY] experiment(latency): measure overhead"),
             ("issue", "[BENCHMARK] eval(transport): compare frozen candidates"),
@@ -147,10 +149,7 @@ class RepositoryChecks(unittest.TestCase):
                     self.assertEqual(bool(rules.file_errors(page, root)), text in forbidden)
         for kind in ("pr", "issue"):
             title = "docs(repo): describe the scope"
-            if kind == "issue":
-                body = "\n".join("## " + h for h in rules.ISSUE_HEADINGS) + "\n"
-            else:
-                body = "Describe the scoped change and its checks.\n"
+            body = "Describe the scoped change and its checks.\n"
             self.assertEqual(rules.metadata_errors({"title": title, "body": body}, kind), [])
             for text in forbidden:
                 with self.subTest(kind=kind, field="body", text=text):
@@ -162,26 +161,48 @@ class RepositoryChecks(unittest.TestCase):
                         {"title": title + " " + text, "body": body}, kind
                     ))
 
-    def test_issue_sections_remain_required_and_pr_sections_are_advisory(self):
+    def test_issue_templates_match_scoped_metadata_policy(self):
         templates = list((ROOT / ".github/ISSUE_TEMPLATE").glob("*.md"))
         self.assertEqual(len(templates), 8)
         for path in templates:
-            self.assertEqual(rules.metadata_errors({"title": "governance(repo): propose a scoped task",
-                                                    "body": path.read_text()}, "issue"), [])
+            body = path.read_text()
+            title = next(line.split('"', 2)[1] for line in body.splitlines()
+                         if line.startswith('title: "'))
+            with self.subTest(template=path.name):
+                self.assertEqual(rules.metadata_errors({"title": title, "body": body}, "issue"), [])
+
+        for prefix, headings in rules.FORMAL_ISSUE_HEADINGS.items():
+            template = next(path.read_text() for path in templates
+                            if f'title: "[{prefix}] ' in path.read_text())
+            title = next(line.split('"', 2)[1] for line in template.splitlines()
+                         if line.startswith('title: "'))
+            for heading in headings:
+                trimmed = template.replace(f"## {heading}", f"## Omitted {heading}")
+                with self.subTest(prefix=prefix, heading=heading):
+                    self.assertTrue(rules.metadata_errors({"title": title, "body": trimmed}, "issue"))
+
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
         obj = {"title": "governance(repo): establish a minimal scaffold", "body": body}
         self.assertEqual(rules.metadata_errors(obj, "pr"), [])
         self.assertEqual(rules.metadata_warnings(obj, "pr"), [])
-        compact = {**obj, "body": "Describe the bounded change, its checks, and the remaining limitation."}
-        duplicate = {**obj, "body": body + "\n## Validation\n"}
-        for candidate in (compact, duplicate):
-            self.assertEqual(rules.metadata_errors(candidate, "pr"), [])
-            self.assertTrue(rules.metadata_warnings(candidate, "pr"))
-        legacy = {"title": obj["title"], "body": body + "\n## Classification\n\n## Traceability\n"
-                  "\n## Project metadata\n\n## Review guide\n"}
-        self.assertEqual(rules.metadata_errors(legacy, "pr"), [])
-        self.assertEqual(rules.metadata_warnings(legacy, "pr"), [])
-        self.assertTrue(rules.metadata_errors(compact, "issue"))
+        for candidate in ("A concise change and actual test result.", body + "\n## Testing\n"):
+            self.assertEqual(rules.metadata_errors({**obj, "body": candidate}, "pr"), [])
+            self.assertTrue(rules.metadata_warnings({**obj, "body": candidate}, "pr"))
+        self.assertEqual(rules.metadata_errors(
+            {"title": "governance(repo): propose a scoped task", "body": "Short task."}, "issue"), [])
+
+    def test_community_issues_support_unicode_and_short_reports(self):
+        for title, body in (
+            ("[BUG] \u6587\u4ef6\u65e0\u6cd5\u6253\u5f00", "\u91cd\u73b0\u6b65\u9aa4：\u8fd0\u884c\u540e\u51fa\u73b0\u9519\u8bef\u3002"),
+            ("[REQUEST] \u652f\u6301\u66f4\u591a\u5de5\u4f5c\u533a", "\u5e0c\u671b\u652f\u6301\u989d\u5916\u7684\u5de5\u4f5c\u76ee\u5f55\u3002"),
+            ("[BUG] Connection fails", "Observed an error on startup."),
+        ):
+            with self.subTest(title=title):
+                self.assertEqual(rules.metadata_errors({"title": title, "body": body}, "issue"), [])
+        self.assertTrue(rules.metadata_errors({"title": "[SPEC] architecture(api): add fields",
+                                              "body": "Too short"}, "issue"))
+        self.assertTrue(rules.metadata_errors({"title": "[BUG] Short report",
+                                              "body": "A private URL " + "https://chatgpt.com/" + "c/secret"}, "issue"))
 
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
