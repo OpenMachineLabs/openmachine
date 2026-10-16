@@ -55,8 +55,8 @@ real call before continuing the original work.
 For example, if the server requires `control_task` claim renewal but the client's
 `transition.action` enum lacks `renew`, do not substitute `resume` or create a
 new task. Preserve the original task and wait for a matching approved catalog.
-Post-v0.2.21 catalog fingerprints and enriched diagnostic fields are not required
-from the stable v0.2.21 baseline.
+Catalog fingerprints and enriched diagnostic fields are available in v0.2.22;
+older runtimes such as v0.2.21 may not expose them.
 
 ## A file changed, a patch was partial, or a workspace is busy
 
