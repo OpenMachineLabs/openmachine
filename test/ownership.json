@@ -241,6 +241,8 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
+        "assets/openmachine-banner.png",
+        "assets/openmachine-workflow.png",
         "scripts/check_repository.py",
         "scripts/premerge.py",
         "scripts/run_tests.py"
