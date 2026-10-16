@@ -15,10 +15,10 @@ concurrency:
   group: quality-${{ github.event_name }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'code' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Required checks must report on all PR events, including metadata-only edits.
 jobs:
   repository:
-    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'repository-metadata-edit' || 'repository' }}
-    if: github.event.action != 'edited' || github.event.changes.base
+    name: repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -34,9 +34,7 @@ jobs:
 
   runtime:
     needs: repository
-    # A skipped metadata job has a different name from the required code check.
-    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'runtime-metadata-edit' || 'runtime' }}
-    if: github.event.action != 'edited' || github.event.changes.base
+    name: runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
