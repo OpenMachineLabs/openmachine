@@ -21,8 +21,9 @@ function command(program, args, cwd) {
 }
 
 async function main(args) {
-  if (![2, 3].includes(args.length) || !args.every((s) => path.isAbsolute(s))) {
-    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output [/absolute/release-sources]');
+  if (![2, 3, 4].includes(args.length) || !args.slice(0, 3).every((s) => path.isAbsolute(s)) ||
+      (args.length === 4 && args[3] !== 'v0.2.21')) {
+    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output [/absolute/release-sources [v0.2.21]]');
   }
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     throw new Error('Build the npm payload on Apple Silicon macOS.');
@@ -35,7 +36,9 @@ async function main(args) {
     throw new Error('npm installer version does not match bundled Core version.');
   }
   const head = command('git', ['rev-parse', 'HEAD'], path.join(source, '..'));
-  if (!/^[0-9a-f]{40}$/.test(head) || manifest.core?.commit !== head) {
+  const coreCommit = args.length === 4 ? command('git',
+    ['rev-parse', 'refs/tags/v0.2.21^{commit}'], path.join(source, '..')) : head;
+  if (!/^[0-9a-f]{40}$/.test(coreCommit) || manifest.core?.commit !== coreCommit) {
     throw new Error('Payload source commit differs from checkout HEAD.');
   }
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), 'om-npm-package-'));
@@ -51,7 +54,7 @@ async function main(args) {
       });
     }
     fs.copyFileSync(path.join(source, '..', 'LICENSE'), path.join(stage, 'LICENSE'));
-    const fullRelease = args.length === 3;
+    const fullRelease = args.length >= 3;
     const expectedSources = JSON.parse(await fsp.readFile(path.join(source, 'release-sources.json'), 'utf8'));
     if (fullRelease) {
       if (manifest.git?.version !== '2.53.0' || manifest.git?.build !== 'v2.53.0-3/f49d009' ||
@@ -76,7 +79,7 @@ async function main(args) {
     await fsp.writeFile(path.join(stage, 'runtime.sha256'), digest + '\n');
     await fsp.writeFile(path.join(stage, 'runtime.archive.sha256'), archiveDigest + '\n');
     const prepared = await prepareRuntime(stage, path.join(scratch, 'first-check'));
-    if (prepared.manifest.core.commit !== head) throw new Error('Core identity mismatch.');
+    if (prepared.manifest.core.commit !== coreCommit) throw new Error('Core identity mismatch.');
     await fsp.mkdir(output, { recursive: true });
     const name = 'openmachine-' + npmVersion + '.tgz';
     if (fs.existsSync(path.join(output, name))) throw new Error('Refusing to overwrite an existing npm package.');
@@ -92,11 +95,12 @@ async function main(args) {
     const finalPackage = path.join(unpack, 'package');
     const verified = await prepareRuntime(finalPackage, path.join(scratch, 'final-check'));
     if (fullRelease) await verifyReleaseSources(finalPackage, expectedSources);
-    if (verified.sha256 !== digest || verified.manifest.core.commit !== head) {
+    if (verified.sha256 !== digest || verified.manifest.core.commit !== coreCommit) {
       throw new Error('Final npm package integrity or source identity mismatch.');
     }
     process.stdout.write(JSON.stringify({ package: path.join(output, name),
-      core_version: manifest.core.version, core_commit: head, manifest_sha256: digest,
+      core_version: manifest.core.version, core_commit: coreCommit, packager_commit: head,
+      legacy_core_tag: args.length === 4 ? args[3] : null, manifest_sha256: digest,
       archive_sha256: archiveDigest, source_archives: fullRelease ? expectedSources.archives.length : 0 }, null, 2) + '\n');
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });

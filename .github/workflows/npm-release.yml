@@ -1,0 +1,146 @@
+name: npm-release
+
+# Only a new stable Release may publish automatically; manual runs only build.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Previously published stable Release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout exact released Core tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          path: tagged
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout audited installer for legacy v0.2.21 only
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == 'v0.2.21'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: legacy
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify existing stable Release and choose source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          test "$(uname -m)" = arm64
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" |
+            jq -e --arg tag "$RELEASE_TAG" '.tag_name == $tag and (.draft == false) and (.prerelease == false)' >/dev/null
+          CORE_SHA="$(git -C tagged rev-parse HEAD)"
+          test "$CORE_SHA" = "$(git -C tagged rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          VERSION="$(printf '%s' "$RELEASE_TAG" | cut -c 2-)"
+          grep -Fqx "__version__ = \"$VERSION\"" tagged/openmachine/__init__.py
+          if test -f tagged/npm/package.json; then
+            PACKAGER=tagged
+            npm pkg set "version=$VERSION" --prefix tagged/npm
+            test "$(node -p "require('./tagged/npm/package.json').name")" = openmachine
+            PACKAGE_MODE=tag-exact
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$RELEASE_TAG" = v0.2.21
+            test "$CORE_SHA" = 6014a3129b989427c7053ff426424963b47e6d4f
+            test -f legacy/npm/package.json
+            PACKAGER=legacy
+            PACKAGE_MODE=legacy-wrapper
+            test "$(node -p "require('./legacy/npm/package.json').version")" = "$VERSION"
+          fi
+          echo "CORE_SHA=$CORE_SHA" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "PACKAGER=$PACKAGER" >> "$GITHUB_ENV"
+          echo "PACKAGE_MODE=$PACKAGE_MODE" >> "$GITHUB_ENV"
+      - name: Test installer selected from tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PACKAGER"
+          node --test test/repository/npm_installer.test.cjs
+      - name: Build tagged Core and audited npm package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/builder"
+          "$RUNNER_TEMP/builder/bin/python" -m pip install -r tagged/requirements.lock hatchling==1.27.0
+          mkdir -p "$RUNNER_TEMP/wheels" "$RUNNER_TEMP/dist"
+          "$RUNNER_TEMP/builder/bin/python" -m pip wheel --no-deps --no-build-isolation tagged --wheel-dir "$RUNNER_TEMP/wheels"
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' -print)"
+          test "$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' | wc -l | tr -d ' ')" = 1
+          test -n "$wheel"
+          "$RUNNER_TEMP/builder/bin/python" -m pip install --no-deps "$wheel"
+          "$RUNNER_TEMP/builder/bin/python" tagged/scripts/build_runtime_payload.py \
+            --wheel "$wheel" --requirements "$PWD/tagged/requirements.lock" \
+            --commit "$CORE_SHA" --cache "$RUNNER_TEMP/runtime-inputs" \
+            --output "$RUNNER_TEMP/runtime-macos-arm64"
+          "$RUNNER_TEMP/builder/bin/python" "$PACKAGER/scripts/prepare_npm_release_sources.py" \
+            --cache "$RUNNER_TEMP/source-cache" --runtime "$RUNNER_TEMP/runtime-macos-arm64" \
+            --output "$RUNNER_TEMP/release-sources"
+          if test "$PACKAGE_MODE" = legacy-wrapper; then
+            node "$PACKAGER/npm/scripts/package.cjs" "$RUNNER_TEMP/runtime-macos-arm64" \
+              "$RUNNER_TEMP/dist" "$RUNNER_TEMP/release-sources" "$RELEASE_TAG"
+          else
+            node "$PACKAGER/npm/scripts/package.cjs" "$RUNNER_TEMP/runtime-macos-arm64" \
+              "$RUNNER_TEMP/dist" "$RUNNER_TEMP/release-sources"
+          fi
+          test -f "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz"
+          shasum -a 256 "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz"
+      - name: Attest release tarball
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/dist/openmachine-*.tgz
+      - name: Upload release archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openmachine-npm-release
+          path: ${{ runner.temp }}/dist/openmachine-*.tgz
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish only after future stable Release
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # npmjs trusted publisher: OpenMachineLabs/openmachine / npm-release.yml
+          npm install -g npm@11.5.1
+          npm publish "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz" \
+            --access public --provenance --registry https://registry.npmjs.org/
+      - name: Verify registry artifact
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(shasum -a 1 "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz" | cut -d ' ' -f1)"
+          actual="$(npm view "openmachine@$VERSION" dist.shasum --registry https://registry.npmjs.org/)"
+          test "$expected" = "$actual"
