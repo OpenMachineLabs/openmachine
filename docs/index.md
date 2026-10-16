@@ -1,6 +1,6 @@
 # OpenMachine
 
-**Your machines. Your tools. One conversation.**
+**One MCP. Every machine. Real execution.**
 
 OpenMachine Core is a local-first MCP runtime that lets an authorized ChatGPT
 conversation inspect files, run commands and coordinate work on your computer
