@@ -168,8 +168,11 @@ class RepositoryChecks(unittest.TestCase):
             body = path.read_text()
             title = next(line.split('"', 2)[1] for line in body.splitlines()
                          if line.startswith('title: "'))
+            label = next(line.split('"', 2)[1] for line in body.splitlines()
+                         if line.startswith('labels: "'))
             with self.subTest(template=path.name):
-                self.assertEqual(rules.metadata_errors({"title": title, "body": body}, "issue"), [])
+                self.assertEqual(rules.metadata_errors(
+                    {"title": title, "body": body, "labels": [{"name": label}]}, "issue"), [])
 
         for prefix, headings in rules.FORMAL_ISSUE_HEADINGS.items():
             template = next(path.read_text() for path in templates
@@ -198,11 +201,31 @@ class RepositoryChecks(unittest.TestCase):
             ("[BUG] Connection fails", "Observed an error on startup."),
         ):
             with self.subTest(title=title):
-                self.assertEqual(rules.metadata_errors({"title": title, "body": body}, "issue"), [])
+                label = "bug" if title.startswith("[BUG]") else "feature-request"
+                self.assertEqual(rules.metadata_errors(
+                    {"title": title, "body": body, "labels": [{"name": label}]}, "issue"), [])
         self.assertTrue(rules.metadata_errors({"title": "[SPEC] architecture(api): add fields",
                                               "body": "Too short"}, "issue"))
         self.assertTrue(rules.metadata_errors({"title": "[BUG] Short report",
                                               "body": "A private URL " + "https://chatgpt.com/" + "c/secret"}, "issue"))
+
+    def test_formal_issue_labels_prevent_title_edits_from_bypassing_policy(self):
+        for label in ("spec", "research", "benchmark", "feature"):
+            for title in ("maintenance(repo): describe the change", "[BUG] Short report",
+                          "[REQUEST] A new capability"):
+                for body in ("Short report.", "\u7b80\u77ed\u62a5\u544a"):
+                    with self.subTest(label=label, title=title, body=body):
+                        errors = rules.metadata_errors(
+                            {"title": title, "body": body, "labels": [{"name": label}]}, "issue")
+                        self.assertIn("body needs exactly one 'Why' section", errors)
+                        if title.startswith("["):
+                            self.assertTrue(any("conflicts with" in error for error in errors))
+                        if body != "Short report.":
+                            self.assertIn("use English; CJK text was found", errors)
+
+        feature = {"title": "feature(workspace): add path exclusions", "labels": [{"name": "feature"}],
+                   "body": "## Why\nA concrete need.\n## Outcome\nExpected behavior.\n## Scope\nOne change.\n"}
+        self.assertEqual(rules.metadata_errors(feature, "issue"), [])
 
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
@@ -223,6 +246,7 @@ class RepositoryChecks(unittest.TestCase):
 
     def test_historical_program_events_keep_editability(self):
         issue = {"title": "[Program] Existing roadmap",
+                 "labels": [{"name": "feature"}],
                  "body": (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "event.json"

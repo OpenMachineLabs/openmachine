@@ -21,6 +21,9 @@ FORMAL_ISSUE_HEADINGS = {
     "BENCHMARK": ("Why", "Scope", "Acceptance", "Evidence"),
     "ROADMAP": ("Why", "Outcome", "Scope"),
 }
+FORMAL_ISSUE_LABELS = {
+    "spec": "SPEC", "research": "SURVEY", "benchmark": "BENCHMARK", "feature": "ROADMAP",
+}
 COMMUNITY_ISSUE_PREFIXES = {"BUG", "REQUEST"}
 PR_HEADINGS = ("Why", "Changes", "Testing")
 
@@ -145,16 +148,26 @@ def metadata_errors(obj: dict, kind: str) -> list[str]:
     if any(ord(char) < 32 and char not in "\t\n\r" for char in body):
         errors.append("body must not contain unsupported control characters")
     prefix = ""
+    formal_types = set()
     if kind == "issue" and isinstance(title, str):
         match = re.match(r"^\[(SPEC|SURVEY|BENCHMARK|REQUEST|BUG|ROADMAP)\] ", title)
         if match:
             prefix = match[1]
-    if kind != "issue" or prefix not in COMMUNITY_ISSUE_PREFIXES:
+        if prefix in FORMAL_ISSUE_HEADINGS:
+            formal_types.add(prefix)
+        labels = {label["name"] for label in obj.get("labels", [])}
+        for label, expected in FORMAL_ISSUE_LABELS.items():
+            if label in labels:
+                formal_types.add(expected)
+                if prefix and prefix != expected:
+                    errors.append(f"Issue label '{label}' conflicts with the [{prefix}] title prefix")
+    if kind != "issue" or prefix not in COMMUNITY_ISSUE_PREFIXES or formal_types:
         errors += english_errors(body)
     errors += public_boundary_errors(body)
     if kind == "issue":
         headings = re.findall(r"^## (.+)$", body, flags=re.M)
-        required = FORMAL_ISSUE_HEADINGS.get(prefix, ())
+        required = sorted({heading for formal_type in formal_types
+                           for heading in FORMAL_ISSUE_HEADINGS[formal_type]})
         errors += [f"body needs exactly one '{heading}' section" for heading in required
                    if headings.count(heading) != 1]
     return errors
