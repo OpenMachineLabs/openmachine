@@ -46,7 +46,11 @@ jobs:
             --commit "$(git rev-parse HEAD)" \
             --cache "$RUNNER_TEMP/runtime-inputs" \
             --output "$RUNNER_TEMP/runtime-macos-arm64"
-          node npm/scripts/package.cjs "$RUNNER_TEMP/runtime-macos-arm64" "$PWD/dist"
+          "$RUNNER_TEMP/builder/bin/python" scripts/prepare_npm_release_sources.py \
+            --cache "$RUNNER_TEMP/release-source-cache" \
+            --runtime "$RUNNER_TEMP/runtime-macos-arm64" \
+            --output "$RUNNER_TEMP/release-sources"
+          node npm/scripts/package.cjs "$RUNNER_TEMP/runtime-macos-arm64" "$PWD/dist" "$RUNNER_TEMP/release-sources"
       - name: Attest unpublished npm tarball
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:

@@ -4,10 +4,12 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { prepareRuntime } = require('../lib/runtime.cjs');
+const { verifyReleaseSources } = require('./verify-release-sources.cjs');
 
 (async () => {
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'om-npm-verify-'));
   try {
+    await verifyReleaseSources(path.resolve(__dirname, '..'));
     const { manifest } = await prepareRuntime(path.resolve(__dirname, '..'), scratch);
     process.stdout.write('Verified bundled Open Machine Core ' + manifest.core.version + '\n');
   } finally {

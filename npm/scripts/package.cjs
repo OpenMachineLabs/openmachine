@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { verifyRuntime, prepareRuntime } = require('../lib/runtime.cjs');
+const { verifyReleaseSources } = require('./verify-release-sources.cjs');
 
 function command(program, args, cwd) {
   const run = spawnSync(program, args, { cwd, encoding: 'utf8',
@@ -20,8 +21,8 @@ function command(program, args, cwd) {
 }
 
 async function main(args) {
-  if (args.length !== 2 || !args.every((s) => path.isAbsolute(s))) {
-    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output');
+  if (![2, 3].includes(args.length) || !args.every((s) => path.isAbsolute(s))) {
+    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output [/absolute/release-sources]');
   }
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     throw new Error('Build the npm payload on Apple Silicon macOS.');
@@ -39,12 +40,24 @@ async function main(args) {
     const stage = path.join(scratch, 'package');
     await fsp.mkdir(container);
     await fsp.mkdir(stage);
-    for (const name of ['package.json', 'README.md', 'bin', 'lib', 'scripts/assert-payload.cjs']) {
+    for (const name of ['package.json', 'README.md', 'THIRD_PARTY.md', 'release-sources.json', 'bin', 'lib',
+      'scripts/assert-payload.cjs', 'scripts/verify-release-sources.cjs']) {
       fs.cpSync(path.join(source, name), path.join(stage, name), {
         recursive: true, verbatimSymlinks: true
       });
     }
     fs.copyFileSync(path.join(source, '..', 'LICENSE'), path.join(stage, 'LICENSE'));
+    const fullRelease = args.length === 3;
+    const expectedSources = JSON.parse(await fsp.readFile(path.join(source, 'release-sources.json'), 'utf8'));
+    if (fullRelease) {
+      if (manifest.git?.version !== '2.53.0' || manifest.git?.build !== 'v2.53.0-3/f49d009' ||
+          manifest.python?.build !== '20261003') {
+        throw new Error('Runtime Git/Python source does not match pinned release sources.');
+      }
+      fs.cpSync(path.resolve(args[2]), path.join(stage, 'third_party_sources'),
+        { recursive: true, verbatimSymlinks: true });
+      await verifyReleaseSources(stage, expectedSources);
+    }
     fs.cpSync(payload, path.join(container, 'runtime'), {
       recursive: true, verbatimSymlinks: true
     });
@@ -74,12 +87,13 @@ async function main(args) {
     command('/usr/bin/tar', ['-xzf', path.join(output, name), '-C', unpack], scratch);
     const finalPackage = path.join(unpack, 'package');
     const verified = await prepareRuntime(finalPackage, path.join(scratch, 'final-check'));
+    if (fullRelease) await verifyReleaseSources(finalPackage, expectedSources);
     if (verified.sha256 !== digest || verified.manifest.core.commit !== head) {
       throw new Error('Final npm package integrity or source identity mismatch.');
     }
     process.stdout.write(JSON.stringify({ package: path.join(output, name),
       core_version: manifest.core.version, core_commit: head, manifest_sha256: digest,
-      archive_sha256: archiveDigest }, null, 2) + '\n');
+      archive_sha256: archiveDigest, source_archives: fullRelease ? expectedSources.archives.length : 0 }, null, 2) + '\n');
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }

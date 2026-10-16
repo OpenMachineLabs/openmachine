@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "target": "macos-arm64",
+  "git_commit": "67ad42147a7acc2af6074753ebd03d904476118f",
+  "dugite_commit": "f49d0098409aa243de8b9162127025ab0bb07a88",
+  "git_lfs_version": "v3.7.1",
+  "gcm_version": "v2.7.3",
+  "python_build": "20261003",
+  "archives": [
+    {
+      "filename": "git-2.53.0.tar.xz",
+      "url": "https://www.kernel.org/pub/software/scm/git/git-2.53.0.tar.xz",
+      "sha256": "5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653",
+      "version": "v2.53.0",
+      "source_commit": "67ad42147a7acc2af6074753ebd03d904476118f",
+      "license": "GPL-2.0-only",
+      "required": [
+        "git-2.53.0/COPYING",
+        "git-2.53.0/Makefile"
+      ]
+    },
+    {
+      "filename": "dugite-native-f49d009.tar.gz",
+      "url": "https://codeload.github.com/desktop/dugite-native/tar.gz/f49d0098409aa243de8b9162127025ab0bb07a88",
+      "sha256": "7d9567471448150f0430365e47edb0c8e57ec3fc8cf65c1e3df1776c9d709446",
+      "version": "v2.53.0-3",
+      "source_commit": "f49d0098409aa243de8b9162127025ab0bb07a88",
+      "license": "GPL-2.0-only",
+      "required": [
+        "dugite-native-f49d0098409aa243de8b9162127025ab0bb07a88/script/build-macos.sh",
+        "dugite-native-f49d0098409aa243de8b9162127025ab0bb07a88/dependencies.json",
+        "dugite-native-f49d0098409aa243de8b9162127025ab0bb07a88/LICENSE.md"
+      ]
+    },
+    {
+      "filename": "git-lfs-v3.7.1.tar.gz",
+      "url": "https://codeload.github.com/git-lfs/git-lfs/tar.gz/refs/tags/v3.7.1",
+      "sha256": "0e83566a9e2477e03627e7fd6bf81f01fadbf93dcaf6abd2686fca90f6bac7dd",
+      "version": "v3.7.1",
+      "source_commit": "tag:v3.7.1",
+      "license": "MIT",
+      "required": [
+        "git-lfs-3.7.1/LICENSE.md"
+      ]
+    },
+    {
+      "filename": "gcm-v2.7.3.tar.gz",
+      "url": "https://codeload.github.com/git-ecosystem/git-credential-manager/tar.gz/5fa7116896c82164996a609accd1c5ad90fe730a",
+      "sha256": "0ee49f74b0db873e47a499523ab893a72277e1330847c17db3069988419a3147",
+      "version": "v2.7.3",
+      "source_commit": "5fa7116896c82164996a609accd1c5ad90fe730a",
+      "license": "MIT",
+      "required": [
+        "git-credential-manager-5fa7116896c82164996a609accd1c5ad90fe730a/LICENSE"
+      ]
+    },
+    {
+      "filename": "python-build-standalone-20261003.tar.gz",
+      "url": "https://codeload.github.com/astral-sh/python-build-standalone/tar.gz/5e46737f6480fc315ebfea83866910cbfcc772f0",
+      "sha256": "2c4bc5e43a0276046f080f40f0bd9586b10f2a6aa1714c592557f57ef0821e0c",
+      "version": "20261003",
+      "source_commit": "5e46737f6480fc315ebfea83866910cbfcc772f0",
+      "license": "see upstream source",
+      "required": []
+    }
+  ]
+}

@@ -10,6 +10,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { prepareRuntime, verifyRuntime } = require('../../npm/lib/runtime.cjs');
 const { run, workspacePath, probePath, optionsOf } = require('../../npm/lib/cli.cjs');
+const { verifyReleaseSources } = require('../../npm/scripts/verify-release-sources.cjs');
 
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const temp = () => fsp.mkdtemp(path.join(os.tmpdir(), 'om-npm-test-'));
@@ -164,4 +165,43 @@ test('non-interactive setup refuses missing workspace or blocked existing runtim
     manager: async () => { checks++; return { status: 'blocked' }; }
   }), /needs review/);
   assert.equal(checks, 1);
+});
+
+
+test('release source archives are mandatory, immutable and unlinked', async (t) => {
+  const root = await temp();
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'third_party_sources');
+  await fsp.mkdir(dir);
+  const archives = Array.from({ length: 5 }, (_, i) => ({
+    filename: 'source-' + i + '.tar.gz',
+    sha256: sha('source-payload-' + i),
+    url: 'https://example.invalid/source'
+  }));
+  const pins = { format: 1, target: 'macos-arm64', git_commit: 'a'.repeat(40),
+    dugite_commit: 'b'.repeat(40), archives };
+  await fsp.writeFile(path.join(root, 'release-sources.json'), JSON.stringify(pins));
+  for (let i = 0; i < 5; i++) {
+    await fsp.writeFile(path.join(dir, archives[i].filename), 'source-payload-' + i);
+  }
+  assert.equal((await verifyReleaseSources(root, pins)).count, 5);
+  await fsp.appendFile(path.join(dir, archives[0].filename), 'tampered');
+  await assert.rejects(verifyReleaseSources(root, pins), /hash or permissions mismatch/);
+  await fsp.writeFile(path.join(dir, archives[0].filename), 'source-payload-0');
+  await fsp.writeFile(path.join(dir, 'unexpected.txt'), 'bad');
+  await assert.rejects(verifyReleaseSources(root, pins), /unexpected/);
+  await fsp.rm(path.join(dir, 'unexpected.txt'));
+  await fsp.rm(path.join(dir, archives[0].filename));
+  await fsp.symlink('/etc/passwd', path.join(dir, archives[0].filename));
+  await assert.rejects(verifyReleaseSources(root, pins), /hash or permissions mismatch/);
+  await fsp.rm(path.join(dir, archives[0].filename));
+  await assert.rejects(verifyReleaseSources(root, pins), /Missing or unexpected/);
+});
+
+test('release validation fails without attached corresponding sources', async (t) => {
+  const root = await temp();
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(root, 'release-sources.json'),
+    await fsp.readFile(path.resolve('npm/release-sources.json')));
+  await assert.rejects(verifyReleaseSources(root), /ENOENT/);
 });

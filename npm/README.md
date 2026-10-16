@@ -34,12 +34,13 @@ trusted Core wheel from a pinned commit and assemble the offline payload using
 'scripts/build_runtime_payload.py' as documented in
 'openmachine/skills/service/runtime-payload.md'. From the repository root:
 
-    node npm/scripts/package.cjs /absolute/runtime-macos-arm64 /absolute/output
+    python3 scripts/prepare_npm_release_sources.py --cache /absolute/cache --runtime /absolute/runtime-macos-arm64 --output /absolute/sources
+    node npm/scripts/package.cjs /absolute/runtime-macos-arm64 /absolute/output /absolute/sources
 
 The producer copies exact source wrapper files and packs the runtime as a
 single 'runtime.tar.gz' to preserve Python/Git symlinks and file modes. It pins
 both archive and manifest digests, runs the same verification as first launch,
-then verifies the final npm tarball. The tarball is the input for a separately authorized npm publish.
+then verifies the final npm tarball. The release form also embeds the five SHA256-pinned source/build archives from release-sources.json and THIRD_PARTY.md. Omitting the third packaging argument is development-only: prepublishOnly refuses a source-less package. The verified tarball is the input for a separately authorized npm publish.
 
 ## Release verification and publication boundary
 
@@ -53,10 +54,10 @@ the tarball. After downloading the artifact, verify its digest and identity:
 Build provenance is not Apple Developer signing/notarization or a substitute
 for a trusted registry publication. Do not release until a maintainer has:
 
-- Verified the complete corresponding source or a legally valid alternative
-  for bundled GPLv2 Git (including actual build inputs and changes), and
-  redistribution permissions and notices for Python, Git Credential Manager,
-  and bundled Python dependencies.
+- Checked the accompanying GPLv2 Git source, corresponding pinned dugite-native
+  build scripts, the Git-LFS/GCM/Python build sources, and all license notices
+  described in THIRD_PARTY.md; independently completed any remaining native
+  component and Python dependency redistribution obligations.
 - Verified actual first-run installation in a separate, clean Apple Silicon
   macOS GUI login account, including ready, start/stop, and commands/writes
   remaining disabled by default. An alternate HOME inside the same login
