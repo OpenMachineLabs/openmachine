@@ -41,6 +41,32 @@ single 'runtime.tar.gz' to preserve Python/Git symlinks and file modes. It pins
 both archive and manifest digests, runs the same verification as first launch,
 then verifies the final npm tarball. The tarball is the input for a separately authorized npm publish.
 
-The release builder still needs provenance, redistribution review and a
-real macOS first-run acceptance test before publication. A checksum copied
-from an untrusted server is not independent signature verification.
+## Release verification and publication boundary
+
+The manual GitHub-hosted macOS ARM64 package job runs only from the protected
+main branch. It attests the exact unpublished openmachine-*.tgz with a
+GitHub Actions OIDC/Sigstore SLSA build provenance statement, then uploads
+the tarball. After downloading the artifact, verify its digest and identity:
+
+    gh attestation verify /absolute/openmachine-0.1.0.tgz --repo OpenMachineLabs/openmachine
+
+Build provenance is not Apple Developer signing/notarization or a substitute
+for a trusted registry publication. Do not release until a maintainer has:
+
+- Verified the complete corresponding source or a legally valid alternative
+  for bundled GPLv2 Git (including actual build inputs and changes), and
+  redistribution permissions and notices for Python, Git Credential Manager,
+  and bundled Python dependencies.
+- Verified actual first-run installation in a separate, clean Apple Silicon
+  macOS GUI login account, including ready, start/stop, and commands/writes
+  remaining disabled by default. An alternate HOME inside the same login
+  session does not satisfy this check.
+- Approved an exact tarball, npm publishing identity, and provenance-bearing
+  first registry upload; verified the resulting registry digest and installed
+  that registry artifact in the same clean-user test environment.
+
+npm trusted publishing requires the package to exist before the trust relationship
+can be created. The first publication needs separately authorized bootstrap
+credentials and an OIDC-capable hosted workflow; configure package-specific
+trusted publishing after that first release. This build workflow **never**
+runs npm publish, uses npm credentials, or changes live Core services.
