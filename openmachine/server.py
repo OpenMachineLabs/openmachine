@@ -1,6 +1,8 @@
 """Explicit local tools and optional GitHub operations on a private MCP service."""
 
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from functools import wraps
 import asyncio
 import hashlib
 import json
@@ -45,6 +47,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
 
     validators: dict[str, Draft202012Validator] = {}
     catalog: dict = {}
+    tool_entry: ContextVar[threading.Event | None] = ContextVar("om_tool_entry", default=None)
 
     async def load_catalog() -> dict:
         if not validators:
@@ -99,14 +102,22 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                    "cancel_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
             return invalid("unexpected_arguments")
+        # The mutable marker crosses the SDK's copied worker-thread context.
+        entered = threading.Event()
+        token = tool_entry.set(entered)
         try:
-            response = await call_next(ctx)
-        except ValidationError:
-            return invalid("handler_validation", handler_entered=True)
-        if (isinstance(response, dict) and response.get("isError") is True
-                and response.get("structuredContent") is None):
-            return invalid("handler_error", handler_entered=True)
-        return response
+            try:
+                response = await call_next(ctx)
+            except ValidationError:
+                return invalid("handler_validation" if entered.is_set() else "sdk_validation",
+                               handler_entered=entered.is_set())
+            if (isinstance(response, dict) and response.get("isError") is True
+                    and response.get("structuredContent") is None):
+                return invalid("handler_error" if entered.is_set() else "sdk_validation",
+                               handler_entered=entered.is_set())
+            return response
+        finally:
+            tool_entry.reset(token)
 
     mcp = MCPServer(
         "Open Machine", instructions="Read inspect_skills(action='read') for the operating overview. "
@@ -117,7 +128,21 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     def guided_tool(*, annotations):
         def register(operation):
             operation.__doc__ = skills.describe_tool(operation.__name__, operation.__doc__ or "")
-            return mcp.tool(annotations=annotations, structured_output=False)(operation)
+            def mark_entry():
+                if (entered := tool_entry.get()) is not None:
+                    entered.set()
+
+            if asyncio.iscoroutinefunction(operation):
+                @wraps(operation)
+                async def handler(*args, **kwargs):
+                    mark_entry()
+                    return await operation(*args, **kwargs)
+            else:
+                @wraps(operation)
+                def handler(*args, **kwargs):
+                    mark_entry()
+                    return operation(*args, **kwargs)
+            return mcp.tool(annotations=annotations, structured_output=False)(handler)
         return register
 
     private_directory(state)

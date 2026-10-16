@@ -1,5 +1,6 @@
 """contract mcp server test_transport behavior."""
 
+import asyncio
 import json
 import unittest
 import uuid
@@ -114,6 +115,11 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 digest = caps["structuredContent"]["mcp_catalog"]["sha256"]
                 cases = (({"name": "private-sentinel"}, "unknown_tool"),
                     ({"name": "read_task", "arguments": {"task_id": "not-created", "limit": "private-sentinel"}}, "invalid_arguments"),
+                    ({"name": "read_workspace_file", "arguments": {"machine": "desktop", "workspace_name": "example",
+                        "path": "AGENTS.md", "line_count": 1.0}}, "sdk_validation"),
+                    ({"name": "control_task", "arguments": {"task_id": "not-created", "expected_revision": 1.0,
+                        "expected_plan_revision": 1, "expected_epoch": 0, "update_id": "a" * 32,
+                        "transition": {"action": "claim", "handoff_id": "b" * 32}}}, "sdk_validation"),
                     ({"name": "read_task", "arguments": {"task_id": "not-created", "preparation_id": "a" * 32}}, "unexpected_arguments"))
                 for params, reason in cases:
                     response = await self.wire_call(client, "tools/call", params)
@@ -149,3 +155,59 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(diagnostic["current_call_dispatch"], "unknown")
                 self.assertEqual(marker.read_text(), str(count))
                 self.assertNotIn("private-handler-sentinel", response.text)
+
+    async def test_handler_validation_errors_remain_unknown_for_sync_and_async_tools(self):
+        marker = self.root / "validation-count"
+        self.launch(bootstrap=("from pathlib import Path\nfrom pydantic import TypeAdapter\n"
+            "from openmachine.app import Application\n"
+            "def fail_after_effect(self, *args, **kwargs):\n"
+            f"    marker = Path({str(marker)!r})\n"
+            "    marker.write_text(str(int(marker.read_text()) + 1) if marker.exists() else '1')\n"
+            "    TypeAdapter(int).validate_python('private-validation-sentinel')\n"
+            "Application.get_capabilities = Application.read_task = fail_after_effect\n"))
+        count = 0
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                for name, arguments in (("get_capabilities", {}), ("read_task", {"task_id": "fixture"})):
+                    response = await self.wire_call(client, "tools/call", {"name": name, "arguments": arguments})
+                    result = response.json()["result"]
+                    self.assert_wire_tool_result(result, version)
+                    self.assertTrue(result["isError"])
+                    diagnostic = result["structuredContent"]["diagnostic"]
+                    self.assertEqual(diagnostic["phase"], "handler")
+                    self.assertEqual(diagnostic["current_call_dispatch"], "unknown")
+                    count += 1
+                    self.assertEqual(marker.read_text(), str(count))
+                    self.assertNotIn("private-validation-sentinel", response.text)
+
+    async def test_handler_entry_is_isolated_from_concurrent_rejected_calls(self):
+        ready, release = self.root / "handler-ready", self.root / "handler-release"
+        self.launch(bootstrap=("from pathlib import Path\nimport time\nfrom openmachine.app import Application\n"
+            "def blocked_handler(self, *args, **kwargs):\n"
+            f"    Path({str(ready)!r}).touch()\n"
+            "    deadline = time.monotonic() + 5\n"
+            f"    while not Path({str(release)!r}).exists() and time.monotonic() < deadline:\n"
+            "        time.sleep(0.01)\n"
+            "    raise ValueError('private-concurrent-sentinel')\n"
+            "Application.read_task = blocked_handler\n"))
+        async with self.wire_client("2026-07-28") as active, self.wire_client("2025-11-25") as rejected:
+            pending = asyncio.create_task(self.wire_call(active, "tools/call", {
+                "name": "read_task", "arguments": {"task_id": "fixture"}}))
+            try:
+                async def await_entry():
+                    while not ready.exists():
+                        await asyncio.sleep(0.01)
+                await asyncio.wait_for(await_entry(), 3)
+                response = await self.wire_call(rejected, "tools/call", {
+                    "name": "read_task", "arguments": {"task_id": "fixture", "limit": 1.0}})
+                diagnostic = response.json()["result"]["structuredContent"]["diagnostic"]
+                self.assertEqual(diagnostic["reason"], "sdk_validation")
+                self.assertEqual(diagnostic["phase"], "validation")
+                self.assertEqual(diagnostic["current_call_dispatch"], "not_attempted")
+            finally:
+                release.touch()
+                completed = await asyncio.wait_for(pending, 3)
+            diagnostic = completed.json()["result"]["structuredContent"]["diagnostic"]
+            self.assertEqual(diagnostic["phase"], "handler")
+            self.assertEqual(diagnostic["current_call_dispatch"], "unknown")
+            self.assertNotIn("private-concurrent-sentinel", completed.text)
