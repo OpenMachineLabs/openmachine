@@ -237,7 +237,7 @@ async function run(argv, overrides = {}) {
   const action = command === 'doctor' ? 'status' : command;
   const result = await manager(runtime, config, state, action);
   output.write(JSON.stringify(result, null, 2) + '\n');
-  if (command === 'doctor' && result.status !== 'ready') {
+  if ((command === 'start' || command === 'doctor') && result.status !== 'ready') {
     throw new Error('Core is not ready: ' + result.status);
   }
   return result;

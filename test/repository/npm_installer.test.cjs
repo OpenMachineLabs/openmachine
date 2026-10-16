@@ -127,6 +127,31 @@ test('first setup uses Core management without granting commands or writes', asy
   assert.equal(calls.length, before + 2);
 });
 
+for (const [command, status, exitCode] of [
+  ['start', 'ready', 0],
+  ['start', 'unready', 1],
+  ['doctor', 'unready', 1],
+  ['status', 'unready', 0]
+]) {
+  test(`CLI ${command} with ${status} preserves diagnostics and exits ${exitCode}`, () => {
+    const result = spawnSync(process.execPath, ['-e', `
+      const cli = require(${JSON.stringify(require.resolve('../../npm/lib/cli.cjs'))});
+      const run = cli.run;
+      cli.run = (args) => run(args, {
+        platform: 'darwin', arch: 'arm64',
+        verify: async () => ({}),
+        manager: async () => ({ status: ${JSON.stringify(status)} })
+      });
+      process.argv = [process.execPath, 'openmachine', ${JSON.stringify(command)}];
+      require(${JSON.stringify(require.resolve('../../npm/bin/openmachine.cjs'))});
+    `], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, exitCode, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { status });
+    assert.equal(result.stderr,
+      exitCode ? `openmachine: Core is not ready: ${status}\n` : '');
+  });
+}
+
 test('npm pack preserves a bundled runtime archive on Apple Silicon', async (t) => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return t.skip('Requires Apple Silicon');
   const root = await temp();
