@@ -99,6 +99,7 @@ class Settings(BaseModel):
     workspaces: dict[Name, Workspace] = Field(default_factory=dict)
     github: GitHubConfig | None = None
     skills: SkillSources = Field(default_factory=SkillSources)
+    check_for_updates: bool = True
 
     @model_validator(mode="after")
     def configured_machines(self):
@@ -117,6 +118,9 @@ class Settings(BaseModel):
     def configuration_sha256(self) -> str:
         # Null is the inherited legacy grant, not a change to old config identity.
         value = self.model_dump()
+        # An omitted/default advisory preference preserves legacy configuration identity.
+        if value["check_for_updates"]:
+            del value["check_for_updates"]
         for machine in value["machines"].values():
             if machine["workspace_write_enabled"] is None:
                 del machine["workspace_write_enabled"]

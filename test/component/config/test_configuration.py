@@ -33,3 +33,24 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 initialize(path, self.work, commands=not commands, workspace_writes=not writes)
             self.assertEqual(path.read_bytes(), before)
+
+    def test_release_check_preference_preserves_old_default_fingerprint(self):
+        import hashlib
+        import json
+        from openmachine.config import Settings
+        from pydantic import ValidationError
+        original = {"schema_version": 1, "machines": {"local": {"transport": "local"}}}
+        config = Settings.model_validate(original)
+        self.assertIs(config.check_for_updates, True)
+        legacy = config.model_dump(exclude={"check_for_updates"})
+        del legacy["machines"]["local"]["workspace_write_enabled"]
+        expected = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(config.configuration_sha256(), expected)
+        explicit = Settings.model_validate(original | {"check_for_updates": True})
+        self.assertEqual(explicit.configuration_sha256(), expected)
+        disabled = Settings.model_validate(original | {"check_for_updates": False})
+        self.assertIs(disabled.check_for_updates, False)
+        self.assertNotEqual(disabled.configuration_sha256(), expected)
+        for value in (0, 1, "false", None, {}):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                Settings.model_validate(original | {"check_for_updates": value})

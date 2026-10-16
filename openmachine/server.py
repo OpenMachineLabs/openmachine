@@ -25,6 +25,7 @@ import uvicorn
 from openmachine import __version__, service, skills
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
+from openmachine.service.updates import ReleaseUpdates
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 from openmachine.mcp.protocol import READ, _reply, _result, MAX_WAITERS
@@ -38,12 +39,14 @@ from openmachine.mcp.execution import register_execution_tools
 def create_server(config: Settings, state: Path) -> MCPServer:
     application = create_application(config, state)
     waiting = threading.BoundedSemaphore(MAX_WAITERS)
+    updates = ReleaseUpdates(state, config.check_for_updates)
 
     @asynccontextmanager
     async def lifespan(_server):
         # SDK 2.2 enters this once per HTTP manager, not per request/session.
         with application.connections.running(), application.task_observer.running():
-            yield {}
+            async with updates.running():
+                yield {}
 
     validators: dict[str, Draft202012Validator] = {}
     catalog: dict = {}
@@ -157,7 +160,7 @@ def create_server(config: Settings, state: Path) -> MCPServer:
         """Report implemented limits and configured targets, not live health or future features."""
         advertised = await load_catalog()
         return await asyncio.to_thread(_reply, lambda: {
-            **application.get_capabilities(), "mcp_catalog": advertised})
+            **application.get_capabilities(), "mcp_catalog": advertised, "updates": updates.snapshot()})
 
     register_connections(application, guided_tool)
 

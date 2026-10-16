@@ -48,6 +48,9 @@ invalid-call diagnostic fields must not be required from the v0.2.21 release.
 The supported troubleshooting approach is to compare the actual client schema
 with the actual server catalog and preserve the original error.
 
+PR #158 later adds advisory release notices on `main`; those fields and settings
+are also outside the v0.2.21 baseline. A notice is not an installed update.
+
 Always inspect the running version's Skills. A merged change does not update an
 installation or refresh a client's approved tools. See
 [updates](../getting-started/updates.md) and [troubleshooting](../troubleshooting.md).
