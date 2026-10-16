@@ -118,7 +118,7 @@ class GitHub:
         self.owner, self.name = self.repo.split("/", 1)
         self.token = os.environ["GH_TOKEN"]
 
-    def request(self, method, path, payload=None, *, allow_404=False):
+    def request(self, method, path, payload=None):
         data = json.dumps(payload).encode() if payload is not None else None
         request = Request(
             "https://api.github.com/" + path.lstrip("/"),
@@ -132,14 +132,9 @@ class GitHub:
                 "User-Agent": "openmachine-auto-metadata",
             },
         )
-        try:
-            with urlopen(request, timeout=20) as response:
-                raw = response.read()
-                return response.status, json.loads(raw) if raw else None
-        except HTTPError as error:
-            if allow_404 and error.code == 404:
-                return 404, None
-            raise
+        with urlopen(request, timeout=20) as response:
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else None
 
     def get(self, path):
         return self.request("GET", path)[1]
@@ -155,13 +150,6 @@ class GitHub:
         if result.get("errors"):
             raise RuntimeError("GitHub GraphQL rejected metadata lookup: " + str(result["errors"]))
         return result["data"]["repository"]
-
-    def assignable(self, number, login):
-        status, _ = self.request(
-            "GET", f"repos/{self.repo}/issues/{number}/assignees/{login}", allow_404=True
-        )
-        return status == 204
-
 
 def closed_near_merge(closed_at, merged_at):
     if not closed_at or not merged_at:
@@ -201,11 +189,20 @@ def fill_missing(api, issue, label, assignee=None):
         print(f"#{number}: added primary label {label}")
     if issue.get("assignees"):
         return
-    if assignee and api.assignable(number, assignee):
-        api.post(base + "/assignees", {"assignees": [assignee]})
-        print(f"#{number}: assigned {assignee}")
-    elif assignee:
-        print(f"#{number}: {assignee} is not assignable; leaving unassigned")
+    if assignee:
+        try:
+            updated = api.post(base + "/assignees", {"assignees": [assignee]})
+        except HTTPError as error:
+            if error.code not in (404, 422):
+                raise
+            print(f"#{number}: GitHub rejected {assignee}; leaving unassigned")
+            return
+        if assignee.casefold() in {
+            user["login"].casefold() for user in updated["assignees"]
+        }:
+            print(f"#{number}: assigned {assignee}")
+        else:
+            print(f"#{number}: GitHub did not assign {assignee}; leaving unassigned")
 
 
 def pull_paths(api, number):
