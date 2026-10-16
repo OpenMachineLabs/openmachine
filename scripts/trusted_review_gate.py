@@ -12,6 +12,7 @@ REPO = "OpenMachineLabs/openmachine"
 REPO_ID = 1392535998
 MAINTAINERS = {70309026, 191080179}  # LuozhuZhang and bella-chai
 CONTEXT = "om/trusted-review-gate"
+SIGNAL_WORKFLOW_ID = 386447341  # Immutable ID of review-policy-signal
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 TITLE = re.compile(r"Review policy PR #([1-9][0-9]{0,8})\Z")
 
@@ -133,7 +134,7 @@ def event_numbers(event, api):
     if name != "workflow_run":
         raise ValueError("unexpected privileged event")
     run = event.get("workflow_run")
-    if not isinstance(run, dict) or run.get("name") != "review-policy-signal":
+    if not isinstance(run, dict) or run.get("workflow_id") != SIGNAL_WORKFLOW_ID:
         raise ValueError("unknown signal workflow")
     if run.get("event") not in {"pull_request", "pull_request_review"}:
         raise ValueError("unknown signal event")
