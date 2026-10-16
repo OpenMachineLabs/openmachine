@@ -19,7 +19,7 @@ installed runtime and a client's approved tool catalog can be different.
 
 On **Apple Silicon macOS**, [install with npm](getting-started/npm-macos.md) (macOS 13+, Node.js 20+). For **other supported macOS and Linux setups**, [build Core from source](getting-started/installation.md).
 
-For source installations, follow [initial configuration](getting-started/configuration.md). Then [connect to ChatGPT](getting-started/connect-chatgpt.md) and [verify access](getting-started/verification.md). npm installs set up the local service, **not** the MCP tunnel or ChatGPT permissions.
+For source installations, follow [initial configuration](getting-started/configuration.md). Then [connect to ChatGPT](getting-started/connect-chatgpt.md) and [verify access](getting-started/verification.md). The npm launcher sets up the local service on first run, **not** the MCP tunnel or ChatGPT permissions.
 
 ## Explore the capabilities
 
