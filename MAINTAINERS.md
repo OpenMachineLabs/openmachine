@@ -57,7 +57,8 @@ authorize implementation, production changes, expensive runs, or purchases.
 
 ## Git and review
 
-Commit subjects, PR titles, and ordinary Issue titles use printable ASCII:
+Commit subjects and ordinary Issue titles must follow the format below. It is
+recommended, but not required for CI, for PR titles. All titles use printable ASCII:
 
 ```text
 <domain>(<scope>): <concrete English outcome>
@@ -65,10 +66,14 @@ Commit subjects, PR titles, and ordinary Issue titles use printable ASCII:
 
 Use lowercase kebab-case for domain and scope. Choose a meaningful domain such
 as `governance`, `docs`, `ci`, `test`, `architecture`, `runtime`, `security`, or
-`refactor`; `eval` is reserved for Benchmark Issues. Do not use vague outcomes
-such as "update" or append a period. Subjects are at most 72 characters; Issue
-and PR titles are at most 100. The bracketed prefixes above are Issue-only.
-A maintainer-authorized squash uses `<PR title> (#<number>)`, at most 72 characters.
+`refactor`; `eval` is reserved for Benchmark Issues. Commit and Issue titles
+must not use vague outcomes such as "update". PR title formatting mismatches
+produce a warning, not a failed check. All titles must avoid surrounding spaces
+and a final period. Commit subjects are at most 72 characters; Issue and PR
+titles are at most 100. The bracketed prefixes above are Issue-only.
+A maintainer-authorized squash uses a valid conventional subject (normally
+`<PR title> (#<number>)`), at most 72 characters. For a nonconforming PR title,
+set a compliant squash subject before merging.
 
 Use `agent/<domain>-<scope>-<outcome>` for a task branch. Keep related changes
 reviewable and atomic; do not rewrite published history to meet a commit count.
@@ -160,8 +165,8 @@ python3 scripts/check_repository.py --mode metadata --event-name pull_request --
 The JSON file contains `{"pull_request": {"title": "...", "body": "..."}}`, with
 the actual draft strings. Both explicit event arguments are required together;
 `issues` uses an `issue` object. Metadata mode reads only that event data and
-does not run source checks, contact GitHub, or publish anything. PR titles,
-English text and a nonempty valid body remain hard checks; suggested section
+does not run source checks, contact GitHub, or publish anything. Basic PR title hygiene, English/ASCII text and a nonempty valid PR body
+remain hard checks. The recommended PR title format and suggested section
 names produce presentation warnings. A passing body is not proof of meaningful
 acceptance, sufficient review or authorization.
 
