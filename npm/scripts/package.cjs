@@ -30,6 +30,10 @@ async function main(args) {
   const [payload, output] = args.map((s) => path.resolve(s));
   const source = path.resolve(__dirname, '..');
   const manifest = JSON.parse(await fsp.readFile(path.join(payload, 'manifest.json'), 'utf8'));
+  const npmVersion = require('../package.json').version;
+  if (manifest.core?.version !== npmVersion) {
+    throw new Error('npm installer version does not match bundled Core version.');
+  }
   const head = command('git', ['rev-parse', 'HEAD'], path.join(source, '..'));
   if (!/^[0-9a-f]{40}$/.test(head) || manifest.core?.commit !== head) {
     throw new Error('Payload source commit differs from checkout HEAD.');
@@ -74,7 +78,7 @@ async function main(args) {
     const prepared = await prepareRuntime(stage, path.join(scratch, 'first-check'));
     if (prepared.manifest.core.commit !== head) throw new Error('Core identity mismatch.');
     await fsp.mkdir(output, { recursive: true });
-    const name = 'openmachine-' + require('../package.json').version + '.tgz';
+    const name = 'openmachine-' + npmVersion + '.tgz';
     if (fs.existsSync(path.join(output, name))) throw new Error('Refusing to overwrite an existing npm package.');
     const packed = JSON.parse(command('npm', [
       'pack', '--ignore-scripts', '--json', '--pack-destination', output

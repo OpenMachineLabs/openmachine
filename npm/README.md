@@ -1,6 +1,8 @@
 # Open Machine npm installer (macOS Apple Silicon)
 
 This directory is the npm distribution wrapper for the existing Python Core.
+The npm release version equals the bundled Python Core version (initially 0.2.21).
+The release packer and prepublish hook both reject mismatches.
 It is not a rewrite of Core, a generic platform installer or an MCP tunnel.
 
 The **published release tarball** embeds one exact macOS ARM64 offline runtime,
@@ -49,7 +51,7 @@ main branch. It attests the exact unpublished openmachine-*.tgz with a
 GitHub Actions OIDC/Sigstore SLSA build provenance statement, then uploads
 the tarball. After downloading the artifact, verify its digest and identity:
 
-    gh attestation verify /absolute/openmachine-0.1.0.tgz --repo OpenMachineLabs/openmachine
+    gh attestation verify /absolute/openmachine-0.2.21.tgz --repo OpenMachineLabs/openmachine
 
 Build provenance is not Apple Developer signing/notarization or a substitute
 for a trusted registry publication. Do not release until a maintainer has:

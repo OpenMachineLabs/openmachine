@@ -11,6 +11,9 @@ const { verifyReleaseSources } = require('./verify-release-sources.cjs');
   try {
     await verifyReleaseSources(path.resolve(__dirname, '..'));
     const { manifest } = await prepareRuntime(path.resolve(__dirname, '..'), scratch);
+    if (manifest.core?.version !== require('../package.json').version) {
+      throw new Error('npm installer version does not match bundled Core version.');
+    }
     process.stdout.write('Verified bundled Open Machine Core ' + manifest.core.version + '\n');
   } finally {
     await fs.rm(scratch, { recursive: true, force: true });
