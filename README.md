@@ -1,17 +1,67 @@
-# Open Machine
+# OpenMachine
 
-An open-source runtime for an existing Chat to operate your machines. Chat controls
-the work; OM provides explicit workspace, command, task, GitHub and browser tools
-with bounded reads and original operation receipts.
+**Your machines. Your tools. One conversation.**
 
-Version `0.2.21` is an initial-development release. Build from its exact tag;
-current `main` may contain unreleased work. A source checkout does not update an
-installed runtime or a client's tool catalog.
+[![License: MIT](https://img.shields.io/badge/License-MIT-222222)](LICENSE)
+[![Python: 3.12+](https://img.shields.io/badge/Python-3.12%2B-555555)](docs/introduction/requirements.md)
 
-## Get started
+[Documentation](docs/index.md) · [Getting started](docs/getting-started/installation.md) ·
+[Releases](https://github.com/OpenMachineLabs/openmachine/releases) · [Contributing](CONTRIBUTING.md)
 
-Use Python 3.12+ and Git on macOS or Linux. Build with the release's pinned
-requirements, then choose an existing disposable workspace:
+OpenMachine Core is a **local-first MCP runtime that connects an authorized
+ChatGPT conversation to your computer, configured SSH machines and developer tools**.
+
+Choose the machines, project workspaces and permissions. ChatGPT requests an
+operation; Core performs it under your native account and retains the original
+result. You can inspect code, run tests, make guarded edits, work with GitHub and
+continue a saved task without treating a lost response as permission to start over.
+
+## What you can do
+
+| Capability | Use it for |
+| --- | --- |
+| [Local machines and context](docs/features/local-machine.md) | Inspect the selected project, environment and opt-in resources before acting. |
+| [Workspace files and worktrees](docs/features/workspace.md) | Read, search, preview edits and apply source-checked changes in the intended tree. |
+| [Native command execution](docs/features/execution.md) | Run commands, read original results, use interactive terminals and verify cleanup. |
+| [Remote Linux over SSH](docs/features/ssh.md) | Use the same tools on explicitly prepared, identity-pinned remote accounts. |
+| [Persistent tasks](docs/features/tasks.md) | Keep goals, stages and evidence; find the original work and continue explicitly. |
+| [GitHub integration](docs/features/github.md) | Work with scoped repositories, Issues, PRs, comments, reviews, Projects and Releases. |
+| [Browser subtasks](docs/features/browser.md) | Delegate a bounded web task to a compatible, authorized native Codex installation. |
+| [Skills](docs/features/skills.md) | Discover the operating guides packaged with the runtime and your reviewed Skill roots. |
+| [Service and runtime](docs/features/service.md) | Manage a macOS user service, retained updates and compatible rollback. |
+
+Tasks preserve progress and observe admitted work; they **do not automatically
+wake ChatGPT or execute the next stage after a chat disconnects**. Optional
+integrations have their own prerequisites and permissions.
+
+## How it works
+
+```text
+You + ChatGPT
+      |
+      | approved MCP calls / original results
+      v
+Supported connection or separately managed private tunnel
+      |
+      | private Unix socket
+      v
+OpenMachine Core
+      |-- local workspaces and native commands
+      |-- prepared Linux workers over SSH
+      |-- scoped GitHub and native browser integrations
+      `-- persistent tasks and operation evidence
+```
+
+Core is the execution and evidence layer, not a chat UI or a hosted control plane.
+See [architecture](docs/introduction/architecture.md) and
+[current limitations](docs/introduction/limitations.md).
+
+## Installation and quick start
+
+The documented release is **v0.2.21**. Use **Python 3.12+**, Git and a
+[supported SQLite engine](docs/introduction/requirements.md); Python's version
+alone is not enough. Before public repository access is enabled, cloning requires
+repository permission. From a directory without an existing `openmachine` clone:
 
 ```sh
 git clone --branch v0.2.21 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
@@ -20,45 +70,49 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
 .venv/bin/python -m pip install --no-deps dist/openmachine-0.2.21-py3-none-any.whl
-.venv/bin/openmachine init --workspace /absolute/path/to/disposable-project
-.venv/bin/openmachine doctor
-.venv/bin/openmachine serve
+.venv/bin/openmachine --version
 ```
 
-Command execution and typed workspace writes are independently disabled by default.
-`serve` exposes only a private Unix socket; it installs no service or tunnel.
-Read [setup](openmachine/skills/overview/setup.md) for grants, configuration,
-installation boundaries and the official tunnel route. Managed services support
-logged-in macOS controllers; Linux supports manual serving and configured SSH
-workers. Windows and managed Linux services are not included.
+Then follow the [initial configuration tutorial](docs/getting-started/configuration.md)
+to create a disposable, read-only workspace and start the private socket server.
+[Connect to ChatGPT](docs/getting-started/connect-chatgpt.md), verify an actual
+file read, then authorize the [first real command](docs/getting-started/first-task.md).
 
-## Operating guides
+**Installing Core is not ChatGPT enrollment.** A supported connection, account or
+workspace eligibility and client tool approvals are separate requirements. Core
+does not install or start a tunnel. There is no assumed package-registry installer,
+public plugin listing or signed desktop download in this source-install path.
 
-Start with [the short operating Skill](openmachine/skills/overview/SKILL.md) or the
-[Skills directory](openmachine/skills/README.md). The runtime exposes its catalogue
-and direct tool-to-guide routes through `inspect_skills`; detailed guides load only
-when needed.
+## Documentation
 
-- [Workspace](openmachine/skills/workspace/SKILL.md): source, exact edits and worktrees.
-- [Execution](openmachine/skills/execution/SKILL.md): original commands and terminal control.
-- [Tasks](openmachine/skills/tasks/SKILL.md): create, continue, control and verify work.
-- [GitHub](openmachine/skills/github/SKILL.md): native accounts and scoped collaboration.
-- [Browser](openmachine/skills/browser/SKILL.md): explicitly authorized UI subtasks.
-- [Service](openmachine/skills/service/SKILL.md): lifecycle, SSH and offline payloads.
+The [user documentation](docs/index.md) is the entry point for all supported
+capabilities. Start with [requirements](docs/introduction/requirements.md), then
+[installation](docs/getting-started/installation.md) and
+[layer-by-layer verification](docs/getting-started/verification.md).
 
-## Development and trust
+For existing installations, use [updates](docs/getting-started/updates.md),
+[configuration](docs/configuration/reference.md) and
+[troubleshooting](docs/troubleshooting.md). The [CLI](docs/reference/cli.md) and
+[MCP tools](docs/reference/tools.md) references link to detailed operating Skills
+without duplicating their contracts. Source `main`, a release, a running service
+and an approved client catalog are different identities.
 
-Follow [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), the
-[Spec index](spec/README.md) and [test/README.md](test/README.md).
-[Development notes](openmachine/skills/overview/development.md) describe module
-ownership. Current code/tests own implemented behavior; historical Issues retain
-approval and evidence. Source, installed tests, deployment and real-client
-acceptance are distinct.
+## Security
 
-OM is a trusted single-operator native runtime, not an OS sandbox or a multi-tenant
-executor. Commands retain account access beyond reader scopes. Exclusions and
-best-effort redaction are not a secret vault; returned files/logs reach ChatGPT
-through OpenAI. Do not expose the listener to untrusted users or treat a tunnel ID
-as a complete access policy. Installation and native grants require authorization.
+Start read-only and grant only the intended machine and repository access.
+Core checks scopes and original operation evidence, but **it is not an OS sandbox
+or a multi-tenant isolation system**. Native commands use their account's rights.
+Cancellation and software rollback do not undo completed user-work effects.
 
-[MIT license](LICENSE).
+Configuration and task records are local to their owners; data returned through
+MCP can leave the machine for the connected client. Never put secrets in prompts,
+command arguments or committed configuration. Read the
+[security and data guide](docs/configuration/security.md) before enabling changes.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, tests, review and public
+metadata conventions. User guides live in `docs/`; detailed tool contracts live
+in the [packaged Skills](openmachine/skills/README.md).
+
+OpenMachine Core is licensed under the [MIT License](LICENSE).
