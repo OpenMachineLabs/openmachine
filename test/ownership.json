@@ -241,6 +241,7 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
+        ".github/workflows/auto-metadata.yml",
         ".github/workflows/documentation.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-workflow.png",
