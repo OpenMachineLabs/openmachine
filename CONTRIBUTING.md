@@ -155,6 +155,13 @@ receive private infrastructure credentials. Respond to review findings with
 focused changes; avoid force-pushing or rewriting published history merely
 to satisfy a commit count.
 
+External contributions require an APPROVED review from LuozhuZhang or
+bella-chai on the PR's current HEAD commit. Additional pushes require renewed
+approval. Internal PRs opened by either core maintainer from this repository
+do not need a human review, but all PRs must pass the independent CI and
+trusted-review-gate status checks. Reviews from other users cannot satisfy
+this gate.
+
 A passing CI result or an opened PR does not guarantee acceptance or authorize a
 merge, release, deployment, or access-setting change. Maintainers decide whether
 the design, safety boundaries, and verification are sufficient. Internal review,

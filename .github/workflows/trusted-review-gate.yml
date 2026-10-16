@@ -1,0 +1,37 @@
+name: trusted-review-gate
+
+on:
+  workflow_run:
+    workflows: [review-policy-signal]
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      pull_number:
+        description: PR number to re-evaluate
+        required: true
+        type: number
+
+# Only trusted default-branch code runs with status-write permission.
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  publish-maintainer-decision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Check author and current approval using GitHub REST
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/trusted_review_gate.py
