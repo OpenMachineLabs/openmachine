@@ -302,7 +302,9 @@ class RepositoryChecks(unittest.TestCase):
     def test_all_workflows_use_github_hosted_ubuntu(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
-                         "documentation.yml": 2}
+                         "documentation.yml": 2,
+                         "review-policy-signal.yml": 1,
+                         "trusted-review-gate.yml": 1}
         workflows = {path.name: path.read_text()
                      for path in (ROOT / ".github/workflows").glob("*.yml")}
         self.assertEqual(set(workflows), set(expected_jobs))
