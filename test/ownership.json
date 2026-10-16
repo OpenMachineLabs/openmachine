@@ -244,6 +244,8 @@
         ".github/workflows/documentation.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-workflow.png",
+        "docs/assets/favicon.png",
+        "docs/assets/logo.webp",
         "docs/stylesheets/extra.css",
         "mkdocs.yml",
         "requirements-docs.lock",

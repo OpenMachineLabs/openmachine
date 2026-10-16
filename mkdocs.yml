@@ -15,6 +15,8 @@ theme:
   name: material
   language: en
   font: false
+  logo: assets/logo.webp
+  favicon: assets/favicon.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -31,7 +33,6 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.sections
     - navigation.top
     - toc.follow
     - search.highlight
@@ -64,34 +65,35 @@ validation:
     absolute_links: warn
     unrecognized_links: warn
 
+# Keep categories collapsible; only the current page's path opens automatically.
 nav:
   - Overview: index.md
-  - Introduction:
-      - Architecture: introduction/architecture.md
-      - Requirements and platforms: introduction/requirements.md
-      - Current limitations: introduction/limitations.md
   - Getting started:
+      - Requirements: introduction/requirements.md
       - Installation: getting-started/installation.md
       - Initial configuration: getting-started/configuration.md
       - Connect to ChatGPT: getting-started/connect-chatgpt.md
       - First task: getting-started/first-task.md
-      - Verify each layer: getting-started/verification.md
+      - Verification: getting-started/verification.md
       - Updates: getting-started/updates.md
-  - Features:
+  - Core features:
       - Local machine: features/local-machine.md
       - Context and environment: features/context.md
       - Workspace and worktrees: features/workspace.md
       - Command execution: features/execution.md
-      - Remote SSH: features/ssh.md
       - Persistent tasks: features/tasks.md
+      - Service and runtime: features/service.md
+  - Integrations:
+      - Remote SSH: features/ssh.md
       - GitHub: features/github.md
       - Browser: features/browser.md
       - Skills: features/skills.md
-      - Service and runtime: features/service.md
   - Configuration and security:
       - Configuration reference: configuration/reference.md
       - Security and data: configuration/security.md
-  - Troubleshooting: troubleshooting.md
-  - Reference:
+  - Help and reference:
+      - Architecture: introduction/architecture.md
+      - Current limitations: introduction/limitations.md
+      - Troubleshooting: troubleshooting.md
       - CLI: reference/cli.md
       - MCP tools: reference/tools.md

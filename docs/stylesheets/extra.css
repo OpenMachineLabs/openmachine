@@ -52,3 +52,8 @@
 .md-nav__link--active {
   font-weight: 700;
 }
+
+.md-header__button.md-logo img {
+  width: 1.6rem;
+  height: 1.6rem;
+}
