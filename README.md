@@ -4,7 +4,7 @@
 
 ### One MCP. Every machine. Real execution.
 
-**Describe what you want done. Let AI make it happen on your machines.**
+**An open-source runtime that lets your existing AI agent operate your machines.**
 
 <a href="openmachine/skills/overview/SKILL.md"><img src="https://img.shields.io/badge/MCP-Compatible-5C4EE5?style=flat-square" alt="MCP compatible"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
@@ -83,8 +83,9 @@ Open Machine is a trusted, single-operator native runtime, **not an OS sandbox**
 Thanks to everyone who contributes to Open Machine.
 
 <p align="center">
-  <a href="https://github.com/LuozhuZhang"><img src="https://avatars.githubusercontent.com/u/70309026?v=4&amp;s=72" width="64" height="64" alt="LuozhuZhang" title="LuozhuZhang" /></a>
-  <a href="https://github.com/bella-chai"><img src="https://avatars.githubusercontent.com/u/191080179?v=4&amp;s=72" width="64" height="64" alt="bella-chai" title="bella-chai" /></a>
+  <a href="https://github.com/OpenMachineLabs/openmachine/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=OpenMachineLabs/openmachine" alt="Open Machine contributors" />
+  </a>
 </p>
 
 [View GitHub contributors](https://github.com/OpenMachineLabs/openmachine/graphs/contributors) · [Contribute to Open Machine](CONTRIBUTING.md)
