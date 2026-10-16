@@ -43,8 +43,9 @@ class FakeGitHub:
         base, kind = path.rsplit("/", 1)
         if kind == "labels":
             self.objects[base]["labels"].extend({"name": label} for label in payload["labels"])
-        elif kind == "assignees":
+        elif kind == "assignees" and self.can_assign:
             self.objects[base]["assignees"].extend({"login": login} for login in payload["assignees"])
+        return self.objects[base]
 
     def graphql(self, query, number):
         self.lookup_count += 1
@@ -56,10 +57,6 @@ class FakeGitHub:
             "nodes": [{"number": n} for n in self.linked],
             "pageInfo": {"hasNextPage": False},
         }}}
-
-    def assignable(self, number, login):
-        return self.can_assign
-
 
 class ClassificationTests(unittest.TestCase):
     def test_issue_templates_and_explicit_body_classification(self):
@@ -107,11 +104,30 @@ class ClassificationTests(unittest.TestCase):
         metadata.fill_missing(api, item, "documentation")
         self.assertEqual(len(api.writes), 1)
 
-    def test_unassignable_user_is_skipped(self):
+    def test_provider_404_or_422_leaves_assignment_empty(self):
+        from urllib.error import HTTPError
+
+        class Rejected(FakeGitHub):
+            def post(self, path, payload):
+                raise HTTPError(path, self.status, "not assignable", {}, None)
+
+        for status in (404, 422):
+            with self.subTest(status=status):
+                item = issue(12, "runtime(scope): unknown")
+                api = Rejected(assignable=False)
+                api.status = status
+                metadata.fill_missing(api, item, None, "contributor")
+                self.assertEqual(item["assignees"], [])
+
+    def test_provider_rejection_does_not_claim_assignment(self):
         item = issue(12, "runtime(scope): unknown")
         api = FakeGitHub({f"repos/{FakeGitHub.repo}/issues/12": item}, assignable=False)
         metadata.fill_missing(api, item, None, "contributor")
-        self.assertEqual(api.writes, [])
+        self.assertEqual(item["assignees"], [])
+        self.assertEqual(api.writes, [(
+            f"repos/{FakeGitHub.repo}/issues/12/assignees",
+            {"assignees": ["contributor"]},
+        )])
 
 
 class ContributorTests(unittest.TestCase):
