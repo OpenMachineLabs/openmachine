@@ -64,8 +64,10 @@ policy does not claim these are the only model-supported modes.
   broad catches, silent fallbacks, or fabricated success.
 - Test observable behavior and important failure paths, not private structure.
   Reuse fixtures; do not build a second implementation inside tests.
-- Update the affected current documentation. Keep a Spec or Survey body in its
-  Issue instead of copying it into several files.
+- Update documentation where the change belongs. Edit root Markdown files
+  (including `README.md` and `AGENTS.md`) only for essential, enduring
+  guidance, never routine PR details. Prefer the least prose and code that
+  fully solves the problem. Keep Spec and Survey bodies in their Issues.
 
 ## English and safety
 
