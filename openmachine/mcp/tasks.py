@@ -4,14 +4,15 @@ import asyncio
 from functools import partial
 import threading
 from typing import Annotated, Literal
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 from openmachine import tasks
 from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT,
                                       _reply, _result, _submit_owned)
 
 def register_task_tools(application, guided_tool, waiting):
-    @guided_tool(annotations=WRITE)
+    @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                             idempotent_hint=True, open_world_hint=True))
     def create_task(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
                     update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                     title: Annotated[str, Field(min_length=1, max_length=200)],

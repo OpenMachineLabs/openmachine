@@ -1261,7 +1261,7 @@
     },
     "create_task": {
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false

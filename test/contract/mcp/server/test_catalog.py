@@ -60,6 +60,9 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assert_tool_contract(discovered, github=True, ssh=False)
                 tools = {t.name: t for t in discovered.tools}
                 self.assertEqual(set(tools), {"get_capabilities", "inspect_context", "inspect_workspace", "inspect_skills", "start_execution", "create_worktree", "read_execution", "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_read", "github_merge", "github_project", "github_release", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration", "start_codex_task", "read_codex_task"})
+                self.assertFalse(tools["create_task"].annotations.read_only_hint)
+                self.assertFalse(tools["create_task"].annotations.destructive_hint)
+                self.assertTrue(tools["control_task"].annotations.destructive_hint)
                 self.assertFalse(tools["start_execution"].annotations.read_only_hint)
                 self.assertTrue(tools["start_execution"].annotations.destructive_hint)
                 self.assertTrue(tools["inspect_workspace"].annotations.read_only_hint)
@@ -129,5 +132,31 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                 self.assertFalse(result.is_error, result)
                                 self.assertEqual(json.loads(result.content[0].text), result.structured_content)
                                 self.assertIn("disposable", result.structured_content["text"])
+                finally:
+                    self.stop(process)
+
+    async def test_catalog_fingerprint_matches_advertised_tools_without_probing_targets(self):
+        original = self.config.read_text()
+        for github in (False, True):
+            for ssh in (False, True):
+                config = original if github else original.split("[github]")[0]
+                if ssh:
+                    config += ('\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\n'
+                               'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n')
+                self.config.write_text(config)
+                process = self.launch()
+                try:
+                    for mode in ("legacy", "2026-07-28"):
+                        async with Client(self.client(), mode=mode, cache=None) as client:
+                            tools = (await client.list_tools()).tools
+                            descriptors = [tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+                                           for tool in sorted(tools, key=lambda item: item.name)]
+                            raw = (json.dumps(descriptors, sort_keys=True, ensure_ascii=False,
+                                              separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+                            result = await client.call_tool("get_capabilities", {})
+                            self.assertFalse(result.is_error, result)
+                            self.assertEqual(result.structured_content["mcp_catalog"], {
+                                "sha256": hashlib.sha256(raw).hexdigest(), "tool_count": len(tools),
+                                "source": "server_tools_list", "client_match": "not_observed"})
                 finally:
                     self.stop(process)
