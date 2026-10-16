@@ -1,4 +1,6 @@
 schema_version = 1
+# Advisory public-release checks while serving; false disables network checks.
+# check_for_updates = false
 
 [machines.local]
 transport = "local"

@@ -26,7 +26,7 @@ class MCPFixture(object):
         self.work.mkdir()
         (self.work / "AGENTS.md").write_text("Only modify this disposable project.\n")
         self.config = self.root / "config.toml"
-        self.config.write_text('schema_version = 1\n[machines.desktop]\ntransport = "local"\nexecution_enabled = true\n'
+        self.config.write_text('schema_version = 1\ncheck_for_updates = false\n[machines.desktop]\ntransport = "local"\nexecution_enabled = true\n'
                                '[workspaces.example]\nmachine = "desktop"\nroot = ' + json.dumps(str(self.work)) + '\n'
                                '[github]\nrepositories = ["Example/repo"]\nattribution = false\n')
         self.state = self.root / "state"

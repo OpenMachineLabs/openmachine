@@ -87,7 +87,8 @@
         "test/component/service/test_machines.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
-        "test/contract/mcp/ssh/test_discovery.py"
+        "test/contract/mcp/ssh/test_discovery.py",
+        "test/contract/mcp/server/test_updates.py"
       ],
       "sources": [
         "openmachine/config.py"
@@ -281,7 +282,8 @@
         "test/contract/mcp/environment/test_context.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
-        "test/unit/server/test_mcp_reply.py"
+        "test/unit/server/test_mcp_reply.py",
+        "test/contract/mcp/server/test_updates.py"
       ]
     },
     "service_checks": {
@@ -626,6 +628,17 @@
         "test/resilience/workspace/test_mcp_edit_restart.py",
         "test/resilience/workspace/test_mcp_patch_restart.py"
       ]
+    },
+    "service_updates": {
+      "sources": [
+        "openmachine/service/updates.py"
+      ],
+      "tests": [
+        "test/component/service/test_updates.py"
+      ],
+      "boundary_tests": [
+        "test/contract/mcp/server/test_updates.py"
+      ]
     }
   },
   "support": {
@@ -706,7 +719,8 @@
       "test/resilience/tasks/test_mcp_legacy_workflow.py",
       "test/resilience/tasks/test_mcp_restart.py",
       "test/resilience/workspace/test_mcp_edit_restart.py",
-      "test/resilience/workspace/test_mcp_patch_restart.py"
+      "test/resilience/workspace/test_mcp_patch_restart.py",
+      "test/contract/mcp/server/test_updates.py"
     ],
     "test/support/payload_cases.py": [
       "test/component/service/test_install_payload.py",

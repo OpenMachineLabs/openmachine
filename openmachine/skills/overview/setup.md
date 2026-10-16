@@ -9,6 +9,7 @@ On this page:
 - [Connect the official tunnel](#connect-the-official-tunnel)
 - [Skills](#skills)
 - [Platform and acceptance](#platform-and-acceptance)
+- [Release update notices](#release-update-notices)
 - [Client-call diagnostics](#diagnose-client-calls-and-interrupted-work)
 
 ## Install
@@ -156,3 +157,53 @@ Chat or authorize the next operation. See [task continuation](../tasks/continue.
 Do not relabel mutating tools as read-only, expand grants, remove task context or
 use another executor to evade a denial. A Core fix cannot promise that a platform
 will approve every request.
+
+## Release update notices
+
+While serving, Core checks the official public GitHub latest-release endpoint in
+an independent asynchronous worker. `get_capabilities.updates` only reads the
+worker's cached view; it never waits for GitHub or starts an installation. Checks
+are enabled by default, no more than once per 24 hours per state directory while
+its valid cache is retained, including failures and restarts. A future-dated
+attempt after a clock rollback is rechecked and starts a new interval rather than
+waiting for the old date to return. Initial reads may be
+`unchecked`; continue work and let later ordinary capability reads see the result.
+
+Only published, non-prerelease `vMAJOR.MINOR.PATCH` tags participate. Comparison is
+numeric, not lexical; equal versions, locally newer versions and unsupported
+local version strings never suggest downgrading. A development commit with the
+same release version is not independently tracked. Maintainers must publish a
+new versioned Release for a new notice; pushing to main is insufficient.
+
+The notice supplies `status`, current/latest versions, the canonical release URL,
+check/next-check timestamps, `stale` and a bounded failure reason. Unavailable or
+stale metadata is not proof of being current. A private repository, absent public
+release, rate limit, timeout or invalid response cannot block ordinary tools.
+The fixed unauthenticated HTTPS request sends no project data, credentials,
+installed version or machine identifier; GitHub still sees ordinary connection
+metadata such as the source IP. Redirects and environment proxy inheritance are
+disabled. No release prose, download or remote command is interpreted.
+
+To disable checks, place this root setting before any TOML tables and apply the
+configuration through the existing [configuration lifecycle](../service/management.md#exact-updates-and-compatible-rollback):
+
+```toml
+schema_version = 1
+check_for_updates = false
+```
+
+Disabled checking starts no worker and reads/writes no cache. Default/omitted
+settings preserve the legacy configuration fingerprint; older readers cannot
+parse an explicitly added setting. `release-check.json` in the selected private
+state directory is bounded disposable metadata, never Task or update authority.
+Malformed data can be replaced; unsafe or unwritable cache disables checks for
+that service lifetime without modifying original work. Check responses are capped
+at 64 KiB with an eight-second async deadline, separate from normal tool budgets.
+
+The operating guide asks Chat to mention a fresh available release once per
+conversation, not repeatedly interrupt or poll for it. This is advisory data,
+not a guaranteed Chat notification or a compatibility/security verdict. Upgrade
+only with user authorization using the [existing installation-specific procedure](../service/management.md#exact-updates-and-compatible-rollback).
+Keep active work and original receipts protected. Updating Core and refreshing a
+client's stored tool catalog remain separate; this checker performs neither.
+Install a version containing this feature once before expecting future notices.
