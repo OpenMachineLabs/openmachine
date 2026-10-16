@@ -159,11 +159,12 @@ class GatePublicationTests(unittest.TestCase):
         original = gate.os.environ.get("GITHUB_EVENT_NAME")
         try:
             gate.os.environ["GITHUB_EVENT_NAME"] = "workflow_run"
-            event = {"workflow_run": {"name": "review-policy-signal",
+            event = {"workflow_run": {"name": "Review policy PR #123",
+                                      "workflow_id": gate.SIGNAL_WORKFLOW_ID,
                                       "event": "pull_request_review",
                                       "display_title": "Review policy PR #123"}}
             self.assertEqual(gate.event_numbers(event, api), [123])
-            event["workflow_run"]["name"] = "fake"
+            event["workflow_run"]["workflow_id"] = -1
             with self.assertRaises(ValueError):
                 gate.event_numbers(event, api)
         finally:
