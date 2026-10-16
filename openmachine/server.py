@@ -1,6 +1,8 @@
 """Explicit local tools and optional GitHub operations on a private MCP service."""
 
 from contextlib import asynccontextmanager
+import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,29 +44,53 @@ def create_server(config: Settings, state: Path) -> MCPServer:
             yield {}
 
     validators: dict[str, Draft202012Validator] = {}
+    catalog: dict = {}
+
+    async def load_catalog() -> dict:
+        if not validators:
+            tools = await mcp.list_tools()
+            descriptors = [tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+                           for tool in sorted(tools, key=lambda item: item.name)]
+            raw = (json.dumps(descriptors, sort_keys=True, ensure_ascii=False,
+                              separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+            validators.update({tool.name: Draft202012Validator(tool.input_schema) for tool in tools})
+            catalog.update(sha256=hashlib.sha256(raw).hexdigest(), tool_count=len(tools),
+                           source="server_tools_list", client_match="not_observed")
+        return dict(catalog)
 
     async def safe_tool_call(ctx: ServerRequestContext, call_next: CallNext) -> HandlerResult:
         if ctx.method != "tools/call":
             return await call_next(ctx)
-        invalid = _result({"error": {"code": "invalid_tool_call",
-            "message": "Check the tool name and arguments against tools/list; no success was verified."}}, True).model_dump(
-                mode="json", by_alias=True, exclude_none=True, exclude={"result_type"})
-        # Middleware short-circuits bypass the SDK's per-version envelope serializer.
-        if ctx.protocol_version == "2026-07-28":
-            invalid.update(resultType="complete", _meta={
-                "io.modelcontextprotocol/serverInfo": {"name": mcp.name, "version": mcp.version}})
-        # v1 validated JSON schema before Pydantic coercion. Preserve this boundary
-        # using the public catalog, without modifying the SDK handler registry.
-        if not validators:
-            validators.update({tool.name: Draft202012Validator(tool.input_schema)
-                               for tool in await mcp.list_tools()})
+        await load_catalog()
+
+        def invalid(reason: str, *, handler_entered: bool = False) -> dict:
+            # Only pre-handler validation proves this call did not dispatch an effect.
+            message = ("The Core handler did not return a verified result. Read the original "
+                       "task/operation before any retry; execution may have occurred."
+                       if handler_entered else
+                       "Core rejected this call before its handler. Compare the name and inputs "
+                       "with tools/list; refresh the client's stored catalog if it differs.")
+            result = _result({"error": {"code": "invalid_tool_call", "message": message},
+                "diagnostic": {"source": "core.mcp", "reason": reason,
+                    "phase": "handler" if handler_entered else "validation",
+                    "current_call_dispatch": "unknown" if handler_entered else "not_attempted",
+                    "core_version": __version__, "catalog_sha256": catalog["sha256"]}}, True).model_dump(
+                        mode="json", by_alias=True, exclude_none=True, exclude={"result_type"})
+            # Middleware short-circuits bypass the SDK's per-version envelope serializer.
+            if ctx.protocol_version == "2026-07-28":
+                result.update(resultType="complete", _meta={
+                    "io.modelcontextprotocol/serverInfo": {"name": mcp.name, "version": mcp.version}})
+            return result
+
         params = ctx.params
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):
-            return invalid
+            return invalid("invalid_request")
         validator = validators.get(params["name"])
         arguments = params.get("arguments")
-        if validator is None or not validator.is_valid({} if arguments is None else arguments):
-            return invalid
+        if validator is None:
+            return invalid("unknown_tool")
+        if not validator.is_valid({} if arguments is None else arguments):
+            return invalid("invalid_arguments")
         # The new contract forbids extra fields before SDK argument filtering.
         guarded = {"inspect_context", "read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue", "github_release",
@@ -72,14 +98,14 @@ def create_server(config: Settings, state: Path) -> MCPServer:
                    "list_integrations", "connect_integration", "read_integration_login",
                    "cancel_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
-            return invalid
+            return invalid("unexpected_arguments")
         try:
             response = await call_next(ctx)
         except ValidationError:
-            return invalid
+            return invalid("handler_validation", handler_entered=True)
         if (isinstance(response, dict) and response.get("isError") is True
                 and response.get("structuredContent") is None):
-            return invalid
+            return invalid("handler_error", handler_entered=True)
         return response
 
     mcp = MCPServer(
@@ -102,9 +128,11 @@ def create_server(config: Settings, state: Path) -> MCPServer:
     file_write = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=has_ssh)
 
     @guided_tool(annotations=READ)
-    def get_capabilities() -> CallToolResult:
+    async def get_capabilities() -> CallToolResult:
         """Report implemented limits and configured targets, not live health or future features."""
-        return _reply(lambda: application.get_capabilities())
+        advertised = await load_catalog()
+        return await asyncio.to_thread(_reply, lambda: {
+            **application.get_capabilities(), "mcp_catalog": advertised})
 
     register_connections(application, guided_tool)
 

@@ -105,3 +105,47 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     response = await client.post("http://localhost/mcp", json=mutation, headers=headers)
                     self.assertEqual(response.status_code, status, response.text)
         self.assertFalse((self.state / "tasks").exists())
+
+    async def test_invalid_calls_identify_core_validation_without_echoing_inputs(self):
+        self.launch()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                caps = (await self.wire_call(client, "tools/call", {"name": "get_capabilities"})).json()["result"]
+                digest = caps["structuredContent"]["mcp_catalog"]["sha256"]
+                cases = (({"name": "private-sentinel"}, "unknown_tool"),
+                    ({"name": "read_task", "arguments": {"task_id": "not-created", "limit": "private-sentinel"}}, "invalid_arguments"),
+                    ({"name": "read_task", "arguments": {"task_id": "not-created", "preparation_id": "a" * 32}}, "unexpected_arguments"))
+                for params, reason in cases:
+                    response = await self.wire_call(client, "tools/call", params)
+                    result = response.json()["result"]
+                    self.assert_wire_tool_result(result, version)
+                    self.assertTrue(result["isError"])
+                    diagnostic = result["structuredContent"]["diagnostic"]
+                    self.assertEqual(diagnostic["source"], "core.mcp")
+                    self.assertEqual(diagnostic["reason"], reason)
+                    self.assertEqual(diagnostic["phase"], "validation")
+                    self.assertEqual(diagnostic["current_call_dispatch"], "not_attempted")
+                    self.assertEqual(diagnostic["catalog_sha256"], digest)
+                    self.assertNotIn("private-sentinel", response.text)
+        self.assertFalse((self.state / "tasks.db").exists())
+        self.assertFalse((self.state / "executions").exists())
+
+    async def test_unstructured_handler_failure_never_claims_no_dispatch(self):
+        marker = self.root / "handler-count"
+        self.launch(bootstrap=("from pathlib import Path\nfrom openmachine.app import Application\n"
+            "def fail_after_effect(self):\n"
+            f"    marker = Path({str(marker)!r})\n"
+            "    marker.write_text(str(int(marker.read_text()) + 1) if marker.exists() else '1')\n"
+            "    raise ValueError('private-handler-sentinel')\n"
+            "Application.get_capabilities = fail_after_effect\n"))
+        for count, version in enumerate(("2025-11-25", "2026-07-28"), 1):
+            async with self.wire_client(version) as client:
+                response = await self.wire_call(client, "tools/call", {"name": "get_capabilities"})
+                result = response.json()["result"]
+                self.assert_wire_tool_result(result, version)
+                self.assertTrue(result["isError"])
+                diagnostic = result["structuredContent"]["diagnostic"]
+                self.assertEqual(diagnostic["phase"], "handler")
+                self.assertEqual(diagnostic["current_call_dispatch"], "unknown")
+                self.assertEqual(marker.read_text(), str(count))
+                self.assertNotIn("private-handler-sentinel", response.text)

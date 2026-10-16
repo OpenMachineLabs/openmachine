@@ -9,6 +9,7 @@ On this page:
 - [Connect the official tunnel](#connect-the-official-tunnel)
 - [Skills](#skills)
 - [Platform and acceptance](#platform-and-acceptance)
+- [Client-call diagnostics](#diagnose-client-calls-and-interrupted-work)
 
 ## Install
 
@@ -123,3 +124,35 @@ and worktree receipt format 6 are compatibility contracts, not release versions;
 ordinary format-5 and historical receipts remain readable. Inspect installed
 capabilities and actual readers separately. Source merge does not update a live
 installation, and tests do not prove real ChatGPT acceptance.
+
+## Diagnose client calls and interrupted work
+
+After an authorized runtime update, compare the actual client tool definitions
+with this server's `tools/list`. A source checkout, service version or reconnect
+does not prove that a client refreshed its approved catalog. In particular, check
+`control_task` renewal and `read_task` section/cursor inputs before continuation.
+Use the client's supported tool-refresh or rescan flow when those definitions
+differ, then verify a fresh conversation. Core cannot update that client snapshot.
+
+`get_capabilities.mcp_catalog` fingerprints the server's advertised descriptors,
+sorted by name and encoded as sorted compact UTF-8 JSON plus LF. The digest covers
+names, descriptions, schemas and annotations; it is not a client-match or health
+claim. It changes when configuration changes the advertised tools. Discovery
+performs no target probe and does not expose request arguments or credentials.
+
+A Core `invalid_tool_call` includes a safe diagnostic source, reason, phase and
+catalog digest. `current_call_dispatch=not_attempted` applies only to that rejected
+call before its handler, never to an earlier request with the same operation ID.
+A handler failure reports dispatch as unknown: read the original task/execution or
+destination before retrying. Structured domain errors retain their original codes.
+Missing replies alone prove neither no effect nor a platform refusal.
+
+Distinguish catalog mismatch, Core permission denial, task-authority expiry,
+transport failure and an explicit client/platform refusal. Never call all of them
+"blocked by the platform". Preserve the original error and IDs. A bounded wait
+ending is not a command timeout or cancellation; original work may still run.
+Read its original result before continuing. Task receipt observation does not wake
+Chat or authorize the next operation. See [task continuation](../tasks/continue.md).
+Do not relabel mutating tools as read-only, expand grants, remove task context or
+use another executor to evade a denial. A Core fix cannot promise that a platform
+will approve every request.
