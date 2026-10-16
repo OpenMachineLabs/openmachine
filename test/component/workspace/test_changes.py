@@ -478,6 +478,8 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
 
     def test_legacy_omitted_edit_grant_keeps_configuration_fingerprint(self):
         value = self.config.model_dump()
+        # A default advisory update preference is also omitted from legacy identity.
+        self.assertTrue(value.pop("check_for_updates"))
         for target in value["machines"].values():
             target.pop("workspace_write_enabled")
         expected = hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
