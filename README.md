@@ -23,6 +23,8 @@
 
 Watch the 47-second demo of Open Machine in action.
 
+https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
+
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
 [Documentation](https://openmachinelabs.github.io/openmachine/) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
@@ -65,8 +67,6 @@ This is an early-development release, not a stable 1.x release.
 **Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
 
 <div align="center">
-
-<br /><br />
 
 <table aria-label="Open Machine community">
 <tr>
