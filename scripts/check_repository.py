@@ -121,7 +121,10 @@ def issue_for_metadata_event(event: dict) -> dict:
 def metadata_errors(obj: dict, kind: str) -> list[str]:
     if not isinstance(obj, dict):
         return ["metadata must be a JSON object"]
-    errors = title_errors(obj.get("title", ""), kind)
+    title = obj.get("title", "")
+    errors = title_errors(title, kind)
+    if isinstance(title, str):
+        errors += public_boundary_errors(title)
     body = obj.get("body")
     if not isinstance(body, str) or not body.strip():
         return errors + ["body must be nonempty text; substantive acceptance still needs review"]

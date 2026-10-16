@@ -124,9 +124,13 @@ class RepositoryChecks(unittest.TestCase):
                 body = "Describe the scoped change and its checks.\n"
             self.assertEqual(rules.metadata_errors({"title": title, "body": body}, kind), [])
             for text in forbidden:
-                with self.subTest(kind=kind, text=text):
+                with self.subTest(kind=kind, field="body", text=text):
                     self.assertTrue(rules.metadata_errors(
                         {"title": title, "body": body + text}, kind
+                    ))
+                with self.subTest(kind=kind, field="title", text=text):
+                    self.assertTrue(rules.metadata_errors(
+                        {"title": title + " " + text, "body": body}, kind
                     ))
 
     def test_issue_sections_remain_required_and_pr_sections_are_advisory(self):
