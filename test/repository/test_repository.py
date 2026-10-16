@@ -318,9 +318,14 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn("python3 scripts/check_repository.py --mode metadata", metadata)
         self.assertIn("python3 scripts/premerge.py --ci --force", quality)
         self.assertIn("types: [opened, synchronize, edited, reopened, ready_for_review]", metadata)
-        self.assertIn("'repository-metadata-edit' || 'repository'", quality)
-        self.assertIn("'runtime-metadata-edit' || 'runtime'", quality)
-        self.assertEqual(quality.count("if: github.event.action != 'edited' || github.event.changes.base"), 2)
+        # Required contexts must keep their names and run for metadata-only edits,
+        # otherwise branch protection can wait forever for a status not emitted.
+        self.assertIn("types: [opened, synchronize, reopened, edited, ready_for_review]", quality)
+        self.assertIn("  repository:\n    name: repository\n", quality)
+        self.assertIn("  runtime:\n    needs: repository\n    name: runtime\n", quality)
+        self.assertNotIn("\n    if:", quality)
+        self.assertNotIn("-metadata-edit", quality)
+        self.assertNotIn("    name: ${{", quality)
         self.assertIn("github.event.changes.base && 'metadata' || 'code'", quality)
         self.assertIn("group: metadata-", metadata)
         for workflow in (quality, metadata):
