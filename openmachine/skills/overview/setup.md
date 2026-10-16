@@ -164,7 +164,9 @@ While serving, Core checks the official public GitHub latest-release endpoint in
 an independent asynchronous worker. `get_capabilities.updates` only reads the
 worker's cached view; it never waits for GitHub or starts an installation. Checks
 are enabled by default, no more than once per 24 hours per state directory while
-its cache is retained, including failures and restarts. Initial reads may be
+its valid cache is retained, including failures and restarts. A future-dated
+attempt after a clock rollback is rechecked and starts a new interval rather than
+waiting for the old date to return. Initial reads may be
 `unchecked`; continue work and let later ordinary capability reads see the result.
 
 Only published, non-prerelease `vMAJOR.MINOR.PATCH` tags participate. Comparison is

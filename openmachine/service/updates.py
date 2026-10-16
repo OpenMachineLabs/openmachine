@@ -166,9 +166,10 @@ class ReleaseUpdates:
             return
         while True:
             if self._record is not None:
-                remaining = self._record["attempted_at_ms"] + INTERVAL_MS - _now()
-                if remaining > 0:
-                    await asyncio.sleep(min(remaining, INTERVAL_MS) / 1000)
+                age = _now() - self._record["attempted_at_ms"]
+                # A clock rollback must not postpone checks until the old date.
+                if 0 <= age < INTERVAL_MS:
+                    await asyncio.sleep((INTERVAL_MS - age) / 1000)
                     continue
             record = {"format": 1, "attempted_at_ms": _now(), "checked_at_ms": None,
                       "tag": None, "reason": "check_incomplete"}

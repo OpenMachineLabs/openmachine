@@ -228,3 +228,18 @@ class ReleaseUpdateTests(unittest.IsolatedAsyncioTestCase):
                     with patch.object(updates, "_now", return_value=timestamp):
                         self.assertTrue(checker.snapshot()["stale"])
             fetch.assert_not_called()
+
+    async def test_future_attempt_rechecks_once_and_reanchors_restart_interval(self):
+        self.cache(age=-10 * updates.INTERVAL_MS)
+        checker = updates.ReleaseUpdates(self.state, True, "0.2.9")
+        with patch.object(updates, "_latest_tag", new_callable=AsyncMock, return_value="v0.3.0") as fetch:
+            async with checker.running():
+                await self.until(lambda: checker.snapshot()["latest_version"] == "0.3.0")
+                await self.until(lambda: updates._read_cache(self.state)["tag"] == "v0.3.0")
+                notice = checker.snapshot()
+                self.assertFalse(notice["stale"])
+                self.assertLessEqual(notice["next_check_at_ms"], updates._now() + updates.INTERVAL_MS)
+            restarted = updates.ReleaseUpdates(self.state, True, "0.2.9")
+            async with restarted.running():
+                await self.until(lambda: restarted.snapshot()["latest_version"] == "0.3.0")
+            self.assertEqual(fetch.await_count, 1)
