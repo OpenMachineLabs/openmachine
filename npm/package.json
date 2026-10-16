@@ -8,8 +8,12 @@
   "bin": {
     "openmachine": "bin/openmachine.cjs"
   },
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -26,7 +30,11 @@
     "runtime.tar.gz",
     "runtime.sha256",
     "runtime.archive.sha256",
-    "README.md"
+    "README.md",
+    "THIRD_PARTY.md",
+    "release-sources.json",
+    "third_party_sources/",
+    "scripts/verify-release-sources.cjs"
   ],
   "scripts": {
     "test": "node --test ../test/repository/npm_installer.test.cjs",
