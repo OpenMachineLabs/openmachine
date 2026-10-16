@@ -270,7 +270,8 @@
         "npm/THIRD_PARTY.md",
         "npm/release-sources.json",
         "npm/scripts/verify-release-sources.cjs",
-        "scripts/prepare_npm_release_sources.py"
+        "scripts/prepare_npm_release_sources.py",
+        ".github/workflows/npm-release.yml"
       ],
       "tests": [
         "test/repository/test_auto_metadata.py",

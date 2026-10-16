@@ -342,7 +342,7 @@ class RepositoryChecks(unittest.TestCase):
     def test_all_workflows_use_explicit_github_hosted_runners(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
-                         "documentation.yml": 2, "npm-package.yml": 1,
+                         "documentation.yml": 2, "npm-package.yml": 1, "npm-release.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}
         workflows = {path.name: path.read_text()
@@ -351,7 +351,7 @@ class RepositoryChecks(unittest.TestCase):
         for name, expected_count in expected_jobs.items():
             with self.subTest(workflow=name):
                 workflow = workflows[name]
-                runner = "macos-15" if name == "npm-package.yml" else "ubuntu-24.04"
+                runner = "macos-15" if name in {"npm-package.yml", "npm-release.yml"} else "ubuntu-24.04"
                 self.assertEqual(workflow.count("    runs-on: " + runner), expected_count)
                 self.assertNotIn("CORE_CI_RUNNER", workflow)
                 self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
@@ -359,6 +359,11 @@ class RepositoryChecks(unittest.TestCase):
                     self.assertIn("workflow_dispatch:", workflow)
                     self.assertIn("test \"$(uname -m)\" = \"arm64\"", workflow)
                     self.assertNotIn("npm publish", workflow)
+                if name == "npm-release.yml":
+                    self.assertIn("types: [published]", workflow)
+                    self.assertIn("refs/tags/$RELEASE_TAG", workflow)
+                    self.assertIn("if: github.event_name == 'release'", workflow)
+                    self.assertNotIn("secrets.NPM_TOKEN", workflow)
 
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()

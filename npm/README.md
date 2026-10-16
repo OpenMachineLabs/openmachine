@@ -46,8 +46,17 @@ then verifies the final npm tarball. The release form also embeds the five SHA25
 
 ## Release verification and publication boundary
 
-The manual GitHub-hosted macOS ARM64 package job runs only from the protected
-main branch. It attests the exact unpublished openmachine-*.tgz with a
+The manual \`npm-package.yml\` job builds current \`main\` for preview and never
+publishes. The separate \`npm-release.yml\` job builds from an exact published,
+non-prerelease GitHub tag and automatically publishes only for new stable
+\`release.published\` events after npm Trusted Publishing is configured. It
+never publishes from workflow_dispatch. For the historical \`v0.2.21\` Release,
+the tagged Core commit is 6014a3129b989427c7053ff426424963b47e6d4f;
+because that tag predates the npm directory, a manual backfill uses the reviewed
+installer from main while the bundled Core is built strictly from that tag.
+Future tags must contain the installer; no other fallback is permitted.
+
+The preview job runs only from the protected main branch. It attests the exact unpublished openmachine-*.tgz with a
 GitHub Actions OIDC/Sigstore SLSA build provenance statement, then uploads
 the tarball. After downloading the artifact, verify its digest and identity:
 
@@ -60,16 +69,23 @@ for a trusted registry publication. Do not release until a maintainer has:
   build scripts, the Git-LFS/GCM/Python build sources, and all license notices
   described in THIRD_PARTY.md; independently completed any remaining native
   component and Python dependency redistribution obligations.
-- Verified actual first-run installation in a separate, clean Apple Silicon
-  macOS GUI login account, including ready, start/stop, and commands/writes
-  remaining disabled by default. An alternate HOME inside the same login
-  session does not satisfy this check.
+- Tested first-run installation and start/stop with a disposable Apple Silicon
+  macOS user-service state and both grants disabled by default. For the first
+  npm release, the maintainer has explicitly deferred an independent clean-GUI
+  login-account test to the post-publication beta; record that limitation.
+  A redirected HOME inside the same login session is not independent acceptance.
 - Approved an exact tarball, npm publishing identity, and provenance-bearing
   first registry upload; verified the resulting registry digest and installed
   that registry artifact in the same clean-user test environment.
 
-npm trusted publishing requires the package to exist before the trust relationship
-can be created. The first publication needs separately authorized bootstrap
-credentials and an OIDC-capable hosted workflow; configure package-specific
-trusted publishing after that first release. This build workflow **never**
-runs npm publish, uses npm credentials, or changes live Core services.
+The first registry bootstrap uses the already-attested manual Release candidate
+and account-owner 2FA. Once \`openmachine\` exists on npmjs.com, configure its
+Trusted Publisher as GitHub Actions, organization \`OpenMachineLabs\`, repository
+\`openmachine\`, workflow filename \`npm-release.yml\`, with direct publish allowed.
+The workflow uses GitHub-hosted OIDC and npm CLI 11.5.1; no long-lived npm token
+or repository secret is needed. Creating a GitHub Release for a stable tag then
+automatically publishes the matching tagged-Core npm version, with npm provenance.
+The GitHub \`Packages\` sidebar uses a separate registry and requires a scoped
+package; \`openmachine\` remains unscoped on npmjs.org with its GitHub repository
+link already specified in package.json. The manual preview workflow never
+publishes or changes live Core.
