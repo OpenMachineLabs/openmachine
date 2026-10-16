@@ -241,8 +241,12 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
+        ".github/workflows/documentation.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-workflow.png",
+        "docs/stylesheets/extra.css",
+        "mkdocs.yml",
+        "requirements-docs.lock",
         "scripts/check_repository.py",
         "scripts/premerge.py",
         "scripts/run_tests.py"
