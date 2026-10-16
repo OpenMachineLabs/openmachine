@@ -17,21 +17,11 @@
 
 <img src="assets/openmachine-banner.png" width="1200" alt="Open Machine — Your AI. Your machines. Connect any AI to your context, and get things done on your machines." />
 
-<br /><br />
-
-<table aria-label="Open Machine community">
-<tr>
-<td align="center" width="520">
-  <a href="https://discord.gg/TAxEWV7fgZ">
-    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
-    <strong>Join the Open Machine Community</strong>
-  </a><br />
-  <sub>Discord · Q&amp;A · Show and Tell</sub>
-</td>
-</tr>
-</table>
-
 </div>
+
+## See Open Machine in Action
+
+Watch the 47-second demo of Open Machine in action.
 
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
@@ -73,6 +63,24 @@ The npm `openmachine` command manages setup and service status; `openmachine cor
 This is an early-development release, not a stable 1.x release.
 
 **Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
+
+<div align="center">
+
+<br /><br />
+
+<table aria-label="Open Machine community">
+<tr>
+<td align="center" width="520">
+  <a href="https://discord.gg/TAxEWV7fgZ">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
+    <strong>Join the Open Machine Community</strong>
+  </a><br />
+  <sub>Discord · Q&amp;A · Show and Tell</sub>
+</td>
+</tr>
+</table>
+
+</div>
 
 ## How it works
 
