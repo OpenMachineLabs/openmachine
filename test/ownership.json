@@ -249,13 +249,17 @@
         "requirements-docs.lock",
         "scripts/check_repository.py",
         "scripts/premerge.py",
-        "scripts/run_tests.py"
+        "scripts/run_tests.py",
+        ".github/workflows/review-policy-signal.yml",
+        ".github/workflows/trusted-review-gate.yml",
+        "scripts/trusted_review_gate.py"
       ],
       "tests": [
         "test/repository/test_dependencies.py",
         "test/repository/test_premerge.py",
         "test/repository/test_repository.py",
-        "test/repository/test_runner.py"
+        "test/repository/test_runner.py",
+        "test/repository/test_trusted_review_gate.py"
       ]
     },
     "server": {

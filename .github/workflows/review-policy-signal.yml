@@ -1,0 +1,21 @@
+name: review-policy-signal
+run-name: 'Review policy PR #${{ github.event.pull_request.number }}'
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review, converted_to_draft]
+    branches: [main]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+# Untrusted PR branches never receive write tokens here.
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Notify default-branch review gate
+        run: echo "Unprivileged signal; no authorizing result is produced."
