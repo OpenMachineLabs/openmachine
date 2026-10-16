@@ -143,7 +143,7 @@ test('npm pack preserves a bundled runtime archive on Apple Silicon', async (t) 
     ['npm/scripts/package.cjs', payload, output], { encoding: 'utf8', timeout: 120000 });
   assert.equal(packed.status, 0, packed.stdout + packed.stderr);
   const files = await fsp.readdir(output);
-  assert.deepEqual(files, ['openmachine-0.1.0.tgz']);
+  assert.deepEqual(files, ['openmachine-0.2.21.tgz']);
   const listing = spawnSync('/usr/bin/tar',
     ['-tzf', path.join(output, files[0])], { encoding: 'utf8' });
   assert.equal(listing.status, 0);
@@ -204,4 +204,32 @@ test('release validation fails without attached corresponding sources', async (t
   await fsp.writeFile(path.join(root, 'release-sources.json'),
     await fsp.readFile(path.resolve('npm/release-sources.json')));
   await assert.rejects(verifyReleaseSources(root), /ENOENT/);
+});
+
+
+test('npm version matches Core and mismatched payload cannot be released', async (t) => {
+  const metadata = require('../../npm/package.json');
+  const core = fs.readFileSync(path.resolve('openmachine/__init__.py'), 'utf8');
+  const version = core.match(/^__version__ = "([^"]+)"$/m);
+  assert.ok(version, 'Core must declare a release version');
+  assert.equal(metadata.version, version[1]);
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const root = await temp();
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const revision = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  assert.equal(revision.status, 0);
+  const pkg = await fixturePackage(root, revision.stdout.trim());
+  assert.equal(spawnSync('/usr/bin/tar',
+    ['-xzf', path.join(pkg, 'runtime.tar.gz'), '-C', root]).status, 0);
+  const payload = path.join(root, 'runtime');
+  const manifestPath = path.join(payload, 'manifest.json');
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+  manifest.core.version = '0.2.20';
+  await fsp.writeFile(manifestPath, JSON.stringify(manifest));
+  const output = path.join(root, 'dist');
+  const result = spawnSync(process.execPath,
+    ['npm/scripts/package.cjs', payload, output], { encoding: 'utf8', timeout: 120000 });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /installer version does not match bundled Core version/);
+  assert.equal(fs.existsSync(output), false);
 });
