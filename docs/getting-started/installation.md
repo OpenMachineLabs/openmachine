@@ -1,7 +1,9 @@
-# Install OpenMachine Core
+# Install OpenMachine Core from source
 
-This installs the released Python package from an exact Git tag. It does not
-start a service, configure a tunnel, grant write permission or connect ChatGPT.
+On Apple Silicon macOS, the shorter route is the [npm installer](npm-macos.md).
+This guide builds the released Python Core from an exact Git tag on macOS or
+Linux. It does not start a service, configure a tunnel, grant write permission
+or connect ChatGPT.
 Complete the [Python, SQLite and Git checks](../introduction/requirements.md)
 first. The following commands run in a terminal on your controller.
 
@@ -61,4 +63,4 @@ Next, create a disposable workspace in
 
 Release notes and artifacts are listed on the
 [release page](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.21).
-This guide does not assume an installer or package-registry publication.
+This source-build route is independent of the npm installer.

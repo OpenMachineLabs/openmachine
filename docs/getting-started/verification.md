@@ -5,7 +5,7 @@ only its own boundary; a pass in one row does not imply the next row passed.
 
 | Layer | Evidence to collect | What it does not establish |
 | --- | --- | --- |
-| Installed CLI | `openmachine --version` and the selected executable | Running service identity or client access. |
+| Installed CLI | npm: `openmachine --version` (launcher) and `openmachine core --version` (bundled Core); source: `openmachine --version` | Running service identity or client access. |
 | Configuration | `doctor` returns valid configuration and expected local directories | Effective file permissions, network readiness or task-store compatibility. |
 | Core serving | Selected private socket and successful MCP initialization | Tunnel or ChatGPT acceptance. |
 | Managed runtime, when used | `doctor --service` verifies the selected identity and a permitted readiness-file read | ChatGPT or GitHub health. |
@@ -17,7 +17,11 @@ only its own boundary; a pass in one row does not imply the next row passed.
 
 ## Useful read-only commands
 
-Use your selected paths, not another installation's defaults:
+For npm installations on Apple Silicon, use `openmachine status` to check the
+managed service. `openmachine --version` reports the npm launcher version, not
+necessarily the running Core version.
+
+For manual source installations, use your selected paths, not another installation's defaults:
 
 ```sh
 openmachine --version

@@ -7,6 +7,7 @@
 **An open-source runtime that lets your existing AI agent operate your machines.**
 
 <a href="openmachine/skills/overview/SKILL.md"><img src="https://img.shields.io/badge/MCP-Compatible-5C4EE5?style=flat-square" alt="MCP compatible"></a>
+<a href="https://www.npmjs.com/package/openmachine"><img src="https://img.shields.io/npm/v/openmachine?style=flat-square" alt="npm version"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-43A047?style=flat-square" alt="MIT License"></a>
 <a href="https://discord.gg/TAxEWV7fgZ"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&amp;logo=discord&amp;logoColor=white" alt="Join Discord"></a>
@@ -54,25 +55,24 @@ Tasks preserve progress and observe admitted work; they **do not automatically w
 
 ## Quick start
 
-**Requirements:** Python 3.12+, Git, and a compatible SQLite version on macOS or Linux. Check the [exact SQLite requirements and platform limits](docs/introduction/requirements.md) with the Python interpreter you will use.
-
-Build from the pinned `v0.2.21` release tag in a directory without an existing `openmachine` clone:
+**macOS Apple Silicon (macOS 13+, Node.js 20+)**
 
 ```bash
-git clone --branch v0.2.21 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
-cd openmachine
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
-.venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.21-py3-none-any.whl
-.venv/bin/openmachine --version
+npm install -g openmachine@latest
+openmachine
 ```
 
-Next, create a disposable, read-only workspace using [Initial configuration](docs/getting-started/configuration.md), then [Connect to ChatGPT](docs/getting-started/connect-chatgpt.md) and run the [first verified command](docs/getting-started/first-task.md).
+On first run, choose an existing project folder containing a readable file (such as `README.md`). Open Machine sets up Core and starts a managed macOS user service. Check it with `openmachine status`.
 
-OM serves a **private Unix socket**. Installing Core or starting `serve` does not enroll a ChatGPT account, install a tunnel or approve client tools. The supported connection, account/workspace eligibility and client approvals are separate requirements.
+For other macOS and Linux setups, [build Core from source](docs/getting-started/installation.md) (Python 3.12+, compatible SQLite, and Git). Windows is not supported.
 
-Command execution and workspace writes are **disabled by default** and require separate explicit grants. This is an initial-development release, not a stable 1.x release. Linux supports manual serving; Windows is not currently supported.
+To use ChatGPT, [connect it separately](docs/getting-started/connect-chatgpt.md) and [verify the connection](docs/getting-started/verification.md). The npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
+
+The npm `openmachine` command manages setup and service status; `openmachine core ...` runs the underlying Python CLI. See the [npm setup guide](docs/getting-started/npm-macos.md).
+
+This is an early-development release, not a stable 1.x release.
+
+**Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
 
 ## How it works
 

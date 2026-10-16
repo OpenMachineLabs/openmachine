@@ -12,6 +12,9 @@ npm installation lifecycle scripts. npm installation only unpacks the package:
     npm install -g openmachine@latest
     openmachine
 
+For requirements and a quick verification check, see the
+[npm installation guide](https://openmachinelabs.github.io/openmachine/getting-started/npm-macos/).
+
 The first run prompts for an **existing project directory** with a harmless
 readable file such as README.md. It uses Core management contract 1 to configure
 read-only access, install a retained managed runtime, then start the macOS
