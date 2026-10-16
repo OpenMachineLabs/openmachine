@@ -72,6 +72,8 @@ The npm `openmachine` command manages setup and service status; `openmachine cor
 
 This is an early-development release, not a stable 1.x release.
 
+**Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
+
 ## How it works
 
 <p align="center">

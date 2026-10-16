@@ -35,7 +35,7 @@ Core's existing Unix-socket binding is:
 --mcp.server-url=channel=main,url=http://localhost/mcp,unix-socket=/absolute/path/to/state/mcp.sock
 ```
 
-Replace the socket path with the **same state directory used by `serve`**.
+Replace the socket path with the **same state directory used by `serve` or the managed service**.
 This is a server-binding argument, not a complete tunnel installation command.
 Preserve the logical host `localhost` and Host/Origin protection. Core opens no
 TCP port; an arbitrary `localhost:8000` URL is not its endpoint.
@@ -56,7 +56,7 @@ not mean that every future mutating call is approved.
 
 ## Prove one real read
 
-Paste this into the connected conversation:
+For the [source-install demo](configuration.md), paste this into the connected conversation:
 
 ```text
 Use OpenMachine for a read-only connection check. Read its operating Skill and
@@ -65,12 +65,18 @@ machine local, workspace project. Return its text and complete SHA256.
 Do not create tasks, run commands, write files or change any configuration.
 ```
 
-The returned text must be `OpenMachine connection check` followed by a newline,
-from the file created in the previous step. Compare its hash locally:
+For the source-install demo, the returned text must be `OpenMachine connection check`
+followed by a newline. Compare its hash locally:
 
 ```sh
 python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$DEMO/project/README.md"
 ```
+
+For an npm installation, use the same read-only check on machine `local`, workspace
+`project`, but request the **existing file chosen during setup** (replace `README.md`
+in the prompt if needed). Match its actual contents and SHA256 locally, for example
+with `shasum -a 256 /absolute/project/README.md` using your real file path.
+The `$DEMO` path and marker text above apply only to the source-install demo.
 
 A real tool response with matching bytes/hash establishes this read path.
 Discovery, a healthy tunnel or a local diagnostic alone does not. Continue with
