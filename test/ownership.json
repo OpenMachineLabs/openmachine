@@ -265,7 +265,8 @@
         ".github/workflows/review-policy-signal.yml",
         ".github/workflows/trusted-review-gate.yml",
         "scripts/trusted_review_gate.py",
-        "test/repository/npm_installer.test.cjs"
+        "test/repository/npm_installer.test.cjs",
+        ".github/CODEOWNERS"
       ],
       "tests": [
         "test/repository/test_auto_metadata.py",

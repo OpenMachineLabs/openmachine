@@ -328,6 +328,12 @@ class RepositoryChecks(unittest.TestCase):
             self.assertNotIn("pull_request_target:", workflow)
             self.assertNotIn(": write", workflow)
 
+    def test_codeowners_routes_all_paths_to_core_maintainers(self):
+        lines = (ROOT / '.github/CODEOWNERS').read_text().splitlines()
+        rules = [line.strip() for line in lines
+                 if line.strip() and not line.lstrip().startswith('#')]
+        self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
+
     def test_all_workflows_use_explicit_github_hosted_runners(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
