@@ -135,7 +135,7 @@ class RepositoryChecks(unittest.TestCase):
 
     def test_issue_sections_remain_required_and_pr_sections_are_advisory(self):
         templates = list((ROOT / ".github/ISSUE_TEMPLATE").glob("*.md"))
-        self.assertEqual(len(templates), 7)
+        self.assertEqual(len(templates), 8)
         for path in templates:
             self.assertEqual(rules.metadata_errors({"title": "governance(repo): propose a scoped task",
                                                     "body": path.read_text()}, "issue"), [])
@@ -182,6 +182,15 @@ class RepositoryChecks(unittest.TestCase):
                     self.assertEqual(rules.main(["--mode", "metadata", "--event-name", "issues",
                                                  "--event-path", str(path)]), expected)
         self.assertEqual(issue["title"], "[Program] Existing roadmap")
+
+    def test_security_contact_intake_excludes_public_vulnerability_details(self):
+        template = (ROOT / ".github/ISSUE_TEMPLATE/security-contact.md").read_text()
+        policy = (ROOT / "SECURITY.md").read_text()
+        frontmatter = template.split("---", 2)[1]
+        self.assertIn('labels: "security"', frontmatter)
+        self.assertIn('title: "security(contact):', frontmatter)
+        self.assertIn("No security evidence belongs in this public Issue", template)
+        self.assertIn("template=security-contact.md", policy)
 
     def test_bug_template_keeps_single_existing_label(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/bug.md").read_text()

@@ -24,10 +24,12 @@ enabled, select **Security → Advisories → Report a vulnerability** on the
 the report privately to maintainers. Its availability depends on the repository
 setting; this file does not enable it.
 
-If the private reporting option is unavailable, open a
-[public Issue](https://github.com/OpenMachineLabs/openmachine/issues/new/choose)
-**only to request a secure private contact method**. Do not include any
-vulnerability details in that request. Wait for a verified private channel before
+If private reporting is unavailable, use the
+[Security Contact Request template](https://github.com/OpenMachineLabs/openmachine/issues/new?template=security-contact.md)
+**only to request a secure private contact method**. This creates a public
+Issue, not a confidential vulnerability report. Do not include any
+technical vulnerability details, logs, credentials, exploit steps, hostnames,
+or private files in that request. Wait for a verified private channel before
 sharing the technical report.
 
 In a private report, provide the affected version or commit, reproduction

@@ -5,4 +5,4 @@ contact_links:
     about: Ask usage questions in the community; do not share private data.
   - name: Security reporting
     url: https://github.com/OpenMachineLabs/openmachine/security/policy
-    about: Read the security policy before requesting a confidential reporting channel.
+    about: Read the policy for private vulnerability reports; use the Security Contact Request template if private reporting is unavailable.
