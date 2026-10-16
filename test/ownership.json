@@ -241,6 +241,7 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
+        ".github/workflows/auto-metadata.yml",
         ".github/workflows/documentation.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-workflow.png",
@@ -249,6 +250,7 @@
         "docs/stylesheets/extra.css",
         "mkdocs.yml",
         "requirements-docs.lock",
+        "scripts/auto_metadata.py",
         "scripts/check_repository.py",
         "scripts/premerge.py",
         "scripts/run_tests.py",
@@ -257,6 +259,7 @@
         "scripts/trusted_review_gate.py"
       ],
       "tests": [
+        "test/repository/test_auto_metadata.py",
         "test/repository/test_dependencies.py",
         "test/repository/test_premerge.py",
         "test/repository/test_repository.py",
