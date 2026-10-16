@@ -165,9 +165,9 @@ result in a progress update. The historical handoff recovery rule below is the
 only continuation exception for a later explicit user request.
 For `task_attention_required`, read the task once if needed to present current
 facts, then end the turn. Report the concise reason, whether original work may
-still be running, and the returned resume prompt. This foreground mechanism is
-not Desktop notification, and it cannot inject a message into a Chat
-that has already disconnected.
+still be running, and the returned resume prompt. This foreground mechanism does
+not provide out-of-band client notifications and cannot inject a message into a
+Chat that has already disconnected.
 
 Every persisted observation advances `revision` only when its content changes.
 Format 4 also records the last material `control_revision`. Business admission can

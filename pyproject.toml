@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openmachine"
 dynamic = ["version"]
-description = "A private MCP runtime for explicit work on your machines."
+description = "A local-first MCP runtime for explicit work on your machines."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

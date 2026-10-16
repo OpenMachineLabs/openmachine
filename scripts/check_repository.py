@@ -25,6 +25,25 @@ def english_errors(text: str) -> list[str]:
     return ["use English; CJK text was found"] if CJK.search(text) else []
 
 
+# Public Core must not publish links to sibling organization repositories or
+# directly address private/shared chat sessions. This is a narrow release-scope
+# guard, not a general-purpose secret scanner.
+SIBLING_REPO = re.compile(r"\bOpenMachineLabs/([A-Za-z0-9_.-]+)\b", re.I)
+CHAT_SESSION = re.compile(
+    r"https?://(?:chatgpt[.]com|chat[.]openai[.]com)/(?:c|share)/[A-Za-z0-9_-]+", re.I
+)
+
+
+def public_boundary_errors(text: str) -> list[str]:
+    errors = []
+    if any(match[1].lower().removesuffix(".git") != "openmachine"
+           for match in SIBLING_REPO.finditer(text)):
+        errors.append("remove sibling organization repository references from public Core")
+    if CHAT_SESSION.search(text):
+        errors.append("remove direct chat-session URLs from public Core")
+    return errors
+
+
 def title_errors(title: str, kind: str) -> list[str]:
     limit = 72 if kind == "commit" else 100
     if not isinstance(title, str) or not title or len(title) > limit or not all(32 <= ord(c) <= 126 for c in title):
@@ -72,7 +91,7 @@ def label_errors(labels: object) -> list[str]:
 
 def file_errors(path: Path, root: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
-    errors = english_errors(text) + english_errors(str(path.relative_to(root)))
+    errors = english_errors(text) + english_errors(str(path.relative_to(root))) + public_boundary_errors(text)
     raw = path.read_bytes()
     if raw.startswith(b"\xef\xbb\xbf") or b"\r" in raw or (raw and not raw.endswith(b"\n")):
         errors.append("use UTF-8 without BOM, LF, and a final newline")
@@ -109,6 +128,7 @@ def metadata_errors(obj: dict, kind: str) -> list[str]:
     if any(ord(char) < 32 and char not in "\t\n\r" for char in body):
         errors.append("body must not contain unsupported control characters")
     errors += english_errors(body)
+    errors += public_boundary_errors(body)
     if kind == "issue":
         headings = re.findall(r"^## (.+)$", body, flags=re.M)
         errors += [f"body needs exactly one '{heading}' section" for heading in ISSUE_HEADINGS

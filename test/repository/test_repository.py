@@ -90,6 +90,45 @@ class RepositoryChecks(unittest.TestCase):
                 page.write_bytes(content.encode("utf-8"))
                 self.assertTrue(rules.file_errors(page, root), repr(content))
 
+    def test_public_boundary_guards_public_source_and_new_metadata(self):
+        allowed = (
+            "https://github.com/OpenMachineLabs/openmachine/issues/2",
+            "https://github.com/OpenMachineLabs/openmachine.git",
+            "https://github.com/desktop/dugite-native",
+            "Core can support an independent desktop client.",
+        )
+        forbidden = (
+            "OpenMachineLabs/" + "internal-client/issues/7",
+            "https://github.com/OpenMachineLabs/" + "internal-service/pull/9",
+            "https://chatgpt.com/" + "c/01234567-abcd-ef01-2345-0123456789ab",
+            "https://chat.openai.com/" + "share/01234567-abcd-ef01-2345-0123456789ab",
+        )
+        for text in allowed:
+            with self.subTest(text=text):
+                self.assertEqual(rules.public_boundary_errors(text), [])
+        for text in forbidden:
+            with self.subTest(text=text):
+                self.assertTrue(rules.public_boundary_errors(text))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            page = root / "README.md"
+            for text in allowed + forbidden:
+                page.write_text(text + "\n")
+                with self.subTest(file=text):
+                    self.assertEqual(bool(rules.file_errors(page, root)), text in forbidden)
+        for kind in ("pr", "issue"):
+            title = "docs(repo): describe the scope"
+            if kind == "issue":
+                body = "\n".join("## " + h for h in rules.ISSUE_HEADINGS) + "\n"
+            else:
+                body = "Describe the scoped change and its checks.\n"
+            self.assertEqual(rules.metadata_errors({"title": title, "body": body}, kind), [])
+            for text in forbidden:
+                with self.subTest(kind=kind, text=text):
+                    self.assertTrue(rules.metadata_errors(
+                        {"title": title, "body": body + text}, kind
+                    ))
+
     def test_issue_sections_remain_required_and_pr_sections_are_advisory(self):
         templates = list((ROOT / ".github/ISSUE_TEMPLATE").glob("*.md"))
         self.assertEqual(len(templates), 7)
