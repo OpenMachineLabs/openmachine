@@ -127,6 +127,114 @@ test('first setup uses Core management without granting commands or writes', asy
   assert.equal(calls.length, before + 2);
 });
 
+test('startup sets only the explicit login preference and verifies the native result', async () => {
+  const calls = [];
+  const inject = { platform: 'darwin', arch: 'arm64', output: { write() {} },
+    verify: async () => ({}),
+    manager: async (_runtime, _config, _state, action, args) => {
+      calls.push([action, ...args]);
+      return { status: 'stopped', startup: { enabled: args[1] === 'true' } };
+    } };
+  await run(['startup', 'on'], inject);
+  await run(['startup', 'off'], inject);
+  assert.deepEqual(calls, [['startup', '--enabled', 'true'], ['startup', '--enabled', 'false']]);
+  await assert.rejects(run(['startup', 'on'], { ...inject,
+    manager: async () => ({ status: 'unknown', reason: 'startup_denied' }) }), /startup_denied/);
+  await assert.rejects(run(['startup', 'off'], { ...inject,
+    manager: async () => ({ status: 'ready', startup: { enabled: true } }) }), /not verified/);
+  for (const args of [['startup'], ['startup', 'yes'], ['startup', 'on', 'extra'], ['update', '--force']]) {
+    await assert.rejects(run(args, { verify: async () => assert.fail('Invalid arguments reached Core') }),
+      /Usage:|Unexpected arguments/);
+  }
+});
+
+test('update uses the bundled payload and retains the original ID across a lost reply', async () => {
+  const calls = [];
+  const runtime = { root: '/fixture/runtime', sha256: 'a'.repeat(64) };
+  let operationId;
+  let lost = true;
+  const completed = () => ({ status: 'completed', operation: {
+    operation_id: operationId, phase: 'completed',
+    request: { payload_sha256: runtime.sha256 }, prepared: { identity: 'b'.repeat(64) }
+  } });
+  const inject = { platform: 'darwin', arch: 'arm64', output: { write() {} },
+    verify: async () => runtime, sleep: async () => {},
+    manager: async (_runtime, _config, _state, action, args) => {
+      calls.push([action, ...(args || [])]);
+      if (action === 'update') {
+        if (operationId) assert.equal(args[1], operationId);
+        operationId = args[1];
+        assert.deepEqual(args.slice(2), ['--payload', runtime.root, '--sha256', runtime.sha256]);
+        if (lost) { lost = false; throw new Error('Lost reply'); }
+        return { status: 'busy', operation: { operation_id: operationId } };
+      }
+      if (action === 'operation') {
+        assert.deepEqual(args, ['--operation-id', operationId]);
+        return completed();
+      }
+      assert.equal(action, 'status');
+      return { status: 'stopped', current: 'b'.repeat(64) };
+    } };
+  await assert.rejects(run(['update'], inject), /Lost reply/);
+  assert.equal((await run(['update'], inject)).status, 'stopped');
+  assert.match(operationId, /^[0-9a-f]{32}$/);
+  assert.deepEqual(calls.map((call) => call[0]), ['update', 'update', 'operation', 'status']);
+  const firstId = operationId;
+  await run(['update'], { ...inject, verify: async () => ({ ...runtime, sha256: 'c'.repeat(64) }),
+    manager: async (_runtime, _config, _state, action, args) => {
+      if (action === 'update') {
+        assert.notEqual(args[1], firstId);
+        return { ...completed(), operation: { ...completed().operation, operation_id: args[1],
+          request: { payload_sha256: 'c'.repeat(64) } } };
+      }
+      return { status: 'ready', current: 'b'.repeat(64) };
+    } });
+});
+
+test('update reports deferred, failed and unrelated busy outcomes without retrying or starting', async () => {
+  for (const status of ['continuation_required', 'recovery_required', 'rejected', 'restored', 'busy', 'unknown']) {
+    const calls = [];
+    await assert.rejects(run(['update'], { platform: 'darwin', arch: 'arm64', output: { write() {} },
+      verify: async () => ({ root: '/fixture/runtime', sha256: 'a'.repeat(64) }),
+      sleep: async () => assert.fail('Unrelated busy state must not be polled'),
+      manager: async (_runtime, _config, _state, action) => {
+        calls.push(action);
+        return { status, reason: 'fixture_reason' };
+      } }), /Update needs review/);
+    assert.deepEqual(calls, ['update']);
+  }
+});
+
+test('update stops waiting at its deadline without cancelling or replacing the operation', async (t) => {
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const calls = [];
+  await assert.rejects(run(['update'], { platform: 'darwin', arch: 'arm64', output: { write() {} },
+    verify: async () => ({ root: '/fixture/runtime', sha256: 'a'.repeat(64) }),
+    sleep: async () => { now = 8 * 60 * 1000; },
+    manager: async (_runtime, _config, _state, action, args) => {
+      calls.push(action);
+      return { status: 'busy', operation: { operation_id: args[1] } };
+    } }), /Update still running/);
+  assert.deepEqual(calls, ['update', 'operation']);
+});
+
+test('a completed update only succeeds when its exact installation is ready or stopped', async () => {
+  for (const [status, current, succeeds] of [
+    ['ready', 'b'.repeat(64), true], ['stopped', 'b'.repeat(64), true],
+    ['ready', 'c'.repeat(64), false], ['unready', 'b'.repeat(64), false]
+  ]) {
+    const request = run(['update'], { platform: 'darwin', arch: 'arm64', output: { write() {} },
+      verify: async () => ({ root: '/fixture/runtime', sha256: 'a'.repeat(64) }),
+      manager: async (_runtime, _config, _state, action, args) => action === 'update'
+        ? { status: 'completed', operation: { phase: 'completed', operation_id: args[1],
+          request: { payload_sha256: 'a'.repeat(64) }, prepared: { identity: 'b'.repeat(64) } } }
+        : { status, current } });
+    if (succeeds) assert.equal((await request).status, status);
+    else await assert.rejects(request, /not verified/);
+  }
+});
+
 for (const [command, status, exitCode] of [
   ['start', 'ready', 0],
   ['start', 'unready', 1],

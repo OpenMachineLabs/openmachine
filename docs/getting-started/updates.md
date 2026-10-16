@@ -7,10 +7,42 @@ Check each one; a merge to `main` does not update any of the others.
 ## npm installer on Apple Silicon
 
 `npm install -g openmachine@latest` installs or updates the npm launcher, **not** an
-existing managed Core runtime. `openmachine --version` reports the launcher
+existing managed Core runtime. Apply the bundled Core explicitly as a second step:
+
+```sh
+npm install -g openmachine@latest
+openmachine update
+openmachine status
+```
+
+`openmachine update` uses the verified payload already in the npm package; it
+does not download a release or schedule automatic upgrades. Core performs its
+existing compatibility and activation checks, preserving configuration, history,
+login preference and deliberate Stop. An update is successful only when its exact
+installation is selected and the service is verified ready or stopped.
+
+The command prints the original operation ID before submission and waits at most
+eight minutes for the worker. A lost reply or timeout does not cancel that worker:
+rerun `openmachine update` to read the same operation for that bundled payload.
+Deferred, rejected, restored and recovery-required outcomes exit unsuccessfully;
+they do not automatically retry. Inspect or explicitly continue the printed ID:
+
+```sh
+openmachine core --config "$HOME/.config/openmachine/config.toml" \
+  --state-dir "$HOME/.local/state/openmachine" manage --contract 1 \
+  operation --operation-id ORIGINAL_ID
+```
+
+After resolving a deferred condition, replace `operation` with `continue` to
+explicitly resume that original operation. Do not delete its records. A new
+attempt after rejection/restoration or reapplying the same payload after rollback
+requires the explicit [Core management workflow](../features/service.md);
+the npm command keeps its original operation rather than silently allocating another.
+
+`openmachine --version` reports the launcher
 version; `openmachine core --version` reports the bundled Core CLI version, which
 may differ from the running service. Check `openmachine status` and use the
-explicit managed update process below when upgrading an existing Core installation.
+explicit managed update process below for advanced wheel or commit inputs.
 
 The commands in the managed macOS section use the Python Core CLI. With npm,
 replace the leading `openmachine` with `openmachine core`, for example:

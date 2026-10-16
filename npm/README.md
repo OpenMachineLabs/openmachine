@@ -24,12 +24,22 @@ For unattended initial configuration:
     openmachine setup --workspace /absolute/project --probe README.md
 
 Run 'openmachine status', 'openmachine start' or 'openmachine stop' afterwards.
+Core runs independently of the terminal. Use 'openmachine startup on' or
+'openmachine startup off' to choose login startup without changing deliberate Stop.
+Only 'openmachine start' clears that Stop.
 Use 'openmachine core ...' to call a native Core CLI command. The ChatGPT
 connection and upstream MCP tunnel are not installed or approved by npm.
 
-This wrapper does not change an existing managed Core installation, repair
-incomplete history, auto-enable login startup, or replace the retained runtime
-when npm updates its own executable. The initial install operation has a
+To update, first run 'npm install -g openmachine@latest', then 'openmachine update'.
+The second command applies the verified bundled Core through its existing managed
+update checks. It preserves configuration, history and service policy, verifies
+the selected installation, and reads the same original operation on repeated calls.
+It does not download releases, automatically retry deferred/failed updates or
+repair incomplete history. See the [update guide](https://openmachinelabs.github.io/openmachine/getting-started/updates/)
+for original-operation recovery and deliberate new attempts after rollback or failure.
+
+Setup does not auto-enable login startup, and npm package installation does not
+replace the retained runtime. The initial install operation has a
 persisted original ID at ~/.config/openmachine/npm-install.json.
 
 ## Preparing a publishable npm tarball

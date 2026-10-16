@@ -16,6 +16,8 @@ const HELP = 'Open Machine npm installer (Apple Silicon macOS)\n' +
   '  openmachine setup [--workspace PATH] [--probe FILE]\n' +
   '                    [--enable-commands] [--enable-workspace-writes]\n' +
   '  openmachine status | start | stop | doctor\n' +
+  '  openmachine startup on | off  Set login startup without changing Stop\n' +
+  '  openmachine update            Apply the Core bundled in this npm package\n' +
   '  openmachine core <arguments>  Run the underlying Python Core CLI\n' +
   '  openmachine --version | --help\n' +
   '\nInstallation leaves machine commands and workspace writes OFF unless approved.\n';
@@ -204,10 +206,13 @@ async function run(argv, overrides = {}) {
     output.write('Open Machine npm installer ' + PKG.version + '\n');
     return;
   }
-  if (!['', 'setup', 'status', 'start', 'stop', 'doctor', 'core'].includes(command)) {
+  if (!['', 'setup', 'status', 'start', 'stop', 'doctor', 'startup', 'update', 'core'].includes(command)) {
     throw new Error('Unknown command: ' + command + '\n' + HELP);
   }
-  if (!['', 'setup', 'core'].includes(command) && argv.length !== 1) {
+  if (command === 'startup' && (argv.length !== 2 || !['on', 'off'].includes(argv[1]))) {
+    throw new Error('Usage: openmachine startup on | off');
+  }
+  if (!['', 'setup', 'core', 'startup'].includes(command) && argv.length !== 1) {
     throw new Error('Unexpected arguments for ' + command);
   }
   if ((overrides.platform || process.platform) !== 'darwin' ||
@@ -234,9 +239,44 @@ async function run(argv, overrides = {}) {
     if (result.status !== 0) throw new Error('Core exited with status ' + result.status);
     return;
   }
+  if (command === 'update') {
+    // One original operation per bundled payload, including after a lost reply.
+    // Core owns admission, continuation and recovery; a rerun never retries it.
+    const operationId = crypto.createHash('sha256').update('npm-update:' + runtime.sha256)
+      .digest('hex').slice(0, 32);
+    output.write('Core update operation: ' + operationId + '\n');
+    let result = await manager(runtime, config, state, 'update', [
+      '--operation-id', operationId, '--payload', runtime.root, '--sha256', runtime.sha256
+    ]);
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (['accepted', 'busy'].includes(result.status) && result.operation?.operation_id === operationId) {
+      if (Date.now() >= deadline) {
+        throw new Error('Update still running. Re-run openmachine update to read operation ' + operationId + '.');
+      }
+      await sleep(1500);
+      result = await manager(runtime, config, state, 'operation', ['--operation-id', operationId]);
+    }
+    output.write(JSON.stringify(result, null, 2) + '\n');
+    if (result.status !== 'completed' || result.operation?.phase !== 'completed' ||
+        result.operation?.operation_id !== operationId ||
+        result.operation?.request?.payload_sha256 !== runtime.sha256 || !result.operation?.prepared?.identity) {
+      throw new Error('Update needs review (' + result.status + '), operation ' + operationId +
+        '. Use Core management to inspect or explicitly continue the original operation.');
+    }
+    const status = await manager(runtime, config, state, 'status');
+    output.write(JSON.stringify(status, null, 2) + '\n');
+    if (!['ready', 'stopped'].includes(status.status) || status.current !== result.operation.prepared.identity) {
+      throw new Error('Update is not verified on the selected service. Inspect openmachine status and operation ' + operationId + '.');
+    }
+    return status;
+  }
   const action = command === 'doctor' ? 'status' : command;
-  const result = await manager(runtime, config, state, action);
+  const args = command === 'startup' ? ['--enabled', String(argv[1] === 'on')] : [];
+  const result = await manager(runtime, config, state, action, args);
   output.write(JSON.stringify(result, null, 2) + '\n');
+  if (command === 'startup' && result.startup?.enabled !== (argv[1] === 'on')) {
+    throw new Error('Login startup was not verified: ' + (result.reason || result.status));
+  }
   if ((command === 'start' || command === 'doctor') && result.status !== 'ready') {
     throw new Error('Core is not ready: ' + result.status);
   }

@@ -34,6 +34,23 @@ The npm `openmachine` command manages setup and service status. Use
 package alone does **not** replace an existing managed Core runtime;
 see [Updates](updates.md).
 
+## Background service and login startup
+
+Core runs as a macOS user service and can keep running after you close the
+terminal. Use `openmachine start`, `openmachine stop` and `openmachine status`
+to control and inspect it.
+
+```sh
+openmachine startup on
+openmachine startup off
+```
+
+These commands enable or disable startup when you log in. They do not start or
+stop the current service. A deliberate `openmachine stop` remains in effect
+until `openmachine start`, even with login startup enabled. First setup leaves
+login startup disabled. This is a user-login service, not a promise of availability
+while the Mac is asleep, shut down or logged out.
+
 ## Connect to ChatGPT
 
 The installer does not configure an MCP tunnel, connect a ChatGPT account or
