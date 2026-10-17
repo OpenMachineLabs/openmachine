@@ -25,6 +25,22 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 
 [Documentation](https://openmachinelabs.github.io/openmachine/) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
+<div align="center">
+
+<table aria-label="Open Machine community">
+<tr>
+<td align="center" width="520">
+  <a href="https://discord.gg/TAxEWV7fgZ">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
+    <strong>Join the Open Machine Community</strong>
+  </a><br />
+  <sub>Discord · Q&amp;A · Show and Tell</sub>
+</td>
+</tr>
+</table>
+
+</div>
+
 ## What you can do
 
 | Capability | Guide |
@@ -72,22 +88,6 @@ This is an early-development release, not a stable 1.x release.
 npm install -g openmachine@latest
 openmachine update
 ```
-
-<div align="center">
-
-<table aria-label="Open Machine community">
-<tr>
-<td align="center" width="520">
-  <a href="https://discord.gg/TAxEWV7fgZ">
-    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
-    <strong>Join the Open Machine Community</strong>
-  </a><br />
-  <sub>Discord · Q&amp;A · Show and Tell</sub>
-</td>
-</tr>
-</table>
-
-</div>
 
 ## How it works
 
