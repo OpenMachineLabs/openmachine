@@ -50,7 +50,13 @@ npm install -g openmachine@latest
 openmachine
 ```
 
-On first run, choose an existing project folder containing a readable file (such as `README.md`). Open Machine sets up Core and starts a managed macOS user service. Check it with `openmachine status`.
+On first run, choose an existing project folder containing a readable file (such as `README.md`). Open Machine sets up Core and starts a managed macOS user service that keeps running after you close the terminal. Check it with `openmachine status`.
+
+Optionally enable startup at login:
+
+```bash
+openmachine startup on
+```
 
 For other macOS and Linux setups, [build Core from source](docs/getting-started/installation.md) (Python 3.12+, compatible SQLite, and Git). Windows is not supported.
 
@@ -61,6 +67,11 @@ The npm `openmachine` command manages setup and service status; `openmachine cor
 This is an early-development release, not a stable 1.x release.
 
 **Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
+
+```bash
+npm install -g openmachine@latest
+openmachine update
+```
 
 <div align="center">
 
