@@ -25,6 +25,22 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 
 [Documentation](https://openmachinelabs.github.io/openmachine/) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
+<div align="center">
+
+<table aria-label="Open Machine community">
+<tr>
+<td align="center" width="520">
+  <a href="https://discord.gg/TAxEWV7fgZ">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
+    <strong>Join the Open Machine Community</strong>
+  </a><br />
+  <sub>Discord · Q&amp;A · Show and Tell</sub>
+</td>
+</tr>
+</table>
+
+</div>
+
 ## What you can do
 
 | Capability | Guide |
@@ -50,7 +66,13 @@ npm install -g openmachine@latest
 openmachine
 ```
 
-On first run, choose an existing project folder containing a readable file (such as `README.md`). Open Machine sets up Core and starts a managed macOS user service. Check it with `openmachine status`.
+On first run, choose an existing project folder containing a readable file (such as `README.md`). Open Machine sets up Core and starts a managed macOS user service that keeps running after you close the terminal. Check it with `openmachine status`.
+
+Optionally enable startup at login:
+
+```bash
+openmachine startup on
+```
 
 For other macOS and Linux setups, [build Core from source](docs/getting-started/installation.md) (Python 3.12+, compatible SQLite, and Git). Windows is not supported.
 
@@ -62,21 +84,10 @@ This is an early-development release, not a stable 1.x release.
 
 **Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
 
-<div align="center">
-
-<table aria-label="Open Machine community">
-<tr>
-<td align="center" width="520">
-  <a href="https://discord.gg/TAxEWV7fgZ">
-    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
-    <strong>Join the Open Machine Community</strong>
-  </a><br />
-  <sub>Discord · Q&amp;A · Show and Tell</sub>
-</td>
-</tr>
-</table>
-
-</div>
+```bash
+npm install -g openmachine@latest
+openmachine update
+```
 
 ## How it works
 
