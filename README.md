@@ -19,9 +19,11 @@
 
 </div>
 
-[![Watch the Open Machine demo](assets/demo-preview.webp)](https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc)
-
-https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc">
+    <img src="assets/demo-preview.webp" width="1200" alt="Watch the 47-second Open Machine demo">
+  </a>
+</p>
 
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
