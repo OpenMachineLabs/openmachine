@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 | Skills | [Discover packaged operating guides and reviewed external Skill roots](docs/features/skills.md). |
 | Service and runtime | [Manage the macOS service, retained updates and compatible rollback](docs/features/service.md). |
 
-Tasks preserve progress and observe admitted work; they **do not automatically wake ChatGPT or execute the next stage after a chat disconnects**. Optional integrations have separate prerequisites. See [current limitations](docs/introduction/limitations.md).
+**Long-running jobs and task continuation:** Already-started jobs can keep running after a ChatGPT conversation disconnects. A job's execution status (running, completed, or failed) is separate from whether ChatGPT is ready to continue or needs user input. Finishing a job **does not automatically wake ChatGPT or start the next stage**. For a structured task, use the original [Task ID](docs/features/tasks.md) in a new conversation to review recorded results, failures, and pending approvals, then explicitly continue the remaining authorized work without rerunning completed steps. Optional integrations have separate prerequisites. See [current limitations](docs/introduction/limitations.md).
 
 ## Quick start
 
