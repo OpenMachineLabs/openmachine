@@ -71,6 +71,17 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
 
+    def test_demo_preview_asset_has_explicit_repository_test_ownership(self):
+        path = "assets/demo-preview.webp"
+        owned = json.loads((ROOT / "test/ownership.json").read_text())
+        self.assertIn(path, owned["modules"]["repository"]["sources"])
+        self.write(path, "video thumbnail fixture")
+        self.manifest["modules"]["repository"]["sources"].append(path)
+        self.save_manifest()
+        plan = runner.make_plan(self.root, self.base)
+        self.assertFalse(plan["runtime_required"])
+        self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+
     def test_community_policy_documents_select_repository_checks(self):
         for path in ("CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
                      "CODE_OF_CONDUCT.md"):

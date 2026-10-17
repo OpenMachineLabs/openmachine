@@ -244,6 +244,7 @@
         ".github/workflows/auto-metadata.yml",
         ".github/workflows/documentation.yml",
         ".github/workflows/npm-package.yml",
+        "assets/demo-preview.webp",
         "assets/openmachine-banner.png",
         "assets/openmachine-workflow.png",
         "docs/assets/favicon.png",
