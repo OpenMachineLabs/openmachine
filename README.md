@@ -107,6 +107,10 @@ For existing installations, use [updates](docs/getting-started/updates.md), the 
 
 The [operating Skill](openmachine/skills/overview/SKILL.md) and [Skills directory](openmachine/skills/README.md) remain the technical starting points for AI agents. A source checkout, published release, running runtime and approved client catalog can differ; read the running version's guide before acting.
 
+## Roadmap
+
+The [current development roadmap](ROADMAP.md) outlines planned features and longer-term directions. Scope and priorities may change.
+
 ## Security
 
 Open Machine is a trusted, single-operator native runtime, **not an OS sandbox** or multi-tenant executor. Native commands can access resources beyond read-only tool scopes. Keep the listener private, grant access deliberately, and remember that files and logs returned to an AI client may leave your machine. Cancellation and software rollback do not undo completed effects. Read [Security and data](docs/configuration/security.md) before enabling execution or remote access; never put secrets in prompts, command arguments or committed configuration. Report vulnerabilities privately via the [Security Policy](SECURITY.md).

@@ -241,6 +241,7 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
+        "ROADMAP.md",
         ".github/workflows/auto-metadata.yml",
         ".github/workflows/documentation.yml",
         ".github/workflows/npm-package.yml",
