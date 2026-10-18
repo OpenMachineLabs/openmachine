@@ -11,12 +11,12 @@ This roadmap outlines planned features and longer-term directions. Scope and pri
 
 - [ ] Deliver a desktop GUI for npm-based installation, updates, and persistent background service management.
 - [ ] Add a machine dashboard for local and remote devices, connection health, and runtime status.
-- [ ] Provide execution history, logs, and task monitoring, with distinct `running` and `ai_wait` states.
+- [ ] Provide execution history, logs, and task monitoring, with distinct `running` and `waiting_for_ai` states.
 - [ ] Add a UI for installing, configuring, and managing plugins and Skills.
 
 ## 3. Multi-Machine Connectivity & Security
 
-- [ ] Support multi-machine management over SSH and Tailscale.
+- [ ] Integrate Tailscale for managed multi-device connectivity alongside existing SSH support.
 - [ ] Add SSH access management and machine-level allowlists and denylists.
 - [ ] Enforce operation-level permissions and block prohibited or high-risk AI actions.
 
@@ -35,7 +35,7 @@ This roadmap outlines planned features and longer-term directions. Scope and pri
 
 - [ ] Integrate external services such as Slack and Gmail.
 - [ ] Support cross-service search, summarization, and information synthesis.
-- [ ] Enable custom Skills for workflows such as Daily Research, Linux Ops, and Meeting Review.
+- [ ] Add publishing and distribution workflows for user-authored Skills, with examples such as Daily Research, Linux Ops, and Meeting Review.
 - [ ] Build a Skill Library for discovering, publishing, and reusing community Skills.
 
 ## 7. GPU & ML Workflows
