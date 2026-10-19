@@ -1295,6 +1295,79 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
         self.assertTrue(item["data"]["fields_complete"])
         self.assertEqual(requests[0]["owner"], "Owner")
 
+    def test_project_field_recovery_requires_exact_complete_destination_without_writes(self):
+        locator = self.task_locator("project", 1)
+        request = dict(action="update_field", repository=REPO, project_number=1,
+                       item_id="PVTI_1", field_id="PVTF_1", value={"date": "2026-01-02"})
+        item = {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                "content": {"id": "ISSUE_1", "repository": {"nameWithOwner": REPO}},
+                "fieldValues": {"nodes": [{"date": "2026-01-02", "field": {"id": "PVTF_1"}}],
+                                "pageInfo": {"hasNextPage": False}}}
+
+        def api(method, endpoint, payload=None):
+            if endpoint != "graphql":
+                return self.response(method, endpoint, payload)
+            self.assertTrue(payload["query"].startswith("query("))
+            if "fieldValues(first:100)" in payload["query"]:
+                return {"data": {"node": item}}
+            return {"data": {"organization": {"projectV2": {"id": "PVT_1", "number": 1}}}}
+
+        with patch.object(self, "transport", side_effect=api):
+            self.assertEqual(github.reconcile(settings(), locator, transport=self.transport)["status"],
+                             "write_outcome_unknown")
+            for mismatch in (dict(request, project_number=2), dict(request, repository="Other/repo")):
+                self.assertEqual(github.reconcile(settings(), locator, mismatch, transport=self.transport)["status"],
+                                 "write_outcome_unknown")
+            result = github.reconcile(settings(), locator, request, transport=self.transport)
+            self.assertEqual((result["status"], result["fields_verified"]), ("verified", True))
+            self.assertEqual(result["receipt"], {"id": "PVTI_1", "project_number": 1})
+            with patch.dict(item["fieldValues"]["pageInfo"], hasNextPage=True):
+                self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "observed")
+            with patch.dict(item["fieldValues"]["nodes"][0], date="2026-01-03"):
+                self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "observed")
+            with patch.dict(item, content=None):
+                self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "observed")
+            with patch.dict(item["content"]["repository"], nameWithOwner="Other/repo"):
+                self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "observed")
+            with patch.dict(item, project={"id": "PVT_other"}):
+                self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "write_outcome_unknown")
+            with patch.object(connection, "read_actor", side_effect=[ACTOR, {"id": 99, "login": "other"}]):
+                self.assert_fault("github_identity_changed", github.reconcile, settings(), locator, request, transport=self.transport)
+
+    def test_project_add_recovery_finds_original_content_with_bounded_read_only_pages(self):
+        self.issue_value["node_id"] = "ISSUE_1"
+        locator = self.task_locator("project", 1)
+        for selector, content_id in (({"issue_number": 1}, "ISSUE_1"),
+                                     ({"pull_request_number": 2}, self.pr["node_id"])):
+            with self.subTest(selector=selector):
+                cursors, found = [], {"enabled": True}
+
+                def api(method, endpoint, payload=None):
+                    if endpoint != "graphql":
+                        return self.response(method, endpoint, payload)
+                    query = payload["query"]
+                    self.assertTrue(query.startswith("query("))
+                    if "projectItems(first:" in query:
+                        cursor = payload["variables"]["cursor"]
+                        cursors.append(cursor)
+                        nodes = [{"id": "PVTI_1", "project": {"id": "PVT_1"}}] if cursor and found["enabled"] else []
+                        return {"data": {"node": {"id": content_id, "projectItems": {"nodes": nodes,
+                            "pageInfo": {"hasNextPage": not bool(nodes), "endCursor": str(len(cursors))}}}}}
+                    if "fieldValues(first:100)" in query:
+                        return {"data": {"node": {"id": "PVTI_1", "project": {"id": "PVT_1"},
+                            "content": {"id": content_id, "repository": {"nameWithOwner": REPO}},
+                            "fieldValues": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}}
+                    return {"data": {"organization": {"projectV2": {"id": "PVT_1", "number": 1}}}}
+
+                request = dict(action="add_item", repository=REPO, project_number=1, **selector)
+                with patch.object(self, "transport", side_effect=api):
+                    self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "verified")
+                    self.assertEqual(cursors, [None, "1"])
+                    cursors.clear()
+                    found["enabled"] = False
+                    self.assertEqual(github.reconcile(settings(), locator, request, transport=self.transport)["status"], "write_outcome_unknown")
+                    self.assertEqual(len(cursors), 10)
+
     def test_project_add_and_single_field_write_verify_destination(self):
         self.issue_value["node_id"] = "ISSUE_1"
         field = {"text": "triage"}
