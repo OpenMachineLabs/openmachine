@@ -545,7 +545,72 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         return _public({"status": "verified" if matches else "observed", "repository": repository,
                         "actor": actor, "receipt": _receipt(value), "fields_verified": bool(matches)})
     if kind == "project":
-        return _public(unknown)  # Project writes without original acknowledgments are never replayed.
+        if (request is None or parent is not None or number is None
+                or request.get("repository", "").casefold() != repository.casefold()
+                or request.get("project_number") != number):
+            return _public(unknown)
+        project = _project_node(repository, number, transport=transport)
+        action = request.get("action")
+        item_id, content_id = request.get("item_id"), None
+        if action == "add_item":
+            issue, pr = request.get("issue_number", 0), request.get("pull_request_number", 0)
+            if (type(issue) is not int or type(pr) is not int or issue < 0 or pr < 0
+                    or (issue > 0) == (pr > 0)):
+                return _public(unknown)
+            content = object_response(transport("GET", f"{root}/{'pulls' if pr else 'issues'}/{pr or issue}"))
+            content_id = content.get("node_id")
+            if not isinstance(content_id, str) or (not pr and "pull_request" in content):
+                return _public(unknown)
+            content_type = "PullRequest" if pr else "Issue"
+            query = ("query($id:ID!,$cursor:String){node(id:$id){... on " + content_type
+                     + "{id projectItems(first:100,after:$cursor){nodes{id project{id}}"
+                     + " pageInfo{hasNextPage endCursor}}}}}")
+            cursor = None
+            for _ in range(10):
+                node = object_response(_graphql(query, {"id": content_id, "cursor": cursor},
+                                                transport=transport).get("node"))
+                if node.get("id") != content_id:
+                    return _public(unknown)
+                items, cursor = _project_page(node.get("projectItems"))
+                found = [item for item in items if (item.get("project") or {}).get("id") == project["id"]]
+                if found:
+                    if len(found) != 1:
+                        return _public(unknown)
+                    item_id = found[0].get("id")
+                    break
+                if cursor is None:
+                    break
+        elif action != "update_field":
+            return _public(unknown)
+        if not isinstance(item_id, str) or not item_id:
+            return _public(unknown)
+        try:
+            observed = _project_item(project["id"], item_id, transport=transport)
+        except Fault as error:
+            if error.code == "github_not_found":
+                return _public(unknown)
+            raise
+        content = observed["content"] or {}
+        matches = ((content.get("repository") or {}).get("nameWithOwner", "").casefold()
+                   == repository.casefold())
+        if action == "add_item":
+            matches &= content.get("id") == content_id
+        else:
+            value = request.get("value")
+            if not isinstance(value, dict) or len(value) != 1:
+                return _public(unknown)
+            key, entry = next(iter(value.items()))
+            if key not in {"text", "number", "date", "singleSelectOptionId", "iterationId"}:
+                return _public(unknown)
+            field = next((field for field in observed["field_values"]
+                          if field["field_id"] == request.get("field_id")), None)
+            key = {"singleSelectOptionId": "optionId"}.get(key, key)
+            matches &= observed["fields_complete"] and field is not None and field.get(key) == entry
+        if connection.read_actor(settings, transport=transport) != actor:
+            raise Fault("github_identity_changed", "The acting account changed during Project recovery.")
+        return _public({"status": "verified" if matches else "observed", "repository": repository,
+                        "actor": actor, "receipt": {"id": item_id, "project_number": number},
+                        "fields_verified": bool(matches)})
     if kind == "review_thread":
         thread_id, head = locator.get("thread_id"), locator.get("expected_head_sha")
         if (number is None or parent is not None or not isinstance(thread_id, str)

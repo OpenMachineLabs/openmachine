@@ -53,6 +53,15 @@ field change. Field updates reject draft or other-repository items, and uncertai
 Project writes exclude further writes to the same organization Project across
 repository aliases. Both writes require scoped permissions and verified readback.
 
+After an uncertain Project write, use the original operation ID and exact original
+arguments. Reconciliation only reads the requested item's membership or field value
+and verifies the bound repository and account; it never repeats the mutation.
+Item discovery is bounded to 1,000 Projects on the original Issue or PR. Missing
+original arguments, missing items, incomplete evidence or a different field value
+leave the original outcome unresolved. A matching destination proves the requested
+result is present, not which client performed the write. Historical records without
+recoverable original arguments cannot be cleared by a current Project snapshot.
+
 Create a Release document with `github_release(action="create", repository, tag_name,
 name, body, draft=True, prerelease=False)`. Notes must be nonempty; the default
 is a draft, and `draft=False` explicitly publishes. The operation checks

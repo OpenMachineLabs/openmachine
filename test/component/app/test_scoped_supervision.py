@@ -88,6 +88,23 @@ class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(other["status"], "write_outcome_unknown")
         self.assertEqual(self.provider.release.call_count, 2)
 
+    def test_project_reconciliation_keeps_original_intent_and_never_repeats_write(self):
+        identity = uuid.uuid4().hex
+        args = dict(action="update_field", repository="Owner/repo", project_number=12,
+                    item_id="PVTI_fixture", field_id="PVTF_fixture", value={"text": "done"},
+                    task_context=self.context_for(identity))
+        self.assertEqual(self.app.github_project(**args)["status"], "write_outcome_unknown")
+        self.fault("task_operation_conflict", self.app.github_project, **dict(args, value={"text": "changed"}))
+        self.assertFalse(self.app.github_project(**args)["task_operation_replayed"])
+        self.assertEqual(self.view()["record"]["operations"][0]["state"], "unknown")
+        self.provider.reconcile.return_value = {"status": "verified", "receipt": {
+            "id": "PVTI_fixture", "project_number": 12}, "fields_verified": True}
+        result = self.app.github_project(**args)
+        self.assertEqual(result["status"], "verified")
+        self.assertFalse(result["task_operation_replayed"])
+        self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "succeeded")
+        self.assertEqual(self.provider.project.call_count, 1)
+
     def test_unknown_project_write_blocks_alias_across_same_organization(self):
         result = self.app.github_project(
             action="update_field", repository="Owner/repo", project_number=12,
