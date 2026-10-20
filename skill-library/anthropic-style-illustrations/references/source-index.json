@@ -1,0 +1,489 @@
+{
+  "version": 1,
+  "evidence_note": "Summaries of prior source reviews, not a new pixel inspection. Observations are attributed to the recorded reviewer; inference is design interpretation, not author intent. Links only; no source media redistributed.",
+  "records": [
+    {
+      "case_id": "A2",
+      "article_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/7418719e3dab222dccb379b8879e1dc08ad34c78-2401x1000.png",
+      "family": "flow",
+      "relationship": "sequence; predicate; early exit",
+      "observed": [
+        "The first call feeds a violet gate; its passing route bends upward through two later calls to the output.",
+        "A dashed failing branch descends to a separate exit. Intermediate outputs are labeled on the main path."
+      ],
+      "inference": "A visible negative outcome counters the common optimistic assumption that every input reaches the final call. A distinct control color separates checking from generation.",
+      "rule": "Preserve the negative branch of a decision. Name intermediate artifacts so dependency is intelligible.",
+      "limit": "Independent benefits are not a serial chain. An unspecified decorative gate does not explain validation.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#A2"
+      }
+    },
+    {
+      "case_id": "A3",
+      "article_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png",
+      "family": "flow",
+      "relationship": "classification; exclusive dispatch",
+      "observed": [
+        "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.",
+        "One route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example."
+      ],
+      "inference": "Keeping the worker silhouette familiar makes the absence of an aggregator significant when the gallery is compared. Dashes need explanation because they could otherwise mean uncertainty or failure.",
+      "rule": "Differentiate alternatives from concurrency using topology and labels. Use stable geometry across comparable pattern figures.",
+      "limit": "Do not use exclusive dispatch when every branch contributes to one result. Dashed routes do not encode measured probabilities.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#A3"
+      }
+    },
+    {
+      "case_id": "A4",
+      "article_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png",
+      "family": "flow",
+      "relationship": "fork; parallel work; aggregation",
+      "observed": [
+        "Solid connectors fan from the input into three equal green peer boxes.",
+        "All worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines."
+      ],
+      "inference": "The explicit aggregator makes reconciliation visible and distinguishes this figure from routing, even though both contain three worker boxes.",
+      "rule": "Name a join when it evaluates or reconciles results. Verify independence before depicting parallel branches.",
+      "limit": "A later task that needs an earlier result belongs in a chain. Equal cards do not show equal effort or reliability.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#A4"
+      }
+    },
+    {
+      "case_id": "A6",
+      "article_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png",
+      "family": "flow",
+      "relationship": "iteration; critique; acceptance",
+      "observed": [
+        "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.",
+        "An accepted branch leaves toward an output distinct from the cycle."
+      ],
+      "inference": "Opposing labeled arcs reduce confusion about who produces the criterion. A visible accepted exit keeps iteration from appearing unbounded.",
+      "rule": "Give both directions of a feedback loop distinct labels. Expose termination and escalation conditions.",
+      "limit": "Repeated independent sampling without actionable feedback is a different pattern. Iteration count cannot be presented as quality improvement without evidence.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#A6"
+      }
+    },
+    {
+      "case_id": "B1",
+      "article_url": "https://www.anthropic.com/engineering/multi-agent-research-system",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/1198befc0b33726c45692ac40f764022f4de1bf2-4584x2579.png",
+      "family": "network",
+      "relationship": "coordination; delegation; memory; provenance",
+      "observed": [
+        "Large chat and system panels are linked by user-request and final-report arrows.",
+        "A central lead agent connects to memory, a citation agent and three search subagents below, with return paths and self-loops."
+      ],
+      "inference": "Keeping citation and memory roles visible plausibly prevents reducing the system to a search fan-out. The chat boundary makes internal exchanges distinct from user-visible outputs.",
+      "rule": "Separate user-facing and internal exchanges. Keep persistence and provenance roles visible when they affect the result.",
+      "limit": "Central card size is not resource consumption. This map does not determine message timing.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#B1"
+      }
+    },
+    {
+      "case_id": "B2",
+      "article_url": "https://www.anthropic.com/engineering/multi-agent-research-system",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/3bde53c9578d74f6e05c3e515e20b910c5a8c20a-4584x4584.png",
+      "family": "sequence",
+      "relationship": "iterative research; persistence; final citation processing",
+      "observed": [
+        "Seven lifelines separate user, system, lead, two subagents, memory and citation roles.",
+        "A large tinted research-loop region contains repeated exchanges and self-loops; citation processing and the final report occur later."
+      ],
+      "inference": "The enclosure makes repeated investigation legible but increases density. This is a zoomable detail view, not an appropriate small thumbnail or sole overview.",
+      "rule": "Separate iteration from finalization. Use coordinated overview/detail views at different reading scales.",
+      "limit": "Loop regions do not guarantee convergence. Spacing and panel height are not execution duration.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#B2"
+      }
+    },
+    {
+      "case_id": "C1",
+      "article_url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/faa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png",
+      "family": "comparison",
+      "relationship": "matched conditions; state curation; feedback",
+      "observed": [
+        "The simpler left panel shows prompt-to-model-to-message. The wider right panel adds documents, tools, memory/history and a dashed current-context boundary.",
+        "Information cards and selection marks identify curation, while tool activity returns information to history."
+      ],
+      "inference": "Stable model/output grammar reduces comparison effort. The added resources alone do not establish improved results, so the new design should emphasize selection rather than accumulation.",
+      "rule": "Hold familiar components constant in a conceptual comparison. Distinguish available information from information actually loaded.",
+      "limit": "More documents do not automatically improve results. Wider or more colorful panels are not quantitative superiority evidence.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#C1"
+      }
+    },
+    {
+      "case_id": "C2",
+      "article_url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/0442fe138158e84ffce92bed1624dd09f37ac46f-2292x1288.png",
+      "family": "concept",
+      "relationship": "ordered continuum; granularity; contrasting examples",
+      "observed": [
+        "A tiled horizontal band uses orange ends and a green middle. Three markers connect to examples of different textual density.",
+        "Labels distinguish excessive specificity, a useful middle and vagueness; no numeric axis establishes an optimum."
+      ],
+      "inference": "Same-task examples isolate specificity from topic. Green emphasis makes the recommendation obvious but risks implying a tested universal optimum without a conceptual label.",
+      "rule": "Calibrate with the same task at multiple levels of detail. Label conceptual scales explicitly.",
+      "limit": "Marker spacing does not quantify performance. A generic middle-ground rule cannot relax exact safety requirements.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#C2"
+      }
+    },
+    {
+      "case_id": "D2",
+      "article_url": "https://www.anthropic.com/engineering/contextual-retrieval",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/2496e7c6fedd7ffaa043895c23a4089638b0c21b-3840x2160.png",
+      "family": "flow",
+      "relationship": "source document; fragment enrichment; unchanged indexing",
+      "observed": [
+        "A wider preparation panel shows a whole document, selected blue chunks and context generation.",
+        "Blue context-plus-chunk pairs feed otherwise neutral indexing; a small runtime region retains orientation."
+      ],
+      "inference": "Showing the full document beside a fragment makes the missing local framing tangible. Keeping indexing recognizable isolates the change without implying a different final model.",
+      "rule": "Highlight only changed information and operations. Never make generated context look like a verbatim source quotation.",
+      "limit": "Do not move a preparation-time intervention to runtime. Added context is not automatic factual verification.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#D2"
+      }
+    },
+    {
+      "case_id": "D3",
+      "article_url": "https://www.anthropic.com/engineering/contextual-retrieval",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/7f8d739e491fe6b3ba0e6a9c74e4083d760b88c9-3840x2160.png",
+      "family": "bar",
+      "relationship": "matched ablation; failure rate; common baseline",
+      "observed": [
+        "Four bars compare standard and contextual groups; the visible values are 5.7, 5.0, 3.7 and 2.9.",
+        "The failure-rate scale starts at zero. A dotted divider separates condition groups, and subdued colors distinguish variants."
+      ],
+      "inference": "Keeping the unfavorable direction explicit reduces the chance that taller bars are intuitively read as better. The lack of visible intervals must not be mistaken for zero uncertainty.",
+      "rule": "Mark lower-is-better outcomes. Use a common scale for matched ablations and distinguish relative percentages from percentage points.",
+      "limit": "Never reuse source benchmark values as a new topic's measurements. Do not invent confidence intervals or significance claims.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#D3"
+      }
+    },
+    {
+      "case_id": "E5",
+      "article_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/d4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png",
+      "family": "screenshot",
+      "relationship": "matched response; information reduction; drill-down",
+      "observed": [
+        "The dark console retains the same general query and two-result structure but presents compact numbered rows.",
+        "The response is shorter through selected content, not merely reduced font size or a tighter crop."
+      ],
+      "inference": "A matched query limits distracting changes and lets the reader inspect the actual contract difference. Concision is valuable when it preserves the next decision, not as an unconditional aesthetic preference.",
+      "rule": "Keep query and result identity fixed in format comparisons. Reduce irrelevant information rather than making all text smaller.",
+      "limit": "Do not infer token savings from image dimensions. Do not drop fields necessary for later actions merely to look clean.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#E5"
+      }
+    },
+    {
+      "case_id": "E6",
+      "article_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/810661bd44a35fb273806ae95160040155978c3e-1920x850.png",
+      "family": "screenshot",
+      "relationship": "failure; diagnosis; repair guidance",
+      "observed": [
+        "The console displays an invalid-identifier error with distinct sections for a summary, valid identifiers and resolution guidance.",
+        "Sectioned monospaced text provides an actionable next step rather than only a machine code."
+      ],
+      "inference": "Visible recovery guidance makes the failure productive; an opaque error would force guessing or repeated invalid calls. The example counters an overly simplistic always-be-concise rule.",
+      "rule": "Include actionable repair information in expected failure responses. Optimize for the next correct action, not merely text length.",
+      "limit": "Do not invent a recovery command the tool cannot execute. Do not expose private account identifiers to make an example realistic.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#E6"
+      }
+    },
+    {
+      "case_id": "E8",
+      "article_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/2445187904704fec8c50af0b950e310ba743fac2-1920x733.png",
+      "family": "screenshot",
+      "relationship": "opaque failure; contrast with actionable guidance",
+      "observed": [
+        "The same general invalid-request situation appears as nested JSON with code, status, field and value.",
+        "The dark monospaced frame lacks the explanatory sections and recovery instructions visible in the companion error example."
+      ],
+      "inference": "Holding the request and console frame stable isolates actionability. Treating JSON as inherently bad would be a mistaken stylistic generalization.",
+      "rule": "Include counterexamples in a style library, not only attractive successes. Compare missing semantic affordances rather than blaming a serialization format.",
+      "limit": "JSON may be appropriate for a wire protocol. Do not retrieve this negative example as an unqualified target style.",
+      "usage": "contrast_not_target",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#E8"
+      }
+    },
+    {
+      "case_id": "F4",
+      "article_url": "https://www.anthropic.com/research/the-anthropic-economic-index",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/189bf07829f2ecc1d3bac5961e9793a9e0f31e7d-3920x2948.jpg",
+      "family": "dumbbell",
+      "relationship": "population share comparison; reference baseline; paired category",
+      "observed": [
+        "Occupation rows connect coral Claude-conversation shares with dark workforce shares on one percentage axis.",
+        "Thin horizontal segments join paired dots and direct values identify endpoints; there are no filled bars and no arrowheads. Source alt text calls this a bar chart, which conflicts with the pixels."
+      ],
+      "inference": "A dumbbell emphasizes the gap more efficiently than paired bars while retaining both baselines. The absence of arrows helps avoid implying a transition from one population into the other.",
+      "rule": "Use connected dots when paired gaps, rather than totals, are the main question. Treat source alt-text mismatches as reviewable evidence discrepancies.",
+      "limit": "Do not describe the segment as growth over time. Do not equate the share gap with the percentage of workers adopting AI.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#F4"
+      }
+    },
+    {
+      "case_id": "F6",
+      "article_url": "https://www.anthropic.com/research/the-anthropic-economic-index",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/1f17c9364b316df226154831452a50b53431817a-2200x1250.jpg",
+      "family": "stacked_bar",
+      "relationship": "part-to-whole; mode groups; common denominator",
+      "observed": [
+        "Two horizontal stacks use blue segments for one mode and purple segments for another, with legends to the right.",
+        "The top and bottom totals are approximately 57.4 and 42.6 rather than two independently normalized 100-percent bars."
+      ],
+      "inference": "Unequal row lengths preserve the between-mode comparison while subdivision retains useful detail. Renormalizing each row would answer a different question and could conceal the main balance.",
+      "rule": "Keep a shared denominator visible in grouped composition charts. Validate segment and group sums before rendering.",
+      "limit": "Do not normalize each row to 100 percent without changing the explanation. Interaction mode is not a measured fraction of jobs replaced.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#F6"
+      }
+    },
+    {
+      "case_id": "G3",
+      "article_url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/a3bca2763d7892982a59c28aa4df7993aaae55ae-2292x673.jpg",
+      "family": "matrix",
+      "relationship": "levels; file classes; loading conditions; size guidance",
+      "observed": [
+        "A four-column table organizes levels, files, context-window conditions and token guidance across three rows.",
+        "Thin rules and gray cells dominate; a starred unlimited entry depends on explanatory context rather than a literal infinite model window."
+      ],
+      "inference": "A restrained table permits precise cross-reading without decorative complexity. Preserving qualifications is essential because an isolated unlimited label is easy to misread.",
+      "rule": "Choose tables for multi-attribute policy comparisons. Preserve footnotes that change the meaning of a cell.",
+      "limit": "Do not interpret external material capacity as unlimited model context. Do not fabricate token budgets for a new domain.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#G3"
+      }
+    },
+    {
+      "case_id": "H2",
+      "article_url": "https://www.anthropic.com/research/alignment-faking",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/6cc34bfc6ba9f1e033a62fcde68ed97b88c9a253-2200x1152.png",
+      "family": "small_multiples",
+      "relationship": "outcome composition; training stages; uncertainty of interpretation",
+      "observed": [
+        "Three panels combine paired stacked bars with a stacked-area training trajectory and a separate final bar.",
+        "Cyan, yellow and red-hatched regions distinguish refusal and different compliance-related categories; the hatch supplies a non-color cue. Fraction scales and internal condition labels organize the panels."
+      ],
+      "inference": "Using both snapshots and a trajectory lets readers see endpoints and development. Patterning makes the highlighted behavioral category more accessible, but density requires careful legend placement.",
+      "rule": "Use separate panels for condition comparisons and temporal trajectories. Add a pattern or label when a critical category must not depend on color alone.",
+      "limit": "Do not turn these experimental frequencies into deployment incident rates. Do not merge distinct compliance categories merely to simplify the palette.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#H2"
+      }
+    },
+    {
+      "case_id": "J1",
+      "article_url": "https://claude.dev/blog/solving-code-review-at-anthropic/",
+      "image_url": "https://claude.dev/media/d4fafcbf3d2137bc64eb7f0707ba91809ff1ed4d098785e36d7422b3b07f6c40.png",
+      "family": "concept",
+      "relationship": "focus; selective explanation; optional artifact",
+      "observed": [
+        "A grid representing a codebase highlights a few salmon-colored cells among gray cells.",
+        "A question connects through a solid hand-drawn arrow to an orange-accented explanation card, while a dashed branch leads to a secondary artifact card. Contrasting summary bands sit below."
+      ],
+      "inference": "Selective color concentrates attention before the explanatory handoff. A dashed secondary path can make optional depth visible without distracting from the primary answer, provided optionality is labeled.",
+      "rule": "Show the selected scope before expanding it. Distinguish a primary answer from optional depth.",
+      "limit": "Grid-cell count is not measured coverage or comprehension. Do not interpret a dashed optional branch as a failure path.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#J1"
+      }
+    },
+    {
+      "case_id": "BL1",
+      "article_url": "https://alignment.anthropic.com/2025/bloom-auto-evals/",
+      "image_url": "https://alignment.anthropic.com/2025/bloom-auto-evals/fig2.png",
+      "family": "flow",
+      "relationship": "overview-detail; generation; rollout; judgment",
+      "observed": [
+        "A small input-pipeline-transcript overview is linked to a larger four-stage view of understanding, ideation, rollout and judgment.",
+        "Configuration labels sit near their owning stages. The rollout includes repeated turns and stopping choices; judge sliders appear as schematic outputs."
+      ],
+      "inference": "A linked overview/detail layout lets readers orient first and inspect a complex stage second. Keeping stopping conditions inside the rollout avoids suggesting unlimited interaction.",
+      "rule": "Use a linked overview and expansion rather than one overloaded diagram. Make iteration controls and stopping choices part of the explanation.",
+      "limit": "Do not cite decorative slider positions as experimental outcomes. Do not present every possible rollout action as mandatory.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#BL1"
+      }
+    },
+    {
+      "case_id": "V2",
+      "article_url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/0205b36f9639fc27f2f6566f73cb56b06f59d555-4584x2580.png",
+      "family": "hierarchy",
+      "relationship": "harness; suite; task; trial; grader; metric",
+      "observed": [
+        "Nested rectangles organize an evaluation harness, suite and tasks, with stacked trial cards and distinct grader/metric chips.",
+        "An external agent-harness exchange and a separate outcome-to-grader path prevent all concepts from becoming one nested list."
+      ],
+      "inference": "A hierarchy reduces the number of definitions readers must hold in memory. Extra cross-boundary edges show relationships that containment alone cannot express.",
+      "rule": "Do not use containment to imply time order. Keep definitions, attempts, assessments and measurements distinct.",
+      "limit": "A task is not a trial count. A recorded metric is not automatically a correct assessment.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#V2"
+      }
+    },
+    {
+      "case_id": "T1",
+      "article_url": "https://www.anthropic.com/research/tracing-thoughts-language-model",
+      "image_url": "https://www-cdn.anthropic.com/images/4zrzovbb/website/e0e156ea6c912a385d66ed562187fced8c392a58-1650x750.png",
+      "family": "network",
+      "relationship": "convergence; shared concepts; divergent outputs",
+      "observed": [
+        "Three differently colored language lanes connect prompt forms to a shared gray concept region and then to corresponding output forms.",
+        "The displayed examples and explanatory wording contain a small opposite-of-large versus opposite-of-small wording inconsistency; this should not be copied into a new diagram."
+      ],
+      "inference": "A common middle region makes reuse apparent at a glance. Retaining language lanes on either side helps readers follow which surface forms correspond without making the middle look language-specific.",
+      "rule": "Use convergence/divergence to explain shared processing across surface variants. Check internal wording consistency even in an authoritative reference.",
+      "limit": "One example does not establish a universal language-independent mechanism. A shared node label is not proof of complete equivalence between inputs.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#T1"
+      }
+    },
+    {
+      "case_id": "P2",
+      "article_url": "https://alignment.anthropic.com/2025/petri/",
+      "image_url": "https://alignment.anthropic.com/2025/petri/figures/petri-alignment-agent-TWITTER-fig-02.jpg",
+      "family": "flow",
+      "relationship": "scenario seeds; bounded auditing loop; multiple judgments",
+      "observed": [
+        "Seed cards marked A, B and C appear on the left. A central auditing loop connects an auditor, a vertical tool menu and a target.",
+        "Judgment sliders on the right retain case markers, linking scenarios to several assessment dimensions."
+      ],
+      "inference": "Repeated case markers support traceability across the pipeline. A large loop makes interaction central while the separate judge region prevents confusing generated behavior with its assessment.",
+      "rule": "Preserve case identity across transformations. Distinguish an action menu from an ordered workflow.",
+      "limit": "Do not imply every tool is invoked for every case. Do not cite illustrative slider values as benchmark findings.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_image_pixels",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#P2"
+      }
+    },
+    {
+      "case_id": "Q1",
+      "article_url": "https://arxiv.org/pdf/2209.10652",
+      "image_url": "https://arxiv.org/pdf/2209.10652#page=2",
+      "family": "small_multiples",
+      "relationship": "controlled sparsity; representation geometry; interference",
+      "observed": [
+        "Three matched two-dimensional feature diagrams show increasing sparsity, labeled 0, 80 and 90 percent, with an arrow across the top.",
+        "Feature directions progress from fewer separated directions to denser arrangements; a feature-importance legend and interference annotation qualify the geometry."
+      ],
+      "inference": "Matched planes permit direct comparison of geometric organization while a small number of features keeps the concept inspectable. The toy-model setting is an essential scope boundary.",
+      "rule": "Use controlled small multiples to explain a geometric mechanism. Keep the numerical meaning of position and color tied to the model definition.",
+      "limit": "Arbitrary categorical tasks cannot be drawn as mathematically orthogonal vectors without a defined model. A toy result is not a complete description of every deployed model.",
+      "usage": "reference",
+      "provenance": {
+        "reviewer": "ChatGPT multimodal source review",
+        "method": "official_pdf_screenshot",
+        "date": "2026-10-20",
+        "review": "Previous commit: knowledge/analyses.jsonl#Q1"
+      }
+    }
+  ]
+}

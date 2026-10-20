@@ -1,108 +1,79 @@
-# Usage
+# Offline usage
 
-Run from this Skill directory with the existing environment. No package install,
-service, browser, network or Core integration is needed for local commands.
-
-```sh
-.venv/bin/python -B scripts/illustrations.py --help
-.venv/bin/python -B scripts/illustrations.py audit
-.venv/bin/python -B scripts/illustrations.py search "orchestrator workers workflow" --family flow --limit 3
-.venv/bin/python -B scripts/illustrations.py show figure_cc54e65f66be5075d3a5652c
-.venv/bin/python -B scripts/illustrations.py analyze-packet figure_cc54e65f66be5075d3a5652c --out runs/packet.json
-.venv/bin/python -B scripts/illustrations.py plan examples/cross-domain/article.md --budget 1 --section section-2 --out runs/plan.json
-.venv/bin/python -B scripts/illustrations.py demo all --out runs/demo
-.venv/bin/python -B scripts/illustrations.py render examples/executed/cross-domain/figure.json --article examples/cross-domain/article.md --out runs/render --png
-.venv/bin/python -B scripts/illustrations.py qa runs/render/figure.json --article examples/cross-domain/article.md --out runs/render
-```
-
-`--knowledge PATH` precedes the command. JSONL indexes are read line by line.
-BM25 uses two passes, document-length normalization (k1=1.2, b=0.75), filters English stopwords, weights explicit relationship matches, ranks by relevance
-and deduplicates asset IDs. A weak reviewed match does not outrank a strong metadata
-match merely because it was reviewed.
-Relationship filtering on an analysis uses its explicit relationship; on metadata
-it is a lexical filter, not a visual judgment. Family inference from metadata is
-also only a lexical hint. `--reviewed-only` means current shape-valid imported
-records; it does not mean independent approval. `--include-supporting` opts in
-to incidental literature and landing-page metadata. Negative contrast E8 stays excluded. `--analyses runs/validated.jsonl` selects an import output.
-The article join and analysis map are held in memory; JSONL file bytes are not
-read wholesale. Collection keeps mutable metadata tables in memory for recovery.
-
-The CLI planner is a draft heuristic. It preserves every Markdown section,
-fenced blocks, full input text, line anchors and SHA-256, even with `--section`.
-ATX and Setext headings are supported; this is not a complete Markdown AST.
-A host LLM should read the whole article, reconsider no-image decisions, explain
-placement and family selection, and preserve uncertainty. Non-English input is
-retained verbatim; lexical cues cannot replace semantic review in any language.
-
-To submit an actual reviewed plan, keep `input_hash`, `full_context` and one
-`decisions` entry for every section. Add `review` with nonempty `reviewer`, `date`
-and `rationale`; each illustration needs `family` and exact section-text
-`evidence`. Run `plan ARTICLE --reviewed PLAN --out OUTPUT`. The CLI checks the
-receipt and anchors; it cannot certify that the named reviewer performed review.
-A figure spec can independently carry a `semantic_review` receipt with the same
-fields. Do not add either receipt merely because generation succeeded.
-
-For actual host visual analyses, follow the [rubric](analysis-rubric.md), then:
+Run from this Skill with an environment containing `PyMuPDF==1.26.3`:
 
 ```sh
-.venv/bin/python -B scripts/illustrations.py import-analyses runs/incoming.jsonl --out runs/validated.jsonl
-.venv/bin/python -B scripts/illustrations.py search "delegation" --analyses runs/validated.jsonl --reviewed-only
+.venv/bin/python -B scripts/illustrate.py verify-index
+.venv/bin/python -B scripts/illustrate.py search 'negative branch' --family flow
+.venv/bin/python -B scripts/illustrate.py search E8 --include-contrast
+.venv/bin/python -B scripts/illustrate.py plan examples/article.md --budget 2 --out runs/plan.json
+.venv/bin/python -B scripts/illustrate.py illustrate examples/article.md --out runs/draft
+.venv/bin/python -B scripts/illustrate.py render examples/article.md examples/figure.json --out runs/example
+.venv/bin/python -B scripts/illustrate.py qa examples/article.md examples/figure.json --out runs/example
+.venv/bin/python -B -m unittest discover -s tests -p 'test_*.py'
 ```
 
-Import validates incoming rows under an exclusive destination lock, upserts atomically,
-retains unrelated rows and replacement history, detects duplicate occurrence/case IDs,
-and is a byte-preserving no-op on identical input. The default destination is
-`knowledge/analyses.jsonl`; `--out` may select a separate store. Validation does not
-endorse inspection claims. Outputs, collector stores and temporary siblings must resolve
-inside this Skill; symlink escapes and hard-linked existing output files fail.
+`plan --out` names a JSON file; other output arguments name directories. QA also
+prints JSON without an output directory. Exit status: 0 success, 1 failed QA,
+2 invalid input/render error. Rendering emits `figure.svg`, `figure.png`,
+`preview.html`, editable `figure.json`, and `qa.json`. All writes must resolve
+inside the Skill; symlink paths and existing hard-linked outputs are rejected.
+Do not use a directory another process is concurrently replacing.
 
-`discover` and `collect` are working network commands, disabled unless
-`--allow-network` is explicitly supplied under a separate collection authorization.
-Do not run them during an offline task. Defaults cap discovery/collection at 20;
-`collect --include-pdfs --max-linked-pdfs 20` additionally bounds linked PDF fanout.
-No source image or full article is stored. Discovery refresh currently rescans
-indexes; it does not implement conditional index caching.
+## Editable spec, version 1
 
-Executed examples are in `examples/executed/`. The article example is a complete
-original reading guide grounded in recovered metadata from a real publication;
-it does not represent full-source-text ingestion or pixel review. The repair
-case transfers a relationship question across domains. Family examples use real
-local index counts and original conceptual designs. Every output remains a draft
-until semantic and visual review. See [implementation review](implementation-review.md).
+See [the workflow example](../examples/figure.json). Required fields:
 
-## Full publication and original cross-domain examples
+- `version`: 1; `article_sha256`: SHA-256 of the **complete original bytes**,
+  including line endings; `title`: nonempty text, at most 160 characters.
+- `family`: `flow`, `comparison`, `matrix`, `bar`, `line`, or `cover`.
+- `nodes`: 1–16 objects with unique `id`, `label` (up to 600 characters), and
+  `quote` (an exact nonempty substring of the article, up to 4000 characters).
+- `case_refs`: nonempty list of `{case_id, article_url}` matching the local
+  index exactly. E8 cannot be a design target. Case families need not equal
+  render families: explain the structural adaptation during host review.
+- `edges`: optional, flow only; up to 32 `{id, from, to, label, quote}` objects.
+  Endpoints must exist; edge IDs are unique and distinct from node IDs.
+  Quotes must support the relationship, not merely mention both endpoints.
+- `citations`: optional `{label, url, quote}` objects. HTTP(S) URLs and exact
+  quotes must occur in the article. Markdown links in node/edge/cell quotes are
+  also retained as clickable SVG and HTML links.
 
-```sh
-.venv/bin/python -B scripts/publication_examples.py
-.venv/bin/python -B scripts/illustrations.py publication-context https://www.anthropic.com/engineering/building-effective-agents --allow-network --network system --out runs/publication-context.json
-```
+IDs begin with an ASCII letter and contain up to 64 letters, digits, `_` or `-`.
+Labels are editable paraphrases; code cannot determine whether they are true.
+To rebind after an article edit, calculate its SHA with `hashlib.sha256` on
+`Path(...).read_bytes()`, then recheck every claim before updating the spec.
 
-`publication-context`, `discover` and `collect` accept `--network direct|system`
-(default `direct`). System mode uses the managed host proxy/DNS environment;
-both modes retain TLS verification, host restrictions and robots checks.
-`publication-context` uses SafeFetcher, fetches exactly one
-official article, reads its editorial sections transiently and retains hashes and
-heuristic decisions. It never saves the full source. Its host must review meaning;
-this command is not an LLM. The original example used web-extracted editorial text. Subsequent actual native
-acceptance resolved the transport gap; see `examples/full-publication/native-acceptance.json`.
-The original fallback coverage remains historical evidence.
+Family-specific fields:
 
-The new original SVG/PNG/HTML/spec/QA outputs are in `examples/full-publication/`
-and `examples/archive-pilot/` (including `message-detail/`). The archive article is
-complete original prose; the official example retains an original brief, all-section
-coverage, six words of exact anchors and no full copyrighted source. Semantic
-self-review and actual AI PNG review are recorded separately in `visual-review.md`.
+| Family | Additional fields and interpretation |
+| --- | --- |
+| flow | Edges show explicitly authored dependencies, including returns. |
+| comparison | Equal-weight peer cards; no inferred causality. |
+| cover | Single-column concept/excerpt cards; no external artwork. |
+| matrix | `columns`: 1–4 labels; each node has matching `cells`: `{text, quote}`. |
+| bar | `unit`, `baseline: 0`; each node has numeric `value`. |
+| line | Same as bar; at least two nodes; ordered categories with equal spacing. |
 
-## One complete offline use example
+Charts accept only finite nonnegative values. Each value must appear next to
+its literal unit in its own exact claim quote (for example `12 ms`). Different
+numeric spellings with the same value are accepted; derived values, unit
+conversion, commas in numbers, negative values, scientific notation, and
+percentage-point arithmetic are unsupported. Line spacing is ordinal, not a
+time or numeric x-axis. Review ordering and comparability manually.
 
-From this Skill directory, render the existing original repair-workflow spec
-against its complete article, then open `runs/repair/figure.png` for visual review:
+## Limits and approval
 
-```sh
-TMPDIR="$PWD/runs/tmp" .venv/bin/python -B scripts/illustrations.py render examples/executed/cross-domain/figure.json --article examples/cross-domain/article.md --out runs/repair --png
-```
+The index is a preserved summary of prior attributed source reviews. Validation
+checks its structure and counts offline, not link availability or image pixels.
+Search ranks token matches across case evidence and boundaries; E8 is excluded
+unless explicitly requested. Plan reads all sections, including text after
+fences; fenced headings cannot create sections. Selection is a length/budget
+heuristic. Automatic drafts take up to four prose lines and invent no edges.
 
-The command exports editable JSON, SVG, PNG, HTML and mechanical QA. It does not
-fetch anything or confer human approval. Create `runs/tmp` inside this Skill first
-if it does not exist. Runtime `runs/`, `.venv/`, raw logs, collector journals, lock
-files and source images are not delivery artifacts.
+Text is escaped and wrapped with conservative character estimates. Complex
+scripts/font coverage, long URLs, dense return paths, and unusual glyph widths
+still need PNG inspection. A successful PNG export does not prove legibility.
+QA verifies SHA, anchors, IDs, links, and numeric evidence; it cannot prove
+entailment, correct emphasis, chart comparability, or publication readiness.
+No network, source-media copying, crawling, or external image generation occurs.

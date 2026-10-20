@@ -1,11 +1,12 @@
 .venv/
-.cache/
+runs/
 __pycache__/
 *.py[cod]
-runs/
-knowledge/.state/
-
-
-# Local collection and import recovery artifacts
-knowledge/.collector-journal.jsonl
-knowledge/*.lock
+.pytest_cache/
+.coverage
+.DS_Store
+figure.svg
+figure.png
+preview.html
+qa.json
+plan.json

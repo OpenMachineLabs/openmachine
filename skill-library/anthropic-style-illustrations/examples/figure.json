@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "article_sha256": "ed2a81e7f6a2e846c01dea21412cdd9979b884bc13fcc76b260f8ad81b4f5edf",
+  "family": "flow",
+  "title": "Review an archive request with its evidence",
+  "nodes": [
+    {
+      "id": "n1",
+      "label": "Receive the request",
+      "quote": "The coordinator records the requested collection and the research question."
+    },
+    {
+      "id": "n2",
+      "label": "Check the evidence",
+      "quote": "The archivist checks the record against the collection catalogue."
+    },
+    {
+      "id": "n3",
+      "label": "Review access",
+      "quote": "The access reviewer checks the annotated record against the collection's access conditions."
+    },
+    {
+      "id": "n4",
+      "label": "Return a traceable response",
+      "quote": "The coordinator returns the decision with its supporting notes."
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "Recorded request",
+      "quote": "Once the request is recorded, the coordinator passes the record to the archivist."
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "Annotated record",
+      "quote": "After the catalogue check is complete, the archivist sends the annotated record to the access reviewer."
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "Decision and notes",
+      "quote": "After the access review, the reviewer passes the decision and its supporting notes to the coordinator."
+    }
+  ],
+  "case_refs": [
+    {
+      "case_id": "P2",
+      "article_url": "https://alignment.anthropic.com/2025/petri/"
+    }
+  ],
+  "citations": []
+}
