@@ -1,0 +1,410 @@
+{
+  "alt": "Matched messages contrast an unexplained publication failure with a proposed message preserving the record ID, restricted status, unresolved display basis and next reviewer action.",
+  "caption": "Both messages describe the same hypothetical incomplete record. The longer response names the state, missing evidence and next action. It does not invent permission.",
+  "claims": [
+    {
+      "id": "message",
+      "quote": "The catalogue page presents the stable identifier, the approved description, visible uncertainty and the applicable display status. A concise preview may omit working discussion, but it must tell readers where the fuller record is available. An error message should identify the failed action and a useful next step. Merely making a message shorter does not improve it if the information needed for recovery disappears.\n\nNo actual scans, personal information or permissions decisions are included in this design exercise. The proposed interface is a teaching example. The archive would need to define its own operational criteria before using it.",
+      "section_id": "section-6",
+      "text": "Show a failed action and useful next step without hiding uncertainty."
+    }
+  ],
+  "columns": [
+    "Missing recovery information",
+    "Original proposed response"
+  ],
+  "family": "comparison",
+  "input_hash": "6cc266d481e167d449e8b5ce5e8614fd61b65a6515ca247691e95433ca42b5b3",
+  "items": [
+    {
+      "cells": [
+        "Unable to publish.",
+        "Record PHOTO-014 remains restricted. The display basis is unresolved. Ask the permissions reviewer to complete the note."
+      ],
+      "claim_ids": [
+        "message"
+      ],
+      "id": "message"
+    }
+  ],
+  "palette": "scientific",
+  "references": [
+    {
+      "analysis": {
+        "article_id": "article_1399aec680791f782180f8a7",
+        "case_id": "E5",
+        "composition": "The dark console retains the same general query and two-result structure but presents compact numbered rows.\nThe response is shorter through selected content, not merely reduced font size or a tighter crop.",
+        "counterexamples": [
+          "Do not infer token savings from image dimensions.",
+          "Do not drop fields necessary for later actions merely to look clean."
+        ],
+        "cross_domain_transfer": {
+          "changes": "Preserve title, date and stable record identifier while moving secondary fields to drill-down.",
+          "domain": "Archive search summaries",
+          "limits": "A summary cannot be used as evidence of unseen full-record content.",
+          "mapping": "Show compact catalog hits linked to full records."
+        },
+        "editorial_purpose": "Show which information can be omitted for the current task while preserving the ability to understand and use results.",
+        "evidence": {
+          "inferred": [
+            {
+              "basis": [
+                "observed:0",
+                "observed:1",
+                "source_stated:0"
+              ],
+              "claim": "A matched query limits distracting changes and lets the reader inspect the actual contract difference. Concision is valuable when it preserves the next decision, not as an unconditional aesthetic preference.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Fd4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png&w=3840"
+            }
+          ],
+          "observed": [
+            {
+              "claim": "The dark console retains the same general query and two-result structure but presents compact numbered rows.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Fd4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png&w=3840"
+            },
+            {
+              "claim": "The response is shorter through selected content, not merely reduced font size or a tighter crop.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Fd4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png&w=3840"
+            }
+          ],
+          "source_stated": [
+            {
+              "claim": "The article contrasts response formats while discussing useful context.",
+              "context_review": {
+                "date": "2026-10-20",
+                "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+                "notes_origin": "runs/curation-02.json#E5",
+                "reviewer": "ChatGPT multimodal source review",
+                "source_hash": "de97f3ee92247b048e2be66c4aef29d3a01e02ec752dfbe965f5edce805fb8c6"
+              },
+              "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+              "method": "context_review_paraphrase"
+            }
+          ]
+        },
+        "family": "screenshot",
+        "figure_id": "figure_843a581d6152e524283555b0",
+        "information_structure": "Result identity stays stable as fields are reduced. The meaningful comparison is information retained versus removed, not the physical area of the two screenshots.",
+        "original_notes": {
+          "file": "runs/curation-02.json",
+          "group_context": {
+            "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+            "source": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+            "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings."
+          },
+          "sha256": "a06a12ab324d0d98ea10df93d59f1b03e1f1581dcdeabb4c3a98b08e8a9db37a",
+          "study": {
+            "asset": "d4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png",
+            "counterexamples": [
+              "Do not infer token savings from image dimensions.",
+              "Do not drop fields necessary for later actions merely to look clean."
+            ],
+            "family": "screenshot",
+            "key": "E5",
+            "mapping": "Result identity stays stable as fields are reduced. The meaningful comparison is information retained versus removed, not the physical area of the two screenshots.",
+            "observed": [
+              "The dark console retains the same general query and two-result structure but presents compact numbered rows.",
+              "The response is shorter through selected content, not merely reduced font size or a tighter crop."
+            ],
+            "purpose": "Show which information can be omitted for the current task while preserving the ability to understand and use results.",
+            "rationale": "A matched query limits distracting changes and lets the reader inspect the actual contract difference. Concision is valuable when it preserves the next decision, not as an unconditional aesthetic preference.",
+            "reconstruction": "Start from the detailed record and explicitly justify each omitted field. Keep enough identity for drill-down; provide accessible copyable output alongside the image.",
+            "relationship": "matched response; information reduction; drill-down",
+            "rules": [
+              "Keep query and result identity fixed in format comparisons.",
+              "Reduce irrelevant information rather than making all text smaller."
+            ],
+            "source_stated": "The article contrasts response formats while discussing useful context.",
+            "title": "Concise output is a semantic selection, not smaller type",
+            "transfer": {
+              "changes": "Preserve title, date and stable record identifier while moving secondary fields to drill-down.",
+              "domain": "Archive search summaries",
+              "limits": "A summary cannot be used as evidence of unseen full-record content.",
+              "mapping": "Show compact catalog hits linked to full records."
+            }
+          }
+        },
+        "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+        "pixel_inspection": {
+          "date": "2026-10-20",
+          "inspector": "ChatGPT multimodal source review",
+          "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Fd4f649a66482efb5a80cf14ea85e84974ede1c49-1920x725.png&w=3840",
+          "method": "official_image_pixels",
+          "note": "Original visual studies based on images opened by main Chat. Rationale is inference; production recipes are proposals, not verified software histories. Exact fonts and color values were not measured.",
+          "rights": "link_only"
+        },
+        "production_certainty": "uncertain",
+        "production_hypothesis": "Start from the detailed record and explicitly justify each omitted field. Keep enough identity for drill-down; provide accessible copyable output alongside the image.",
+        "relationship": "matched response; information reduction; drill-down",
+        "reusable_rules": [
+          "Keep query and result identity fixed in format comparisons.",
+          "Reduce irrelevant information rather than making all text smaller."
+        ],
+        "source_hash": "de97f3ee92247b048e2be66c4aef29d3a01e02ec752dfbe965f5edce805fb8c6",
+        "title": "Concise output is a semantic selection, not smaller type",
+        "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings.",
+        "usage": "reference"
+      },
+      "article_id": "article_1399aec680791f782180f8a7",
+      "evidence_level": "validated_analysis",
+      "figure_id": "figure_843a581d6152e524283555b0",
+      "source_hash": "de97f3ee92247b048e2be66c4aef29d3a01e02ec752dfbe965f5edce805fb8c6",
+      "source_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "transfer": "Transfer semantic selection instead of smaller type; retain actionable information."
+    },
+    {
+      "analysis": {
+        "article_id": "article_1399aec680791f782180f8a7",
+        "case_id": "E6",
+        "composition": "The console displays an invalid-identifier error with distinct sections for a summary, valid identifiers and resolution guidance.\nSectioned monospaced text provides an actionable next step rather than only a machine code.",
+        "counterexamples": [
+          "Do not invent a recovery command the tool cannot execute.",
+          "Do not expose private account identifiers to make an example realistic."
+        ],
+        "cross_domain_transfer": {
+          "changes": "Use neutral sample values and actual form constraints.",
+          "domain": "Application-form validation",
+          "limits": "Guidance should not imply the corrected request will satisfy unrelated eligibility checks.",
+          "mapping": "Explain which field is invalid, show acceptable formats and provide a valid correction route."
+        },
+        "editorial_purpose": "Demonstrate that response quality depends on recovery utility, not minimum length.",
+        "evidence": {
+          "inferred": [
+            {
+              "basis": [
+                "observed:0",
+                "observed:1",
+                "source_stated:0"
+              ],
+              "claim": "Visible recovery guidance makes the failure productive; an opaque error would force guessing or repeated invalid calls. The example counters an overly simplistic always-be-concise rule.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F810661bd44a35fb273806ae95160040155978c3e-1920x850.png&w=3840"
+            }
+          ],
+          "observed": [
+            {
+              "claim": "The console displays an invalid-identifier error with distinct sections for a summary, valid identifiers and resolution guidance.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F810661bd44a35fb273806ae95160040155978c3e-1920x850.png&w=3840"
+            },
+            {
+              "claim": "Sectioned monospaced text provides an actionable next step rather than only a machine code.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F810661bd44a35fb273806ae95160040155978c3e-1920x850.png&w=3840"
+            }
+          ],
+          "source_stated": [
+            {
+              "claim": "The section recommends informative tool errors that help an agent correct its next action.",
+              "context_review": {
+                "date": "2026-10-20",
+                "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+                "notes_origin": "runs/curation-02.json#E6",
+                "reviewer": "ChatGPT multimodal source review",
+                "source_hash": "e5968de3b317f3d8200e1b7a60cc289b07d8f8e5ee46b7ad6099aad0389fc415"
+              },
+              "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+              "method": "context_review_paraphrase"
+            }
+          ]
+        },
+        "family": "screenshot",
+        "figure_id": "figure_7bfcd962220661973e185b42",
+        "information_structure": "The failed value, allowable alternatives and repair action have separate textual roles. Headings support scanning while preserving exact identifiers.",
+        "original_notes": {
+          "file": "runs/curation-02.json",
+          "group_context": {
+            "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+            "source": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+            "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings."
+          },
+          "sha256": "a06a12ab324d0d98ea10df93d59f1b03e1f1581dcdeabb4c3a98b08e8a9db37a",
+          "study": {
+            "asset": "810661bd44a35fb273806ae95160040155978c3e-1920x850.png",
+            "counterexamples": [
+              "Do not invent a recovery command the tool cannot execute.",
+              "Do not expose private account identifiers to make an example realistic."
+            ],
+            "family": "screenshot",
+            "key": "E6",
+            "mapping": "The failed value, allowable alternatives and repair action have separate textual roles. Headings support scanning while preserving exact identifiers.",
+            "observed": [
+              "The console displays an invalid-identifier error with distinct sections for a summary, valid identifiers and resolution guidance.",
+              "Sectioned monospaced text provides an actionable next step rather than only a machine code."
+            ],
+            "purpose": "Demonstrate that response quality depends on recovery utility, not minimum length.",
+            "rationale": "Visible recovery guidance makes the failure productive; an opaque error would force guessing or repeated invalid calls. The example counters an overly simplistic always-be-concise rule.",
+            "reconstruction": "Write an original error that names the failed field, states valid alternatives and offers a real supported recovery operation. Keep the API truth separate from user-facing explanation.",
+            "relationship": "failure; diagnosis; repair guidance",
+            "rules": [
+              "Include actionable repair information in expected failure responses.",
+              "Optimize for the next correct action, not merely text length."
+            ],
+            "source_stated": "The section recommends informative tool errors that help an agent correct its next action.",
+            "title": "An error can be longer and more useful",
+            "transfer": {
+              "changes": "Use neutral sample values and actual form constraints.",
+              "domain": "Application-form validation",
+              "limits": "Guidance should not imply the corrected request will satisfy unrelated eligibility checks.",
+              "mapping": "Explain which field is invalid, show acceptable formats and provide a valid correction route."
+            }
+          }
+        },
+        "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+        "pixel_inspection": {
+          "date": "2026-10-20",
+          "inspector": "ChatGPT multimodal source review",
+          "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F810661bd44a35fb273806ae95160040155978c3e-1920x850.png&w=3840",
+          "method": "official_image_pixels",
+          "note": "Original visual studies based on images opened by main Chat. Rationale is inference; production recipes are proposals, not verified software histories. Exact fonts and color values were not measured.",
+          "rights": "link_only"
+        },
+        "production_certainty": "uncertain",
+        "production_hypothesis": "Write an original error that names the failed field, states valid alternatives and offers a real supported recovery operation. Keep the API truth separate from user-facing explanation.",
+        "relationship": "failure; diagnosis; repair guidance",
+        "reusable_rules": [
+          "Include actionable repair information in expected failure responses.",
+          "Optimize for the next correct action, not merely text length."
+        ],
+        "source_hash": "e5968de3b317f3d8200e1b7a60cc289b07d8f8e5ee46b7ad6099aad0389fc415",
+        "title": "An error can be longer and more useful",
+        "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings.",
+        "usage": "reference"
+      },
+      "article_id": "article_1399aec680791f782180f8a7",
+      "evidence_level": "validated_analysis",
+      "figure_id": "figure_7bfcd962220661973e185b42",
+      "source_hash": "e5968de3b317f3d8200e1b7a60cc289b07d8f8e5ee46b7ad6099aad0389fc415",
+      "source_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "transfer": "Transfer recovery guidance; useful explanations may be longer."
+    },
+    {
+      "analysis": {
+        "article_id": "article_1399aec680791f782180f8a7",
+        "case_id": "E8",
+        "composition": "The same general invalid-request situation appears as nested JSON with code, status, field and value.\nThe dark monospaced frame lacks the explanatory sections and recovery instructions visible in the companion error example.",
+        "counterexamples": [
+          "JSON may be appropriate for a wire protocol.",
+          "Do not retrieve this negative example as an unqualified target style."
+        ],
+        "cross_domain_transfer": {
+          "changes": "Retain exact protocol fields while adding useful guidance in the appropriate layer.",
+          "domain": "Service API documentation",
+          "limits": "Readable wording cannot compensate for incorrect or unsupported recovery advice.",
+          "mapping": "Contrast an opaque validation payload with a developer-facing repair explanation."
+        },
+        "editorial_purpose": "Provide a specific counterexample so the positive recommendation is testable: the reader can identify exactly what recovery information is absent.",
+        "evidence": {
+          "inferred": [
+            {
+              "basis": [
+                "observed:0",
+                "observed:1",
+                "source_stated:0"
+              ],
+              "claim": "Holding the request and console frame stable isolates actionability. Treating JSON as inherently bad would be a mistaken stylistic generalization.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F2445187904704fec8c50af0b950e310ba743fac2-1920x733.png&w=3840"
+            }
+          ],
+          "observed": [
+            {
+              "claim": "The same general invalid-request situation appears as nested JSON with code, status, field and value.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F2445187904704fec8c50af0b950e310ba743fac2-1920x733.png&w=3840"
+            },
+            {
+              "claim": "The dark monospaced frame lacks the explanatory sections and recovery instructions visible in the companion error example.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F2445187904704fec8c50af0b950e310ba743fac2-1920x733.png&w=3840"
+            }
+          ],
+          "source_stated": [
+            {
+              "claim": "The article discusses how error responses can guide correction rather than simply expose low-level failure details.",
+              "context_review": {
+                "date": "2026-10-20",
+                "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+                "notes_origin": "runs/curation-02.json#E8",
+                "reviewer": "ChatGPT multimodal source review",
+                "source_hash": "d48fc55d2fbd4fe2ad67e7dba97926888dad2ebc6622cd0521a2565c3b04642c"
+              },
+              "locator": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+              "method": "context_review_paraphrase"
+            }
+          ]
+        },
+        "family": "screenshot",
+        "figure_id": "figure_f878dfa4779b281d2c020838",
+        "information_structure": "Nested syntax exposes a machine-oriented schema, while absent action guidance is the important difference. The format itself is not the failure mechanism.",
+        "original_notes": {
+          "file": "runs/curation-02.json",
+          "group_context": {
+            "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+            "source": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+            "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings."
+          },
+          "sha256": "a06a12ab324d0d98ea10df93d59f1b03e1f1581dcdeabb4c3a98b08e8a9db37a",
+          "study": {
+            "asset": "2445187904704fec8c50af0b950e310ba743fac2-1920x733.png",
+            "counterexamples": [
+              "JSON may be appropriate for a wire protocol.",
+              "Do not retrieve this negative example as an unqualified target style."
+            ],
+            "family": "screenshot",
+            "key": "E8",
+            "mapping": "Nested syntax exposes a machine-oriented schema, while absent action guidance is the important difference. The format itself is not the failure mechanism.",
+            "observed": [
+              "The same general invalid-request situation appears as nested JSON with code, status, field and value.",
+              "The dark monospaced frame lacks the explanatory sections and recovery instructions visible in the companion error example."
+            ],
+            "purpose": "Provide a specific counterexample so the positive recommendation is testable: the reader can identify exactly what recovery information is absent.",
+            "rationale": "Holding the request and console frame stable isolates actionability. Treating JSON as inherently bad would be a mistaken stylistic generalization.",
+            "reconstruction": "Create a matched pair with identical failed input: one machine-only response and one response with valid alternatives and a supported next step. Label the former as a negative design case.",
+            "relationship": "opaque failure; contrast with actionable guidance",
+            "rules": [
+              "Include counterexamples in a style library, not only attractive successes.",
+              "Compare missing semantic affordances rather than blaming a serialization format."
+            ],
+            "source_stated": "The article discusses how error responses can guide correction rather than simply expose low-level failure details.",
+            "title": "A negative example isolates missing recovery information",
+            "transfer": {
+              "changes": "Retain exact protocol fields while adding useful guidance in the appropriate layer.",
+              "domain": "Service API documentation",
+              "limits": "Readable wording cannot compensate for incorrect or unsupported recovery advice.",
+              "mapping": "Contrast an opaque validation payload with a developer-facing repair explanation."
+            }
+          }
+        },
+        "palette": "Charts use restrained pink/coral against light neutral fields; console examples use near-black terminal surfaces with light text. These are distinct visual families within one article.",
+        "pixel_inspection": {
+          "date": "2026-10-20",
+          "inspector": "ChatGPT multimodal source review",
+          "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F2445187904704fec8c50af0b950e310ba743fac2-1920x733.png&w=3840",
+          "method": "official_image_pixels",
+          "note": "Original visual studies based on images opened by main Chat. Rationale is inference; production recipes are proposals, not verified software histories. Exact fonts and color values were not measured.",
+          "rights": "link_only"
+        },
+        "production_certainty": "uncertain",
+        "production_hypothesis": "Create a matched pair with identical failed input: one machine-only response and one response with valid alternatives and a supported next step. Label the former as a negative design case.",
+        "relationship": "opaque failure; contrast with actionable guidance",
+        "reusable_rules": [
+          "Include counterexamples in a style library, not only attractive successes.",
+          "Compare missing semantic affordances rather than blaming a serialization format."
+        ],
+        "source_hash": "d48fc55d2fbd4fe2ad67e7dba97926888dad2ebc6622cd0521a2565c3b04642c",
+        "title": "A negative example isolates missing recovery information",
+        "typography": "Charts use sans-serif labels and direct values; console examples use aligned monospaced text and visible section headings.",
+        "usage": "contrast_not_target"
+      },
+      "article_id": "article_1399aec680791f782180f8a7",
+      "evidence_level": "validated_analysis",
+      "figure_id": "figure_f878dfa4779b281d2c020838",
+      "source_hash": "d48fc55d2fbd4fe2ad67e7dba97926888dad2ebc6622cd0521a2565c3b04642c",
+      "source_url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "transfer": "Negative contrast only: remove neither the failed action nor the recovery step."
+    }
+  ],
+  "schema_version": 1,
+  "semantic_review": {
+    "date": "2026-10-20",
+    "rationale": "Checked claims, distinctions and limitations against the complete available input; no PNG visual review.",
+    "reviewer": "Codex author self-review"
+  },
+  "subtitle": "Matched state • Illustrative record identifier",
+  "title": "Make an unfinished record recoverable"
+}

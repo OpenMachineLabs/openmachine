@@ -1,0 +1,68 @@
+{
+  "budget": 2,
+  "decisions": [
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-1"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-2"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-3"
+    }
+  ],
+  "full_context": "# Corpus coverage\n\nThese are counts derived from the retained local indexes, not model performance measurements.\n\n## Counts\n\nSource publications: 850 documents. Supporting literature: 62 documents. Landing pages: 1 documents.\n\n## Reading policy\n\nDefault retrieval includes source publications. Supporting literature requires explicit inclusion. Metadata retrieval leads to source inspection, then analysis import.\n",
+  "input_hash": "3787ff5e85062f89e42226ae8a09802b5309971d372f14bc071e854ffc92e813",
+  "schema_version": 1,
+  "sections": [
+    {
+      "anchor": "section-1",
+      "end_line": 4,
+      "heading": "Corpus coverage",
+      "id": "section-1",
+      "level": 1,
+      "start_line": 1,
+      "text": "# Corpus coverage\n\nThese are counts derived from the retained local indexes, not model performance measurements.\n"
+    },
+    {
+      "anchor": "section-2",
+      "end_line": 8,
+      "heading": "Counts",
+      "id": "section-2",
+      "level": 2,
+      "start_line": 5,
+      "text": "## Counts\n\nSource publications: 850 documents. Supporting literature: 62 documents. Landing pages: 1 documents.\n"
+    },
+    {
+      "anchor": "section-3",
+      "end_line": 11,
+      "heading": "Reading policy",
+      "id": "section-3",
+      "level": 2,
+      "start_line": 9,
+      "text": "## Reading policy\n\nDefault retrieval includes source publications. Supporting literature requires explicit inclusion. Metadata retrieval leads to source inspection, then analysis import."
+    }
+  ],
+  "selection": [
+    "section-1",
+    "section-2",
+    "section-3"
+  ],
+  "semantic_review": "pending_host_llm",
+  "status": "heuristic_draft"
+}

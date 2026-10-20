@@ -1,0 +1,172 @@
+{
+  "alt": "What the local corpus contains",
+  "caption": "Counts computed from the retained articles index. Supporting literature and landing pages are excluded from default style retrieval.",
+  "claims": [
+    {
+      "id": "c1",
+      "quote": "Source publications: 850 documents. Supporting literature: 62 documents. Landing pages: 1 documents.",
+      "section_id": "section-2",
+      "text": "Source publications: 850 documents. Supporting literature: 62 documents. Landing pages: 1 documents."
+    }
+  ],
+  "data": [
+    {
+      "claim_ids": [
+        "c1"
+      ],
+      "evidence": "Source publications: 850 documents.",
+      "id": "source",
+      "label": "Source publications",
+      "value": 850
+    },
+    {
+      "claim_ids": [
+        "c1"
+      ],
+      "evidence": "Supporting literature: 62 documents.",
+      "id": "support",
+      "label": "Supporting literature",
+      "value": 62
+    },
+    {
+      "claim_ids": [
+        "c1"
+      ],
+      "evidence": "Landing pages: 1 documents.",
+      "id": "landing",
+      "label": "Landing pages",
+      "value": 1
+    }
+  ],
+  "family": "bar",
+  "input_hash": "3787ff5e85062f89e42226ae8a09802b5309971d372f14bc071e854ffc92e813",
+  "references": [
+    {
+      "analysis": {
+        "article_id": "article_ffc229d83891918f82064b92",
+        "case_id": "A6",
+        "composition": "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.\nAn accepted branch leaves toward an output distinct from the cycle.",
+        "counterexamples": [
+          "Repeated independent sampling without actionable feedback is a different pattern.",
+          "Iteration count cannot be presented as quality improvement without evidence."
+        ],
+        "cross_domain_transfer": {
+          "changes": "State the rubric and route unresolved disagreements to a human decision after bounded revisions.",
+          "domain": "Copy editing",
+          "limits": "Editorial acceptance is not proof of factual correctness or audience effectiveness.",
+          "mapping": "An author submits a draft; an editor returns specific issues; a passing revision proceeds to production."
+        },
+        "editorial_purpose": "Explain what changes between attempts; a generic circular arrow would conceal the critique that makes revision possible.",
+        "evidence": {
+          "inferred": [
+            {
+              "basis": [
+                "observed:0",
+                "observed:1",
+                "source_stated:0"
+              ],
+              "claim": "Opposing labeled arcs reduce confusion about who produces the criterion. A visible accepted exit keeps iteration from appearing unbounded.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+            }
+          ],
+          "observed": [
+            {
+              "claim": "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+            },
+            {
+              "claim": "An accepted branch leaves toward an output distinct from the cycle.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+            }
+          ],
+          "source_stated": [
+            {
+              "claim": "The evaluator-optimizer pattern uses evaluation feedback to refine generated work.",
+              "context_review": {
+                "date": "2026-10-20",
+                "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+                "notes_origin": "runs/curation-01.json#A6",
+                "reviewer": "ChatGPT multimodal source review",
+                "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587"
+              },
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "method": "context_review_paraphrase"
+            }
+          ]
+        },
+        "family": "flow",
+        "figure_id": "figure_ef124886031c1d9413654b40",
+        "information_structure": "The forward artifact and return feedback are different messages. Evaluation owns the exit decision. The cycle depicts attempts, not convergence or a measured quality trend.",
+        "original_notes": {
+          "file": "runs/curation-01.json",
+          "group_context": {
+            "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+            "source": "https://www.anthropic.com/engineering/building-effective-agents",
+            "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+          },
+          "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+          "study": {
+            "asset": "14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png",
+            "counterexamples": [
+              "Repeated independent sampling without actionable feedback is a different pattern.",
+              "Iteration count cannot be presented as quality improvement without evidence."
+            ],
+            "family": "flow",
+            "key": "A6",
+            "mapping": "The forward artifact and return feedback are different messages. Evaluation owns the exit decision. The cycle depicts attempts, not convergence or a measured quality trend.",
+            "observed": [
+              "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.",
+              "An accepted branch leaves toward an output distinct from the cycle."
+            ],
+            "purpose": "Explain what changes between attempts; a generic circular arrow would conceal the critique that makes revision possible.",
+            "rationale": "Opposing labeled arcs reduce confusion about who produces the criterion. A visible accepted exit keeps iteration from appearing unbounded.",
+            "reconstruction": "Define an evaluable acceptance criterion, name both exchanged artifacts and reserve an exit port. Add a retry limit or escalation only when supported by the article's actual workflow.",
+            "relationship": "iteration; critique; acceptance",
+            "rules": [
+              "Give both directions of a feedback loop distinct labels.",
+              "Expose termination and escalation conditions."
+            ],
+            "source_stated": "The evaluator-optimizer pattern uses evaluation feedback to refine generated work.",
+            "title": "Feedback carries information, not guaranteed improvement",
+            "transfer": {
+              "changes": "State the rubric and route unresolved disagreements to a human decision after bounded revisions.",
+              "domain": "Copy editing",
+              "limits": "Editorial acceptance is not proof of factual correctness or audience effectiveness.",
+              "mapping": "An author submits a draft; an editor returns specific issues; a passing revision proceeds to production."
+            }
+          }
+        },
+        "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+        "pixel_inspection": {
+          "date": "2026-10-20",
+          "inspector": "ChatGPT multimodal source review",
+          "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840",
+          "method": "official_image_pixels",
+          "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+          "rights": "link_only"
+        },
+        "production_certainty": "uncertain",
+        "production_hypothesis": "Define an evaluable acceptance criterion, name both exchanged artifacts and reserve an exit port. Add a retry limit or escalation only when supported by the article's actual workflow.",
+        "relationship": "iteration; critique; acceptance",
+        "reusable_rules": [
+          "Give both directions of a feedback loop distinct labels.",
+          "Expose termination and escalation conditions."
+        ],
+        "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587",
+        "title": "Feedback carries information, not guaranteed improvement",
+        "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+        "usage": "reference"
+      },
+      "article_id": "article_ffc229d83891918f82064b92",
+      "evidence_level": "validated_analysis",
+      "figure_id": "figure_ef124886031c1d9413654b40",
+      "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587",
+      "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "transfer": "Reuse the retained source reviewer relationship study; the composition is original and no new pixel review is claimed."
+    }
+  ],
+  "schema_version": 1,
+  "subtitle": "Original explanatory composition",
+  "title": "What the local corpus contains",
+  "unit": "documents"
+}

@@ -1,0 +1,168 @@
+{
+  "alt": "Two questions before choosing a workflow",
+  "caption": "An original reading map based on workflow names. The source article supplies the actual usage conditions; this comparison does not rank performance.",
+  "claims": [
+    {
+      "id": "c1",
+      "quote": "Routing invites a question about selection. Parallelization invites a question\nabout concurrent work.",
+      "section_id": "section-3",
+      "text": "Routing invites a question about selection. Parallelization invites a question\nabout concurrent work."
+    }
+  ],
+  "columns": [
+    "Routing • Selection",
+    "Parallelization • Concurrency"
+  ],
+  "family": "comparison",
+  "input_hash": "63fb6bc706b578a4f930525fe89b22a7c1e71164189707a5b72d24c2e89ea91d",
+  "items": [
+    {
+      "cells": [
+        "Which path fits this input?",
+        "Which work can proceed concurrently?"
+      ],
+      "claim_ids": [
+        "c1"
+      ],
+      "id": "questions"
+    },
+    {
+      "cells": [
+        "Read the routing section for conditions.",
+        "Read the parallelization section for conditions."
+      ],
+      "claim_ids": [
+        "c1"
+      ],
+      "id": "boundaries"
+    }
+  ],
+  "references": [
+    {
+      "analysis": {
+        "article_id": "article_ffc229d83891918f82064b92",
+        "case_id": "A3",
+        "composition": "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.\nOne route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example.",
+        "counterexamples": [
+          "Do not use exclusive dispatch when every branch contributes to one result.",
+          "Dashed routes do not encode measured probabilities."
+        ],
+        "cross_domain_transfer": {
+          "changes": "State selection criteria and preserve the service's actual escalation path.",
+          "domain": "Support triage",
+          "limits": "The diagram does not establish perfect classification or interchangeable response types.",
+          "mapping": "A dispatcher chooses billing, account-access or delivery support."
+        },
+        "editorial_purpose": "Distinguish choosing a specialist from running all specialists for every request.",
+        "evidence": {
+          "inferred": [
+            {
+              "basis": [
+                "observed:0",
+                "observed:1",
+                "source_stated:0"
+              ],
+              "claim": "Keeping the worker silhouette familiar makes the absence of an aggregator significant when the gallery is compared. Dashes need explanation because they could otherwise mean uncertainty or failure.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+            }
+          ],
+          "observed": [
+            {
+              "claim": "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+            },
+            {
+              "claim": "One route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example.",
+              "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+            }
+          ],
+          "source_stated": [
+            {
+              "claim": "The routing section assigns inputs to specialized downstream tasks.",
+              "context_review": {
+                "date": "2026-10-20",
+                "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+                "notes_origin": "runs/curation-01.json#A3",
+                "reviewer": "ChatGPT multimodal source review",
+                "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129"
+              },
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "method": "context_review_paraphrase"
+            }
+          ]
+        },
+        "family": "flow",
+        "figure_id": "figure_606c4039a9aab3c910989f31",
+        "information_structure": "Fan-out represents possible paths. The router owns selection, handlers produce alternative results, and the common destination is not a synthesis operation.",
+        "original_notes": {
+          "file": "runs/curation-01.json",
+          "group_context": {
+            "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+            "source": "https://www.anthropic.com/engineering/building-effective-agents",
+            "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+          },
+          "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+          "study": {
+            "asset": "5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png",
+            "counterexamples": [
+              "Do not use exclusive dispatch when every branch contributes to one result.",
+              "Dashed routes do not encode measured probabilities."
+            ],
+            "family": "flow",
+            "key": "A3",
+            "mapping": "Fan-out represents possible paths. The router owns selection, handlers produce alternative results, and the common destination is not a synthesis operation.",
+            "observed": [
+              "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.",
+              "One route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example."
+            ],
+            "purpose": "Distinguish choosing a specialist from running all specialists for every request.",
+            "rationale": "Keeping the worker silhouette familiar makes the absence of an aggregator significant when the gallery is compared. Dashes need explanation because they could otherwise mean uncertainty or failure.",
+            "reconstruction": "Label the input category at each route. Keep handler cards equal, emphasize the selected path and explain alternative routes. Include an unknown-category destination when the source specifies one.",
+            "relationship": "classification; exclusive dispatch",
+            "rules": [
+              "Differentiate alternatives from concurrency using topology and labels.",
+              "Use stable geometry across comparable pattern figures."
+            ],
+            "source_stated": "The routing section assigns inputs to specialized downstream tasks.",
+            "title": "Routing: alternatives are not concurrent workers",
+            "transfer": {
+              "changes": "State selection criteria and preserve the service's actual escalation path.",
+              "domain": "Support triage",
+              "limits": "The diagram does not establish perfect classification or interchangeable response types.",
+              "mapping": "A dispatcher chooses billing, account-access or delivery support."
+            }
+          }
+        },
+        "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+        "pixel_inspection": {
+          "date": "2026-10-20",
+          "inspector": "ChatGPT multimodal source review",
+          "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840",
+          "method": "official_image_pixels",
+          "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+          "rights": "link_only"
+        },
+        "production_certainty": "uncertain",
+        "production_hypothesis": "Label the input category at each route. Keep handler cards equal, emphasize the selected path and explain alternative routes. Include an unknown-category destination when the source specifies one.",
+        "relationship": "classification; exclusive dispatch",
+        "reusable_rules": [
+          "Differentiate alternatives from concurrency using topology and labels.",
+          "Use stable geometry across comparable pattern figures."
+        ],
+        "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129",
+        "title": "Routing: alternatives are not concurrent workers",
+        "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+        "usage": "reference"
+      },
+      "article_id": "article_ffc229d83891918f82064b92",
+      "evidence_level": "validated_analysis",
+      "figure_id": "figure_606c4039a9aab3c910989f31",
+      "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129",
+      "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "transfer": "Reuse the retained source reviewer relationship study; the composition is original and no new pixel review is claimed."
+    }
+  ],
+  "schema_version": 1,
+  "subtitle": "Original explanatory composition",
+  "title": "Two questions before choosing a workflow"
+}

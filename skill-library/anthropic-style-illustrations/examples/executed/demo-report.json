@@ -1,0 +1,118 @@
+{
+  "article": {
+    "checks": [
+      "input_hash",
+      "claim_anchors",
+      "reference_hashes",
+      "unique_ids",
+      "numeric_evidence",
+      "geometry",
+      "escaped_text"
+    ],
+    "height": 614,
+    "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+    "nodes": 0,
+    "semantic_review": "NOT RUN",
+    "status": "PASS",
+    "text_blocks": 10,
+    "visual_review": "NOT RUN",
+    "width": 1200
+  },
+  "cross-domain": {
+    "checks": [
+      "input_hash",
+      "claim_anchors",
+      "reference_hashes",
+      "unique_ids",
+      "numeric_evidence",
+      "geometry",
+      "escaped_text"
+    ],
+    "height": 938,
+    "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+    "nodes": 4,
+    "semantic_review": "NOT RUN",
+    "status": "PASS",
+    "text_blocks": 9,
+    "visual_review": "NOT RUN",
+    "width": 1200
+  },
+  "families": {
+    "bar": {
+      "checks": [
+        "input_hash",
+        "claim_anchors",
+        "reference_hashes",
+        "unique_ids",
+        "numeric_evidence",
+        "geometry",
+        "escaped_text"
+      ],
+      "height": 593,
+      "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+      "nodes": 0,
+      "semantic_review": "NOT RUN",
+      "status": "PASS",
+      "text_blocks": 11,
+      "visual_review": "NOT RUN",
+      "width": 1200
+    },
+    "cover": {
+      "checks": [
+        "input_hash",
+        "claim_anchors",
+        "reference_hashes",
+        "unique_ids",
+        "numeric_evidence",
+        "geometry",
+        "escaped_text"
+      ],
+      "height": 822,
+      "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+      "nodes": 0,
+      "semantic_review": "NOT RUN",
+      "status": "PASS",
+      "text_blocks": 11,
+      "visual_review": "NOT RUN",
+      "width": 1200
+    },
+    "line": {
+      "checks": [
+        "input_hash",
+        "claim_anchors",
+        "reference_hashes",
+        "unique_ids",
+        "numeric_evidence",
+        "geometry",
+        "escaped_text"
+      ],
+      "height": 882,
+      "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+      "nodes": 0,
+      "semantic_review": "NOT RUN",
+      "status": "PASS",
+      "text_blocks": 15,
+      "visual_review": "NOT RUN",
+      "width": 1200
+    },
+    "matrix": {
+      "checks": [
+        "input_hash",
+        "claim_anchors",
+        "reference_hashes",
+        "unique_ids",
+        "numeric_evidence",
+        "geometry",
+        "escaped_text"
+      ],
+      "height": 681,
+      "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+      "nodes": 0,
+      "semantic_review": "NOT RUN",
+      "status": "PASS",
+      "text_blocks": 16,
+      "visual_review": "NOT RUN",
+      "width": 1200
+    }
+  }
+}

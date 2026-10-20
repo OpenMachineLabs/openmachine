@@ -1,0 +1,102 @@
+{
+  "budget": 1,
+  "decisions": [
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-1"
+    },
+    {
+      "decision": "illustrate",
+      "evidence": [
+        "Intake sends the item description to a safety reviewer and a parts reviewer."
+      ],
+      "family": "flow",
+      "reader_question": "How do these elements relate?",
+      "reason": "Draft relationship cue; host must review meaning.",
+      "section_id": "section-2"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-3"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-4"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-5"
+    }
+  ],
+  "full_context": "# Designing a community repair intake\n\nThis original design proposal concerns a neighborhood repair workshop. It is a\nconceptual process, not a report of measured workshop outcomes. The reader is a\nvolunteer deciding who needs which information before accepting an item.\n\n## Intake workflow\n\nIntake sends the item description to a safety reviewer and a parts reviewer.\nThe safety reviewer returns a safety note. The parts reviewer returns a parts\nnote. Both notes reach the coordinator. The coordinator returns an incomplete\nrequest to intake for clarification. An accepted request can then be scheduled.\nThese arrows describe proposed information handoffs, not elapsed time or proof\nthat a repair is safe.\n\n## Why the two reviews stay separate\n\nA missing component and an unsafe device are different reasons to pause. Keep\ntheir notes separate so a coordinator can see what remains unresolved. A fork\nand join expresses that both reviews are needed. A loop expresses clarification,\nnot guaranteed eventual acceptance. The topology is an original process design.\n\n## Reference transfer and its limits\n\nThe recovered agent-workflow corpus includes an orchestrator-workers figure.\nThat metadata is useful for finding a delegation reference. This design transfers\nthe question of how separate work rejoins; it does not claim to reproduce the\nsource figure's geometry, palette or typography. Human volunteers retain their\nown judgment. Model automation is not evidence for workshop safety.\n\n## Scope boundary\n\nScheduling, repair procedures and safety criteria are outside this proposal.\nDo not add invented success rates or timelines. A brief written boundary is\nmore useful here than a decorative chart.\n",
+  "input_hash": "b7798e90fe4d9169066dfee15970c467ace383abda2d8a11b840d78b65e2e785",
+  "schema_version": 1,
+  "sections": [
+    {
+      "anchor": "section-1",
+      "end_line": 6,
+      "heading": "Designing a community repair intake",
+      "id": "section-1",
+      "level": 1,
+      "start_line": 1,
+      "text": "# Designing a community repair intake\n\nThis original design proposal concerns a neighborhood repair workshop. It is a\nconceptual process, not a report of measured workshop outcomes. The reader is a\nvolunteer deciding who needs which information before accepting an item.\n"
+    },
+    {
+      "anchor": "section-2",
+      "end_line": 15,
+      "heading": "Intake workflow",
+      "id": "section-2",
+      "level": 2,
+      "start_line": 7,
+      "text": "## Intake workflow\n\nIntake sends the item description to a safety reviewer and a parts reviewer.\nThe safety reviewer returns a safety note. The parts reviewer returns a parts\nnote. Both notes reach the coordinator. The coordinator returns an incomplete\nrequest to intake for clarification. An accepted request can then be scheduled.\nThese arrows describe proposed information handoffs, not elapsed time or proof\nthat a repair is safe.\n"
+    },
+    {
+      "anchor": "section-3",
+      "end_line": 22,
+      "heading": "Why the two reviews stay separate",
+      "id": "section-3",
+      "level": 2,
+      "start_line": 16,
+      "text": "## Why the two reviews stay separate\n\nA missing component and an unsafe device are different reasons to pause. Keep\ntheir notes separate so a coordinator can see what remains unresolved. A fork\nand join expresses that both reviews are needed. A loop expresses clarification,\nnot guaranteed eventual acceptance. The topology is an original process design.\n"
+    },
+    {
+      "anchor": "section-4",
+      "end_line": 30,
+      "heading": "Reference transfer and its limits",
+      "id": "section-4",
+      "level": 2,
+      "start_line": 23,
+      "text": "## Reference transfer and its limits\n\nThe recovered agent-workflow corpus includes an orchestrator-workers figure.\nThat metadata is useful for finding a delegation reference. This design transfers\nthe question of how separate work rejoins; it does not claim to reproduce the\nsource figure's geometry, palette or typography. Human volunteers retain their\nown judgment. Model automation is not evidence for workshop safety.\n"
+    },
+    {
+      "anchor": "section-5",
+      "end_line": 35,
+      "heading": "Scope boundary",
+      "id": "section-5",
+      "level": 2,
+      "start_line": 31,
+      "text": "## Scope boundary\n\nScheduling, repair procedures and safety criteria are outside this proposal.\nDo not add invented success rates or timelines. A brief written boundary is\nmore useful here than a decorative chart."
+    }
+  ],
+  "selection": [
+    "section-2"
+  ],
+  "semantic_review": "pending_host_llm",
+  "status": "heuristic_draft"
+}

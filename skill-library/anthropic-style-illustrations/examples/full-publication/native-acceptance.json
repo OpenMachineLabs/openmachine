@@ -1,0 +1,27 @@
+{
+  "paper": {
+    "anthropic_affiliation_present": true,
+    "byte_count": 4919189,
+    "bytes_stored": false,
+    "page_count": 62,
+    "response_sha256": "0acd3e05e40c1b703be3aed15c8cdbd5713a1840df9738b495d2bde2e8eb1e3a",
+    "status": "PASS",
+    "title": "",
+    "transport": "SafeFetcher(network=system)",
+    "url": "https://arxiv.org/pdf/2209.10652"
+  },
+  "publication": {
+    "decision_count": 19,
+    "input_hash": "abccd0508a997f989856da3654255eb49a76133d0d53c64716e54f6a34ea5ff9",
+    "sections": 19,
+    "status": "PASS",
+    "word_count": 2737
+  },
+  "execution_id": "c26b3a409d2e4ac29f1ba3c1e04d5096",
+  "tests": {
+    "passed": 56,
+    "provenance": "User-verified native OM execution; prior candidate"
+  },
+  "provenance": "Supplied actual native receipts; no fetch rerun in final offline pass",
+  "publication_response_sha256": "8f599310f14e76b15a8fe154ab131b55164b780680d7a6a970c23fe8ada11fc9"
+}

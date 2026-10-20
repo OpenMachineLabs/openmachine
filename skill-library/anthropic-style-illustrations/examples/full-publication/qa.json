@@ -1,0 +1,23 @@
+{
+  "checks": [
+    "input_hash",
+    "claim_anchors",
+    "reference_hashes",
+    "unique_ids",
+    "numeric_evidence",
+    "geometry",
+    "escaped_text"
+  ],
+  "height": 641,
+  "limits": "Mechanical source anchors do not prove paraphrase entailment, aesthetic quality or inspection truth.",
+  "nodes": 0,
+  "semantic_review": {
+    "date": "2026-10-20",
+    "rationale": "Checked claims, distinctions and limitations against the complete available input; no PNG visual review.",
+    "reviewer": "Codex author self-review"
+  },
+  "status": "PASS",
+  "text_blocks": 13,
+  "visual_review": "NOT RUN",
+  "width": 1200
+}

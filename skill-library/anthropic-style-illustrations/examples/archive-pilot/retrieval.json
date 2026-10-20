@@ -1,0 +1,389 @@
+[
+  {
+    "analysis": {
+      "article_id": "article_ffc229d83891918f82064b92",
+      "case_id": "A4",
+      "composition": "Solid connectors fan from the input into three equal green peer boxes.\nAll worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines.",
+      "counterexamples": [
+        "A later task that needs an earlier result belongs in a chain.",
+        "Equal cards do not show equal effort or reliability."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Describe conflict resolution at synthesis rather than treating concatenation as sufficient.",
+        "domain": "Community-event planning",
+        "limits": "Do not imply all evidence streams are equally trustworthy or that teams never communicate.",
+        "mapping": "Gather accessibility needs, venue constraints and transport options, then consolidate them into a plan."
+      },
+      "editorial_purpose": "Externalize how separate contributions become one result. A list of subtasks would not show the synthesis obligation.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "The explicit aggregator makes reconciliation visible and distinguishes this figure from routing, even though both contain three worker boxes.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Solid connectors fan from the input into three equal green peer boxes.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          },
+          {
+            "claim": "All worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The parallelization section combines independent work performed concurrently.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "notes_origin": "runs/curation-01.json#A4",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70"
+            },
+            "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_f2226c54393c0e981fdad4ab",
+      "information_structure": "Branch position expresses peer status; edges carry artifacts and dependencies; the many-to-one card owns combination. Equal area is not equal duration or confidence.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+          "source": "https://www.anthropic.com/engineering/building-effective-agents",
+          "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png",
+          "counterexamples": [
+            "A later task that needs an earlier result belongs in a chain.",
+            "Equal cards do not show equal effort or reliability."
+          ],
+          "family": "flow",
+          "key": "A4",
+          "mapping": "Branch position expresses peer status; edges carry artifacts and dependencies; the many-to-one card owns combination. Equal area is not equal duration or confidence.",
+          "observed": [
+            "Solid connectors fan from the input into three equal green peer boxes.",
+            "All worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines."
+          ],
+          "purpose": "Externalize how separate contributions become one result. A list of subtasks would not show the synthesis obligation.",
+          "rationale": "The explicit aggregator makes reconciliation visible and distinguishes this figure from routing, even though both contain three worker boxes.",
+          "reconstruction": "Identify truly independent tasks and the aggregator's input contract. Give each incoming branch an unambiguous port and name the synthesis action. Use branch artifact labels rather than unlabeled connectors.",
+          "relationship": "fork; parallel work; aggregation",
+          "rules": [
+            "Name a join when it evaluates or reconciles results.",
+            "Verify independence before depicting parallel branches."
+          ],
+          "source_stated": "The parallelization section combines independent work performed concurrently.",
+          "title": "Independent work followed by an explicit join",
+          "transfer": {
+            "changes": "Describe conflict resolution at synthesis rather than treating concatenation as sufficient.",
+            "domain": "Community-event planning",
+            "limits": "Do not imply all evidence streams are equally trustworthy or that teams never communicate.",
+            "mapping": "Gather accessibility needs, venue constraints and transport options, then consolidate them into a plan."
+          }
+        }
+      },
+      "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "Identify truly independent tasks and the aggregator's input contract. Give each incoming branch an unambiguous port and name the synthesis action. Use branch artifact labels rather than unlabeled connectors.",
+      "relationship": "fork; parallel work; aggregation",
+      "reusable_rules": [
+        "Name a join when it evaluates or reconciles results.",
+        "Verify independence before depicting parallel branches."
+      ],
+      "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70",
+      "title": "Independent work followed by an explicit join",
+      "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+      "usage": "reference"
+    },
+    "article_id": "article_ffc229d83891918f82064b92",
+    "asset_id": "asset_c2a96685c2bfc031ccc57ccf",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_f2226c54393c0e981fdad4ab",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 17.740114,
+    "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "title": "Building effective agents"
+  },
+  {
+    "analysis": {
+      "article_id": "article_33d81116743596d4b1f6f110",
+      "case_id": "D1",
+      "composition": "Two pale panels divide preprocessing and runtime. Documents enter embedding and TF-IDF/indexing paths that cross into retrieval and fusion.\nA query enters from above, and ranked information continues toward a model and response. Baseline processing remains neutral.",
+      "counterexamples": [
+        "A container does not establish a security guarantee.",
+        "An unlabeled merge conceals ranking semantics when those semantics matter."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Use actual catalog-index names and show the final librarian selection separately.",
+        "domain": "Library catalog services",
+        "limits": "The drawing explains information movement, not measured search quality.",
+        "mapping": "Catalog books and build indexes before a patron query finds and combines candidate records."
+      },
+      "editorial_purpose": "Prevent the reader from confusing reusable preparation with operations performed for each query.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "A quiet baseline leaves visual emphasis available for the intervention in the next figure. Reusing its coordinates can make a changed method easier to understand than redrawing everything.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F45603646e979c62349ce27744a940abf30200d57-3840x2160.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Two pale panels divide preprocessing and runtime. Documents enter embedding and TF-IDF/indexing paths that cross into retrieval and fusion.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F45603646e979c62349ce27744a940abf30200d57-3840x2160.png&w=3840"
+          },
+          {
+            "claim": "A query enters from above, and ranked information continues toward a model and response. Baseline processing remains neutral.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F45603646e979c62349ce27744a940abf30200d57-3840x2160.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The article establishes retrieval components before explaining contextual changes.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/contextual-retrieval",
+              "notes_origin": "runs/curation-02.json#D1",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "7fade35f9e9ae20609206df353bed099efa7ab1b8758aeb1983b27f0cd3a726e"
+            },
+            "locator": "https://www.anthropic.com/engineering/contextual-retrieval",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_5501cdf0129159b9a3b7f592",
+      "information_structure": "Phase containers identify when work occurs; persistent indexes are the connecting artifacts; parallel retrieval channels converge before generation. A boundary is not necessarily a server or security boundary.",
+      "original_notes": {
+        "file": "runs/curation-02.json",
+        "group_context": {
+          "palette": "Warm off-white phase panels, neutral baseline operations, blue intervention accents and coral/terracotta evidence accents.",
+          "source": "https://www.anthropic.com/engineering/contextual-retrieval",
+          "typography": "Compact sans-serif operation labels; data charts have direct numeric labels and restrained grids."
+        },
+        "sha256": "a06a12ab324d0d98ea10df93d59f1b03e1f1581dcdeabb4c3a98b08e8a9db37a",
+        "study": {
+          "asset": "45603646e979c62349ce27744a940abf30200d57-3840x2160.png",
+          "counterexamples": [
+            "A container does not establish a security guarantee.",
+            "An unlabeled merge conceals ranking semantics when those semantics matter."
+          ],
+          "family": "flow",
+          "key": "D1",
+          "mapping": "Phase containers identify when work occurs; persistent indexes are the connecting artifacts; parallel retrieval channels converge before generation. A boundary is not necessarily a server or security boundary.",
+          "observed": [
+            "Two pale panels divide preprocessing and runtime. Documents enter embedding and TF-IDF/indexing paths that cross into retrieval and fusion.",
+            "A query enters from above, and ranked information continues toward a model and response. Baseline processing remains neutral."
+          ],
+          "purpose": "Prevent the reader from confusing reusable preparation with operations performed for each query.",
+          "rationale": "A quiet baseline leaves visual emphasis available for the intervention in the next figure. Reusing its coordinates can make a changed method easier to understand than redrawing everything.",
+          "reconstruction": "List persisted artifacts separately from per-request operations. Place each on the correct side, label crossing information and route the query independently of source documents.",
+          "relationship": "preprocessing; persistent indexes; retrieval fusion",
+          "rules": [
+            "Separate once-per-corpus from once-per-query work.",
+            "Establish a restrained baseline before an intervention comparison."
+          ],
+          "source_stated": "The article establishes retrieval components before explaining contextual changes.",
+          "title": "Preparation and runtime need different containers",
+          "transfer": {
+            "changes": "Use actual catalog-index names and show the final librarian selection separately.",
+            "domain": "Library catalog services",
+            "limits": "The drawing explains information movement, not measured search quality.",
+            "mapping": "Catalog books and build indexes before a patron query finds and combines candidate records."
+          }
+        }
+      },
+      "palette": "Warm off-white phase panels, neutral baseline operations, blue intervention accents and coral/terracotta evidence accents.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F45603646e979c62349ce27744a940abf30200d57-3840x2160.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Original visual studies based on images opened by main Chat. Rationale is inference; production recipes are proposals, not verified software histories. Exact fonts and color values were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "List persisted artifacts separately from per-request operations. Place each on the correct side, label crossing information and route the query independently of source documents.",
+      "relationship": "preprocessing; persistent indexes; retrieval fusion",
+      "reusable_rules": [
+        "Separate once-per-corpus from once-per-query work.",
+        "Establish a restrained baseline before an intervention comparison."
+      ],
+      "source_hash": "7fade35f9e9ae20609206df353bed099efa7ab1b8758aeb1983b27f0cd3a726e",
+      "title": "Preparation and runtime need different containers",
+      "typography": "Compact sans-serif operation labels; data charts have direct numeric labels and restrained grids.",
+      "usage": "reference"
+    },
+    "article_id": "article_33d81116743596d4b1f6f110",
+    "asset_id": "asset_d2ae501c5f4da8e7dc3fe3d5",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_5501cdf0129159b9a3b7f592",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F45603646e979c62349ce27744a940abf30200d57-3840x2160.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 4.660681,
+    "source_hash": "7fade35f9e9ae20609206df353bed099efa7ab1b8758aeb1983b27f0cd3a726e",
+    "source_url": "https://www.anthropic.com/engineering/contextual-retrieval",
+    "title": "Introducing Contextual Retrieval"
+  },
+  {
+    "analysis": {
+      "article_id": "article_33d81116743596d4b1f6f110",
+      "case_id": "D6",
+      "composition": "Five stacked domain panels reuse a multicolor method legend and dense direct labels.\nVertical ranges differ across panels; embedding-category labels occupy the lower portion of each repeated chart.",
+      "counterexamples": [
+        "Equal physical heights can represent different values across panels.",
+        "A dense appendix chart is unsuitable as a tiny mobile hero."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Choose shared or independent axes according to the actual comparison question.",
+        "domain": "Multi-site course assessment",
+        "limits": "Small multiples do not correct unequal samples or make site differences causal.",
+        "mapping": "Compare instructional interventions across courses or locations with one method legend."
+      },
+      "editorial_purpose": "Reveal exceptions and domain dependence hidden by an aggregate improvement.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "Repeated grammar makes method-specific exceptions easier to spot, but local scale expansion trades absolute comparability for detail. Reuse must preserve that tradeoff rather than silently treating heights as comparable.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Five stacked domain panels reuse a multicolor method legend and dense direct labels.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png&w=3840"
+          },
+          {
+            "claim": "Vertical ranges differ across panels; embedding-category labels occupy the lower portion of each repeated chart.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The appendix breaks evaluation down by domain and configuration.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/contextual-retrieval",
+              "notes_origin": "runs/curation-02.json#D6",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "c1ecdf120e2ec0e1097354d60e215d8c9a60aa3d8a67487808f4359ee56f6f36"
+            },
+            "locator": "https://www.anthropic.com/engineering/contextual-retrieval",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "small_multiples",
+      "figure_id": "figure_a105958f9cbb6a0d2cadfb36",
+      "information_structure": "Panel identity encodes domain; position within each panel encodes comparable methods. Between-panel magnitudes require axis reading because scales differ.",
+      "original_notes": {
+        "file": "runs/curation-02.json",
+        "group_context": {
+          "palette": "Warm off-white phase panels, neutral baseline operations, blue intervention accents and coral/terracotta evidence accents.",
+          "source": "https://www.anthropic.com/engineering/contextual-retrieval",
+          "typography": "Compact sans-serif operation labels; data charts have direct numeric labels and restrained grids."
+        },
+        "sha256": "a06a12ab324d0d98ea10df93d59f1b03e1f1581dcdeabb4c3a98b08e8a9db37a",
+        "study": {
+          "asset": "646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png",
+          "counterexamples": [
+            "Equal physical heights can represent different values across panels.",
+            "A dense appendix chart is unsuitable as a tiny mobile hero."
+          ],
+          "family": "small_multiples",
+          "key": "D6",
+          "mapping": "Panel identity encodes domain; position within each panel encodes comparable methods. Between-panel magnitudes require axis reading because scales differ.",
+          "observed": [
+            "Five stacked domain panels reuse a multicolor method legend and dense direct labels.",
+            "Vertical ranges differ across panels; embedding-category labels occupy the lower portion of each repeated chart."
+          ],
+          "purpose": "Reveal exceptions and domain dependence hidden by an aggregate improvement.",
+          "rationale": "Repeated grammar makes method-specific exceptions easier to spot, but local scale expansion trades absolute comparability for detail. Reuse must preserve that tradeoff rather than silently treating heights as comparable.",
+          "reconstruction": "Use a table with domain, method and result columns. Hold method order/colors constant. Prefer shared axes for magnitude comparisons; otherwise label independent scales and supply accessible data.",
+          "relationship": "domain heterogeneity; repeated configuration comparison",
+          "rules": [
+            "Disaggregate when transfer to a specific domain matters.",
+            "Disclose independent scales and maintain method order."
+          ],
+          "source_stated": "The appendix breaks evaluation down by domain and configuration.",
+          "title": "Disaggregation with an explicit independent-scale warning",
+          "transfer": {
+            "changes": "Choose shared or independent axes according to the actual comparison question.",
+            "domain": "Multi-site course assessment",
+            "limits": "Small multiples do not correct unequal samples or make site differences causal.",
+            "mapping": "Compare instructional interventions across courses or locations with one method legend."
+          }
+        }
+      },
+      "palette": "Warm off-white phase panels, neutral baseline operations, blue intervention accents and coral/terracotta evidence accents.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Original visual studies based on images opened by main Chat. Rationale is inference; production recipes are proposals, not verified software histories. Exact fonts and color values were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "Use a table with domain, method and result columns. Hold method order/colors constant. Prefer shared axes for magnitude comparisons; otherwise label independent scales and supply accessible data.",
+      "relationship": "domain heterogeneity; repeated configuration comparison",
+      "reusable_rules": [
+        "Disaggregate when transfer to a specific domain matters.",
+        "Disclose independent scales and maintain method order."
+      ],
+      "source_hash": "c1ecdf120e2ec0e1097354d60e215d8c9a60aa3d8a67487808f4359ee56f6f36",
+      "title": "Disaggregation with an explicit independent-scale warning",
+      "typography": "Compact sans-serif operation labels; data charts have direct numeric labels and restrained grids.",
+      "usage": "reference"
+    },
+    "article_id": "article_33d81116743596d4b1f6f110",
+    "asset_id": "asset_9d08a87b2ca86eaacf05fcba",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "small_multiples",
+    "figure_id": "figure_a105958f9cbb6a0d2cadfb36",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F646a894ec4e6120cade9951a362f685cd2ec89b2-2458x2983.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 2.877795,
+    "source_hash": "c1ecdf120e2ec0e1097354d60e215d8c9a60aa3d8a67487808f4359ee56f6f36",
+    "source_url": "https://www.anthropic.com/engineering/contextual-retrieval",
+    "title": "Introducing Contextual Retrieval"
+  }
+]

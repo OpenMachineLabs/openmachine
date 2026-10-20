@@ -1,0 +1,102 @@
+{
+  "budget": 1,
+  "decisions": [
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-1"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-2"
+    },
+    {
+      "decision": "illustrate",
+      "evidence": [
+        "Routing invites a question about selection. Parallelization invites a question"
+      ],
+      "family": "comparison",
+      "reader_question": "How do these elements relate?",
+      "reason": "Draft relationship cue; host must review meaning.",
+      "section_id": "section-3"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-4"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-5"
+    }
+  ],
+  "full_context": "# A reading guide to agent workflow vocabulary\n\nThis original guide uses the recovered metadata for Anthropic's real article\n[Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).\nIt is a complete input article for this example, not a reproduction or a claim\nthat the full source article was read during this offline run. Its audience is\nan engineer choosing which workflow question to investigate next.\n\n## Distinguish the questions\n\nThe source figure captions identify prompt chaining, routing, parallelization,\norchestrator-workers, and evaluator-optimizer workflows. These names provide a\nuseful reading map. They do not establish that one pattern is universally best.\nA comparison can help the reader separate the questions before opening each\nsource section: sequence, selection, concurrency, delegation, and revision.\n\n## Compare two reading paths\n\nRouting invites a question about selection. Parallelization invites a question\nabout concurrent work. This is an original interpretation of the workflow names,\nnot a finding about the appearance of their source figures. Read the original\narticle for its conditions, examples, and implementation advice.\n\n## Evidence and limitations\n\nThe recovered corpus retains short excerpts and source locators, not the complete\narticle or source pixels. The caption \"The routing workflow\" identifies one\noccurrence; \"The parallelization workflow\" identifies another. The proposed\ncomparison uses those identities as reference context. Its alignment, colors,\nwording and panel design are original. It makes no performance claim.\n\n## Next action\n\nOpen the source sections and inspect their figures before importing any visual\nanalysis. Keep the comparison a draft until a host semantic review has checked\nthat it accurately serves the intended reader. This instruction is sufficient\nin prose and does not need another illustration.\n",
+  "input_hash": "63fb6bc706b578a4f930525fe89b22a7c1e71164189707a5b72d24c2e89ea91d",
+  "schema_version": 1,
+  "sections": [
+    {
+      "anchor": "section-1",
+      "end_line": 8,
+      "heading": "A reading guide to agent workflow vocabulary",
+      "id": "section-1",
+      "level": 1,
+      "start_line": 1,
+      "text": "# A reading guide to agent workflow vocabulary\n\nThis original guide uses the recovered metadata for Anthropic's real article\n[Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).\nIt is a complete input article for this example, not a reproduction or a claim\nthat the full source article was read during this offline run. Its audience is\nan engineer choosing which workflow question to investigate next.\n"
+    },
+    {
+      "anchor": "section-2",
+      "end_line": 16,
+      "heading": "Distinguish the questions",
+      "id": "section-2",
+      "level": 2,
+      "start_line": 9,
+      "text": "## Distinguish the questions\n\nThe source figure captions identify prompt chaining, routing, parallelization,\norchestrator-workers, and evaluator-optimizer workflows. These names provide a\nuseful reading map. They do not establish that one pattern is universally best.\nA comparison can help the reader separate the questions before opening each\nsource section: sequence, selection, concurrency, delegation, and revision.\n"
+    },
+    {
+      "anchor": "section-3",
+      "end_line": 23,
+      "heading": "Compare two reading paths",
+      "id": "section-3",
+      "level": 2,
+      "start_line": 17,
+      "text": "## Compare two reading paths\n\nRouting invites a question about selection. Parallelization invites a question\nabout concurrent work. This is an original interpretation of the workflow names,\nnot a finding about the appearance of their source figures. Read the original\narticle for its conditions, examples, and implementation advice.\n"
+    },
+    {
+      "anchor": "section-4",
+      "end_line": 31,
+      "heading": "Evidence and limitations",
+      "id": "section-4",
+      "level": 2,
+      "start_line": 24,
+      "text": "## Evidence and limitations\n\nThe recovered corpus retains short excerpts and source locators, not the complete\narticle or source pixels. The caption \"The routing workflow\" identifies one\noccurrence; \"The parallelization workflow\" identifies another. The proposed\ncomparison uses those identities as reference context. Its alignment, colors,\nwording and panel design are original. It makes no performance claim.\n"
+    },
+    {
+      "anchor": "section-5",
+      "end_line": 37,
+      "heading": "Next action",
+      "id": "section-5",
+      "level": 2,
+      "start_line": 32,
+      "text": "## Next action\n\nOpen the source sections and inspect their figures before importing any visual\nanalysis. Keep the comparison a draft until a host semantic review has checked\nthat it accurately serves the intended reader. This instruction is sufficient\nin prose and does not need another illustration."
+    }
+  ],
+  "selection": [
+    "section-3"
+  ],
+  "semantic_review": "pending_host_llm",
+  "status": "heuristic_draft"
+}

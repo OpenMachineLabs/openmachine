@@ -1,0 +1,237 @@
+{
+  "figure_groups": [
+    {
+      "id": "baseline-method-results",
+      "members": [
+        {
+          "case_id": "D1",
+          "figure_id": "figure_5501cdf0129159b9a3b7f592",
+          "role": "baseline"
+        },
+        {
+          "case_id": "D2",
+          "figure_id": "figure_a3cee6c91de1c2dede455794",
+          "role": "method"
+        },
+        {
+          "case_id": "D3",
+          "figure_id": "figure_3799b1c8fa91e0639960cc74",
+          "role": "results"
+        },
+        {
+          "case_id": "D4",
+          "figure_id": "figure_8f8ee85ad28e7e7007e77cca",
+          "role": "extended method"
+        },
+        {
+          "case_id": "D5",
+          "figure_id": "figure_7189eb51553985d43d0a67e7",
+          "role": "extended results"
+        },
+        {
+          "case_id": "D6",
+          "figure_id": "figure_a105958f9cbb6a0d2cadfb36",
+          "role": "condition detail"
+        }
+      ],
+      "purpose": "Read the retrieval baseline, contextual insertion and reported results as a connected explanation. Never transfer the reported values to another system."
+    },
+    {
+      "id": "matched-console-recovery",
+      "members": [
+        {
+          "case_id": "E6",
+          "figure_id": "figure_7bfcd962220661973e185b42",
+          "role": "useful recovery"
+        },
+        {
+          "case_id": "E8",
+          "figure_id": "figure_f878dfa4779b281d2c020838",
+          "role": "contrast_not_target"
+        }
+      ],
+      "purpose": "Compare recovery information in a useful error and its negative contrast. E8 is not a style target."
+    },
+    {
+      "id": "matched-console-verbosity",
+      "members": [
+        {
+          "case_id": "E4",
+          "figure_id": "figure_3de5582e92265daab3a7ac28",
+          "role": "detailed"
+        },
+        {
+          "case_id": "E5",
+          "figure_id": "figure_843a581d6152e524283555b0",
+          "role": "concise"
+        }
+      ],
+      "purpose": "Compare detailed and concise outputs by retained semantic information, not font size."
+    }
+  ],
+  "patterns": [
+    {
+      "counterexample": "Do not draw a causal arrow between merely correlated measurements.",
+      "family": "flow",
+      "id": "explicit-handoffs",
+      "references": [
+        {
+          "article_id": "article_ffc229d83891918f82064b92",
+          "case_id": "A4",
+          "figure_id": "figure_f2226c54393c0e981fdad4ab",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_ffc229d83891918f82064b92",
+          "case_id": "A6",
+          "figure_id": "figure_ef124886031c1d9413654b40",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_a3afc1e8c7c23916e7f5233b",
+          "case_id": "B1",
+          "figure_id": "figure_52b1617aa2d9120d50cb73cd",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_c6870ed6fa432fb12cdedfa4",
+          "case_id": "P2",
+          "figure_id": "figure_98c20ba39ae555c60324b7df",
+          "usage": "reference"
+        }
+      ],
+      "rule": "Name each handoff, preserve explicit nodes, and give feedback its own outside lane.",
+      "transfer": "In a workshop intake, separate safety and parts review before coordination; keep human authority explicit.",
+      "use": "A reader must distinguish separate work and the point where it rejoins."
+    },
+    {
+      "counterexample": "Do not align unrelated metrics as if they were a common benchmark.",
+      "family": "comparison",
+      "id": "matched-questions",
+      "references": [
+        {
+          "article_id": "article_ffc229d83891918f82064b92",
+          "case_id": "A3",
+          "figure_id": "figure_606c4039a9aab3c910989f31",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_ffc229d83891918f82064b92",
+          "case_id": "A4",
+          "figure_id": "figure_f2226c54393c0e981fdad4ab",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_c6870ed6fa432fb12cdedfa4",
+          "case_id": "P1",
+          "figure_id": "figure_f877389cdd4c4b03883f3238",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_1399aec680791f782180f8a7",
+          "case_id": "E6",
+          "figure_id": "figure_7bfcd962220661973e185b42",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_1399aec680791f782180f8a7",
+          "case_id": "E8",
+          "figure_id": "figure_f878dfa4779b281d2c020838",
+          "usage": "contrast_not_target"
+        }
+      ],
+      "rule": "Align comparable rows; use the same scale and wording level across columns.",
+      "transfer": "Compare routing and parallel work by the question each answers, without inventing speed differences.",
+      "use": "Alternatives answer different questions or share decision criteria."
+    },
+    {
+      "counterexample": "Do not convert unknown values into negative judgments.",
+      "family": "matrix",
+      "id": "decision-grid",
+      "references": [
+        {
+          "article_id": "article_2e50ab69ebea3b2c9412dd48",
+          "case_id": "G3",
+          "figure_id": "figure_28f1275ed4c5793fa807a3b2",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_9bab7650498e417407496f1c",
+          "case_id": "F2",
+          "figure_id": "figure_b99b69190dcc282b62fc6f27",
+          "usage": "reference"
+        }
+      ],
+      "rule": "Keep criterion order stable and label unknowns explicitly.",
+      "transfer": "Map record classes against inclusion policy and next review action.",
+      "use": "The reader must inspect several alternatives against the same criteria."
+    },
+    {
+      "counterexample": "Do not manufacture measurements to fill an attractive chart.",
+      "family": "bar",
+      "id": "honest-quantities",
+      "references": [
+        {
+          "article_id": "article_33d81116743596d4b1f6f110",
+          "case_id": "D3",
+          "figure_id": "figure_3799b1c8fa91e0639960cc74",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_33d81116743596d4b1f6f110",
+          "case_id": "D5",
+          "figure_id": "figure_7189eb51553985d43d0a67e7",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_9bab7650498e417407496f1c",
+          "case_id": "F4",
+          "figure_id": "figure_ca32e0f21b6b3ba50882c25a",
+          "usage": "reference"
+        }
+      ],
+      "rule": "Use a zero baseline, exact values and a data provenance note.",
+      "transfer": "Show corpus coverage counts as index counts, never model performance.",
+      "use": "Actual magnitudes share a unit and denominator."
+    },
+    {
+      "counterexample": "Do not imply continuity between arbitrary categories.",
+      "family": "line",
+      "id": "ordered-evidence",
+      "references": [
+        {
+          "article_id": "article_6c790a16de0afd2b5fe6beb9",
+          "case_id": "V3",
+          "figure_id": "figure_f5487c8f6e69ad3cf559e3b9",
+          "usage": "reference"
+        }
+      ],
+      "rule": "Use increasing x values, declare both units and retain a complete readable data key.",
+      "transfer": "A cumulative index traversal can use ordinal position, explicitly distinguished from time.",
+      "use": "A numeric x axis has a meaningful order and measured or derived values."
+    },
+    {
+      "counterexample": "Do not let decorative size imply an unsupported quantity.",
+      "family": "cover",
+      "id": "concept-without-scale",
+      "references": [
+        {
+          "article_id": "article_9bab7650498e417407496f1c",
+          "case_id": "F1",
+          "figure_id": "figure_cc30d05f87a64404d2e92aba",
+          "usage": "reference"
+        },
+        {
+          "article_id": "article_c7dfeeeb6dfb1916550c27a8",
+          "case_id": "J1",
+          "figure_id": "figure_2d212d011d7d56a38c7fb695",
+          "usage": "reference"
+        }
+      ],
+      "rule": "Use distinct labeled motifs, restrained color and a visible conceptual label.",
+      "transfer": "Introduce retrieval, inspection and creation without claiming automated review.",
+      "use": "An opening metaphor introduces a conceptual progression."
+    }
+  ],
+  "status": "Original design guidance; not an official Anthropic brand manual or a corpus visual analysis"
+}

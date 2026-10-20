@@ -1,0 +1,85 @@
+{
+  "budget": 1,
+  "decisions": [
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-1"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-2"
+    },
+    {
+      "decision": "illustrate",
+      "evidence": [
+        "A router chooses a specialist. A parallel workflow combines independent contributions. An evaluator returns actionable critique and permits an accepted result to leave the cycle. Similar boxes can therefore imply different contracts."
+      ],
+      "family": "flow",
+      "reader_question": "How do these elements relate?",
+      "reason": "Draft relationship cue; host must review meaning.",
+      "section_id": "section-3"
+    },
+    {
+      "decision": "no_image",
+      "evidence": [],
+      "family": null,
+      "reader_question": null,
+      "reason": "Outside selection, no clear relationship cue, or budget reserved; keep prose.",
+      "section_id": "section-4"
+    }
+  ],
+  "full_context": "# Choosing an exchange pattern\n\n## Reader need\n\nThe publication recommends simple systems, with additional complexity justified by evaluation. Its patterns distinguish fixed dependencies, alternative handlers, concurrent contributions, dynamic decomposition and feedback. Interfaces and stopping rules remain important throughout.\n\n## Selected explanation\n\nA router chooses a specialist. A parallel workflow combines independent contributions. An evaluator returns actionable critique and permits an accepted result to leave the cycle. Similar boxes can therefore imply different contracts.\n\n## Scope\n\nThis original comparison teaches those contracts. It does not rank models, promise convergence, estimate speed or replace the source's conditions and appendices. Human review and clear tool definitions remain relevant. Source examples and framework names are deliberately omitted.\n",
+  "input_hash": "a96252a46298e17e7717a86f1e97234927cac55c88f1e1f72049bc3d2b98d5ae",
+  "schema_version": 1,
+  "sections": [
+    {
+      "anchor": "section-1",
+      "end_line": 2,
+      "heading": "Choosing an exchange pattern",
+      "id": "section-1",
+      "level": 1,
+      "start_line": 1,
+      "text": "# Choosing an exchange pattern\n"
+    },
+    {
+      "anchor": "section-2",
+      "end_line": 6,
+      "heading": "Reader need",
+      "id": "section-2",
+      "level": 2,
+      "start_line": 3,
+      "text": "## Reader need\n\nThe publication recommends simple systems, with additional complexity justified by evaluation. Its patterns distinguish fixed dependencies, alternative handlers, concurrent contributions, dynamic decomposition and feedback. Interfaces and stopping rules remain important throughout.\n"
+    },
+    {
+      "anchor": "section-3",
+      "end_line": 10,
+      "heading": "Selected explanation",
+      "id": "section-3",
+      "level": 2,
+      "start_line": 7,
+      "text": "## Selected explanation\n\nA router chooses a specialist. A parallel workflow combines independent contributions. An evaluator returns actionable critique and permits an accepted result to leave the cycle. Similar boxes can therefore imply different contracts.\n"
+    },
+    {
+      "anchor": "section-4",
+      "end_line": 13,
+      "heading": "Scope",
+      "id": "section-4",
+      "level": 2,
+      "start_line": 11,
+      "text": "## Scope\n\nThis original comparison teaches those contracts. It does not rank models, promise convergence, estimate speed or replace the source's conditions and appendices. Human review and clear tool definitions remain relevant. Source examples and framework names are deliberately omitted."
+    }
+  ],
+  "selection": [
+    "section-3"
+  ],
+  "semantic_review": "pending_host_llm",
+  "status": "heuristic_draft"
+}

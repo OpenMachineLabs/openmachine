@@ -1,0 +1,8 @@
+# Collection and certificate verification. No OM runtime dependencies are changed.
+beautifulsoup4==4.12.3
+certifi==2025.1.31
+soupsieve==3.0.3
+# Optional PDF inspection and portable PNG export.
+PyMuPDF==1.26.3
+# Reference-image inspection; original images are never bundled with the corpus.
+Pillow==11.3.0

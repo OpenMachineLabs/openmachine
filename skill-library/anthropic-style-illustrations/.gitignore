@@ -1,0 +1,11 @@
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+runs/
+knowledge/.state/
+
+
+# Local collection and import recovery artifacts
+knowledge/.collector-journal.jsonl
+knowledge/*.lock

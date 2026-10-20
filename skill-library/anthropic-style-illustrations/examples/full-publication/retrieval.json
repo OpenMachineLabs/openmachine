@@ -1,0 +1,647 @@
+[
+  {
+    "analysis": {
+      "article_id": "article_ffc229d83891918f82064b92",
+      "case_id": "A4",
+      "composition": "Solid connectors fan from the input into three equal green peer boxes.\nAll worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines.",
+      "counterexamples": [
+        "A later task that needs an earlier result belongs in a chain.",
+        "Equal cards do not show equal effort or reliability."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Describe conflict resolution at synthesis rather than treating concatenation as sufficient.",
+        "domain": "Community-event planning",
+        "limits": "Do not imply all evidence streams are equally trustworthy or that teams never communicate.",
+        "mapping": "Gather accessibility needs, venue constraints and transport options, then consolidate them into a plan."
+      },
+      "editorial_purpose": "Externalize how separate contributions become one result. A list of subtasks would not show the synthesis obligation.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "The explicit aggregator makes reconciliation visible and distinguishes this figure from routing, even though both contain three worker boxes.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Solid connectors fan from the input into three equal green peer boxes.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          },
+          {
+            "claim": "All worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The parallelization section combines independent work performed concurrently.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "notes_origin": "runs/curation-01.json#A4",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70"
+            },
+            "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_f2226c54393c0e981fdad4ab",
+      "information_structure": "Branch position expresses peer status; edges carry artifacts and dependencies; the many-to-one card owns combination. Equal area is not equal duration or confidence.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+          "source": "https://www.anthropic.com/engineering/building-effective-agents",
+          "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png",
+          "counterexamples": [
+            "A later task that needs an earlier result belongs in a chain.",
+            "Equal cards do not show equal effort or reliability."
+          ],
+          "family": "flow",
+          "key": "A4",
+          "mapping": "Branch position expresses peer status; edges carry artifacts and dependencies; the many-to-one card owns combination. Equal area is not equal duration or confidence.",
+          "observed": [
+            "Solid connectors fan from the input into three equal green peer boxes.",
+            "All worker outputs enter a violet aggregator before the final output. The join is a named processing card, not merely intersecting lines."
+          ],
+          "purpose": "Externalize how separate contributions become one result. A list of subtasks would not show the synthesis obligation.",
+          "rationale": "The explicit aggregator makes reconciliation visible and distinguishes this figure from routing, even though both contain three worker boxes.",
+          "reconstruction": "Identify truly independent tasks and the aggregator's input contract. Give each incoming branch an unambiguous port and name the synthesis action. Use branch artifact labels rather than unlabeled connectors.",
+          "relationship": "fork; parallel work; aggregation",
+          "rules": [
+            "Name a join when it evaluates or reconciles results.",
+            "Verify independence before depicting parallel branches."
+          ],
+          "source_stated": "The parallelization section combines independent work performed concurrently.",
+          "title": "Independent work followed by an explicit join",
+          "transfer": {
+            "changes": "Describe conflict resolution at synthesis rather than treating concatenation as sufficient.",
+            "domain": "Community-event planning",
+            "limits": "Do not imply all evidence streams are equally trustworthy or that teams never communicate.",
+            "mapping": "Gather accessibility needs, venue constraints and transport options, then consolidate them into a plan."
+          }
+        }
+      },
+      "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "Identify truly independent tasks and the aggregator's input contract. Give each incoming branch an unambiguous port and name the synthesis action. Use branch artifact labels rather than unlabeled connectors.",
+      "relationship": "fork; parallel work; aggregation",
+      "reusable_rules": [
+        "Name a join when it evaluates or reconciles results.",
+        "Verify independence before depicting parallel branches."
+      ],
+      "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70",
+      "title": "Independent work followed by an explicit join",
+      "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+      "usage": "reference"
+    },
+    "article_id": "article_ffc229d83891918f82064b92",
+    "asset_id": "asset_c2a96685c2bfc031ccc57ccf",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_f2226c54393c0e981fdad4ab",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F406bb032ca007fd1624f261af717d70e6ca86286-2401x1000.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 8.395423,
+    "source_hash": "292c67512f6c2a633eeb379e3a64f2b3bf6088c2d88fccc4e6019a6b30e2db70",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "title": "Building effective agents"
+  },
+  {
+    "analysis": {
+      "article_id": "article_ffc229d83891918f82064b92",
+      "case_id": "A3",
+      "composition": "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.\nOne route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example.",
+      "counterexamples": [
+        "Do not use exclusive dispatch when every branch contributes to one result.",
+        "Dashed routes do not encode measured probabilities."
+      ],
+      "cross_domain_transfer": {
+        "changes": "State selection criteria and preserve the service's actual escalation path.",
+        "domain": "Support triage",
+        "limits": "The diagram does not establish perfect classification or interchangeable response types.",
+        "mapping": "A dispatcher chooses billing, account-access or delivery support."
+      },
+      "editorial_purpose": "Distinguish choosing a specialist from running all specialists for every request.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "Keeping the worker silhouette familiar makes the absence of an aggregator significant when the gallery is compared. Dashes need explanation because they could otherwise mean uncertainty or failure.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+          },
+          {
+            "claim": "One route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The routing section assigns inputs to specialized downstream tasks.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "notes_origin": "runs/curation-01.json#A3",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129"
+            },
+            "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_606c4039a9aab3c910989f31",
+      "information_structure": "Fan-out represents possible paths. The router owns selection, handlers produce alternative results, and the common destination is not a synthesis operation.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+          "source": "https://www.anthropic.com/engineering/building-effective-agents",
+          "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png",
+          "counterexamples": [
+            "Do not use exclusive dispatch when every branch contributes to one result.",
+            "Dashed routes do not encode measured probabilities."
+          ],
+          "family": "flow",
+          "key": "A3",
+          "mapping": "Fan-out represents possible paths. The router owns selection, handlers produce alternative results, and the common destination is not a synthesis operation.",
+          "observed": [
+            "A router leads to three vertically aligned call boxes and a shared output; there is no aggregator card.",
+            "One route is solid and other routes are dashed. The peer-box arrangement resembles the neighboring parallelization example."
+          ],
+          "purpose": "Distinguish choosing a specialist from running all specialists for every request.",
+          "rationale": "Keeping the worker silhouette familiar makes the absence of an aggregator significant when the gallery is compared. Dashes need explanation because they could otherwise mean uncertainty or failure.",
+          "reconstruction": "Label the input category at each route. Keep handler cards equal, emphasize the selected path and explain alternative routes. Include an unknown-category destination when the source specifies one.",
+          "relationship": "classification; exclusive dispatch",
+          "rules": [
+            "Differentiate alternatives from concurrency using topology and labels.",
+            "Use stable geometry across comparable pattern figures."
+          ],
+          "source_stated": "The routing section assigns inputs to specialized downstream tasks.",
+          "title": "Routing: alternatives are not concurrent workers",
+          "transfer": {
+            "changes": "State selection criteria and preserve the service's actual escalation path.",
+            "domain": "Support triage",
+            "limits": "The diagram does not establish perfect classification or interchangeable response types.",
+            "mapping": "A dispatcher chooses billing, account-access or delivery support."
+          }
+        }
+      },
+      "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "Label the input category at each route. Keep handler cards equal, emphasize the selected path and explain alternative routes. Include an unknown-category destination when the source specifies one.",
+      "relationship": "classification; exclusive dispatch",
+      "reusable_rules": [
+        "Differentiate alternatives from concurrency using topology and labels.",
+        "Use stable geometry across comparable pattern figures."
+      ],
+      "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129",
+      "title": "Routing: alternatives are not concurrent workers",
+      "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+      "usage": "reference"
+    },
+    "article_id": "article_ffc229d83891918f82064b92",
+    "asset_id": "asset_8021e4731f3ecd7c234b0b70",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_606c4039a9aab3c910989f31",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F5c0c0e9fe4def0b584c04d37849941da55e5e71c-2401x1000.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 6.667289,
+    "source_hash": "40fe3fba7d6426056751e7e1e7cdf2d3d9e5449cf57ca1f1517d69b8afe01129",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "title": "Building effective agents"
+  },
+  {
+    "analysis": {
+      "article_id": "article_ffc229d83891918f82064b92",
+      "case_id": "A7",
+      "composition": "Human, model and environment occupy distinct positions; action and feedback connect model and environment in opposite directions.\nDashed supervisory connections lead to the human and a dotted downward path terminates at a stop card.",
+      "counterexamples": [
+        "A human icon is not a safety guarantee.",
+        "A static lookup with no state-changing action does not require this control loop."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Add real water limits, sensor-failure handling and manual shutdown conditions.",
+        "domain": "Greenhouse irrigation",
+        "limits": "A conceptual loop is not a certified engineering safety diagram.",
+        "mapping": "A controller changes valves, sensors report soil state and a grower supervises exceptions."
+      },
+      "editorial_purpose": "Distinguish text generation from choosing actions whose observed results affect later choices.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "Placing the human outside the main cycle can suggest intermittent oversight. That is a useful reading only when the operational policy supports it; the picture itself does not establish autonomy or safety.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Human, model and environment occupy distinct positions; action and feedback connect model and environment in opposite directions.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png&w=3840"
+          },
+          {
+            "claim": "Dashed supervisory connections lead to the human and a dotted downward path terminates at a stop card.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The article describes agents acting through tools and environmental feedback, with opportunities for human input and stopping.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "notes_origin": "runs/curation-01.json#A7",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "9df2170a49314c3c98697c07cf2bce441c153d165e5f2ef6f92dedab9883b4fe"
+            },
+            "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_37cce56c445c5cc5989447ed",
+      "information_structure": "The environment is a stateful participant. Action arrows change it; feedback returns observations; supervision is a separate control interface rather than another resource lookup.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+          "source": "https://www.anthropic.com/engineering/building-effective-agents",
+          "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png",
+          "counterexamples": [
+            "A human icon is not a safety guarantee.",
+            "A static lookup with no state-changing action does not require this control loop."
+          ],
+          "family": "flow",
+          "key": "A7",
+          "mapping": "The environment is a stateful participant. Action arrows change it; feedback returns observations; supervision is a separate control interface rather than another resource lookup.",
+          "observed": [
+            "Human, model and environment occupy distinct positions; action and feedback connect model and environment in opposite directions.",
+            "Dashed supervisory connections lead to the human and a dotted downward path terminates at a stop card."
+          ],
+          "purpose": "Distinguish text generation from choosing actions whose observed results affect later choices.",
+          "rationale": "Placing the human outside the main cycle can suggest intermittent oversight. That is a useful reading only when the operational policy supports it; the picture itself does not establish autonomy or safety.",
+          "reconstruction": "List permitted actions, observable state and stop triggers before layout. Give actions and observations separate lanes, label the human's authority and keep termination visible.",
+          "relationship": "action; observation; supervision; stopping",
+          "rules": [
+            "Draw stateful environments explicitly.",
+            "Distinguish supervisory control from ordinary feedback."
+          ],
+          "source_stated": "The article describes agents acting through tools and environmental feedback, with opportunities for human input and stopping.",
+          "title": "Environment feedback and human supervision are separate",
+          "transfer": {
+            "changes": "Add real water limits, sensor-failure handling and manual shutdown conditions.",
+            "domain": "Greenhouse irrigation",
+            "limits": "A conceptual loop is not a certified engineering safety diagram.",
+            "mapping": "A controller changes valves, sensors report soil state and a grower supervises exceptions."
+          }
+        }
+      },
+      "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "List permitted actions, observable state and stop triggers before layout. Give actions and observations separate lanes, label the human's authority and keep termination visible.",
+      "relationship": "action; observation; supervision; stopping",
+      "reusable_rules": [
+        "Draw stateful environments explicitly.",
+        "Distinguish supervisory control from ordinary feedback."
+      ],
+      "source_hash": "9df2170a49314c3c98697c07cf2bce441c153d165e5f2ef6f92dedab9883b4fe",
+      "title": "Environment feedback and human supervision are separate",
+      "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+      "usage": "reference"
+    },
+    "article_id": "article_ffc229d83891918f82064b92",
+    "asset_id": "asset_574e5d5365a2e8cb6d215bf0",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_37cce56c445c5cc5989447ed",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F58d9f10c985c4eb5d53798dea315f7bb5ab6249e-2401x1000.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 3.965622,
+    "source_hash": "9df2170a49314c3c98697c07cf2bce441c153d165e5f2ef6f92dedab9883b4fe",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "title": "Building effective agents"
+  },
+  {
+    "analysis": {
+      "article_id": "article_ffc229d83891918f82064b92",
+      "case_id": "A6",
+      "composition": "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.\nAn accepted branch leaves toward an output distinct from the cycle.",
+      "counterexamples": [
+        "Repeated independent sampling without actionable feedback is a different pattern.",
+        "Iteration count cannot be presented as quality improvement without evidence."
+      ],
+      "cross_domain_transfer": {
+        "changes": "State the rubric and route unresolved disagreements to a human decision after bounded revisions.",
+        "domain": "Copy editing",
+        "limits": "Editorial acceptance is not proof of factual correctness or audience effectiveness.",
+        "mapping": "An author submits a draft; an editor returns specific issues; a passing revision proceeds to production."
+      },
+      "editorial_purpose": "Explain what changes between attempts; a generic circular arrow would conceal the critique that makes revision possible.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "Opposing labeled arcs reduce confusion about who produces the criterion. A visible accepted exit keeps iteration from appearing unbounded.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+          },
+          {
+            "claim": "An accepted branch leaves toward an output distinct from the cycle.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The evaluator-optimizer pattern uses evaluation feedback to refine generated work.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+              "notes_origin": "runs/curation-01.json#A6",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587"
+            },
+            "locator": "https://www.anthropic.com/engineering/building-effective-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "flow",
+      "figure_id": "figure_ef124886031c1d9413654b40",
+      "information_structure": "The forward artifact and return feedback are different messages. Evaluation owns the exit decision. The cycle depicts attempts, not convergence or a measured quality trend.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+          "source": "https://www.anthropic.com/engineering/building-effective-agents",
+          "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png",
+          "counterexamples": [
+            "Repeated independent sampling without actionable feedback is a different pattern.",
+            "Iteration count cannot be presented as quality improvement without evidence."
+          ],
+          "family": "flow",
+          "key": "A6",
+          "mapping": "The forward artifact and return feedback are different messages. Evaluation owns the exit decision. The cycle depicts attempts, not convergence or a measured quality trend.",
+          "observed": [
+            "Generator and evaluator exchange a solution on an upper curved path and rejection/feedback on a lower return path.",
+            "An accepted branch leaves toward an output distinct from the cycle."
+          ],
+          "purpose": "Explain what changes between attempts; a generic circular arrow would conceal the critique that makes revision possible.",
+          "rationale": "Opposing labeled arcs reduce confusion about who produces the criterion. A visible accepted exit keeps iteration from appearing unbounded.",
+          "reconstruction": "Define an evaluable acceptance criterion, name both exchanged artifacts and reserve an exit port. Add a retry limit or escalation only when supported by the article's actual workflow.",
+          "relationship": "iteration; critique; acceptance",
+          "rules": [
+            "Give both directions of a feedback loop distinct labels.",
+            "Expose termination and escalation conditions."
+          ],
+          "source_stated": "The evaluator-optimizer pattern uses evaluation feedback to refine generated work.",
+          "title": "Feedback carries information, not guaranteed improvement",
+          "transfer": {
+            "changes": "State the rubric and route unresolved disagreements to a human decision after bounded revisions.",
+            "domain": "Copy editing",
+            "limits": "Editorial acceptance is not proof of factual correctness or audience effectiveness.",
+            "mapping": "An author submits a draft; an editor returns specific issues; a passing revision proceeds to production."
+          }
+        }
+      },
+      "palette": "White canvas, pale green model rectangles, pale violet supporting/control cards, coral endpoint pills, muted gray arrows; not a beige editorial template.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "Define an evaluable acceptance criterion, name both exchanged artifacts and reserve an exit port. Add a retry limit or escalation only when supported by the article's actual workflow.",
+      "relationship": "iteration; critique; acceptance",
+      "reusable_rules": [
+        "Give both directions of a feedback loop distinct labels.",
+        "Expose termination and escalation conditions."
+      ],
+      "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587",
+      "title": "Feedback carries information, not guaranteed improvement",
+      "typography": "Short centered sans-serif role labels; smaller verbs on interfaces. Exact font unknown.",
+      "usage": "reference"
+    },
+    "article_id": "article_ffc229d83891918f82064b92",
+    "asset_id": "asset_a206d547e4be5fa73bc13cf3",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "flow",
+    "figure_id": "figure_ef124886031c1d9413654b40",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2F14f51e6406ccb29e695da48b17017e899a6119c7-2401x1000.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 3.918219,
+    "source_hash": "f0a1ad89e03fc7df0bcef5a6d6efa0834d8b71db9ff7153bcb7cd8ae20d5b587",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "title": "Building effective agents"
+  },
+  {
+    "analysis": {
+      "article_id": "article_126e07cf0d684e0333f96055",
+      "case_id": "C1",
+      "composition": "The simpler left panel shows prompt-to-model-to-message. The wider right panel adds documents, tools, memory/history and a dashed current-context boundary.\nInformation cards and selection marks identify curation, while tool activity returns information to history.",
+      "counterexamples": [
+        "More documents do not automatically improve results.",
+        "Wider or more colorful panels are not quantitative superiority evidence."
+      ],
+      "cross_domain_transfer": {
+        "changes": "Show a bounded selection and subsequent update of teaching notes.",
+        "domain": "Adaptive teaching",
+        "limits": "Resource count is not a measure of learning effectiveness.",
+        "mapping": "Compare a fixed worksheet with a teacher-curated lesson using prior work, references and current feedback."
+      },
+      "editorial_purpose": "Show that context engineering is more than renaming a prompt. Familiar primitives are held constant while state and selection are exposed.",
+      "evidence": {
+        "inferred": [
+          {
+            "basis": [
+              "observed:0",
+              "observed:1",
+              "source_stated:0"
+            ],
+            "claim": "Stable model/output grammar reduces comparison effort. The added resources alone do not establish improved results, so the new design should emphasize selection rather than accumulation.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Ffaa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png&w=3840"
+          }
+        ],
+        "observed": [
+          {
+            "claim": "The simpler left panel shows prompt-to-model-to-message. The wider right panel adds documents, tools, memory/history and a dashed current-context boundary.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Ffaa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png&w=3840"
+          },
+          {
+            "claim": "Information cards and selection marks identify curation, while tool activity returns information to history.",
+            "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Ffaa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png&w=3840"
+          }
+        ],
+        "source_stated": [
+          {
+            "claim": "The section contrasts prompt writing with iterative management of all information available to an agent.",
+            "context_review": {
+              "date": "2026-10-20",
+              "locator": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+              "notes_origin": "runs/curation-01.json#C1",
+              "reviewer": "ChatGPT multimodal source review",
+              "source_hash": "64402674a64be0412d10d41181e83f857146debd64a005287bb5375f47064c47"
+            },
+            "locator": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+            "method": "context_review_paraphrase"
+          }
+        ]
+      },
+      "family": "comparison",
+      "figure_id": "figure_883c1904ab5933050a8f7e6e",
+      "information_structure": "Containers distinguish stored resources from selected current information. The return path changes state; it is not a second unrelated example. Extra panel width accommodates complexity rather than measuring superiority.",
+      "original_notes": {
+        "file": "runs/curation-01.json",
+        "group_context": {
+          "palette": "Warm neutral canvas with blue, green, orange and violet semantic accents; colors identify information roles rather than a universal quality rank.",
+          "source": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+          "typography": "Sans-serif labels, short headings and compact text examples; exact font and color values unmeasured."
+        },
+        "sha256": "969fa8dfc3a297d1d7ce6f0d3336804cbea96b27bd96d15b762e25e59e2c53fd",
+        "study": {
+          "asset": "faa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png",
+          "counterexamples": [
+            "More documents do not automatically improve results.",
+            "Wider or more colorful panels are not quantitative superiority evidence."
+          ],
+          "family": "comparison",
+          "key": "C1",
+          "mapping": "Containers distinguish stored resources from selected current information. The return path changes state; it is not a second unrelated example. Extra panel width accommodates complexity rather than measuring superiority.",
+          "observed": [
+            "The simpler left panel shows prompt-to-model-to-message. The wider right panel adds documents, tools, memory/history and a dashed current-context boundary.",
+            "Information cards and selection marks identify curation, while tool activity returns information to history."
+          ],
+          "purpose": "Show that context engineering is more than renaming a prompt. Familiar primitives are held constant while state and selection are exposed.",
+          "rationale": "Stable model/output grammar reduces comparison effort. The added resources alone do not establish improved results, so the new design should emphasize selection rather than accumulation.",
+          "reconstruction": "List stores, selection and update operations separately; reuse model geometry across panels; then add the bounded context container and return path.",
+          "relationship": "matched conditions; state curation; feedback",
+          "rules": [
+            "Hold familiar components constant in a conceptual comparison.",
+            "Distinguish available information from information actually loaded."
+          ],
+          "source_stated": "The section contrasts prompt writing with iterative management of all information available to an agent.",
+          "title": "Static prompt versus managed information state",
+          "transfer": {
+            "changes": "Show a bounded selection and subsequent update of teaching notes.",
+            "domain": "Adaptive teaching",
+            "limits": "Resource count is not a measure of learning effectiveness.",
+            "mapping": "Compare a fixed worksheet with a teacher-curated lesson using prior work, references and current feedback."
+          }
+        }
+      },
+      "palette": "Warm neutral canvas with blue, green, orange and violet semantic accents; colors identify information roles rather than a universal quality rank.",
+      "pixel_inspection": {
+        "date": "2026-10-20",
+        "inspector": "ChatGPT multimodal source review",
+        "locator": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Ffaa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png&w=3840",
+        "method": "official_image_pixels",
+        "note": "Main Chat inspected actual official image pixels and the related article sections. Observations below are visual evidence. Rationale and reconstruction are original analysis, not verified author intent or tool history. Exact typefaces and hex colors were not measured.",
+        "rights": "link_only"
+      },
+      "production_certainty": "uncertain",
+      "production_hypothesis": "List stores, selection and update operations separately; reuse model geometry across panels; then add the bounded context container and return path.",
+      "relationship": "matched conditions; state curation; feedback",
+      "reusable_rules": [
+        "Hold familiar components constant in a conceptual comparison.",
+        "Distinguish available information from information actually loaded."
+      ],
+      "source_hash": "64402674a64be0412d10d41181e83f857146debd64a005287bb5375f47064c47",
+      "title": "Static prompt versus managed information state",
+      "typography": "Sans-serif labels, short headings and compact text examples; exact font and color values unmeasured.",
+      "usage": "reference"
+    },
+    "article_id": "article_126e07cf0d684e0333f96055",
+    "asset_id": "asset_f85193df42dab6989cb428ef",
+    "classification": "source_publication",
+    "evidence_level": "validated_analysis",
+    "family": "comparison",
+    "figure_id": "figure_883c1904ab5933050a8f7e6e",
+    "image_link": "https://www.anthropic.com/_next/image?q=75&url=https%3A%2F%2Fwww-cdn.anthropic.com%2Fimages%2F4zrzovbb%2Fwebsite%2Ffaa261102e46c7f090a2402a49000ffae18c5dd6-2292x1290.png&w=3840",
+    "review_status": "import_shape_validated_not_endorsed",
+    "score": 3.076225,
+    "source_hash": "64402674a64be0412d10d41181e83f857146debd64a005287bb5375f47064c47",
+    "source_url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+    "title": "Effective context engineering for AI agents"
+  }
+]
