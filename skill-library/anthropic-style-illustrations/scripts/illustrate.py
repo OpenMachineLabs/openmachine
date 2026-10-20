@@ -95,8 +95,8 @@ def load_index():
     """Validate the existing curated records; never fetch source media."""
     data = read_json(INDEX)
     records = data.get('records', [])
-    if data.get('version') != 1 or len(records) != 23:
-        raise ValueError('Expected version 1 index with 23 curated cases')
+    if data.get('version') != 1 or not isinstance(records, list) or not records:
+        raise ValueError('Expected version 1 index with nonempty curated cases')
     seen = set()
     required = ('family', 'relationship', 'inference', 'rule', 'limit')
     for record in records:
@@ -115,8 +115,6 @@ def load_index():
             raise ValueError(f'{case_id}: missing provenance')
         if record.get('usage') not in ('reference', 'contrast_not_target'):
             raise ValueError(f'{case_id}: invalid usage')
-    if len({r['article_url'] for r in records}) != 14:
-        raise ValueError('Expected 14 source articles')
     if not any(r['case_id'] == 'E8' and r['usage'] == 'contrast_not_target' for r in records):
         raise ValueError('E8 must remain a negative contrast case')
     return records

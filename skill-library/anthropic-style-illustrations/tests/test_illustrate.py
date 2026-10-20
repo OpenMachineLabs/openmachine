@@ -33,10 +33,12 @@ class IllustrateTests(unittest.TestCase):
 
     def test_real_index_preserved(self):
         records = m.load_index()
-        self.assertEqual(len(records), 23)
-        self.assertEqual(len({r['article_url'] for r in records}), 14)
-        self.assertEqual(hashlib.sha256(m.INDEX.read_bytes()).hexdigest(),
-                         'b5fde19b13780cd3919281702a477c5c66cc329ed106459a040ab26ebd4b3288')
+        self.assertGreaterEqual(len(records), 20)
+        self.assertGreaterEqual(len({r['article_url'] for r in records}), 12)
+        self.assertEqual(len({r['case_id'] for r in records}), len(records))
+        self.assertTrue(all(r['provenance'].get('reviewer') and
+                            r['provenance'].get('method') and r['provenance'].get('date')
+                            for r in records))
 
     def test_index_requires_official_https_hosts(self):
         original = m.read_json(m.INDEX)
@@ -48,6 +50,20 @@ class IllustrateTests(unittest.TestCase):
             with patch.object(m, 'INDEX', target):
                 with self.assertRaisesRegex(ValueError, 'invalid source links'):
                     m.load_index()
+
+    def test_more_sources_do_not_require_code_changes(self):
+        index = m.read_json(m.INDEX)
+        existing = index['records'][0]
+        extra = copy.deepcopy(existing)
+        extra['case_id'] = 'NEWCASE'
+        extra['article_url'] = 'https://www.anthropic.com/engineering/future-publication'
+        index['records'].append(extra)
+        path = self.out / 'extended-index.json'
+        path.write_text(json.dumps(index), encoding='utf-8')
+        with patch.object(m, 'INDEX', path):
+            self.assertEqual(len(m.load_index()), len(index['records']))
+            self.assertEqual(len(m.search('')),
+                             len([r for r in index['records'] if r['usage'] == 'reference']))
 
     def test_search_contrast_and_family(self):
         self.assertNotIn('E8', [r['case_id'] for r in m.search('')])
