@@ -3,7 +3,7 @@ import {AbsoluteFill, Audio, Composition, interpolate, staticFile, useCurrentFra
 
 const ink='#23231F', paper='#F2EFE8', rust='#B95438', leaf='#607C68', blue='#8BA0A8', rule='#D2CEC4', white='#FFFEFA';
 const show=(f:number,a:number,b:number)=>interpolate(f,[a,b],[0,1],{extrapolateLeft:'clamp',extrapolateRight:'clamp'});
-const Label:React.FC<{x:number;y:number;children:React.ReactNode;color?:string;size?:number;serif?:boolean}> = ({x,y,children,color=ink,size=28,serif=false}) => <div style={{position:'absolute',left:x,top:y,fontFamily:serif?'Georgia,serif':'Arial,sans-serif',fontSize:size,color,lineHeight:1.15,letterSpacing:serif?'-0.03em':'-.01em'}}>{children}</div>;
+const Label:React.FC<{x:number;y:number;children:React.ReactNode;color?:string;size?:number;serif?:boolean;w?:number}> = ({x,y,children,color=ink,size=28,serif=false,w}) => <div style={{position:'absolute',left:x,top:y,width:w,fontFamily:serif?'Georgia,serif':'Arial,sans-serif',fontSize:size,color,lineHeight:1.15,letterSpacing:serif?'-0.03em':'-.01em'}}>{children}</div>;
 const Line:React.FC<{x:number;y:number;w:number;color?:string}> = ({x,y,w,color=rule}) => <div style={{position:'absolute',left:x,top:y,width:w,height:2,background:color}}/>;
 const Sheet:React.FC<{x:number;y:number;w:number;h:number;children:React.ReactNode;fill?:string;angle?:number}> = ({x,y,w,h,children,fill=white,angle=0}) => <div style={{position:'absolute',left:x,top:y,width:w,height:h,background:fill,border:'1px solid '+rule,boxSizing:'border-box',transform:'rotate('+angle+'deg)',boxShadow:'0 14px 28px rgba(35,35,31,.05)'}}>{children}</div>;
 const Header:React.FC<{n:string;name:string}> = ({n,name}) => <><Label x={100} y={64} size={19} color="#65645E">{name.toUpperCase()}</Label><Label x={1680} y={64} size={19} color="#65645E">{n} / FIELDNOTE</Label><Line x={100} y={105} w={1720}/></>;
@@ -12,7 +12,7 @@ const Chunk:React.FC<{x:number;y:number;context:boolean;contextProgress?:number;
  return <div style={{position:'absolute',left:x,top:y,transform:'scale('+scale+')',transformOrigin:'top left',opacity}}>
  <Sheet x={0} y={0} w={640} h={248}>
  <div style={{position:'absolute',left:24,top:20,width:590,height:54*cp,background:'#E4E9E0',borderLeft:'5px solid '+leaf,opacity:cp}}/>
- <div style={{position:'absolute',left:42,top:34,opacity:cp}}><Label x={0} y={0} size={21} color={leaf}>ACME CORP. / Q2 2023 SEC FILING</Label></div>
+ <Label x={42} y={34} w={540} size={21} color={leaf}>ACME CORP. / Q2 2023 SEC FILING</Label>
  <Label x={30} y={38+62*cp} size={31} serif>“The company's revenue grew by 3% over the previous quarter.”</Label>
  <Line x={30} y={160+24*cp} w={575}/><Label x={30} y={179+24*cp} size={17} color="#65645E">ILLUSTRATIVE SOURCE EXCERPT</Label>
  </Sheet></div>;

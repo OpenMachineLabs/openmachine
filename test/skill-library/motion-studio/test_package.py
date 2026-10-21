@@ -39,6 +39,11 @@ class MotionStudioPackageTests(unittest.TestCase):
         self.assertRegex(source, r'durationInFrames=\{1200\}')
         self.assertIn("ContextualRetrieval", source)
 
+    def test_context_label_has_explicit_readable_width(self):
+        source = (PILOT / "src" / "Film.tsx").read_text()
+        self.assertIn("w={540}", source)
+        self.assertIn("ACME CORP. / Q2 2023 SEC FILING", source)
+
     def test_research_claims_keep_evaluation_scope_and_caveat(self):
         brief = (PILOT / "brief.md").read_text()
         self.assertIn("top-20-chunk evaluation", brief)
