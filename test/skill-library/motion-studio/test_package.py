@@ -1,5 +1,7 @@
-"""Structural regression checks for the self-contained Motion Studio Skill."""
+"""Focused ownership tests for the self-contained Motion Studio production Skill."""
+import importlib.util
 import json
+import math
 import unittest
 from pathlib import Path
 
@@ -9,7 +11,7 @@ PILOT = SKILL / "examples" / "pilot-film"
 
 
 class MotionStudioPackageTests(unittest.TestCase):
-    def test_skill_documents_and_style_are_present(self):
+    def test_skill_style_and_real_direction_artwork_are_present(self):
         for relative in (
             "SKILL.md",
             "references/workflow.md",
@@ -18,7 +20,9 @@ class MotionStudioPackageTests(unittest.TestCase):
             "styles/anthropic-editorial/STYLE.md",
             "styles/anthropic-editorial/references.md",
             "examples/pilot-film/brief.md",
-            "examples/pilot-film/art-directions.svg",
+            "examples/pilot-film/src/Art.tsx",
+            "examples/pilot-film/src/DirectionB.tsx",
+            "examples/pilot-film/scripts/generate_soundtrack.py",
         ):
             with self.subTest(path=relative):
                 self.assertTrue((SKILL / relative).is_file(), relative)
@@ -31,25 +35,54 @@ class MotionStudioPackageTests(unittest.TestCase):
         for name, version in package["dependencies"].items():
             self.assertEqual(lock["packages"]["node_modules/" + name]["version"], version)
 
-    def test_composition_is_40_seconds_full_hd_30_fps(self):
+    def test_composition_and_real_nine_second_proof(self):
         source = (PILOT / "src" / "root.tsx").read_text()
         self.assertRegex(source, r'width=\{1920\}')
         self.assertRegex(source, r'height=\{1080\}')
         self.assertRegex(source, r'fps=\{30\}')
         self.assertRegex(source, r'durationInFrames=\{1200\}')
         self.assertIn("ContextualRetrieval", source)
+        self.assertIn("DirectionB", source)
+        self.assertTrue((ROOT / "artifacts/motion-studio/direction-study.jpg").is_file())
+        package = json.loads((PILOT / "package.json").read_text())
+        self.assertIn("--frames=310-579", package["scripts"]["preview"])
+        self.assertEqual((579 - 310 + 1) / 30, 9)
 
-    def test_context_label_has_explicit_readable_width(self):
-        source = (PILOT / "src" / "Film.tsx").read_text()
-        self.assertIn("w={540}", source)
-        self.assertIn("opacity={cp}", source)
-        self.assertIn("ACME CORP. / Q2 2023 SEC FILING", source)
+    def test_context_attaches_to_same_fragment_without_erasing_original(self):
+        artwork = (PILOT / "src" / "Art.tsx").read_text()
+        film = (PILOT / "src" / "Film.tsx").read_text()
+        self.assertIn("GENERATED CONTEXT / PREPENDED", artwork)
+        self.assertIn("The company's revenue grew by 3%", artwork)
+        self.assertIn("context={0}", film)
+        self.assertIn("context={dock}", film)
+        self.assertIn("context={1}", film)
+        self.assertIn("SemanticField", film)
+        self.assertIn("LexicalIndex", film)
 
-    def test_research_claims_keep_evaluation_scope_and_caveat(self):
+    def test_original_score_is_deterministic_and_fades_at_edges(self):
+        path = PILOT / "scripts" / "generate_soundtrack.py"
+        spec = importlib.util.spec_from_file_location("pilot_score", path)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.SECONDS, 40)
+        self.assertEqual(module.fade(0), 0)
+        self.assertEqual(module.fade(20), 1)
+        self.assertEqual(module.fade(40), 0)
+        for second in (1.2, 12.8, 22.4, 38.7):
+            result = module.score(second, int(second * module.RATE))
+            self.assertEqual(result, module.score(second, int(second * module.RATE)))
+            self.assertEqual(len(result), 2)
+            self.assertTrue(all(math.isfinite(v) and abs(v) < 1 for v in result))
+
+    def test_research_claim_keeps_evaluation_scope_and_example_boundary(self):
         brief = (PILOT / "brief.md").read_text()
-        self.assertIn("top-20-chunk evaluation", brief)
-        self.assertIn("not a universal guarantee", brief)
+        self.assertIn("top-20-chunk retrieval failure rate", brief)
+        self.assertIn("5.7%", brief)
+        self.assertIn("2.9%", brief)
+        self.assertIn("49% relative reduction", brief)
         self.assertIn("illustrative", brief.lower())
+        self.assertIn("not imply universal", brief)
 
 
 if __name__ == "__main__":

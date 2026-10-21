@@ -1,91 +1,188 @@
 import React from 'react';
-import {AbsoluteFill, Audio, Composition, interpolate, staticFile, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Audio, staticFile, useCurrentFrame} from 'remotion';
+import {
+  P, Type, Eyebrow, PathDraw, Archive, Fragment, MiniFragments,
+  SemanticField, LexicalIndex, IsometricIndex, Dot, PaperCorners,
+  reveal, fadeBand, mix, clip
+} from './Art';
 
-const ink='#23231F', paper='#F2EFE8', rust='#B95438', leaf='#607C68', blue='#8BA0A8', rule='#D2CEC4', white='#FFFEFA';
-const show=(f:number,a:number,b:number)=>interpolate(f,[a,b],[0,1],{extrapolateLeft:'clamp',extrapolateRight:'clamp'});
-const Label:React.FC<{x:number;y:number;children:React.ReactNode;color?:string;size?:number;serif?:boolean;w?:number;opacity?:number}> = ({x,y,children,color=ink,size=28,serif=false,w,opacity=1}) => <div style={{position:'absolute',left:x,top:y,width:w,opacity,fontFamily:serif?'Georgia,serif':'Arial,sans-serif',fontSize:size,color,lineHeight:1.15,letterSpacing:serif?'-0.03em':'-.01em'}}>{children}</div>;
-const Line:React.FC<{x:number;y:number;w:number;color?:string}> = ({x,y,w,color=rule}) => <div style={{position:'absolute',left:x,top:y,width:w,height:2,background:color}}/>;
-const Sheet:React.FC<{x:number;y:number;w:number;h:number;children:React.ReactNode;fill?:string;angle?:number}> = ({x,y,w,h,children,fill=white,angle=0}) => <div style={{position:'absolute',left:x,top:y,width:w,height:h,background:fill,border:'1px solid '+rule,boxSizing:'border-box',transform:'rotate('+angle+'deg)',boxShadow:'0 14px 28px rgba(35,35,31,.05)'}}>{children}</div>;
-const Header:React.FC<{n:string;name:string}> = ({n,name}) => <><Label x={100} y={64} size={19} color="#65645E">{name.toUpperCase()}</Label><Label x={1680} y={64} size={19} color="#65645E">{n} / FIELDNOTE</Label><Line x={100} y={105} w={1720}/></>;
-const Chunk:React.FC<{x:number;y:number;context:boolean;contextProgress?:number;scale?:number;opacity?:number}> = ({x,y,context,contextProgress,scale=1,opacity=1}) => {
- const cp = contextProgress ?? (context ? 1 : 0);
- return <div style={{position:'absolute',left:x,top:y,transform:'scale('+scale+')',transformOrigin:'top left',opacity}}>
- <Sheet x={0} y={0} w={640} h={248}>
- <div style={{position:'absolute',left:24,top:20,width:590,height:54*cp,background:'#E4E9E0',borderLeft:'5px solid '+leaf,opacity:cp}}/>
- <Label x={42} y={34} w={540} opacity={cp} size={21} color={leaf}>ACME CORP. / Q2 2023 SEC FILING</Label>
- <Label x={30} y={38+62*cp} size={31} serif>“The company's revenue grew by 3% over the previous quarter.”</Label>
- <Line x={30} y={160+24*cp} w={575}/><Label x={30} y={179+24*cp} size={17} color="#65645E">ILLUSTRATIVE SOURCE EXCERPT</Label>
- </Sheet></div>;
-};
-
-export const Film:React.FC=()=>{
+/**
+ * Contextual Retrieval / an editorial documentary in seven hand-directed shots.
+ * The filing, paper excerpt, explanatory context and index materials retain their
+ * identity across shots. All data claims come from Anthropic's 2024-09-19 article;
+ * all named ACME examples and vector/token graphics are illustrations.
+ */
+export const Film:React.FC = () => {
  const f=useCurrentFrame();
- const fade=(a:number,b:number)=>show(f,a,b);
- const scene=(a:number,b:number)=>f>=a&&f<b;
- return <AbsoluteFill style={{background:paper,color:ink,overflow:'hidden'}}>
- <Audio src={staticFile('score.wav')} volume={0.48}/>
- {scene(0,150)&&<><Header n="01" name="The context problem"/>
- <Label x={100} y={175} size={76} serif>A sentence can be true—<br/>and still be hard to find.</Label>
- <Label x={105} y={405} size={29} color="#65645E">Split a document into pieces. What happens when a piece<br/>forgets where it came from?</Label>
- <Chunk x={1010+90*(1-fade(0,24))} y={300} context={false} scale={.9} opacity={fade(0,20)}/>
- <Line x={105} y={710} w={680}/><Label x={105} y={744} size={23} color="#65645E">RETRIEVAL-AUGMENTED GENERATION</Label>
- <Label x={105} y={790} size={31} serif>A useful answer begins with a useful passage.</Label></>}
- {scene(150,300)&&<><Header n="02" name="01 / Chunking"/>
- <Label x={100} y={150} size={65} serif>Cut the page. Lose the frame.</Label>
- <Sheet x={135} y={285} w={550} h={450} angle={-2}>
- <Label x={35} y={35} size={23} color="#65645E">ACME CORP. / QUARTERLY FILING</Label><Line x={35} y={80} w={470}/>
- <Label x={35} y={130} size={31} serif>Q2 2023 revenue increased following a stronger enterprise quarter.</Label>
- <Line x={35} y={300} w={470}/><Label x={35} y={340} size={20} color="#65645E">SECTION 4.2 — PERFORMANCE</Label></Sheet>
- <div style={{position:'absolute',left:720,top:280,width:3,height:475,background:rust}}/>
- <Chunk x={800} y={350} context={false} scale={.83}/>
- <Label x={820} y={590} size={23} color={rust}>COMPANY? PERIOD? SOURCE?</Label>
- <Label x={100} y={850} size={31} color="#65645E">The words survive. The relationship may not.</Label></>}
- {scene(300,450)&&<><Header n="03" name="02 / Contextualize"/>
- <Label x={100} y={150} size={63} serif>Give the same sentence its address.</Label>
- <Label x={105} y={245} size={25} color="#65645E">Prepend a concise, chunk-specific note before indexing.</Label>
- <Sheet x={130} y={390+25*(1-fade(305,330))} w={360} h={125} fill="#E4E9E0" angle={-3}>
- <Label x={25} y={25} size={21} color={leaf}>DOCUMENT CONTEXT</Label><Label x={25} y={68} size={29} serif>ACME · Q2 2023</Label></Sheet>
- <Line x={500} y={455} w={110*fade(305,330)} color={leaf}/>
- <Chunk x={650} y={350} context={true} contextProgress={fade(305,345)}/>
- <Label x={130} y={590} size={24} color="#65645E">Context is attached to the chunk, not substituted for it.</Label>
- <Label x={100} y={865} size={19} color="#65645E">ILLUSTRATIVE EXCERPT ADAPTED FROM ANTHROPIC'S ARTICLE</Label></>}
- {scene(450,630)&&<><Header n="04" name="03 / Two indexes"/>
- <Label x={100} y={145} size={61} serif>One contextualized chunk. Two ways in.</Label>
- <Chunk x={100} y={350} context={true} scale={.67}/>
- <Line x={535} y={445} w={135*show(f,465,495)} color={blue}/>
- <div style={{position:'absolute',left:700,top:255,width:430,height:230,borderTop:'3px solid '+blue,borderBottom:'3px solid '+blue}}>
- <Label x={22} y={20} size={20} color={blue}>SEMANTIC INDEX</Label><Label x={22} y={70} size={37} serif>Meaning</Label><Label x={22} y={130} size={24} color="#65645E">Embeddings map contextual text to a vector.</Label></div>
- <div style={{position:'absolute',left:700,top:545,width:430,height:230,borderTop:'3px solid '+rust,borderBottom:'3px solid '+rust}}>
- <Label x={22} y={20} size={20} color={rust}>LEXICAL INDEX</Label><Label x={22} y={70} size={37} serif>Exact terms</Label><Label x={22} y={130} size={24} color="#65645E">BM25 keeps words and identifiers searchable.</Label></div>
- <Line x={1155} y={365} w={125*show(f,480,510)} color={blue}/><Line x={1155} y={655} w={125*show(f,495,525)} color={rust}/>
- <Sheet x={1310} y={410} w={420} h={230}><Label x={30} y={30} size={21} color="#65645E">COMBINED CANDIDATES</Label><Line x={30} y={75} w={350}/><Label x={30} y={100} size={30} serif>Rank · merge · dedupe</Label><Label x={30} y={160} size={22} color="#65645E">Complementary signals</Label></Sheet>
- <Label x={100} y={875} size={22} color="#65645E">CONTEXT IS PREPENDED BEFORE BOTH INDEXES ARE BUILT.</Label></>}
- {scene(630,780)&&<><Header n="05" name="04 / Retrieve"/>
- <Label x={100} y={150} size={64} serif>A query can find the right fragment.</Label>
- <Sheet x={120} y={335} w={620} h={160}><Label x={28} y={25} size={20} color={rust}>USER QUERY</Label><Label x={28} y={70} size={30} serif>What was ACME's Q2 2023 revenue growth?</Label></Sheet>
- <Line x={770} y={410} w={135} color={blue}/>
- <Chunk x={960} y={325} context={true} scale={.78} opacity={fade(650,680)}/>
- <Label x={110} y={575} size={30} color="#65645E">The passage arrives with its source context intact.</Label><Line x={110} y={675} w={650}/>
- <Label x={110} y={715} size={22} color="#65645E">A PREPROCESSING CHANGE</Label><Label x={110} y={760} size={31} serif>Not a longer prompt for every question.</Label></>}
- {scene(780,960)&&<><Header n="06" name="05 / Measured result"/>
- <Label x={100} y={145} size={63} serif>Fewer relevant passages missed.</Label>
- <Label x={105} y={245} size={25} color="#65645E">Anthropic evaluation · relevant chunk not retrieved in the top 20</Label>
- <Label x={145} y={340} size={20} color="#65645E">BASELINE</Label><Label x={145} y={385} size={75} serif>5.7%</Label>
- <div style={{position:'absolute',left:145,top:490,width:700,height:38,background:'#DEDAD1'}}/><div style={{position:'absolute',left:145,top:490,width:700*fade(790,840),height:38,background:rust}}/>
- <Label x={1000} y={340} size={20} color={leaf}>CONTEXTUAL EMBEDDINGS + BM25</Label><Label x={1000} y={385} size={75} serif>2.9%</Label>
- <div style={{position:'absolute',left:1000,top:490,width:700,height:38,background:'#DEDAD1'}}/><div style={{position:'absolute',left:1000,top:490,width:700*(2.9/5.7)*fade(790,840),height:38,background:leaf}}/>
- <Line x={145} y={600} w={1560}/><Label x={145} y={650} size={51} color={leaf} serif>49% relative reduction</Label>
- <Label x={145} y={735} size={25} color="#65645E">Failure rate in this evaluation—not a universal guarantee.</Label>
- <Label x={145} y={825} size={19} color="#65645E">SOURCE: ANTHROPIC, INTRODUCING CONTEXTUAL RETRIEVAL, 19 SEP 2024</Label></>}
- {scene(960,1200)&&<><Header n="07" name="The boundary"/>
- <Label x={105} y={170} size={68} serif>Context helps retrieval.<br/>It does not replace judgment.</Label>
- <Label x={110} y={390} size={31} color="#65645E">Chunk boundaries, prompts, and retrieval depth still matter.</Label>
- <Sheet x={1120} y={320} w={550} h={300} fill={white} angle={1}>
- <Label x={40} y={35} size={22} color={leaf}>KEEP THE SOURCE ATTACHED</Label><Line x={40} y={80} w={450}/>
- <Label x={40} y={115} size={29} serif>Meaning + exact terms</Label><Label x={40} y={175} size={25} color="#65645E">Context before indexing</Label><Label x={40} y={230} size={22} color="#65645E">Measured in one published setup</Label></Sheet>
- <Line x={110} y={720} w={850}/><Label x={110} y={765} size={23} color="#65645E">ANTHROPIC ENGINEERING · CONTEXTUAL RETRIEVAL · 2024</Label>
- <Label x={110} y={825} size={31} serif>Find the passage. Keep the frame.</Label></>}
+
+ const open=1-reveal(f,140,163);
+ const lost=fadeBand(f,143,347,18,20);
+ const restored=fadeBand(f,328,568,21,18);
+ const indexed=fadeBand(f,552,790,20,23);
+ const searched=fadeBand(f,767,962,21,20);
+ const measured=fadeBand(f,939,1138,17,18);
+ const final=reveal(f,1116,1142);
+
+ const cut=reveal(f,178,243);
+ const dock=reveal(f,384,473);
+ const split=reveal(f,587,667);
+ const lookup=reveal(f,818,906);
+ const evidence=reveal(f,977,1060);
+
+ return <AbsoluteFill style={{backgroundColor:P.paper}}>
+ <Audio src={staticFile('score.wav')} volume={0.65}/>
+ <svg viewBox="0 0 1920 1080" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="quiet-grid" width="88" height="88" patternUnits="userSpaceOnUse">
+      <path d="M88 0H0V88" fill="none" stroke={P.line} strokeWidth=".8" opacity=".30"/>
+      <circle cx="0" cy="0" r="2" fill={P.sage} opacity=".28"/>
+    </pattern>
+    <clipPath id="inside-page"><rect x="0" y="0" width="1920" height="1080"/></clipPath>
+  </defs>
+
+  {/* 0—5.5 s: a real-looking filing instead of a decorative title card. */}
+  <g opacity={open}>
+    <rect width="1920" height="1080" fill={P.forest}/>
+    <path d="M105 900H1765 M105 915H1765" stroke="#496157" strokeWidth="1" opacity=".6"/>
+    <Eyebrow x={132} y={111} dark>THE LOST ADDRESS / 01</Eyebrow>
+    <Type x={130} y={351} size={87} serif fill={P.white} opacity={reveal(f,4,33)}>The answer is in there.</Type>
+    <Type x={130} y={469} size={112} serif fill={P.white} opacity={reveal(f,26,63)}>But where?</Type>
+    <Type x={134} y={576} size={32} fill="#CAD8CE" opacity={reveal(f,49,83)}>
+      What happens when a document becomes fragments?
+    </Type>
+    <Archive x={mix(1190,1032,reveal(f,7,65))} y={173} scale={.82} turn={mix(6,-1,reveal(f,16,91))} opacity={reveal(f,6,42)}/>
+    <PathDraw d="M132 717C430 717 570 763 1002 645" amount={reveal(f,44,108)} color={P.coral} opacity={.65} width={2}/>
+    <Dot x={mix(132,1002,reveal(f,61,117))} y={mix(717,645,reveal(f,61,117))} r={6} color={P.coral} opacity={reveal(f,44,62)}/>
+    <Eyebrow x={132} y={983} dark>ONE TECHNICAL STORY / CONTEXTUAL RETRIEVAL</Eyebrow>
+  </g>
+
+  {/* 5—11.5 s: a cut is spatial and irreversible unless provenance returns. */}
+  <g opacity={lost}>
+    <rect width="1920" height="1080" fill={P.paper}/>
+    <rect width="1920" height="1080" fill="url(#quiet-grid)" opacity=".26"/>
+    <Eyebrow x={126} y={108}>01 / CHUNKING</Eyebrow>
+    <Type x={126} y={218} size={78} serif>The words survive.</Type>
+    <Type x={126} y={304} size={78} serif>The address doesn't.</Type>
+    <Archive x={mix(64,-135,cut)} y={401} scale={.59} turn={-3} opacity={.6+cut*.1}/>
+    <PathDraw d="M394 565C535 528 645 528 822 530" amount={cut} color={P.rust} width={2.6} dashed/>
+    <circle cx={mix(396,818,cut)} cy={530+35*(1-cut)} r="10" fill={P.paper} stroke={P.rust} strokeWidth="2" opacity={cut}/>
+    <Fragment x={mix(1040,801,cut)} y={mix(446,395,cut)} scale={.98} context={0} opacity={reveal(f,166,213)} angle={mix(5,-1,cut)}/>
+    <PaperCorners x={782} y={377} w={758} h={268} fill={P.rust}/>
+    <MiniFragments x={132} y={826} count={4} highlight={2} fade={reveal(f,208,265)}/>
+    <Type x={819} y={764} size={25} fill={P.rust} spacing={2} opacity={reveal(f,238,273)}>
+      COMPANY?    QUARTER?    WHICH FILING?
+    </Type>
+    <Type x={819} y={834} size={30} serif opacity={reveal(f,248,286)}>
+      A correct sentence. An incomplete clue.
+    </Type>
+    <Eyebrow x={126} y={1003}>ILLUSTRATIVE SEC-FILING EXCERPT / ANTHROPIC</Eyebrow>
+  </g>
+
+  {/* 11—19 s: the nine-second centerpiece. Whole document -> note -> same excerpt. */}
+  <g opacity={restored}>
+    <rect width="1920" height="1080" fill={P.paper}/>
+    <rect width="1920" height="1080" fill="url(#quiet-grid)" opacity=".18"/>
+    <Eyebrow x={124} y={104}>02 / CONTEXTUALIZE · PREPROCESSING</Eyebrow>
+    <Type x={122} y={209} size={83} serif>Give the chunk its address.</Type>
+    <Type x={128} y={282} size={30} fill={P.muted}>Use the whole document to write a short, chunk-specific note.</Type>
+    <Archive x={114} y={410} scale={.49} turn={-4} emphasis={0}/>
+    <Type x={134} y={823} size={22} fill={P.muted}>SOURCE DOCUMENT</Type>
+    <Type x={134} y={860} size={21} fill={P.sage} weight={700}>ACME / Q2 2023</Type>
+    <PathDraw d="M450 598C525 598 548 456 659 456" amount={dock} color={P.sage} width={3}/>
+    <g opacity={clip(1-dock)}>
+      <rect x={mix(460,660,dock)} y={mix(554,417,dock)} width={185} height={62} fill={P.mint} stroke={P.sage}/>
+      <Type x={mix(477,677,dock)} y={mix(588,451,dock)} size={20} fill={P.forest}>Source context</Type>
+    </g>
+    <Fragment x={660} y={412} scale={1.12} context={dock} opacity={reveal(f,329,353)}/>
+    <PaperCorners x={645} y={397} w={837} h={411} fill={P.sage}/>
+    <Type x={663} y={901} size={29} serif opacity={reveal(f,451,485)}>
+      Same words. Now searchable with their provenance.
+    </Type>
+    <Eyebrow x={663} y={962} fill={P.sage}>ADDED BEFORE EMBEDDING AND BM25 INDEXING</Eyebrow>
+    <PathDraw d="M1501 604C1596 604 1653 558 1771 558" amount={reveal(f,502,552)} color={P.blue} width={2.5}/>
+    <PathDraw d="M1501 620C1603 639 1664 707 1771 707" amount={reveal(f,519,559)} color={P.rust} width={2.5}/>
+    <Dot x={1770} y={558} r={6} color={P.blue} opacity={reveal(f,542,557)}/>
+    <Dot x={1770} y={707} r={6} color={P.rust} opacity={reveal(f,542,557)}/>
+  </g>
+
+  {/* 19—26 s: the two actual retrieval material families, not identical cards. */}
+  <g opacity={indexed}>
+    <rect width="1920" height="1080" fill={P.paper}/>
+    <Eyebrow x={123} y={107}>03 / BUILD BOTH INDEXES</Eyebrow>
+    <Type x={118} y={211} size={78} serif>One passage. Two ways in.</Type>
+    <Type x={124} y={266} size={29} fill={P.muted}>The context travels with both representations.</Type>
+    <path d="M786 310V990" stroke={P.line} strokeWidth="2"/>
+    <Fragment x={123} y={408} scale={.72} context={1}/>
+    <Type x={133} y={783} size={24} fill={P.muted}>ONE CONTEXTUALIZED CHUNK</Type>
+    <IsometricIndex x={187} y={826} f={f} color={P.sage} opacity={.9}/>
+    <PathDraw d="M660 536C754 536 773 459 850 459" amount={split} color={P.blue} width={3.3}/>
+    <PathDraw d="M660 559C755 590 774 790 850 790" amount={reveal(f,620,716)} color={P.rust} width={3.3}/>
+    <Dot x={mix(665,849,split)} y={mix(536,459,split)} r={8} color={P.blue} opacity={split}/>
+    <Dot x={mix(665,849,split)} y={mix(559,790,split)} r={8} color={P.rust} opacity={split}/>
+    <SemanticField x={870} y={318} f={f} progress={reveal(f,600,692)}/>
+    <LexicalIndex x={870} y={662} f={f} progress={reveal(f,637,730)}/>
+  </g>
+
+  {/* 26—32 s: query opens a concrete archive fragment rather than a fictitious score. */}
+  <g opacity={searched}>
+    <rect width="1920" height="1080" fill={P.paper}/>
+    <rect x="0" y="0" width="1920" height="397" fill="#E9EDE5"/>
+    <Eyebrow x={126} y={108}>04 / RETRIEVE</Eyebrow>
+    <Type x={123} y={221} size={74} serif>Ask a more specific question.</Type>
+    <Type x={130} y={303} size={36}>What was ACME Corp's Q2 2023 revenue growth?</Type>
+    <path d="M125 333H1769" stroke={P.line} strokeWidth="2"/>
+    <path d="M125 349H742" stroke={P.rust} strokeWidth={3}/>
+    <Dot x={mix(126,743,lookup)} y={349} r={7} color={P.rust}/>
+    <Type x={126} y={452} size={24} fill={P.muted} spacing={1.5}>SEARCH THE CHUNKS</Type>
+    <MiniFragments x={135} y={535} count={8} highlight={6} fade={reveal(f,777,825)}/>
+    <PathDraw d="M680 654C822 654 831 664 984 664" amount={lookup} color={P.sage} width={3}/>
+    <path d="M713 566L713 838" stroke={P.line} strokeWidth="1.5" strokeDasharray="6 11"/>
+    <Type x={1002} y={479} size={23} weight={700} fill={P.sage} spacing={2.3} opacity={lookup}>MATCH / PROVENANCE RETAINED</Type>
+    <Fragment x={990} y={545} scale={.78} context={1} opacity={lookup} highlight={1}/>
+    <PaperCorners x={976} y={527} w={589} h={288} fill={P.sage}/>
+    <Type x={1011} y={904} size={27} serif opacity={lookup}>A findable answer is still tied to its document.</Type>
+    <Eyebrow x={128} y={1007}>DIAGRAM ILLUSTRATIVE · NO QUERY ACCURACY CLAIMED</Eyebrow>
+  </g>
+
+  {/* 32—37.5 s: a measured result, with the scale and scope beside it. */}
+  <g opacity={measured}>
+    <rect width="1920" height="1080" fill={P.forest}/>
+    <path d="M125 106H1790 M125 965H1790" stroke="#59736A" strokeWidth="2" opacity=".75"/>
+    <Eyebrow x={129} y={84} dark>05 / PUBLISHED EVALUATION</Eyebrow>
+    <Type x={122} y={206} size={79} serif fill={P.white}>Fewer relevant passages missed.</Type>
+    <Type x={128} y={284} size={29} fill="#C5D3C8">Retrieval failure rate · 1 − recall@20 · averaged across the evaluated domains</Type>
+    {[0,1,2,3,4,5,6].map(i=> <g key={i}>
+      <path d={'M'+(554+195*i)+' 361V795'} stroke="#617A6E" strokeWidth={i===0?2:1} opacity={.46} strokeDasharray={i===0?'0':'5 10'}/>
+      <Type x={554+195*i} y={824} size={22} fill="#B8C9BF" anchor="middle">{i}%</Type>
+    </g>)}
+    <Type x={122} y={471} size={29} fill="#CCD8CF">BASELINE</Type>
+    <Type x={122} y={541} size={76} fill={P.white} serif>5.7%</Type>
+    <rect x="554" y="472" width={1170*5.7/6*evidence} height="63" fill={P.rust}/>
+    <rect x="554" y="472" width={1170*5.7/6*evidence} height="2" fill="#F8B998"/>
+    <Type x={122} y={644} size={28} fill="#CCD8CF">CONTEXTUAL</Type>
+    <Type x={122} y={684} size={24} fill="#B3C6B8">EMBEDDINGS + BM25</Type>
+    <Type x={122} y={759} size={76} fill={P.white} serif>2.9%</Type>
+    <rect x="554" y="687" width={1170*2.9/6*evidence} height="63" fill="#98C0A4"/>
+    <rect x="554" y="687" width={1170*2.9/6*evidence} height="2" fill="#D4E7D8"/>
+    <Type x={1781} y={888} size={68} serif fill="#D6EAD7" anchor="end" opacity={reveal(f,1032,1081)}>49% lower</Type>
+    <Type x={1781} y={927} size={23} fill="#C2D0C6" anchor="end">relative failure reduction in this evaluation</Type>
+    <Type x={130} y={1018} size={18} fill="#B6C3B8">SOURCE: ANTHROPIC, INTRODUCING CONTEXTUAL RETRIEVAL · SEP 19 2024</Type>
+  </g>
+
+  {/* 37.5—40 s: a quiet end, with the same contextualized paper as protagonist. */}
+  <g opacity={final}>
+    <rect width="1920" height="1080" fill={P.paper}/>
+    <rect width="1920" height="1080" fill="url(#quiet-grid)" opacity=".15"/>
+    <Eyebrow x={132} y={165}>CONTEXTUAL RETRIEVAL / AN EDITORIAL FIELDNOTE</Eyebrow>
+    <Type x={124} y={412} size={105} serif>Keep the passage.</Type>
+    <Type x={124} y={546} size={105} serif>Keep its context.</Type>
+    <Fragment x={1048} y={634} scale={.71} context={1}/>
+    <path d="M130 668H923" stroke={P.line} strokeWidth="3"/>
+    <Dot x={923} y={668} r={7} color={P.sage}/>
+    <Type x={132} y={726} size={31} fill={P.muted}>A better address for information worth finding.</Type>
+    <Type x={132} y={981} size={21} fill={P.muted}>READ THE RESEARCH  /  ANTHROPIC.COM/RESEARCH/CONTEXTUAL-RETRIEVAL</Type>
+    <path d="M130 1014H1790" stroke={P.line} strokeWidth="2"/>
+  </g>
+ </svg>
  </AbsoluteFill>;
 };
-
-export const FilmRoot:React.FC=()=> <Composition id="ContextualRetrieval" component={Film} width={1920} height={1080} fps={30} durationInFrames={1200}/>;
