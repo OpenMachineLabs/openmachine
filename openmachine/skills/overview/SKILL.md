@@ -52,6 +52,33 @@ follow the existing [update procedure](../service/management.md#exact-updates-an
 for the actual installation and retain original work. Check the client tool catalog
 separately after updating; Core cannot refresh an approved client snapshot.
 
+## Choose work from current evidence
+
+Before starting a candidate or declaring a blocker, inspect the selected workspace
+and relevant worktrees, original Tasks/operations, and owning Issue/PR/CI evidence.
+Use bounded reads and stable project/PR anchors; deepen only relevant gaps. A
+missing PR, empty search or clean tree does not prove nobody is working there.
+Reconcile stale status against newer original evidence for the same prerequisite,
+target and revision, not merely the newest unrelated result.
+
+Separate implementation, integration, acceptance and deployment. A pending test
+blocks only actions that require its result. For a real blocker, name the missing
+prerequisite, affected action, source/revision and condition that would unblock it.
+Before ordinary waiting or handoff, check for a useful independent step within the
+user's authorized outcome. Continue it when scope, ownership and resources permit;
+otherwise explain the remaining dependency. Do not invent work to stay busy or
+expand authority to avoid a blocker. Unknown state calls for bounded investigation,
+not assumed idleness, a fabricated dependency or a PASS.
+
+Check overlapping edits, interface/schema changes and shared services, ports,
+databases and deployment targets. Reuse the original work when continuing it;
+isolate independent edits when needed. Worktrees isolate files, not all resources.
+Refresh affected evidence before effects and before a merge that may deploy or
+replace a revision under acceptance. Preserve original receipts and use existing
+Issue/PR/Task records rather than another status ledger. Task claims, permission
+checks and mandatory foreground stops still apply: changing tasks or worktrees
+never bypasses them, uncertain effects or a live owner's work.
+
 ## Complete the authorized delivery
 
 Carry the user's requested outcome through verification. Reuse still-valid explicit

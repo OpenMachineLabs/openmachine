@@ -14,7 +14,7 @@ relevant to your question:
 | --- | --- |
 | `workspace` | One Git status page and target identity. |
 | `worktrees` | Registered worktrees, not proof that they are idle. |
-| `activity` | An explicitly selected task and original operation index. |
+| `activity` | An explicitly selected task, stage dependencies/state and original operation index. |
 | `runtime` | Controller provenance, configured grants and supported routes. |
 | `environment` | Target observer and paths of explicitly requested executables. |
 | `project` | Bounded root declarations and lock fingerprints, without evaluating them. |
@@ -23,6 +23,9 @@ relevant to your question:
 
 Default sections are `workspace`, `activity` and `runtime`. Supply a known
 `task_id` for task activity; no selected task does not mean there is no activity.
+Activity includes the bounded stage plan and available original evidence references,
+not a decision that another task is blocked or safe to run. Check current owners
+and shared resources; separate development from integration and release gates.
 
 ## Example
 

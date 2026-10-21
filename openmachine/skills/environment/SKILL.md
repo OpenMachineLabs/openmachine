@@ -28,7 +28,7 @@ request remains visible. Worktree listing preserves all configured root grants.
 | --- | --- |
 | `workspace` | One Git status page, not a full diff or submodule inspection. |
 | `worktrees` | One registration page, not proof of ownership, cleanliness or idleness. |
-| `activity` | Explicit task contract and original operation index, not a fresh process inventory. |
+| `activity` | Explicit task contract, stage dependencies/state and original operation index, not a fresh process inventory. |
 | `runtime` | Controller provenance and configured target grants/support, not live backend health. |
 | `environment` | Target observer runtime and requested executable paths, never project execution. |
 | `project` | Guarded root declarations and lock fingerprints, not evaluated configuration. |
@@ -49,6 +49,16 @@ plan revision, retry or another checkout. Historical running/unknown outcomes do
 not establish present liveness or cleanup. Other tasks and external editors are
 outside this section's coverage, even when its operation page is complete.
 
+Activity `stages` projects all declared stages (at most 16) at `plan_revision`,
+including dependencies, actual state, expected result, verification and available
+original `evidence_ref` values. These are retained plan facts, not a runnable queue
+or proof an external prerequisite is still missing. Follow the original evidence
+and compare current source/CI results before applying the
+[parallel-work decision rule](../overview/SKILL.md#choose-work-from-current-evidence).
+The operation-page `limit` does not truncate stages; the 64 KiB response cap still
+applies. Older runtimes may omit `stages`; use the original `read_task` summary,
+not invented dependencies.
+
 ## Act using the original owners
 
 Instruction paths are references only: read applicable `AGENTS.md` explicitly.
@@ -61,7 +71,7 @@ only activity; read that original task again. Sections have separate observation
 times: `atomic=false` is not a transaction, reservation or kernel CAS. Refresh
 affected facts before acting and retain existing identity/hash/HEAD, permissions,
 task claim and original-operation guards. Do not create worktrees automatically,
-replay uncertain effects, accept stages, or infer safe parallelism from this read.
+replay uncertain effects, accept stages, or infer safe parallelism from this read alone.
 
 There is no context cache, incremental baseline, background monitoring or Chat
 wake-up. The tool does not prove that Chat retained an earlier response. Source

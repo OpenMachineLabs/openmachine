@@ -19,7 +19,9 @@ changing their scope.
 - Define the outcome, allowed paths, non-goals, smallest acceptance check, and
   stopping condition before a substantive change.
 - Read the affected code and its callers first. Preserve unrelated work; use
-  an isolated branch or worktree when necessary.
+  an isolated branch or worktree when necessary. Follow the operating Skill
+  [parallel-work decision rule](openmachine/skills/overview/SKILL.md#choose-work-from-current-evidence);
+  an unrelated acceptance gate is not a repository-wide development blocker.
 - Prefer direct, readable code and existing owners. Every dependency, module,
   public interface, configuration option, or abstraction needs a current use.
 - Do not add future stubs, empty product directories, generic registries,

@@ -143,6 +143,50 @@ class ContextTests(TaskFixture, unittest.TestCase):
         self.assertFalse(changed["sections"]["activity"]["data"]["target_binding"]["matches"])
         self.assertEqual(self.task_bytes(), before)
 
+    def test_stage_dependencies_preserve_acceptance_and_original_evidence(self):
+        stage = self.request["stages"][0]
+        self.request["stages"] += [
+            dict(stage, id="integration", depends_on=["verify"],
+                 result="Consumer integration", verification="Original consumer acceptance"),
+            dict(stage, id="independent", depends_on=[], result="Independent source check")]
+        self.accept_plan()
+        arguments = self.write_arguments()
+        self.app.write_workspace_file(**arguments)
+        self.control("record_decision", stage_id="verify", outcome="accepted",
+                     evidence=[arguments["change_id"]], reason="Verified fixture file.")
+        self.control("record_decision", stage_id="integration", outcome="blocked",
+                     evidence=[], reason="Fixture consumer acceptance is unavailable.")
+        original = self.app.read_task("structured-one")["record"]
+        before = self.task_bytes()
+        activity = self.observe(task_id="structured-one", sections=["activity"], limit=1)["sections"]["activity"]
+        data = activity["data"]
+        self.assertEqual(activity["revision"], original["revision"])
+        self.assertEqual(data["plan_revision"], original["plan"]["revision"])
+        self.assertEqual([s["id"] for s in data["stages"]], ["verify", "integration", "independent"])
+        self.assertEqual([s["state"] for s in data["stages"]], ["accepted", "blocked", "pending"])
+        self.assertEqual([s["depends_on"] for s in data["stages"]], [[], ["verify"], []])
+        self.assertEqual(data["stages"][1]["verification"], "Original consumer acceptance")
+        self.assertEqual(data["stages"][1]["result"], "Consumer integration")
+        self.assertEqual(data["control"], original["control"])
+        self.assertEqual(data["stages"][0]["evidence_ref"], original["plan"]["stages"][0]["evidence_ref"])
+        evidence = self.app.read_task(**data["stages"][0]["evidence_ref"])
+        self.assertIn(arguments["change_id"], json.dumps(evidence))
+        self.assertTrue(all("evidence" not in s for s in data["stages"]))
+        self.assertEqual(self.task_bytes(), before)
+        self.assertNotIn("runnable", data)
+
+    def test_stage_summary_is_bounded_by_the_plan_not_the_operation_limit(self):
+        stage = self.request["stages"][0]
+        self.request["stages"] = [dict(stage, id=f"stage-{i}", depends_on=[]) for i in range(16)]
+        self.create()
+        before = self.task_bytes()
+        data = self.observe(task_id="structured-one", sections=["activity"], limit=1)["sections"]["activity"]["data"]
+        self.assertEqual(len(data["stages"]), 16)
+        self.assertEqual(data["stages"][-1]["id"], "stage-15")
+        self.assertEqual(data["operations"], [])
+        self.assertLess(len(json.dumps(data, ensure_ascii=True).encode()), 65536)
+        self.assertEqual(self.task_bytes(), before)
+
     def test_missing_task_and_revision_drift_preserve_other_sections(self):
         missing = self.observe(task_id="not-created")
         self.assertEqual(missing["sections"]["activity"]["status"], "unavailable")
@@ -160,6 +204,7 @@ class ContextTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app, "read_task", side_effect=drift):
             result = self.observe(task_id="structured-one")
         self.assertEqual(result["sections"]["activity"]["error"]["code"], "source_changed")
+        self.assertEqual(result["sections"]["activity"]["data"], {})
         self.assertEqual(result["sections"]["runtime"]["status"], "observed")
 
     def test_input_scope_and_omission_do_not_read_unselected_sources(self):

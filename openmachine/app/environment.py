@@ -101,6 +101,8 @@ def _activity(app, selection: dict, context: dict, task_id: str, limit: int) -> 
     result = _section(reference, "retained_evidence", complete=page.get("complete") is True,
         data={"task_id": task_id, "title": record["title"], "revision": record["revision"],
               "updated_at_ms": record["updated_at_ms"], "plan_revision": record["plan"]["revision"],
+              "stages": [{key: stage[key] for key in ("id", "depends_on", "state", "result",
+                  "verification", "evidence_ref") if key in stage} for stage in record["plan"]["stages"]],
               "contract": {key: contract[key] for key in ("objective", "scope", "exclusions", "acceptance",
                   "stop_condition", "authority_refs", "expires_at_ms", "targets", "tools")},
               "contract_complete": False,
