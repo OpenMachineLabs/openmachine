@@ -19,3 +19,20 @@ illustrative. The 5.7% and 2.9% chart values are sourced from Anthropic's Septem
 The MP4s were rendered and inspected for duration, frame rate, dimensions, audio
 streams and sampled scene frames. Those checks alone do not establish full
 normal-speed audio/video playback review or public editorial acceptance.
+
+## New article film: Nine Hours of Autonomous Engineering
+
+- `nine-hours-engineering.mp4`: complete revised 42-second, 1920×1080/30 fps film with original stereo audio.
+- `nine-hours-preview.mp4`: real 9-second mechanism sequence, source frames 320–589.
+- `nine-hours-poster.png`: opening clock/filing signature.
+- `nine-hours-contact-sheet.jpg`: eight sampled frames from the **encoded film**.
+- `nine-hours-direction-a.png`: selected context-to-Skill keyframe.
+- `nine-hours-direction-b.png`: materially different compute-first alternative.
+
+Editable source, locked dependencies and reproduction instructions are in
+`skill-library/motion-studio/examples/pilot-film/`; factual scope and sound
+decisions are recorded in `nine-hours-brief.md`. The author reports average
+GPU utilization changing from 43% to 93% in one internal repository over a
+roughly nine-hour autonomous run. The graphic is a sourced before/after
+illustration, not raw telemetry or a controlled study. Final editorial acceptance
+still requires viewing the complete movie with sound at intended size.

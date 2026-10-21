@@ -85,5 +85,44 @@ class MotionStudioPackageTests(unittest.TestCase):
         self.assertIn("not imply universal", brief)
 
 
+    def test_nine_hours_article_film_has_exact_output_contract(self):
+        source = (PILOT / "src" / "root.tsx").read_text()
+        package = json.loads((PILOT / "package.json").read_text())
+        film = (PILOT / "src" / "NineHours.tsx").read_text()
+        artwork = (PILOT / "src" / "NineHoursArt.tsx").read_text()
+        self.assertIn("id=\"NineHoursEngineering\"", source)
+        self.assertIn("durationInFrames={1260}", source)
+        self.assertIn("id=\"NineHoursAlt\"", source)
+        self.assertIn("--frames=320-589", package["scripts"]["nine-hours-preview"])
+        self.assertEqual((589 - 320 + 1) / 30, 9)
+        self.assertIn("staticFile('nine-hours-score.wav')", film)
+        self.assertIn("value={43}", film)
+        self.assertIn("value={93}", film)
+        self.assertIn("Skill", film)
+        self.assertIn("ComputeRack", film)
+        self.assertIn("MiniChip", artwork)
+
+    def test_nine_hours_audio_and_claims_are_bounded(self):
+        brief = (PILOT / "nine-hours-brief.md").read_text()
+        self.assertIn("over 10 million hours of audio", brief)
+        self.assertIn("43% to 93%", brief)
+        self.assertIn("reported before/after", brief)
+        self.assertIn("independent verification", brief)
+        self.assertIn("six hours of research", brief)
+        path = PILOT / "scripts" / "generate_nine_hours_score.py"
+        spec = importlib.util.spec_from_file_location("nine_hours_score", path)
+        self.assertIsNotNone(spec)
+        score = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(score)
+        self.assertEqual(score.SECONDS, 42)
+        self.assertEqual(score.fade(0), 0)
+        self.assertGreater(score.fade(41.95), 0)
+        self.assertEqual(score.fade(42), 0)
+        for second in (4.7, 17.5, 33.2, 40.1):
+            l, r = score.sample(second)
+            self.assertEqual((l, r), score.sample(second))
+            self.assertTrue(all(math.isfinite(v) and abs(v) < 1 for v in (l, r)))
+
+
 if __name__ == "__main__":
     unittest.main()

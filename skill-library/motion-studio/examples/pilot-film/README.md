@@ -37,3 +37,31 @@ Change the line of copy or a frame boundary in Film.tsx, inspect the affected fr
 The final deliverables are the actual MP4, nine-second preview, poster, contact sheet, art-direction comparison JPEG outside the package, editable source, lockfile and this reproduction note. The score is audible but optional for comprehension; there is **no narration**, so captions are unnecessary.
 
 A render, codec inspection, sampled-frame audit or CI PASS is *not* the same as watching the whole film at normal speed with sound at the intended viewing size. The accepting reviewer should check shot-to-shot legibility, temporal relationships, sound texture, exact claims and the full end hold. Preserve this distinction in the PR review and in Spec #204.
+
+## Second source-specific film — Nine Hours of Autonomous Engineering
+
+The same locked Remotion project now also includes a separate 42-second English
+composition (`NineHoursEngineering`) based on the source article:
+https://luozhu.io/blogs/2026/10/21/nine-hours-of-autonomous-engineering.html.
+This is a direct test of the reusable Motion Studio production method, not
+a new renderer or a replacement for the original Contextual Retrieval pilot.
+
+Run the following from this directory after `npm ci`:
+
+1. `python3 scripts/generate_nine_hours_score.py` — original, deterministic 42-second stereo audio.
+2. `npm run nine-hours-preview` — nine seconds from frames 320–589 of the real composition.
+3. `npm run nine-hours-render` — 42-second 1920×1080/30 fps MP4 in ignored `out/`.
+4. `npm run nine-hours-still` — poster at frame 90.
+5. `npm run nine-hours-direction-a` and `npm run nine-hours-alt` — selected and rejected real visual directions.
+6. `python3 scripts/review_nine_hours.py` — self-contained contact SVG from actual video frames.
+
+Use the documented Remotion `--browser-executable` argument only when needed
+for your installed Chrome/Chromium. Review JPEG and MP4 copies live under
+`artifacts/motion-studio/` at repository level. The exact claims, visually
+illustrative elements, alternate direction, timed beats and sound intent are
+recorded in `nine-hours-brief.md`.
+
+No reference-film media are redistributed. This second film is based on the
+author's reported internal run; the 43% and 93% figures are **not** a new
+independently measured benchmark. The PR remains in Draft pending editorial
+acceptance after full normal-speed playback with sound.

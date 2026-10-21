@@ -37,6 +37,15 @@ Cut visibly, retain object identity, reveal a new relationship, then provide a r
 
 Design audio as an authored sequence: a restrained tonal bed; soft cut, dock, split, retrieval and measurement accents; a deliberate fade. No narration is needed when all essential information is legible muted. Do not imply audio has been listened to when only its waveform or stream has been inspected.
 
+## Second subject demonstration
+
+The Nine Hours engineering case exercises this same material-first method
+without recycling the Contextual Retrieval scenes. Its objects are engineering
+context fragments, an actual Skill cartridge, a laptop test surface, a CUDA
+processor, a remote rack, and a calibrated utilization graph. The 42-second
+timeline proves that the style is a **decision process**, not a fixed visual
+template. Its 43%→93% result is marked as author-reported in one internal case.
+
 ## Accuracy and art rights
 
 Source and date every measured figure. Mark fictive documents, tokens and spatial fields as illustrative, not experimental outputs. The existing anthropic-style-illustrations Skill is the upstream research/illustration method; adapt meaningful SVG layers or construct new time-aware vector artwork, never animate its entire dense static image blindly. See references.md and the editable pilot.
