@@ -85,6 +85,29 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.app.find_tasks(machine="remote")["total"], 1)
         self.assertEqual(self.app.find_tasks(machine="remote", workspace="other")["total"], 0)
 
+    def test_scoped_discovery_checks_original_operation_index_bindings(self):
+        self.create()
+        def admit(record, now):
+            operation = self.operation_fixture(record, now, 1)
+            operation["locator"]["target_identity"] = "b" * 64
+            record["operations"].append(operation)
+        tasks.update(self.state, "structured-one", admit)
+        for column, forged, selected in (
+                ("machine", "forged", {"machine": "forged", "target_identity": "b" * 64}),
+                ("target_identity", "c" * 64, {"machine": "desktop", "target_identity": "c" * 64})):
+            with self.subTest(column=column):
+                with sqlite3.connect(self.path) as connection:
+                    connection.execute(f"UPDATE operations SET {column}=?", (forged,))
+                self.fault("corrupt_tasks", self.app.find_tasks, **selected)
+                self.fault("corrupt_tasks", self.app.find_tasks)
+                with sqlite3.connect(self.path) as connection:
+                    connection.execute(f"UPDATE operations SET {column}=?",
+                                       ("desktop" if column == "machine" else "b" * 64,))
+        valid = self.app.find_tasks(machine="desktop", target_identity="b" * 64)
+        self.assertEqual(valid["total"], 1)
+        self.assertEqual(valid["tasks"][0]["operation_targets"], [
+            {"kind": "execution", "machine": "desktop", "target_identity": "b" * 64}])
+
     def test_derived_target_index_upgrades_old_sqlite_without_rewriting_tasks(self):
         original = self.create()["record"]
         with database.connect(self.state) as connection:

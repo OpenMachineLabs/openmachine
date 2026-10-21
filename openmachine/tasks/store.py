@@ -438,7 +438,8 @@ def _target_filter(machine: str, workspace: str, workspace_identity: str,
     return "task_id IN (" + " UNION ".join(sources) + ")", values
 
 
-def _list_row(connection, row, store_identity: str) -> dict:
+def _list_row(connection, row, store_identity: str, machine: str, workspace: str,
+              target_identity: str) -> dict:
     value = db.decode(row["current"], row["sha256"])
     if value.get("task_id", row["task_id"]) != row["task_id"] or value["revision"] != row["revision"]:
         raise Fault("corrupt_tasks", "Task list metadata differs from its current authority.")
@@ -446,11 +447,27 @@ def _list_row(connection, row, store_identity: str) -> dict:
     terminal = value.get("terminal") if structured else None
     operations = []
     if structured:
-        observed = connection.execute("""SELECT kind,machine,target_identity FROM operations
+        # An indexed match is a candidate, not evidence: verify the original
+        # operation before treating its denormalized target as Task membership.
+        if machine and (target_identity or not workspace):
+            if target_identity:
+                sql = ("SELECT * FROM operations INDEXED BY operation_target "
+                       "WHERE machine=? AND target_identity=? AND task_id=? LIMIT 1")
+                arguments = (machine, target_identity, row["task_id"])
+            else:
+                sql = ("SELECT * FROM operations INDEXED BY operation_locator "
+                       "WHERE task_id=? AND machine=? LIMIT 1")
+                arguments = (row["task_id"], machine)
+            match = connection.execute(sql, arguments).fetchone()
+            if match is not None:
+                decode_operation(match)
+        observed = connection.execute("""SELECT * FROM operations
             WHERE task_id=? AND kind IN ('execution','change') AND machine IS NOT NULL
             GROUP BY kind,machine,target_identity ORDER BY kind,machine,target_identity LIMIT 9""",
             (row["task_id"],)).fetchall()
-        operations = [dict(item) for item in observed[:8]]
+        for item in observed[:8]:
+            decode_operation(item)
+            operations.append({key: item[key] for key in ("kind", "machine", "target_identity")})
     return {"task_id": row["task_id"], "title": value["title"], "revision": row["revision"],
             "kind": row["kind"], "state": value["control"]["state"] if structured else None,
             "owner_store_identity": store_identity,
@@ -516,7 +533,8 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
             total = connection.execute("SELECT count(*) FROM tasks" + where, arguments).fetchone()[0]
             rows = connection.execute("SELECT task_id,kind,current,sha256,revision FROM tasks" + where
                                       + " ORDER BY task_id LIMIT ? OFFSET ?", [*arguments, limit, offset])
-            page = [_list_row(connection, row, owner["identity"]) for row in rows]
+            page = [_list_row(connection, row, owner["identity"], machine, workspace, target_identity)
+                    for row in rows]
         if expected_generation != -1 and generation != expected_generation:
             raise Fault("task_index_changed", "Task lookup changed between pages; use its current generation.")
         exact = bool(identity or wanted) and not query
