@@ -2,6 +2,8 @@
 """Offline, article-bound illustration drafts. QA checks evidence, not meaning."""
 
 import argparse
+from collections import Counter
+from datetime import date
 import hashlib
 import html
 import json
@@ -14,12 +16,14 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / 'references/source-index.json'
+CATALOG = ROOT / 'references/article-index.json'
 FAMILIES = ('flow', 'comparison', 'matrix', 'bar', 'line', 'cover')
 COLORS = ('#dce9e0', '#e5e0ef', '#f3e4cc', '#dce8ee')
 INK = '#243b37'
 BACKGROUND = '#fcfaf5'
 SOURCE_HOSTS = {'www.anthropic.com', 'www-cdn.anthropic.com',
-                'alignment.anthropic.com', 'claude.dev', 'arxiv.org'}
+                'alignment.anthropic.com', 'claude.dev', 'arxiv.org',
+                'transformer-circuits.pub', 'www.transformer-circuits.pub', 'claude.com'}
 ID = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,63}\Z')
 NUMBER = r'[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
 
@@ -81,10 +85,15 @@ def json_text(value):
 
 
 def valid_url(value):
-    if not isinstance(value, str) or any(c.isspace() for c in value):
+    if not isinstance(value, str) or not value or any(c.isspace() or ord(c) < 32 for c in value):
         return False
-    parts = urlsplit(value)
-    return parts.scheme in ('http', 'https') and bool(parts.hostname) and not parts.username
+    try:
+        parts = urlsplit(value)
+        return (parts.scheme in ('http', 'https') and bool(parts.hostname)
+                and parts.username is None and parts.password is None
+                and parts.port in (None, 80, 443))
+    except ValueError:
+        return False
 
 
 def valid_source_url(url):
@@ -94,12 +103,16 @@ def valid_source_url(url):
 def load_index():
     """Validate the existing curated records; never fetch source media."""
     data = read_json(INDEX)
+    if not isinstance(data, dict):
+        raise ValueError('Case index must be an object')
     records = data.get('records', [])
     if data.get('version') != 1 or not isinstance(records, list) or not records:
         raise ValueError('Expected version 1 index with nonempty curated cases')
     seen = set()
     required = ('family', 'relationship', 'inference', 'rule', 'limit')
     for record in records:
+        if not isinstance(record, dict):
+            raise ValueError('Case must be an object')
         case_id = record.get('case_id')
         if not isinstance(case_id, str) or not ID.fullmatch(case_id) or case_id in seen:
             raise ValueError('Invalid or duplicate case ID')
@@ -109,10 +122,22 @@ def load_index():
                 raise ValueError(f'{case_id}: missing {field}')
         if not all(valid_source_url(record.get(key)) for key in ('article_url', 'image_url')):
             raise ValueError(f'{case_id}: invalid source links')
-        if not record.get('observed') or not all(isinstance(x, str) for x in record['observed']):
+        if not isinstance(record.get('observed'), list) or not record['observed'] or not all(isinstance(x, str) and x.strip() for x in record['observed']):
             raise ValueError(f'{case_id}: missing observations')
-        if not isinstance(record.get('provenance'), dict):
+        provenance = record.get('provenance', {})
+        if not isinstance(provenance, dict) or not all(provenance.get(k) for k in ('reviewer', 'method', 'date', 'status')):
             raise ValueError(f'{case_id}: missing provenance')
+        if provenance['status'] not in ('retained_prior_review', 'current_pixel_review'):
+            raise ValueError(f'{case_id}: not an inspected design case')
+        if date.fromisoformat(provenance['date']) > date.today():
+            raise ValueError(f'{case_id}: future review date')
+        analysis = record.get('analysis', {})
+        if not isinstance(analysis, dict) or not all(analysis.get(k) for k in (
+                'reader_problem', 'information_mapping', 'palette', 'typography',
+                'reconstruction_hypothesis', 'cross_domain_transfer', 'counterexamples')):
+            raise ValueError(f'{case_id}: incomplete reusable analysis')
+        if analysis.get('production_certainty') != 'uncertain':
+            raise ValueError(f'{case_id}: reconstruction is not a verified production recipe')
         if record.get('usage') not in ('reference', 'contrast_not_target'):
             raise ValueError(f'{case_id}: invalid usage')
     if not any(r['case_id'] == 'E8' and r['usage'] == 'contrast_not_target' for r in records):
@@ -120,21 +145,97 @@ def load_index():
     return records
 
 
-def search(query, family=None, include_contrast=False):
-    tokens = re.findall(r'\w+', query.casefold())
-    matches = []
-    for record in load_index():
+def terms(value):
+    words = re.findall(r'\w+', str(value).casefold())
+    stop = set('a an the of in and or to for with from is are how what this that using use'.split())
+    return {w for w in words if w not in stop}
+
+
+def search(query, family=None, include_contrast=False, limit=8, full=False):
+    """Bounded lexical retrieval; relationship and transfer outrank topic matches."""
+    if not 1 <= limit <= 100:
+        raise ValueError('limit must be between 1 and 100')
+    wanted, matches = terms(query), []
+    records = load_index()
+    vocab = {r['case_id']: terms(r['relationship'] + ' ' + r['rule'] + ' ' + str(r['analysis'])) for r in records}
+    df = Counter(word for words in vocab.values() for word in words)
+    for record in records:
         if record['usage'] != 'reference' and not include_contrast:
             continue
         if family and record['family'] != family:
             continue
-        corpus = ' '.join(str(record[k]) for k in (
-            'case_id', 'family', 'relationship', 'observed', 'inference', 'rule', 'limit'
-        )).casefold()
-        score = sum(token in corpus for token in tokens)
-        if score or not tokens:
-            matches.append(dict(record, score=score))
-    return sorted(matches, key=lambda row: (-row['score'], row['case_id']))
+        analysis = record['analysis']
+        roles = terms(record['relationship'] + ' ' + record['family'])
+        transfer = terms(analysis['reader_problem'] + ' ' + str(analysis['cross_domain_transfer']))
+        evidence = terms(record['rule'] + ' ' + record.get('title', '') + ' ' + str(record['observed']))
+        score = sum(math.log(1 + len(records)/(1+df[word])) *
+                    (4*(word in roles) + 2*(word in transfer) + (word in evidence)) for word in wanted)
+        if query.strip().casefold() == record['case_id'].casefold():
+            score += 100
+        if score or not wanted:
+            result = dict(record) if full else {k: record[k] for k in (
+                'case_id', 'article_url', 'image_url', 'family', 'relationship', 'rule', 'limit', 'usage')}
+            result.update(score=round(score, 4), evidence_level=record['provenance']['status'])
+            matches.append(result)
+    return sorted(matches, key=lambda r: (-r['score'], r['case_id']))[:limit]
+
+
+def show(case_id):
+    record = next((r for r in load_index() if r['case_id'] == case_id), None)
+    if record is None:
+        raise ValueError('Unknown case ID')
+    groups = read_json(INDEX).get('figure_groups', [])
+    return dict(record, figure_groups=[g for g in groups if case_id in g['case_ids']])
+
+
+def load_catalog():
+    data = read_json(CATALOG)
+    if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('articles'), list):
+        raise ValueError('Invalid article catalog')
+    seen = set()
+    for row in data['articles']:
+        url = row.get('article_url')
+        if not valid_source_url(url) or url in seen or not row.get('title'):
+            raise ValueError('Invalid or duplicate article URL')
+        seen.add(url)
+        figures = row.get('figures', [])
+        if not isinstance(figures, list) or any(not isinstance(f, dict) or not valid_url(f.get('url')) for f in figures):
+            raise ValueError('Invalid figure link metadata')
+        if len({f['url'] for f in figures}) != len(figures):
+            raise ValueError('Duplicate figure locator within article')
+    return data['articles']
+
+
+def catalog(query, limit=8, category=None):
+    """Discovery links are never promoted to inspected design evidence."""
+    if not 1 <= limit <= 100:
+        raise ValueError('limit must be between 1 and 100')
+    wanted, matches = terms(query), []
+    for row in load_catalog():
+        if category and row['category'] != category:
+            continue
+        score = len(wanted & terms(row['title']))*3 + len(wanted & terms(row['category'] + ' ' + row['article_url']))
+        score += len(wanted & terms(' '.join(f.get('label', '') for f in row['figures'])))
+        if score or not wanted:
+            result = {k: row[k] for k in ('article_url', 'title', 'category', 'observed_at')}
+            result.update(score=score, evidence_level='metadata_only', figure_locator_count=len(row['figures']),
+                          figures=row['figures'][:3], more_figures_at=row['article_url'])
+            matches.append(result)
+    return sorted(matches, key=lambda r: (-r['score'], r['article_url']))[:limit]
+
+
+def coverage():
+    records, articles = load_index(), load_catalog()
+    figures = [f for row in articles for f in row['figures']]
+    embedded = sum(f.get('kind') in ('embedded_image', 'inline_svg', 'canvas') for f in figures)
+    return {'ok': True, 'cases': len(records), 'sources': len({r['article_url'].rstrip('/') for r in records}),
+            'case_review_status': dict(Counter(r['provenance']['status'] for r in records)),
+            'design_families': dict(Counter(r['family'] for r in records)),
+            'catalog_articles': len(articles), 'article_categories': dict(Counter(a['category'] for a in articles)),
+            'figure_locators': len(figures), 'unique_figure_locators': len({f['url'] for f in figures}),
+            'embedded_page_locators': embedded, 'source_media_binaries_stored': 0,
+            'index_bytes': INDEX.stat().st_size, 'catalog_bytes': CATALOG.stat().st_size,
+            'boundary': 'Catalog metadata is not deep review. Prior review is not current source freshness or independent approval.'}
 
 
 def sections(article):
@@ -191,41 +292,76 @@ def prose_lines(body):
             yield text
 
 
-def plan(article, digest, budget=3):
-    if budget < 0:
-        raise ValueError('Budget must be nonnegative')
-    rows = []
-    used = 0
-    for section in sections(article):
-        prose = list(prose_lines(section['body']))
-        eligible = sum(len(line) for line in prose) >= 80
+def selected_sections(article, target=None):
+    parts = [dict(s, section_id=f'section-{i}') for i, s in enumerate(sections(article), 1)]
+    chosen = [s['section_id'] for s in parts if target is None or target in (s['section_id'], s['title'])]
+    if not parts or not chosen or (target is not None and len(chosen) != 1):
+        raise ValueError('Missing or ambiguous section; use a section-N ID')
+    return parts, set(chosen)
+
+
+def plan(article, digest, budget=3, section=None, reviewed=None):
+    if type(budget) is not int or not 0 <= budget <= 20:
+        raise ValueError('Budget must be between 0 and 20')
+    parts, chosen = selected_sections(article, section)
+    if reviewed is not None:
+        if not isinstance(reviewed, dict) or reviewed.get('article_sha256') != digest:
+            raise ValueError('Reviewed plan must match the complete article SHA')
+        if not all(isinstance(reviewed.get(k), str) and reviewed[k].strip() for k in ('audience', 'thesis', 'reviewer', 'rationale')):
+            raise ValueError('Reviewed plan needs audience, thesis, reviewer and rationale')
+        decisions = reviewed.get('decisions', [])
+        if not isinstance(decisions, list) or any(not isinstance(d, dict) for d in decisions):
+            raise ValueError('Invalid reviewed decisions')
+        if sorted(d.get('section_id', '') for d in decisions) != sorted(s['section_id'] for s in parts):
+            raise ValueError('Reviewed plan must decide every section exactly once')
+        cases = {r['case_id']: r for r in load_index()}
+        used = 0
+        for decision in decisions:
+            if decision.get('decision') not in ('image', 'no-image') or not decision.get('reason'):
+                raise ValueError('Every decision needs an image/no-image choice and reason')
+            if decision['decision'] == 'no-image':
+                continue
+            used += 1
+            source = next(s for s in parts if s['section_id'] == decision['section_id'])
+            quotes, refs = decision.get('quotes'), decision.get('case_ids')
+            if source['section_id'] not in chosen or not decision.get('reader_question') or not decision.get('family'):
+                raise ValueError('Image must be selected and have a reader question and family')
+            if not isinstance(quotes, list) or not quotes or any(not isinstance(q, str) or not q or q not in source['body'] for q in quotes):
+                raise ValueError('Each planned image needs exact quotes in its selected section')
+            if not isinstance(refs, list) or not refs or any(r not in cases or cases[r]['usage'] != 'reference' for r in refs):
+                raise ValueError('Planned reference is unknown or a negative contrast')
+        if used > budget:
+            raise ValueError('Reviewed plan exceeds budget')
+        return dict(reviewed, sections=parts, selection=sorted(chosen),
+                    approval='supplied editorial plan validated; not independent semantic or visual approval')
+    rows, used = [], 0
+    for part in parts:
+        prose = ' '.join(prose_lines(part['body']))
+        eligible = len(prose) >= 80 and part['section_id'] in chosen
         selected = eligible and used < budget
         used += selected
-        rows.append(dict(section, decision='image' if selected else 'no-image',
-                         reason='Heuristic: substantial prose within budget' if selected
-                         else 'Heuristic: short/code-only section or budget exhausted'))
-    return {'article_sha256': digest, 'budget': budget, 'sections': rows,
+        rows.append(dict(part, decision='image' if selected else 'no-image',
+                         reason='Heuristic: substantial prose within selected budget; host must review reader need' if selected
+                         else 'Outside selection, short/code-only prose or exhausted budget',
+                         candidate_cases=[r['case_id'] for r in search(part['title']+' '+prose, limit=3)] if selected else []))
+    return {'article_sha256': digest, 'budget': budget, 'selection': sorted(chosen), 'sections': rows,
             'approval': 'heuristic only; no semantic or visual approval'}
 
 
-def draft(article, digest):
-    """Use prose verbatim; do not infer causal edges from section order."""
-    candidates = [line for section in sections(article)
-                  for line in prose_lines(section['body']) if len(line) <= 600]
+def draft(article, digest, section=None):
+    """An editable scaffold, not an invented mechanism or editorial decision."""
+    parts, chosen = selected_sections(article, section)
+    candidates = [line for part in parts if part['section_id'] in chosen
+                  for line in prose_lines(part['body']) if len(line) <= 600]
     if not candidates:
         raise ValueError('No suitable prose for a draft; author a spec manually')
     selected = candidates[:4]
-    return {
-        'version': 1, 'article_sha256': digest, 'family': 'comparison',
-        'title': 'Selected article excerpts',
-        'nodes': [{'id': f'n{i}', 'label': quote, 'quote': quote}
-                  for i, quote in enumerate(selected, 1)],
-        'edges': [], 'case_refs': [{'case_id': 'C1',
-                                  'article_url': next(r['article_url'] for r in load_index()
-                                                      if r['case_id'] == 'C1')}],
-        'citations': [],
-        'draft_note': 'Original concept draft. Peer cards imply no sequence or measured difference.'
-    }
+    refs = search('matched comparison '+ ' '.join(selected), family='comparison', limit=2)
+    return {'version': 1, 'article_sha256': digest, 'family': 'comparison',
+            'title': 'Selected article excerpts', 'selection': sorted(chosen),
+            'nodes': [{'id': f'n{i}', 'label': quote, 'quote': quote} for i, quote in enumerate(selected, 1)],
+            'edges': [], 'case_refs': [{k: r[k] for k in ('case_id', 'article_url')} for r in refs],
+            'citations': [], 'draft_note': 'Original excerpt scaffold; peer cards imply no causality or measured difference.'}
 
 
 def xml_text(value):
@@ -238,7 +374,7 @@ def xml_text(value):
     return html.escape(value, quote=True)
 
 
-def qa(article, digest, spec):
+def qa(article, digest, spec, directory=None):
     """Structural/evidence QA deliberately does not assert semantic entailment."""
     errors = []
     if not isinstance(spec, dict):
@@ -368,11 +504,25 @@ def qa(article, digest, spec):
                     errors.append('Chart value with unit must occur exactly in its claim quote')
         if family == 'line' and len(node_map) < 2:
             errors.append('Line charts require at least two ordered points')
+    for key in ('caption', 'alt'):
+        if key in spec:
+            text(spec[key], key, 1200)
     # JSON can also contain nonfinite values in unused metadata.
     try:
         json.dumps(spec, allow_nan=False)
     except (ValueError, TypeError):
         errors.append('Spec must be finite JSON data')
+    if directory is not None and not errors:
+        target = safe_output(directory)
+        expected = {'figure.svg': make_svg(spec), 'figure.json': json_text(spec)}
+        expected['preview.html'] = make_html(spec, expected['figure.svg'])
+        for name, value in expected.items():
+            file = safe_output(target / name)
+            if not file.is_file() or file.read_text(encoding='utf-8') != value:
+                errors.append(f'{name} does not match the validated spec')
+        png = safe_output(target / 'figure.png')
+        if not png.is_file() or png.read_bytes() != png_bytes(expected['figure.svg']):
+            errors.append('figure.png does not match the current renderer/spec')
     return {'ok': not errors, 'errors': errors, 'article_sha256': digest,
             'semantic_approval': False, 'visual_approval': False,
             'limitations': ['Exact quotes do not prove that labels or relationships are entailed.',
@@ -583,6 +733,9 @@ def make_svg(spec):
         body, y = render_cards(spec, top)
     parts.extend(body)
     y += 20
+    if spec.get('caption'):
+        parts.append(svg_text(spec['caption'], 60, y, 100, 16))
+        y += len(wrapped(spec['caption'], 100))*24 + 20
     parts.append(svg_text('DRAFT · evidence checks only · human review required', 60, y, 100, 14))
     y += 35
     links = article_links(spec) + [(f'Design case {r["case_id"]}', r['article_url'])
@@ -598,6 +751,7 @@ def make_svg(spec):
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="{height}" '
             f'viewBox="0 0 1200 {height}" role="img">'
             f'<title>{xml_text(spec["title"])}</title>'
+            f'<desc>{xml_text(spec.get("alt", spec["title"]))}</desc>'
             f'<rect width="1200" height="{height}" fill="{BACKGROUND}"/>'
             + ''.join(parts) + '</svg>\n')
 
@@ -633,6 +787,15 @@ def make_html(spec, svg):
             '<h2>Exact article anchors</h2><ul>' + anchors + '</ul></body></html>\n')
 
 
+def png_bytes(svg):
+    try:
+        import fitz
+    except ImportError as exc:
+        raise ValueError('PNG export requires PyMuPDF (fitz); use the pinned requirements.txt') from exc
+    with fitz.open(stream=svg.encode('utf-8'), filetype='svg') as document:
+        return document[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False).tobytes('png')
+
+
 def render(article, digest, spec, out):
     report = qa(article, digest, spec)
     if not report['ok']:
@@ -640,14 +803,8 @@ def render(article, digest, spec, out):
     out = safe_output(out)
     names = ('figure.svg', 'figure.png', 'preview.html', 'figure.json', 'qa.json')
     paths = {name: safe_output(out / name) for name in names}
-    try:
-        import fitz
-    except ImportError as exc:
-        raise ValueError('PNG export requires PyMuPDF (fitz); use the pinned requirements.txt') from exc
     svg = make_svg(spec)
-    # Render before emitting any files so a missing/broken PNG backend fails clearly.
-    with fitz.open(stream=svg.encode('utf-8'), filetype='svg') as document:
-        png = document[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False).tobytes('png')
+    png = png_bytes(svg)
     outputs = {'figure.svg': svg, 'preview.html': make_html(spec, svg),
                'figure.json': json_text(spec), 'qa.json': json_text(report)}
     out.mkdir(parents=True, exist_ok=True)
@@ -665,13 +822,24 @@ def main(argv=None):
     search_parser.add_argument('query')
     search_parser.add_argument('--family')
     search_parser.add_argument('--include-contrast', action='store_true')
+    search_parser.add_argument('--limit', type=int, default=8)
+    show_parser = sub.add_parser('show', help='Read one detailed design case')
+    show_parser.add_argument('case_id')
+    cat_parser = sub.add_parser('catalog', help='Search article/figure links, not reviewed cases')
+    cat_parser.add_argument('query')
+    cat_parser.add_argument('--limit', type=int, default=8)
+    cat_parser.add_argument('--category')
     plan_parser = sub.add_parser('plan', help='Heuristic section inventory, not approval')
     plan_parser.add_argument('article', type=Path)
     plan_parser.add_argument('--budget', type=int, default=3)
     plan_parser.add_argument('--out', type=Path, help='JSON file inside this Skill')
+    plan_parser.add_argument('--section', help='Exact heading or section-N; complete article still required')
+    plan_parser.add_argument('--reviewed', type=Path, help='Host-authored editorial decisions with complete-input SHA')
     for command in ('illustrate', 'render', 'qa'):
         cmd = sub.add_parser(command)
         cmd.add_argument('article', type=Path)
+        if command == 'illustrate':
+            cmd.add_argument('--section')
         if command != 'illustrate':
             cmd.add_argument('spec', type=Path)
         cmd.add_argument('--out', type=Path, required=command != 'qa',
@@ -679,24 +847,24 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == 'verify-index':
-            records = load_index()
-            result = {'ok': True, 'cases': len(records),
-                      'sources': len({r['article_url'] for r in records}),
-                      'sha256': hashlib.sha256(INDEX.read_bytes()).hexdigest()}
+            result = coverage()
         elif args.command == 'search':
-            result = search(args.query, args.family, args.include_contrast)
+            result = search(args.query, args.family, args.include_contrast, args.limit)
+        elif args.command == 'show':
+            result = show(args.case_id)
+        elif args.command == 'catalog':
+            result = catalog(args.query, args.limit, args.category)
         else:
             article, digest = read_article(args.article)
             if args.command == 'plan':
-                result = plan(article, digest, args.budget)
+                result = plan(article, digest, args.budget, args.section,
+                              read_json(args.reviewed) if args.reviewed else None)
                 if args.out:
                     write_text(args.out, json_text(result))
             else:
-                spec = draft(article, digest) if args.command == 'illustrate' else read_json(args.spec)
+                spec = draft(article, digest, args.section) if args.command == 'illustrate' else read_json(args.spec)
                 if args.command == 'qa':
-                    result = qa(article, digest, spec)
-                    if args.out:
-                        write_text(safe_output(args.out) / 'qa.json', json_text(result))
+                    result = qa(article, digest, spec, args.out)
                 else:
                     result = render(article, digest, spec, args.out)
         print(json_text(result), end='')

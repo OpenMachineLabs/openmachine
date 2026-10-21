@@ -62,8 +62,7 @@ class IllustrateTests(unittest.TestCase):
         path.write_text(json.dumps(index), encoding='utf-8')
         with patch.object(m, 'INDEX', path):
             self.assertEqual(len(m.load_index()), len(index['records']))
-            self.assertEqual(len(m.search('')),
-                             len([r for r in index['records'] if r['usage'] == 'reference']))
+            self.assertEqual([r['case_id'] for r in m.search('NEWCASE')], ['NEWCASE'])
 
     def test_search_contrast_and_family(self):
         self.assertNotIn('E8', [r['case_id'] for r in m.search('')])
@@ -207,6 +206,90 @@ class IllustrateTests(unittest.TestCase):
         path.write_text('{"value": NaN}')
         with self.assertRaisesRegex(ValueError, 'Nonfinite'):
             m.read_json(path)
+
+    def test_expanded_two_tier_evidence_and_preservation(self):
+        cases = m.load_index()
+        articles = m.load_catalog()
+        self.assertGreaterEqual(len(cases), 80)
+        self.assertGreaterEqual(len(articles), 450)
+        self.assertGreaterEqual(sum(len(a['figures']) for a in articles), 1800)
+        self.assertEqual(len({a['article_url'] for a in articles}), len(articles))
+        ids = {r['case_id'] for r in cases}
+        self.assertTrue({'A2', 'P2', 'Q1', 'MCP1', 'SKY1', 'X2', 'X7'} <= ids)
+        self.assertEqual(sum(r['provenance']['status'] == 'retained_prior_review'
+                             for r in cases), 59)
+        self.assertTrue(all('inference' in r and r['observed'] and
+                            r['analysis']['production_certainty'] == 'uncertain'
+                            for r in cases))
+        self.assertEqual(len([a for a in articles if a['category'] == 'engineering']) > 0, True)
+
+    def test_catalog_discovery_is_not_visual_approval(self):
+        candidates = m.catalog('alignment evaluation', limit=12)
+        self.assertTrue(candidates)
+        for result in candidates:
+            self.assertEqual(result['evidence_level'], 'metadata_only')
+            self.assertTrue(m.valid_source_url(result['article_url']))
+            self.assertLessEqual(len(result['figures']), 3)
+            self.assertGreaterEqual(result['figure_locator_count'], len(result['figures']))
+        detail = m.show('X2')
+        self.assertEqual(detail['provenance']['status'], 'current_pixel_review')
+        self.assertGreaterEqual(len(detail['observed']), 2)
+        self.assertEqual(detail['analysis']['production_certainty'], 'uncertain')
+
+    def test_new_figure_reference_in_editable_workflow(self):
+        case = m.show('X2')
+        edited = copy.deepcopy(self.spec)
+        edited['case_refs'] = [{'case_id': 'X2', 'article_url': case['article_url']}]
+        report = m.render(self.article, self.sha, edited, self.out)
+        self.assertTrue(report['ok'])
+        self.assertIn('Design case X2', (self.out / 'preview.html').read_text())
+        self.assertNotIn('data:image', (self.out / 'figure.svg').read_text())
+
+    def test_full_article_reviewed_placement_respects_no_image(self):
+        parts, selected = m.selected_sections(self.article)
+        self.assertGreaterEqual(len(parts), 4)
+        target = next(p for p in parts if p['title'] == 'Check the evidence')
+        quote = 'The archivist checks the record against the collection catalogue.'
+        self.assertIn(quote, target['body'])
+        decisions = [
+            {'section_id': part['section_id'], 'decision': 'image',
+             'family': 'flow', 'reason': 'This section needs a handoff visual.',
+             'reader_question': 'How are catalogue results passed for access review?',
+             'quotes': [quote], 'case_ids': ['X2']}
+            if part['section_id'] == target['section_id']
+            else {'section_id': part['section_id'], 'decision': 'no-image',
+                  'reason': 'This step is already clear in prose.'}
+            for part in parts
+        ]
+        review = {'article_sha256': self.sha, 'audience': 'Archive reviewers',
+                  'thesis': 'Evidence and access decisions must remain traceable.',
+                  'reviewer': 'AI semantic author review',
+                  'rationale': 'One complex handoff benefits from illustration.',
+                  'decisions': decisions}
+        plan = m.plan(self.article, self.sha, budget=1, reviewed=review)
+        self.assertEqual(plan['approval'].startswith('supplied editorial plan'), True)
+        self.assertEqual(len(plan['decisions']), len(parts))
+        self.assertEqual(sum(d['decision'] == 'image' for d in plan['decisions']), 1)
+        self.assertEqual(m.plan(self.article, self.sha, budget=1,
+                                section=target['section_id'], reviewed=review)['selection'],
+                         [target['section_id']])
+        bad = copy.deepcopy(review)
+        bad['decisions'][0]['reason'] = ''
+        with self.assertRaises(ValueError):
+            m.plan(self.article, self.sha, reviewed=bad)
+        bad = copy.deepcopy(review)
+        selected_decision = next(d for d in bad['decisions'] if d['decision'] == 'image')
+        selected_decision['case_ids'] = ['E8']
+        with self.assertRaisesRegex(ValueError, 'negative contrast'):
+            m.plan(self.article, self.sha, reviewed=bad)
+
+    def test_retrieval_disambiguates_unreviewed_and_negative(self):
+        self.assertIn('X2', [r['case_id'] for r in m.search('X2')])
+        self.assertNotIn('E8', [r['case_id'] for r in m.search('', limit=100)])
+        self.assertEqual([r['case_id'] for r in m.search('E8', include_contrast=True)],
+                         ['E8'])
+        with self.assertRaises(ValueError):
+            m.show('NO_SUCH_CASE')
 
 
 if __name__ == '__main__':

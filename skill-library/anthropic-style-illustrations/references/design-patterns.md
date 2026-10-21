@@ -50,6 +50,36 @@ choices, not permission to copy a source image or a claim of fresh pixel review.
     variants when the article supports it. Check terminology against evidence;
     authoritative figures can still contain inconsistent wording.
 
+15. **Preparation, iteration and evaluation boundaries — X2, MCP1.** Show
+    one-time research and briefing apart from repeated work. Draw held-out,
+    independent evaluation as a trust boundary and label the feedback loop.
+    Do not imply the producer can see private evaluator data.
+16. **Prove more than one aspect of success — X1, X7.** When the argument
+    involves optimization, independent audits, scale transfer and baselines,
+    use separate clearly titled panels or an ordered dot plot with its
+    uncertainty row. Never combine different denominators or make elapsed
+    time look like quality.
+17. **Intervention next to measurement — X3, X6, X8.** Place matched
+    conditions and their measured effects together. Reuse axes, condition
+    colors and precise metric names across controlled small multiples.
+    Dense token labels and specialist activation plots need custom layouts and
+    actual viewing-size checks, not an automatic generic chart.
+18. **Qualitative control and matched interface evidence — X4, X5, X9.**
+    Keep the baseline scenario beside the changed condition, preserving the
+    reader's ability to inspect the example. Match timestamps and viewports;
+    a selected screenshot is neither a representative latency distribution nor
+    a substitute for broader outcome evidence.
+19. **Provenance before interpretation — SKY1, SWAP1, X2.** Separate source
+    records, algorithmic transformations, learned judgments and independent
+    checkpoints where they matter to the claim. A provenance path cannot be
+    inferred from arrows alone: label who produced and verified each artifact.
+
+These are **reusable information structures**, not CSS recipes or rights to
+reproduce official artwork. `source-index.json` contains the full attributed
+observations, inferences and transfer limits. Other editorial families (network,
+dot plot, waterfall, error bars and scientific small multiples) may require a
+bespoke original SVG or charting tool rather than the six generic renderer modes.
+
 For every adaptation, record linked case IDs in the spec and exact article
 anchors for the new content. Source cases guide structure; the new article
 owns all substantive claims. Final semantic and visual judgment stays with the host.

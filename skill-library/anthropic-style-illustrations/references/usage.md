@@ -4,7 +4,9 @@ Run from this Skill with an environment containing `PyMuPDF==1.26.3`:
 
 ```sh
 .venv/bin/python -B scripts/illustrate.py verify-index
+.venv/bin/python -B scripts/illustrate.py catalog 'technical evaluation' --limit 5
 .venv/bin/python -B scripts/illustrate.py search 'negative branch' --family flow
+.venv/bin/python -B scripts/illustrate.py show X2
 .venv/bin/python -B scripts/illustrate.py search E8 --include-contrast
 .venv/bin/python -B scripts/illustrate.py plan examples/article.md --budget 2 --out runs/plan.json
 .venv/bin/python -B scripts/illustrate.py illustrate examples/article.md --out runs/draft
@@ -19,6 +21,41 @@ prints JSON without an output directory. Exit status: 0 success, 1 failed QA,
 `preview.html`, editable `figure.json`, and `qa.json`. All writes must resolve
 inside the Skill; symlink paths and existing hard-linked outputs are rejected.
 Do not use a directory another process is concurrently replacing.
+
+## Two tiers of source knowledge
+
+- `article-index.json` is the **broad** public-source discovery catalog: official article URLs, topical categories and figure/page locators. Each `catalog` result has `evidence_level: metadata_only`; an image URL or embedded-page locator is not a claim of source-pixel inspection. Follow the links online at design time to confirm relevance and current content.
+- `source-index.json` is the **deep** linked figure-analysis library. Use `search` to shortlist information relationships and `show CASE_ID` to inspect what was observed, what the source said, what was inferred, why the composition helps and when not to reuse it. Evidence marked `retained_prior_review` came from earlier attributed AI reviews; `current_pixel_review` denotes bounded later AI pixel inspection. Neither denotes human sign-off.
+- `verify-index` gives actual current counts and rejects malformed links, unreviewed cases masquerading as pixel analyses, duplicate URLs and invalid structure. No source HTML, PDF or raster bytes are shipped. The local index is a **snapshot**, not a live availability guarantee; source website indexes may change.
+- More analyzed visual forms do not enlarge the deterministic renderer automatically; a complex network, multi-panel, statistical uncertainty chart or photographic comparison may require a separate original graphic guided by those references.
+
+## Host-reviewed, whole-article illustration plan
+
+`plan` reads every Markdown section, ignores fenced-code headings and returns a heuristic inventory. To turn it into a deliberate article-wide editorial plan, the host should read the complete article first and create a reviewed JSON decision for **every** section:
+
+```json
+{
+  "article_sha256": "<SHA256 of the entire original article bytes>",
+  "audience": "Technical engineers evaluating the proposed system",
+  "thesis": "One sentence stating the article's actual main claim",
+  "reviewer": "Host article-context semantic review",
+  "rationale": "Why these images, and why the remaining sections stay as prose",
+  "decisions": [
+    {
+      "section_id": "section-2",
+      "decision": "image",
+      "reason": "Explicitly compare two source-described paths",
+      "reader_question": "When does each path apply?",
+      "family": "comparison",
+      "quotes": ["An exact substantive excerpt from section 2."],
+      "case_ids": ["C1"]
+    },
+    {"section_id": "section-1", "decision": "no-image", "reason": "Already clear in prose"}
+  ]
+}
+```
+
+The example illustrates fields, **not** a valid complete plan for any particular article; include all of that article's section IDs with exact matching excerpts. Validate using `plan ARTICLE --reviewed runs/plan-reviewed.json --out runs/plan-validated.json`. A targeted `--section section-N` still requires the whole article and every-section decisions. Semantic truth remains the host's responsibility.
 
 ## Editable spec, version 1
 
@@ -76,4 +113,4 @@ scripts/font coverage, long URLs, dense return paths, and unusual glyph widths
 still need PNG inspection. A successful PNG export does not prove legibility.
 QA verifies SHA, anchors, IDs, links, and numeric evidence; it cannot prove
 entailment, correct emphasis, chart comparability, or publication readiness.
-No network, source-media copying, crawling, or external image generation occurs.
+No automatic network access, source-media copying, crawling, or external image generation occurs. To update the source catalogs, independently check official article/image links and retain short attributed metadata and observed-versus-inferred design notes; do not copy full webpages, PDFs, image bytes, screenshots or runtime collection journals into this Skill.
