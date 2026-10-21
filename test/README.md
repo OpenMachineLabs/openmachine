@@ -79,6 +79,7 @@ on pull-request events, and the final commit landing on main is checked on push.
 | --- | --- |
 | `unit/<module>/` | Pure parsing, validation, transformations and state decisions; no real server, process lifecycle or timed waiting. |
 | `component/<module>/` | Module behavior with local files, state stores and application collaborators. |
+| `skill-library/<skill-name>/` | Standalone Skill behavior tests; keep each Skill in its own named folder, with exact paths in `ownership.json`. |
 | `contract/mcp/<module>/` | Wire encoding, catalog/schema, routing, result and error boundaries. |
 | `resilience/<module>/` | Real owned processes, crash/restart, cancellation, lost replies and retained-state recovery. |
 | `repository/` | Repository hygiene, dependency direction, test selection and runner behavior. |

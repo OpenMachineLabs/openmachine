@@ -113,6 +113,21 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
                     if not full:
                         self.assertEqual(self.product_tests(plan), expected)
 
+    def test_skill_library_named_folder_is_selected_by_ownership(self):
+        test = "test/skill-library/example-skill/test_behavior.py"
+        source = "skill-library/example-skill/SKILL.md"
+        self.write(test, "import unittest\nclass Check(unittest.TestCase):\n    def test_example(self): self.assertTrue(True)\n")
+        self.write(source, "---\nname: example-skill\n---\n# Example\n")
+        self.manifest["modules"]["example_skill"] = {
+            "sources": [source], "tests": [test], "boundary_tests": []}
+        self.save_manifest()
+        plan = runner.make_plan(self.root, self.base)
+        self.assertIn(test, plan["tests"])
+        self.assertTrue(plan["runtime_required"])
+        self.assertEqual(plan["environment"], "wheel")
+        with self.assertRaisesRegex(ValueError, "named Skill directory"):
+            runner.test_path("test/skill-library/test_example.py")
+
     def test_unowned_canonical_skill_resources_are_rejected(self):
         self.write("openmachine/skills/new-guide.md", "A new shipped guide.\n")
         with self.assertRaisesRegex(ValueError, "without an explicit owner"):

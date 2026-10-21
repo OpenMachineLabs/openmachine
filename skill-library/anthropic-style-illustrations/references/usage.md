@@ -12,7 +12,7 @@ Run from this Skill with an environment containing `PyMuPDF==1.26.3`:
 .venv/bin/python -B scripts/illustrate.py illustrate examples/article.md --out runs/draft
 .venv/bin/python -B scripts/illustrate.py render examples/article.md examples/figure.json --out runs/example
 .venv/bin/python -B scripts/illustrate.py qa examples/article.md examples/figure.json --out runs/example
-.venv/bin/python -B -m unittest discover -s ../../test/component/anthropic_illustrations -p 'test_*.py'
+.venv/bin/python -B -m unittest discover -s ../../test/skill-library/anthropic-style-illustrations -p 'test_*.py'
 ```
 
 `plan --out` names a JSON file; other output arguments name directories. QA also

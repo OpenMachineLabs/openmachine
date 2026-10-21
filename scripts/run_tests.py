@@ -20,7 +20,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "test/ownership.json"
-LAYERS = ("repository", "unit", "component", "contract", "resilience")
+LAYERS = ("repository", "unit", "component", "skill-library", "contract", "resilience")
 GLOBAL_PATHS = {
     "requirements.lock", "pyproject.toml", "scripts/run_tests.py",
     "scripts/premerge.py", ".github/workflows/quality.yml",
@@ -91,6 +91,8 @@ def test_path(value: object) -> str:
     parts = PurePosixPath(path).parts
     if len(parts) < 3 or parts[0] != "test" or parts[1] not in LAYERS:
         raise ValueError(f"test must have an explicit layer: {path}")
+    if parts[1] == "skill-library" and len(parts) < 4:
+        raise ValueError(f"skill-library tests require a named Skill directory: {path}")
     if not parts[-1].startswith("test_") or not path.endswith(".py"):
         raise ValueError(f"expected an exact test_*.py file: {path}")
     return path

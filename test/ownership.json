@@ -686,7 +686,7 @@
         "skill-library/anthropic-style-illustrations/scripts/illustrate.py"
       ],
       "tests": [
-        "test/component/anthropic_illustrations/test_illustrate.py"
+        "test/skill-library/anthropic-style-illustrations/test_illustrate.py"
       ],
       "boundary_tests": []
     }
