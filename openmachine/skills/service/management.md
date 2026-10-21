@@ -9,6 +9,7 @@ On this page:
 - [Bounded runtime recovery](#bounded-runtime-recovery)
 - [Diagnose without replay](#diagnose-without-replay)
 - [Product management](#product-management)
+- [Confirmed configuration changes](#confirmed-configuration-changes)
 - [Policy and old-Core limits](#policy-and-old-core-limits)
 - [Original maintenance operations](#original-maintenance-operations)
 
@@ -274,6 +275,30 @@ profiles. The additive `configure:verify_existing` capability allows an
 authorized management caller to verify this step before continuing its original
 install operation. Installed state still rejects first-run configuration; this
 is not a configuration editor.
+
+### Confirmed configuration changes
+
+When `capabilities` includes `update:configuration_consent`, `manage update`
+accepts paired `--config-sha256` and `--candidate-sha256`. Bind the exact active
+configuration shown during confirmation and the exact reviewed candidate, not
+freshly substituted digests at dispatch. `manage machines` provides the active
+file digest; hash the candidate file bytes separately. Without a candidate path,
+both refer to the active file. These raw-file hashes are distinct from MCP's
+normalized `configuration_sha256`.
+
+The owner checks the active digest under maintenance admission and retains only
+the confirmed candidate bytes before publishing the original operation. Changed
+inputs return `configuration_changed` or `candidate_configuration_changed`;
+invalid digests return `invalid_configuration_consent`. A verified rejection
+before a record exists reports `admitted: false`; missing or uncertain replies
+still require original-ID readback. Existing records are read before new inputs
+are considered, never resubmitted. Activation reuses the original selection and
+configuration guards, preserving deliberate Stop and retained results.
+
+Omitting both flags retains the earlier update contract; a consent-dependent
+client must not silently fall back when this capability is absent. Preserve all
+unrelated settings in the candidate. This is not a workspace-reference migration,
+an OS sandbox or permission to modify another component's sharing settings.
 
 ### Policy and old-Core limits
 

@@ -21,6 +21,228 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class ServiceTests(ServiceCaseFixture, unittest.TestCase):
+    def test_confirmed_update_preserves_independent_grants_and_unrelated_settings(self):
+        self.policy_fixture()
+        self.machine_fixture()
+        self.config.write_text(self.config.read_text() + '\n[github]\nread_repositories=["example/project"]\n'
+            + '\n[workspaces.existing]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
+        original, selection = self.config.read_bytes(), service_state._record(self.state)
+        candidate = self.root / "candidate.toml"
+        with patch.object(maintenance, "_spawn") as spawn:
+            for index, (commands, writes) in enumerate(((False, False), (False, True), (True, False), (True, True)), 1):
+                with self.subTest(commands=commands, writes=writes):
+                    candidate.write_text(original.decode().replace('transport="local"',
+                        f'transport="local"\nexecution_enabled={str(commands).lower()}\nworkspace_write_enabled={str(writes).lower()}')
+                        + '\n[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
+                    accepted = maintenance.submit(self.config, self.state, "update", f"{index:032x}", self.root / "payload", "c" * 64,
+                        candidate_config=candidate, expected_config_sha256=maintenance._digest(self.config),
+                        expected_candidate_sha256=maintenance._digest(candidate))
+                    record = accepted["operation"]
+                    saved = maintenance.load(Path(record["request"]["candidate_config"]))
+                    baseline = maintenance.load(self.config)
+                    self.assertEqual((saved.machines["local"].execution_enabled,
+                                      saved.machines["local"].workspace_write_enabled), (commands, writes))
+                    self.assertEqual((saved.github, saved.skills, saved.workspaces["existing"]),
+                                     (baseline.github, baseline.skills, baseline.workspaces["existing"]))
+                    self.assertEqual(saved.workspaces["project"].root, str(self.root))
+                    if commands:
+                        saved.machine("local", write=True)
+                    else:
+                        self.assert_fault("execution_disabled", lambda: saved.machine("local", write=True))
+                    if writes:
+                        saved.workspace_machine("local")
+                    else:
+                        self.assert_fault("workspace_write_disabled", lambda: saved.workspace_machine("local"))
+                    self.assertEqual(self.config.read_bytes(), original)
+                    self.assertEqual(service_state._record(self.state), selection)
+                    # No fixture worker was dispatched; settle its admission for the next combination.
+                    maintenance._save(self.state, record, "rejected", reason="fixture_not_dispatched")
+            self.assertEqual(spawn.call_count, 4)
+
+    def test_confirmed_update_rejects_stale_and_invalid_digests_before_admission(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes() + b"\n# reviewed candidate\n")
+        old, new = maintenance._digest(self.config), maintenance._digest(candidate)
+        original = self.config.read_bytes()
+        for current, proposed, reason in (("0" * 64, new, "configuration_changed"),
+                (old, "0" * 64, "candidate_configuration_changed"),
+                ("A" * 64, new, "invalid_configuration_consent"),
+                (old, "bad", "invalid_configuration_consent"),
+                (None, new, "invalid_configuration_consent"),
+                (old, True, "invalid_configuration_consent")):
+            with self.subTest(reason=reason, current=current, proposed=proposed), \
+                    patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance, "_spawn") as spawn:
+                result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                    source=self.root / "payload", sha256="c" * 64, candidate_config=candidate,
+                    expected_config_sha256=current, expected_candidate_sha256=proposed)
+                self.assertEqual((result["status"], result["admitted"], result["reason"]), ("rejected", False, reason))
+                self.assertIn("update:configuration_consent", result["capabilities"])
+                self.assertEqual(result["operation_id"], "1" * 32)
+                self.assertFalse((self.state / "service/operations").exists())
+                self.assertEqual(self.config.read_bytes(), original)
+                spawn.assert_not_called()
+
+    def test_confirmed_input_loss_or_invalidity_is_rejected_before_admission(self):
+        self.machine_fixture()
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        for target, reason in ((self.config, "configuration_changed"), (candidate, "candidate_configuration_changed")):
+            for missing in (False, True):
+                for during_admission in (False, True):
+                    with self.subTest(target=target.name, missing=missing, during_admission=during_admission):
+                        self.config.write_bytes(original)
+                        candidate.write_bytes(original + b"\n# reviewed candidate\n")
+                        old, new = maintenance._digest(self.config), maintenance._digest(candidate)
+                        def change():
+                            if missing:
+                                target.unlink()
+                            else:
+                                target.write_bytes(b"[invalid TOML")
+                        if not during_admission:
+                            change()
+                        with patch.object(maintenance.sys, "platform", "darwin"), \
+                                patch.object(maintenance, "_available", side_effect=lambda state: change() if during_admission else None), \
+                                patch.object(maintenance, "_spawn") as spawn:
+                            result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                                source=self.root / "payload", sha256="c" * 64, candidate_config=candidate,
+                                expected_config_sha256=old, expected_candidate_sha256=new)
+                        self.assertEqual((result["status"], result["admitted"], result["reason"]), ("rejected", False, reason))
+                        self.assertFalse((self.state / "service/operations").exists())
+                        if target != self.config:
+                            self.assertEqual(self.config.read_bytes(), original)
+                        spawn.assert_not_called()
+
+    def test_candidate_input_read_failures_do_not_mask_retention_store_failures(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes())
+        digest = maintenance._digest(candidate)
+        failures = (
+            (FileNotFoundError(2, "missing input", str(candidate)), True),
+            (OSError(5, "input read failed", str(candidate)), True),
+            (OSError(28, "retention store full", str(self.state / "service/configurations")), False),
+            (maintenance.Fault("configuration_unavailable", "Retained snapshot is invalid."), False),
+        )
+        for error, rejected in failures:
+            with self.subTest(error=type(error).__name__, rejected=rejected), \
+                    patch.object(maintenance.sys, "platform", "darwin"), \
+                    patch.object(service_state, "_snapshot_configuration", side_effect=error), \
+                    patch.object(maintenance, "_spawn") as spawn:
+                result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                    source=self.root / "payload", sha256="c" * 64, candidate_config=candidate,
+                    expected_config_sha256=digest, expected_candidate_sha256=digest)
+                if rejected:
+                    self.assertEqual((result["status"], result["admitted"], result["reason"]),
+                                     ("rejected", False, "candidate_configuration_changed"))
+                else:
+                    self.assertEqual(result["status"], "unknown")
+                    self.assertNotIn("admitted", result)
+                self.assertFalse((self.state / "service/operations").exists())
+                self.assertEqual(maintenance._digest(self.config), digest)
+                spawn.assert_not_called()
+
+    def test_confirmed_update_rechecks_active_config_inside_admission_lock(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes())
+        digest = maintenance._digest(self.config)
+        changed = self.config.read_bytes() + b"\n# concurrent edit\n"
+        with patch.object(maintenance, "_available", side_effect=lambda state: self.config.write_bytes(changed)), \
+                patch.object(maintenance, "_spawn") as spawn:
+            self.assert_fault("configuration_changed", lambda: maintenance.submit(self.config, self.state, "update", "1" * 32,
+                self.root / "payload", "c" * 64, candidate_config=candidate,
+                expected_config_sha256=digest, expected_candidate_sha256=digest))
+            spawn.assert_not_called()
+        self.assertEqual(self.config.read_bytes(), changed)
+        self.assertFalse((self.state / "service/operations").exists())
+
+    def test_confirmed_update_rejects_candidate_changed_during_retention(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes())
+        digest = maintenance._digest(candidate)
+        snapshot = service_state._snapshot_configuration
+        def changed(state, path):
+            path.write_bytes(path.read_bytes() + b"\n# changed after confirmation\n")
+            return snapshot(state, path)
+        with patch.object(service_state, "_snapshot_configuration", side_effect=changed), patch.object(maintenance, "_spawn") as spawn:
+            self.assert_fault("candidate_configuration_changed", lambda: maintenance.submit(self.config, self.state, "update", "1" * 32,
+                self.root / "payload", "c" * 64, candidate_config=candidate,
+                expected_config_sha256=digest, expected_candidate_sha256=digest))
+            spawn.assert_not_called()
+        self.assertEqual(maintenance._digest(self.config), digest)
+        self.assertFalse((self.state / "service/operations").exists())
+
+    def test_confirmed_update_freezes_candidate_and_reads_original_after_lost_reply(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        reviewed = self.config.read_bytes() + b"\n# reviewed candidate\n"
+        candidate.write_bytes(reviewed)
+        with patch.object(maintenance, "_spawn", side_effect=OSError("not launched")) as spawn:
+            record = maintenance.submit(self.config, self.state, "update", "1" * 32, self.root / "payload", "c" * 64,
+                candidate_config=candidate, expected_config_sha256=maintenance._digest(self.config),
+                expected_candidate_sha256=maintenance._digest(candidate))["operation"]
+            frozen = Path(record["request"]["candidate_config"])
+            self.assertEqual(frozen.read_bytes(), reviewed)
+            self.assertTrue(frozen.is_relative_to(self.state / "service/configurations"))
+            candidate.write_bytes(reviewed + b"\n# caller edited its draft later\n")
+            self.assertEqual(maintenance._inputs_unchanged(self.state, record), frozen)
+            again = maintenance.submit(self.config, self.state, "update", "1" * 32, Path("absent"), "invalid",
+                expected_config_sha256="invalid", expected_candidate_sha256="invalid")
+            self.assertEqual((again["status"], again["operation"]), ("continuation_required", record))
+            self.assertEqual(record["reason"], "maintenance_launch_unavailable")
+            self.assertEqual(maintenance.read_operation(self.config, self.state, "1" * 32)["operation"], record)
+            spawn.assert_called_once()
+
+    def test_confirmed_update_keeps_uncertain_publication_unknown(self):
+        self.machine_fixture()
+        digest = maintenance._digest(self.config)
+        save = maintenance._save
+        def lost(*args, **kwargs):
+            save(*args, **kwargs)
+            raise OSError("lost acknowledgement after publication")
+        with patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance, "_save", side_effect=lost), \
+                patch.object(maintenance, "_spawn") as spawn:
+            result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                source=self.root / "payload", sha256="c" * 64,
+                expected_config_sha256=digest, expected_candidate_sha256=digest)
+            self.assertEqual(result["status"], "unknown")
+            self.assertNotIn("admitted", result)
+            spawn.assert_not_called()
+        original = maintenance.read_operation(self.config, self.state, "1" * 32)
+        self.assertEqual(original["operation"]["request"]["config_sha256"], digest)
+        self.assertEqual(maintenance._digest(self.config), digest)
+
+    def test_confirmed_grant_revocation_activates_without_clearing_stop(self):
+        self.policy_fixture()
+        self.machine_fixture()
+        self.config.write_text(self.config.read_text().replace('transport="local"',
+            'transport="local"\nexecution_enabled=true\nworkspace_write_enabled=true'))
+        original_policy = service_state._record(self.state)["policy"]
+        candidate = self.root / "candidate.toml"
+        candidate.write_text(self.config.read_text().replace('enabled=true', 'enabled=false'))
+        expected = candidate.read_bytes()
+        with patch.object(maintenance, "_spawn"):
+            record = maintenance.submit(self.config, self.state, "update", "1" * 32, self.root / "payload", "c" * 64,
+                candidate_config=candidate, expected_config_sha256=maintenance._digest(self.config),
+                expected_candidate_sha256=maintenance._digest(candidate))["operation"]
+        prepared = {"status": "prepared", "identity": self.b, "version": "0.1.0a7", "payload_sha256": "c" * 64,
+                    "runtime": str(self.state / "service/versions" / self.b), "launch_python": sys.executable,
+                    "path_environment": os.defpath, "selection": "unchanged", "service": "not_started"}
+        maintenance._save(self.state, record, "prepared", prepared=prepared)
+        _, _, start = self.activation_mocks()
+        with patch.object(service_runtime, "_sync_definition"), lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        original = maintenance.read_operation(self.config, self.state, record["operation_id"])
+        self.assertEqual((original["status"], original["operation"]["outcome"]["status"]), ("completed", "stopped"))
+        self.assertEqual(self.config.read_bytes(), expected)
+        self.assertEqual(service_state._record(self.state)["policy"], original_policy)
+        config = maintenance.load(self.config)
+        self.assert_fault("execution_disabled", lambda: config.machine("local", write=True))
+        self.assert_fault("workspace_write_disabled", lambda: config.workspace_machine("local"))
+        start.assert_not_called()
+
     def test_status_separates_selected_and_running_commits(self):
         for identity, commit in ((self.a, "c" * 40), (self.b, "d" * 40)):
             path = service_state._runtime(self.state, identity) / "installation.json"

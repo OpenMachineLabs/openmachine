@@ -80,6 +80,8 @@ def main() -> int:
             operation.add_argument("--probe-path", required=True)
         else:
             operation.add_argument("--candidate-config", type=Path)
+            operation.add_argument("--config-sha256", help="Confirmed active configuration file SHA256; requires --candidate-sha256")
+            operation.add_argument("--candidate-sha256", help="Confirmed candidate configuration file SHA256; requires --config-sha256")
     for action in ("operation", "continue", "retire"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
@@ -100,6 +102,9 @@ def main() -> int:
         parser.error("--requirements is required with --wheel and cannot be combined with --commit")
     if args.command == "manage" and (args.config is None or args.state_dir is None):
         parser.error("manage requires explicit --config and --state-dir before the subcommand")
+    if (args.command == "manage" and args.management_action == "update"
+            and (args.config_sha256 is None) != (args.candidate_sha256 is None)):
+        parser.error("--config-sha256 and --candidate-sha256 must be supplied together")
     args.config = args.config if args.config is not None else DEFAULT_CONFIG
     args.state_dir = args.state_dir if args.state_dir is not None else DEFAULT_STATE
     try:
@@ -115,6 +120,9 @@ def main() -> int:
                     inputs.update(workspace=args.probe_workspace, path=args.probe_path)
                 else:
                     inputs["candidate_config"] = args.candidate_config
+                    if args.config_sha256 is not None:
+                        inputs.update(expected_config_sha256=args.config_sha256,
+                                      expected_candidate_sha256=args.candidate_sha256)
             if action.startswith("machine-"):
                 inputs["name"] = args.name
                 if action in {"machine-test", "machine-add"}:

@@ -198,19 +198,41 @@ def _spawn(state: Path, identity: str, lock, python: str) -> None:
                      stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=(lock.fileno(),))
 
 
+def _confirmed_configuration(path: Path, expected: str | None, reason: str, *, state: Path | None = None) -> str:
+    """Classify input drift before admission without hiding retention-store failures."""
+    try:
+        digest = _digest(path) if state is None else service_state._snapshot_configuration(state, path)
+    except (Fault, OSError) as error:
+        input_error = (isinstance(error, Fault) and error.code in {
+            "config_unavailable", "invalid_config", "invalid_service_configuration"}
+            or isinstance(error, OSError) and (state is None or error.filename == str(path)))
+        if expected is None or not input_error:
+            raise
+        raise Fault(reason, "The confirmed configuration is unavailable or invalid; review and confirm it again.") from error
+    if expected is not None and digest != expected:
+        raise Fault(reason, "The confirmed configuration changed; review and confirm it again.")
+    return digest
+
+
 def submit(config_path: Path, state: Path, action: Literal["install", "update"], identity: str,
            source: Path, sha256: str, *, candidate_config: Path | None = None,
-           workspace: str = "", path: str = "", expected_config_sha256: str | None = None) -> dict:
+           workspace: str = "", path: str = "", expected_config_sha256: str | None = None,
+           expected_candidate_sha256: str | None = None) -> dict:
     destination = _operation_path(state, identity)
     if os.path.lexists(destination):
         return read_operation(config_path, state, identity)
+    if (expected_candidate_sha256 is not None and expected_config_sha256 is None
+            or any(value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value))
+                   for value in (expected_config_sha256, expected_candidate_sha256))):
+        raise Fault("invalid_configuration_consent", "Use confirmed lowercase SHA256 file digests; candidate consent also requires the active configuration digest.")
     if not source.is_absolute() or candidate_config is not None and not candidate_config.is_absolute():
         raise Fault("invalid_service_path", "Payload and candidate configuration paths must be absolute.")
     # Verification is read-only. The expected digest is supplied by the trusted
     # product artifact, never a feed-selected command or an arbitrary executable.
     payload.verify(source, sha256)
     selected_config = candidate_config or config_path
-    config_hash, candidate_hash = _digest(config_path), _digest(selected_config)
+    config_hash = _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
+    candidate_hash = _confirmed_configuration(selected_config, expected_candidate_sha256, "candidate_configuration_changed")
     state = private_directory(state)
     root = private_directory(state / "service")
     private_directory(state / "locks")
@@ -219,9 +241,8 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
             return {"status": "busy", "operation": _read(state, identity)}
         _available(state)
         if expected_config_sha256 is not None:
-            if _digest(config_path) != expected_config_sha256 or config_hash != expected_config_sha256:
-                raise Fault("configuration_changed", "Configuration changed; test the exact connection again before saving.")
-            digest = service_state._snapshot_configuration(state, selected_config)
+            _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
+            digest = _confirmed_configuration(selected_config, candidate_hash, "candidate_configuration_changed", state=state)
             selected_config = service_state._saved_configuration(state, digest)
         if action == "install":
             if candidate_config is not None or not workspace or not path:
@@ -619,7 +640,7 @@ def change_machine(config_path: Path, state: Path, action: str, identity: str, n
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
-                "capabilities": [*CAPABILITIES, "configure:verify_existing"],
+                "capabilities": [*CAPABILITIES, "configure:verify_existing", "update:configuration_consent"],
                 "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
                 "implementation_state_contract": service_state.STATE_CONTRACT}
     try:
@@ -668,6 +689,10 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                 "ssh_host_key_mismatch", "ssh_authentication_required", "ssh_unavailable", "remote_runtime_unavailable",
                 "ssh_protocol_error", "protocol_mismatch", "local_machine_required", "machine_in_use",
                 "resource_busy", "maintenance_busy", "activation_pending", "incompatible_management"}
+                and not os.path.lexists(_operation_path(state, inputs["identity"]))):
+            result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
+        if (action == "update" and code in {"configuration_changed", "candidate_configuration_changed",
+                                            "invalid_configuration_consent"}
                 and not os.path.lexists(_operation_path(state, inputs["identity"]))):
             result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
     return envelope | result | {"observed_at_ms": time.time_ns() // 1000000}
