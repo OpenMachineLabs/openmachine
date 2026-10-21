@@ -1,0 +1,1202 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-21",
+  "purpose": "First-party discovery index; each entry states the actual medium and inspection scope. No raw media or archived pages.",
+  "sources": [
+    {
+      "id": "EX01",
+      "title": "Large Language Models explained briefly",
+      "url": "https://www.3blue1brown.com/lessons/mini-llm/",
+      "publisher": "3Blue1Brown",
+      "kind": "video_text_adaptation",
+      "topics": [
+        "llm",
+        "feedback",
+        "object-continuity"
+      ],
+      "learning_targets": [
+        "Track one growing input through repeated prediction."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Lesson text and image captions read; neither video nor frames inspected."
+    },
+    {
+      "id": "EX02",
+      "title": "Attention in transformers, step-by-step | Deep Learning Chapter 6",
+      "url": "https://www.3blue1brown.com/lessons/attention/",
+      "publisher": "3Blue1Brown",
+      "kind": "video_text_adaptation",
+      "topics": [
+        "attention",
+        "context",
+        "weighted-selection"
+      ],
+      "learning_targets": [
+        "Motivate behavior before matrix details."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Written adaptation read; no video playback.",
+      "media_locator": {
+        "kind": "youtube_watch_page",
+        "url": "https://www.youtube.com/watch?v=eMlx5fFNoYc",
+        "discovery": "Official 3Blue1Brown result; playback unverified."
+      }
+    },
+    {
+      "id": "EX03",
+      "title": "Transformers, the tech behind LLMs | Deep Learning Chapter 5",
+      "url": "https://www.3blue1brown.com/lessons/gpt/",
+      "publisher": "3Blue1Brown",
+      "kind": "video_text_adaptation",
+      "topics": [
+        "transformer",
+        "overview-detail",
+        "pipeline"
+      ],
+      "learning_targets": [
+        "Preview the pipeline before unpacking individual operations."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Written lesson verifies overview-first structure; no temporal or pixel inspection."
+    },
+    {
+      "id": "EX04",
+      "title": "Introduction to the A* Algorithm",
+      "url": "https://www.redblobgames.com/pathfinding/a-star/introduction.html",
+      "publisher": "Red Blob Games / Amit Patel",
+      "kind": "interactive_explainer",
+      "topics": [
+        "pathfinding",
+        "frontier",
+        "comparison"
+      ],
+      "learning_targets": [
+        "Hold the map constant while comparing search strategies."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Page instructions and algorithm sections read; controls not operated."
+    },
+    {
+      "id": "EX05",
+      "title": "Making of: Introduction to A*",
+      "url": "https://www.redblobgames.com/pathfinding/a-star/making-of.html",
+      "publisher": "Red Blob Games / Amit Patel",
+      "kind": "author_design_notes",
+      "topics": [
+        "editorial-method",
+        "internal-state",
+        "progressive-complexity"
+      ],
+      "learning_targets": [
+        "Select the explanatory internal variable before arranging scenes."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Author's design account read; this is not a video study."
+    },
+    {
+      "id": "EX06",
+      "title": "Hexagonal Grids",
+      "url": "https://www.redblobgames.com/grids/hexagons/",
+      "publisher": "Red Blob Games / Amit Patel",
+      "kind": "interactive_reference",
+      "topics": [
+        "coordinates",
+        "linked-representations",
+        "geometry"
+      ],
+      "learning_targets": [
+        "Preserve a selected cell across coordinate representations."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Reference sections and interaction instructions read; no live interaction."
+    },
+    {
+      "id": "EX07",
+      "title": "GPS",
+      "url": "https://ciechanow.ski/gps/",
+      "publisher": "Bartosz Ciechanowski",
+      "kind": "interactive_explainer",
+      "topics": [
+        "positioning",
+        "constraint-reveal",
+        "linked-representations"
+      ],
+      "learning_targets": [
+        "Add constraints individually while keeping the target identifiable."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Text describes paired map/scene and distance constraints; pixels and controls uninspected."
+    },
+    {
+      "id": "EX08",
+      "title": "Sound",
+      "url": "https://ciechanow.ski/sound/",
+      "publisher": "Bartosz Ciechanowski",
+      "kind": "interactive_explainer",
+      "topics": [
+        "simulation",
+        "time-scale",
+        "micro-to-macro"
+      ],
+      "learning_targets": [
+        "Connect microscopic events to aggregate measurements; disclose slowed time."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Text describes particles, collision highlights, and time control. No sound played."
+    },
+    {
+      "id": "EX09",
+      "title": "Mechanical Watch",
+      "url": "https://ciechanow.ski/mechanical-watch/",
+      "publisher": "Bartosz Ciechanowski",
+      "kind": "interactive_explainer",
+      "topics": [
+        "mechanical-system",
+        "layer-reveal",
+        "part-identity"
+      ],
+      "learning_targets": [
+        "Expose internal parts while preserving names, positions, and color identity."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Text and control descriptions read; model not rotated."
+    },
+    {
+      "id": "EX10",
+      "title": "Attention and Augmented Recurrent Neural Networks",
+      "url": "https://distill.pub/2016/augmented-rnns/",
+      "publisher": "Distill / Chris Olah and Shan Carter",
+      "kind": "illustrated_research_article",
+      "topics": [
+        "memory",
+        "attention",
+        "weighted-read"
+      ],
+      "learning_targets": [
+        "Distinguish weighted selection from exclusive routing."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Article text read; diagram media not inspected. Historical architecture context."
+    },
+    {
+      "id": "EX11",
+      "title": "Why Momentum Really Works",
+      "url": "https://distill.pub/2017/momentum/",
+      "publisher": "Distill / Gabriel Goh",
+      "kind": "interactive_research_article",
+      "topics": [
+        "optimization",
+        "parameter-change",
+        "counterfactual"
+      ],
+      "learning_targets": [
+        "Compare trajectories using consistent axes and an explicit model assumption."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Article text and parameter descriptions read; trajectories not played."
+    },
+    {
+      "id": "EX12",
+      "title": "Computing Receptive Fields of Convolutional Neural Networks",
+      "url": "https://distill.pub/2019/computing-receptive-fields/",
+      "publisher": "Distill / Andre Araujo, Wade Norris, and Jack Sim",
+      "kind": "illustrated_research_article",
+      "topics": [
+        "dependency",
+        "receptive-field",
+        "graph"
+      ],
+      "learning_targets": [
+        "Trace output dependencies backward through branches."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Definitions and single-path/arbitrary-graph sections read; no media inspected."
+    },
+    {
+      "id": "EX13",
+      "title": "Neurotic Neurons",
+      "url": "https://ncase.me/neurons/",
+      "publisher": "Nicky Case",
+      "kind": "interactive_animated_explainer",
+      "topics": [
+        "direct-manipulation",
+        "propagation",
+        "interactive-narrative"
+      ],
+      "learning_targets": [
+        "Inspect the author's hybrid of interactive simulation and animated explanation."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Landing-page description and author links verified; experience not played. Do not reuse its health claims without separate medical verification."
+    },
+    {
+      "id": "EX14",
+      "title": "Neurotic Neurons: Design Patterns",
+      "url": "https://blog.ncase.me/neurotic-neurons-design-patterns/",
+      "publisher": "Nicky Case",
+      "kind": "author_design_notes",
+      "topics": [
+        "direct-manipulation",
+        "rule-consistency",
+        "clarity"
+      ],
+      "learning_targets": [
+        "Make actions cause immediate visible changes; keep rules consistent."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Eight samples per linked GIF inspected; see frame-observations.json. Interactive controls and continuous playback were not inspected.",
+      "media_locator": {
+        "kind": "animated_gif",
+        "url": "https://blog.ncase.me/content/images/2015/09/propagation.gif",
+        "discovery": "Clicked author's propagation example; tool identified image/gif, unsupported for viewing."
+      }
+    },
+    {
+      "id": "EX15",
+      "title": "How NAT traversal works",
+      "url": "https://tailscale.com/blog/how-nat-traversal-works",
+      "publisher": "Tailscale",
+      "kind": "illustrated_technical_explainer",
+      "topics": [
+        "networking",
+        "state-transition",
+        "failure-retry"
+      ],
+      "learning_targets": [
+        "Show packets and firewall state together, including unsuccessful attempts."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Technical narrative and captions read; diagrams not visually inspected."
+    },
+    {
+      "id": "EX16",
+      "title": "Tailscale: How it works",
+      "url": "https://tailscale.com/blog/how-tailscale-works",
+      "publisher": "Tailscale",
+      "kind": "illustrated_technical_explainer",
+      "topics": [
+        "architecture",
+        "control-plane",
+        "data-plane"
+      ],
+      "learning_targets": [
+        "Separate coordination metadata from application-data paths."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Bottom-up explanation and key-distribution sequence verified; historical overview, not a current deployment guarantee."
+    },
+    {
+      "id": "EX17",
+      "title": "Transformer Explainer: LLM Transformer Model Visually Explained",
+      "url": "https://poloclub.github.io/transformer-explainer/",
+      "publisher": "Georgia Tech Polo Club",
+      "kind": "interactive_model_explainer",
+      "topics": [
+        "transformer",
+        "sampling",
+        "parameter-control"
+      ],
+      "learning_targets": [
+        "Tie a specific model's internal stages to controllable sampling settings."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Page labels identify GPT-2 small and temperature/top-k/top-p controls; model not run."
+    },
+    {
+      "id": "EX18",
+      "title": "Motion",
+      "url": "https://www.carbondesignsystem.com/building-blocks/foundations/motion/overview",
+      "publisher": "IBM Carbon Design System",
+      "kind": "motion_guideline",
+      "topics": [
+        "attention-hierarchy",
+        "motion-intensity",
+        "easing"
+      ],
+      "learning_targets": [
+        "Reserve expressive motion for deliberate emphasis; use restrained motion elsewhere."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Official guideline text read; embedded examples not played."
+    },
+    {
+      "id": "EX19",
+      "title": "Motion: Choreography",
+      "url": "https://www.carbondesignsystem.com/building-blocks/foundations/motion/choreography",
+      "publisher": "IBM Carbon Design System",
+      "kind": "motion_guideline",
+      "topics": [
+        "semantic-consistency",
+        "object-continuity",
+        "sequencing"
+      ],
+      "learning_targets": [
+        "Assign consistent meaning to motion and preserve shared elements."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Official choreography principles read; no motion viewing."
+    },
+    {
+      "id": "EX20",
+      "title": "Motion",
+      "url": "https://fluent2.microsoft.design/motion",
+      "publisher": "Microsoft Fluent",
+      "kind": "motion_guideline_with_video_examples",
+      "topics": [
+        "motion-purpose",
+        "easing",
+        "transitions"
+      ],
+      "learning_targets": [
+        "Choose motion by function and relation, then tune size and travel distance."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Official principles and video-player presence verified; example videos not played."
+    },
+    {
+      "id": "EX21",
+      "title": "Wait UX",
+      "url": "https://fluent2.microsoft.design/wait-ux",
+      "publisher": "Microsoft Fluent",
+      "kind": "interaction_guideline",
+      "topics": [
+        "progress",
+        "uncertainty",
+        "status"
+      ],
+      "learning_targets": [
+        "Use determinate progress only when progress is actually known."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Guideline text read; this concerns product status, not film pacing."
+    },
+    {
+      "id": "EX22",
+      "title": "Designing Fluid Interfaces",
+      "url": "https://developer.apple.com/videos/play/wwdc2018/803/",
+      "publisher": "Apple Developer",
+      "kind": "conference_video_with_transcript",
+      "topics": [
+        "gesture",
+        "continuous-feedback",
+        "direct-manipulation"
+      ],
+      "learning_targets": [
+        "Connect input and response throughout an action."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Official transcript and downloadable media links verified; no segment watched.",
+      "media_locator": {
+        "kind": "mp4",
+        "url": "https://devstreaming-cdn.apple.com/videos/wwdc/2018/803lpnlacvg2jsndx/803/803_hd_designing_fluid_interfaces.mp4?dl=1",
+        "discovery": "Official HD Video link; tool identified video/mp4 but did not decode it."
+      }
+    },
+    {
+      "id": "EX23",
+      "title": "How we built Pingora, the proxy that connects Cloudflare to the Internet",
+      "url": "https://blog.cloudflare.com/how-we-built-pingora-the-proxy-that-connects-cloudflare-to-the-internet/",
+      "publisher": "Cloudflare",
+      "kind": "illustrated_architecture_article",
+      "topics": [
+        "architecture-change",
+        "connection-pool",
+        "before-after"
+      ],
+      "learning_targets": [
+        "Compare ownership boundaries under the same conceptual workload."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Engineering account explains worker-local connection pools and reuse constraints; illustrations not inspected."
+    },
+    {
+      "id": "EX24",
+      "title": "Building effective agents",
+      "url": "https://www.anthropic.com/research/building-effective-agents",
+      "publisher": "Anthropic",
+      "kind": "illustrated_technical_article",
+      "topics": [
+        "workflow",
+        "routing",
+        "parallelism",
+        "feedback"
+      ],
+      "learning_targets": [
+        "Represent chain, routing, parallel aggregation, and iterative evaluation distinctly."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Workflow definitions and figure positions verified. Static topology does not establish event duration."
+    },
+    {
+      "id": "EX25",
+      "title": "How we built our multi-agent research system",
+      "url": "https://www.anthropic.com/research/multi-agent-research-system",
+      "publisher": "Anthropic",
+      "kind": "illustrated_architecture_article",
+      "topics": [
+        "orchestration",
+        "parallelism",
+        "adaptive-loop"
+      ],
+      "learning_targets": [
+        "Show delegation, independent work, synthesis, and possible further research."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Architecture narrative and workflow captions read; no inference of timing from illustrations."
+    },
+    {
+      "id": "EX26",
+      "title": "Building Beautiful Transitions with Material Motion for Flutter",
+      "url": "https://codelabs.developers.google.com/codelabs/material-motion-flutter",
+      "publisher": "Google Codelabs",
+      "kind": "implementation_tutorial_with_animation_examples",
+      "topics": [
+        "transition-semantics",
+        "shared-element",
+        "spatial-relation"
+      ],
+      "learning_targets": [
+        "Match transitions to element relationships."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Eight samples per linked GIF inspected; see frame-observations.json. Interactive controls and continuous playback were not inspected.",
+      "media_locator": {
+        "kind": "animated_gif",
+        "url": "https://codelabs.developers.google.com/static/codelabs/material-motion-flutter/img/11807bdf36c66657.gif",
+        "discovery": "Container Transform example linked by codelab; content type image/gif identified."
+      },
+      "additional_media_locators": [
+        {
+          "kind": "animated_gif",
+          "url": "https://codelabs.developers.google.com/static/codelabs/material-motion-flutter/img/71218f390abae07e.gif",
+          "discovery": "Shared Axis example linked by codelab; content type image/gif identified."
+        }
+      ]
+    },
+    {
+      "id": "EX27",
+      "title": "Explorable Explanations",
+      "url": "https://worrydream.com/ExplorableExplanations/",
+      "publisher": "Bret Victor",
+      "kind": "author_design_essay_with_interactive_examples",
+      "topics": [
+        "counterfactual",
+        "assumptions",
+        "reader-agency"
+      ],
+      "learning_targets": [
+        "Choose explicit what-if scenarios when translating exploration into a linear film."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "evidence_note": "Author's essay read; interactive examples not operated."
+    },
+    {
+      "id": "product-raycast-pro",
+      "title": "Introducing Raycast Pro",
+      "url": "https://www.raycast.com/blog/introducing-raycast-pro",
+      "publisher": "Raycast",
+      "kind": "launch_post",
+      "topics": [
+        "text-transformation",
+        "ui-proof"
+      ],
+      "learning_targets": [
+        "Keep the selected text recognizable across an AI transformation.",
+        "Show the result returning to the original work context."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The launch separates quick answers, chat, and commands that transform selected text."
+    },
+    {
+      "id": "product-raycast-notes",
+      "title": "Meet the new Raycast Notes",
+      "url": "https://www.raycast.com/blog/raycast-notes",
+      "publisher": "Raycast",
+      "kind": "launch_post",
+      "topics": [
+        "capture-flow",
+        "keyboard-interaction"
+      ],
+      "learning_targets": [
+        "Trace one note from capture through formatting and retrieval.",
+        "Make keyboard-triggered actions visible without showing every keystroke."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The page introduces multiple notes, Markdown formatting, and commands for creating and finding notes.",
+      "media_locator": {
+        "url": "https://youtu.be/6knS3y39f7k",
+        "kind": "official_page_video_link",
+        "located_on": "https://www.raycast.com/blog/raycast-notes",
+        "retrieval_note": "Video link discovered; playback not inspected."
+      }
+    },
+    {
+      "id": "product-figma-slides",
+      "title": "Stack the deck with Figma Slides",
+      "url": "https://www.figma.com/blog/introducing-figma-slides/",
+      "publisher": "Figma",
+      "kind": "launch_post",
+      "topics": [
+        "interactive-proof",
+        "presentation"
+      ],
+      "learning_targets": [
+        "Embed a working interaction at the moment it supports the claim.",
+        "Use transitions to preserve context between explanation and demonstration."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The article describes playable prototypes, animated slide transitions, and contextual audience feedback."
+    },
+    {
+      "id": "product-figma-make",
+      "title": "Introducing Figma Make: A New Way to Test, Edit, and Prompt Designs",
+      "url": "https://www.figma.com/blog/introducing-figma-make/",
+      "publisher": "Figma",
+      "kind": "launch_post",
+      "topics": [
+        "artifact-transformation",
+        "object-continuity"
+      ],
+      "learning_targets": [
+        "Keep an existing design identifiable when demonstrating a new behavior.",
+        "Show one bounded interaction change."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Existing frames can retain structure and metadata when used to produce interactive experiences."
+    },
+    {
+      "id": "product-github-agent-mode",
+      "title": "Agent mode 101: All about GitHub Copilot’s powerful mode",
+      "url": "https://github.blog/ai-and-ml/github-copilot/agent-mode-101-all-about-github-copilots-powerful-mode/",
+      "publisher": "GitHub",
+      "kind": "explainer",
+      "topics": [
+        "feedback-loop",
+        "agent-workflow"
+      ],
+      "learning_targets": [
+        "Show plan, action, observable output, and correction as distinct events.",
+        "Distinguish synchronous assistance from asynchronous delegation."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The article explains iterative tool use and distinguishes agent mode from the separate asynchronous coding agent.",
+      "media_locator": {
+        "url": "https://www.youtube.com/embed/pRihTxpipZ0",
+        "kind": "official_page_video_embed",
+        "located_on": "https://github.blog/ai-and-ml/github-copilot/agent-mode-101-all-about-github-copilots-powerful-mode/",
+        "retrieval_note": "Embed URL discovered; player fetch throttled; playback not inspected."
+      }
+    },
+    {
+      "id": "product-github-spark",
+      "title": "GitHub Spark in public preview for Copilot Pro+ subscribers",
+      "url": "https://github.blog/changelog/2025-07-23-github-spark-in-public-preview-for-copilot-pro-subscribers/",
+      "publisher": "GitHub",
+      "kind": "launch_post",
+      "topics": [
+        "prompt-to-app",
+        "artifact-continuity"
+      ],
+      "learning_targets": [
+        "Carry the same app through prompt, preview, and code views.",
+        "Use concrete editing actions to substantiate the result."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Spark combines natural-language, visual, and code iteration; its example workbench displays a restaurant-rating app."
+    },
+    {
+      "id": "product-notion-mail",
+      "title": "Introducing Notion Mail, a new inbox that thinks like you",
+      "url": "https://www.notion.com/blog/introducing-notion-mail",
+      "publisher": "Notion",
+      "kind": "launch_post",
+      "topics": [
+        "classification",
+        "routing"
+      ],
+      "learning_targets": [
+        "Follow one message as rules classify it and place it in a view.",
+        "Separate sorting from replying or deleting."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The launch describes natural-language inbox rules, labels, and personalized views for incoming messages."
+    },
+    {
+      "id": "product-notion-custom-agents",
+      "title": "Introducing Custom Agents",
+      "url": "https://www.notion.com/blog/introducing-custom-agents",
+      "publisher": "Notion",
+      "kind": "launch_post",
+      "topics": [
+        "agent-workflow",
+        "handoff",
+        "routing"
+      ],
+      "learning_targets": [
+        "Show trigger, structured record, enrichment, and returned status.",
+        "Keep the request identity across connected tools."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "A routing example captures requests, tracks them in a database, enriches them, and updates the team.",
+      "media_locator": {
+        "url": "https://www.youtube-nocookie.com/embed/yrEic418kjg",
+        "kind": "official_page_video_embed",
+        "located_on": "https://www.notion.com/blog/introducing-custom-agents",
+        "retrieval_note": "Embed URL discovered; script-based player not inspected."
+      }
+    },
+    {
+      "id": "product-supabase-branching",
+      "title": "Supabase Branching",
+      "url": "https://supabase.com/blog/supabase-branching",
+      "publisher": "Supabase",
+      "kind": "launch_post",
+      "topics": [
+        "branching",
+        "environment-boundary"
+      ],
+      "learning_targets": [
+        "Pair a Git branch with its database preview.",
+        "Show production changing at merge rather than during preview edits."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Git-linked preview environments keep changes isolated until migrations are merged into production.",
+      "media_locator": {
+        "url": "https://www.youtube-nocookie.com/embed/peXKxavGnBo",
+        "kind": "official_page_video_embed",
+        "located_on": "https://supabase.com/blog/supabase-branching",
+        "retrieval_note": "Embed URL discovered; script-based player not inspected."
+      }
+    },
+    {
+      "id": "product-supabase-branching-2",
+      "title": "Introducing Branching 2.0",
+      "url": "https://supabase.com/blog/branching-2-0",
+      "publisher": "Supabase",
+      "kind": "launch_post",
+      "topics": [
+        "branching",
+        "scope-boundary",
+        "review-gate"
+      ],
+      "learning_targets": [
+        "Differentiate copied schema and configuration from excluded data.",
+        "Animate the change set through review and merge."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The article explicitly excludes data from branch copies and outlines creation, edits, review, synchronization, and merge."
+    },
+    {
+      "id": "product-warp-agent-mode",
+      "title": "Agent Mode: LLM embedded in the terminal for multi-step workflows",
+      "url": "https://www.warp.dev/blog/agent-mode",
+      "publisher": "Warp",
+      "kind": "launch_post",
+      "topics": [
+        "terminal-proof",
+        "feedback-loop"
+      ],
+      "learning_targets": [
+        "Keep commands and their actual outputs visually distinct.",
+        "Show permission or correction as part of the loop when relevant."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The launch describes multi-step terminal work informed by command outputs, with user approval for actions."
+    },
+    {
+      "id": "product-warp-2",
+      "title": "Introducing Warp 2.0: Reimagining coding with the Agentic Development Environment",
+      "url": "https://www.warp.dev/blog/reimagining-coding-agentic-development-environment",
+      "publisher": "Warp",
+      "kind": "launch_post",
+      "topics": [
+        "developer-workflow",
+        "scope-selection"
+      ],
+      "learning_targets": [
+        "Select a single task thread from a broad product story.",
+        "Use intermediate artifacts to connect development stages."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The launch positions an agent-centered environment across setup, coding, and delivery work."
+    },
+    {
+      "id": "product-cursor-plan-mode",
+      "title": "Introducing Plan Mode",
+      "url": "https://cursor.com/blog/plan-mode",
+      "publisher": "Cursor",
+      "kind": "launch_post",
+      "topics": [
+        "plan-to-action",
+        "review-gate"
+      ],
+      "learning_targets": [
+        "Show the editable plan as a meaningful intermediate artifact.",
+        "Separate planned, running, and verified states."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Plan Mode researches code, produces an editable Markdown plan, then supports building from it."
+    },
+    {
+      "id": "product-cursor-2",
+      "title": "Introducing Cursor 2.0 and Composer",
+      "url": "https://cursor.com/blog/2-0",
+      "publisher": "Cursor",
+      "kind": "launch_post",
+      "topics": [
+        "parallel-work",
+        "isolation",
+        "review"
+      ],
+      "learning_targets": [
+        "Give parallel tasks stable labels and separate lanes.",
+        "Return to shared review without implying isolated branches automatically combine."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The article describes parallel agents isolated with worktrees or remote machines and tools for reviewing and testing changes."
+    },
+    {
+      "id": "product-resend-ai-editor",
+      "title": "AI Email Editor",
+      "url": "https://resend.com/blog/ai-email-editor",
+      "publisher": "Resend",
+      "kind": "launch_post",
+      "topics": [
+        "bounded-edit",
+        "content-transformation"
+      ],
+      "learning_targets": [
+        "Show a specific content block changing while its surroundings remain stable.",
+        "Separate generation from checking the output."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The page describes drafting from URLs, inline edits, issue checks, and collaboration."
+    },
+    {
+      "id": "product-resend-new-editor",
+      "title": "Introducing the New Email Editor",
+      "url": "https://resend.com/changelog/introducing-the-new-email-editor",
+      "publisher": "Resend",
+      "kind": "launch_post",
+      "topics": [
+        "ui-proof",
+        "reorder",
+        "global-style"
+      ],
+      "learning_targets": [
+        "Use one edit to demonstrate global consistency.",
+        "Maintain block identity during layout and ordering changes."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "observation_scope": "Sampled frames; see frame-observations.json. No audio or continuous playback review.",
+      "publisher_stated": "The release introduces a redesigned inspector, columns, global themes, embeds, code view, and improved drag-and-drop."
+    },
+    {
+      "id": "product-resend-launch-production",
+      "title": "Launch Week: Behind the Scenes",
+      "url": "https://resend.com/blog/launch-week-behind-the-scenes",
+      "publisher": "Resend",
+      "kind": "production_breakdown",
+      "topics": [
+        "campaign-system",
+        "production"
+      ],
+      "learning_targets": [
+        "Derive a coordinated article, short video, and social explanation from one feature brief.",
+        "Make each surface understandable on its own."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The team describes shared art direction and a daily plan containing a feature article, video, social post, and email.",
+      "media_locator": {
+        "url": "https://www.youtube.com/playlist?list=PL6QNrh9-4_AYtjEYNGl_JPfNAQGIIqKCm",
+        "kind": "official_page_video_playlist",
+        "located_on": "https://resend.com/blog/launch-week-behind-the-scenes",
+        "retrieval_note": "Launch Week IV playlist discovered; individual videos not inspected."
+      }
+    },
+    {
+      "id": "product-arc-search-launch",
+      "title": "Introducing our new mobile browser, Arc Search",
+      "url": "https://arc.net/blog/arc-search",
+      "publisher": "The Browser Company",
+      "kind": "launch_post",
+      "topics": [
+        "search-to-summary",
+        "task-result"
+      ],
+      "learning_targets": [
+        "Begin with a specific question and finish with a usable result.",
+        "Distinguish retrieval, synthesis, and the resulting page."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The launch describes a search workflow that reads multiple pages and creates a custom answer page."
+    },
+    {
+      "id": "product-arc-search-comparison",
+      "title": "Arc Search — A fast, ad-free mobile browser",
+      "url": "https://arc.net/search",
+      "publisher": "The Browser Company",
+      "kind": "product_page",
+      "topics": [
+        "matched-comparison",
+        "visual-simplification"
+      ],
+      "learning_targets": [
+        "Hold content and framing constant when comparing clutter and focus.",
+        "Avoid turning a visual comparison into an unmeasured speed claim."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The page includes explicitly labeled before-and-after ad-blocking images and separate feature sections."
+    },
+    {
+      "id": "product-linear-asks",
+      "title": "Linear Asks",
+      "url": "https://linear.app/changelog/2023-10-25-linear-asks",
+      "publisher": "Linear",
+      "kind": "launch_post",
+      "topics": [
+        "handoff",
+        "status-return",
+        "object-continuity"
+      ],
+      "learning_targets": [
+        "Track a request across Slack intake, issue handling, and completion updates.",
+        "Use a stable request label to make integration intelligible."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Asks turns Slack requests into Linear issues and returns status updates to Slack."
+    },
+    {
+      "id": "product-linear-agents",
+      "title": "Linear for Agents",
+      "url": "https://linear.app/changelog/2025-05-20-linear-for-agents",
+      "publisher": "Linear",
+      "kind": "launch_post",
+      "topics": [
+        "delegation",
+        "agent-identity"
+      ],
+      "learning_targets": [
+        "Demonstrate delegation through an existing familiar assignment action.",
+        "Keep agent identity explicit while showing progress."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "observation_scope": "Sampled frames; see frame-observations.json. No audio or continuous playback review.",
+      "publisher_stated": "Agents appear as identifiable app users that can receive issues, mentions, and team membership."
+    },
+    {
+      "id": "product-stripe-connect-making",
+      "title": "Connect: behind the front-end experience",
+      "url": "https://stripe.com/blog/connect-front-end-experience",
+      "publisher": "Stripe",
+      "kind": "production_breakdown",
+      "topics": [
+        "semantic-metaphor",
+        "code-native-motion",
+        "reduced-motion"
+      ],
+      "learning_targets": [
+        "Separate decorative brand motion from explanatory product behavior.",
+        "Build exact UI with code and preserve an accessible static interpretation."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The author explains component-metaphor cubes, code-built onboarding animation, and reduced-motion handling."
+    },
+    {
+      "id": "product-stripe-workbench-lifecycle",
+      "title": "Bringing your Stripe objects to life with Workbench",
+      "url": "https://stripe.dev/blog/bringing-your-stripe-objects-to-life-with-workbench",
+      "publisher": "Stripe",
+      "kind": "tutorial",
+      "topics": [
+        "state-machine",
+        "object-lifecycle",
+        "debugging"
+      ],
+      "learning_targets": [
+        "Follow one named object through conditional state transitions.",
+        "Connect an API event to the visible status change."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The walkthrough uses a PaymentIntent and Inspector to explain payment state changes and a state-machine model."
+    },
+    {
+      "id": "product-vercel-fluid",
+      "title": "How Fluid compute works on Vercel",
+      "url": "https://vercel.com/blog/how-fluid-compute-works-on-vercel",
+      "publisher": "Vercel",
+      "kind": "architecture_explainer",
+      "topics": [
+        "routing",
+        "concurrency",
+        "resource-reuse"
+      ],
+      "learning_targets": [
+        "Show requests sharing capacity while waiting on external work.",
+        "Keep routing and response paths explicit."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The article explains router-mediated invocation, concurrent instances, streaming responses, and adaptive scaling."
+    },
+    {
+      "id": "product-vercel-gateway",
+      "title": "Introducing the AI Gateway",
+      "url": "https://vercel.com/blog/ai-gateway",
+      "publisher": "Vercel",
+      "kind": "launch_post",
+      "topics": [
+        "routing",
+        "abstraction-boundary"
+      ],
+      "learning_targets": [
+        "Keep the client interface stable while changing the downstream provider.",
+        "Mark roadmap behavior separately from released functionality."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The historical launch describes a common model interface and separately discusses planned routing and billing capabilities."
+    },
+    {
+      "id": "product-rive-linkedin",
+      "title": "How BUCK Built LinkedIn's First Year in Review, Entirely in Rive",
+      "url": "https://rive.app/blog/linkedin-year-in-review-2025-built-with-rive",
+      "publisher": "Rive",
+      "kind": "production_breakdown",
+      "topics": [
+        "data-driven-story",
+        "modularity",
+        "localization"
+      ],
+      "learning_targets": [
+        "Represent content variations as data within a reusable motion system.",
+        "Test long text, missing values, and alternate story paths."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "Rive describes a modular LinkedIn recap whose story responds to personal data, device constraints, and language."
+    },
+    {
+      "id": "product-rive-spotify",
+      "title": "Spotify used Rive for Spotify Wrapped 2025",
+      "url": "https://rive.app/blog/spotify-used-rive-for-spotify-wrapped-2025",
+      "publisher": "Rive",
+      "kind": "production_breakdown",
+      "topics": [
+        "data-driven-story",
+        "motion-components"
+      ],
+      "learning_targets": [
+        "Prototype with representative data before replacing it with real input.",
+        "Reuse chart and story-card components across variations."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The account describes prototyping with dummy data, then connecting reusable animations to real user data."
+    },
+    {
+      "id": "product-rive-state-machine",
+      "title": "A beginner's guide to the Rive State Machine",
+      "url": "https://rive.app/blog/how-state-machines-work-in-rive",
+      "publisher": "Rive",
+      "kind": "tutorial",
+      "topics": [
+        "state-machine",
+        "event-response"
+      ],
+      "learning_targets": [
+        "Define which event permits each animation transition.",
+        "Separate external data fetching from visual response."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The guide explains states, transitions, inputs, and data binding; external application logic supplies asynchronous data."
+    },
+    {
+      "id": "product-apple-mac-mini",
+      "title": "Apple’s new Mac mini is more mighty, more mini, and built for Apple Intelligence",
+      "url": "https://www.apple.com/newsroom/2024/10/apples-new-mac-mini-is-more-mighty-more-mini-and-built-for-apple-intelligence/",
+      "publisher": "Apple",
+      "kind": "launch_post",
+      "topics": [
+        "cutaway",
+        "hidden-mechanism",
+        "spatial-explanation"
+      ],
+      "learning_targets": [
+        "Connect an externally visible benefit to the mechanism inside.",
+        "Use spatial reveals only where component placement matters."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "observation_scope": "Sampled frames; see frame-observations.json. No audio or continuous playback review.",
+      "publisher_stated": "The release links compact size to efficiency and a thermal architecture that guides airflow through system levels.",
+      "media_locator": {
+        "url": "https://youtu.be/TtFm9n3NVzE",
+        "kind": "official_page_video_link",
+        "located_on": "https://www.apple.com/newsroom/2024/10/apples-new-mac-mini-is-more-mighty-more-mini-and-built-for-apple-intelligence/",
+        "retrieval_note": "Primary announcement video link discovered; no segment or thermal-animation timestamp verified."
+      }
+    },
+    {
+      "id": "product-jitter-project-teaser",
+      "title": "Project Teaser",
+      "url": "https://jitter.video/template/project-teaser/",
+      "publisher": "Jitter",
+      "kind": "motion_template",
+      "topics": [
+        "anticipation",
+        "reveal",
+        "teaser"
+      ],
+      "learning_targets": [
+        "Use a brief reveal to open curiosity before explaining the mechanism.",
+        "Treat a teaser format as a hook rather than a complete explanation."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The template page credits Vendredi Society and describes gradual anticipation followed by a project reveal.",
+      "publisher_declared_duration_seconds": 9,
+      "publisher_declared_ratio": "4:5"
+    },
+    {
+      "id": "product-jitter-cart-split",
+      "title": "View Cart Button: Split",
+      "url": "https://jitter.video/template/view-cart-button-split/",
+      "publisher": "Jitter",
+      "kind": "motion_template",
+      "topics": [
+        "microinteraction",
+        "state-change"
+      ],
+      "learning_targets": [
+        "Make feedback correspond to the action that caused it.",
+        "Use a small interaction as a focused proof shot."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The template is described as a cart button with a split variant and dynamic interaction state.",
+      "publisher_declared_duration_seconds": 8,
+      "publisher_declared_ratio": "4:3"
+    },
+    {
+      "id": "product-jitter-countdown",
+      "title": "Countdown: Bold",
+      "url": "https://jitter.video/template/countdown-bold/",
+      "publisher": "Jitter",
+      "kind": "motion_template",
+      "topics": [
+        "kinetic-type",
+        "anticipation"
+      ],
+      "learning_targets": [
+        "Reserve numeric countdowns for a real reveal or deadline.",
+        "Check that expressive type remains readable on a phone."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The template page describes large animated numerals for anticipation and announcement use.",
+      "publisher_declared_duration_seconds": 4,
+      "publisher_declared_ratio": "4:5"
+    },
+    {
+      "id": "product-framer-ai",
+      "title": "Framer: AI canvas agent",
+      "url": "https://www.framer.com/ai/",
+      "publisher": "Framer",
+      "kind": "product_page",
+      "topics": [
+        "canvas-editing",
+        "responsive-layout",
+        "human-control"
+      ],
+      "learning_targets": [
+        "Show a generated artifact becoming directly editable.",
+        "Demonstrate responsive adaptation as a new composition, not a crop."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "page_verified",
+      "observation_scope": "page_text_only",
+      "publisher_stated": "The page explains prompting for editable pages and refining layout, components, and breakpoints on the canvas."
+    }
+  ]
+}
