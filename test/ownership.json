@@ -671,6 +671,24 @@
       "boundary_tests": [
         "test/contract/mcp/server/test_updates.py"
       ]
+    },
+    "anthropic_illustrations": {
+      "sources": [
+        "skill-library/anthropic-style-illustrations/.gitignore",
+        "skill-library/anthropic-style-illustrations/SKILL.md",
+        "skill-library/anthropic-style-illustrations/examples/article.md",
+        "skill-library/anthropic-style-illustrations/examples/figure.json",
+        "skill-library/anthropic-style-illustrations/references/article-index.json",
+        "skill-library/anthropic-style-illustrations/references/design-patterns.md",
+        "skill-library/anthropic-style-illustrations/references/source-index.json",
+        "skill-library/anthropic-style-illustrations/references/usage.md",
+        "skill-library/anthropic-style-illustrations/requirements.txt",
+        "skill-library/anthropic-style-illustrations/scripts/illustrate.py"
+      ],
+      "tests": [
+        "test/skill-library/anthropic-style-illustrations/test_illustrate.py"
+      ],
+      "boundary_tests": []
     }
   },
   "support": {

@@ -1,0 +1,12 @@
+.venv/
+runs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.DS_Store
+figure.svg
+figure.png
+preview.html
+qa.json
+plan.json
