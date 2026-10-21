@@ -689,6 +689,13 @@
         "test/skill-library/anthropic-style-illustrations/test_illustrate.py"
       ],
       "boundary_tests": []
+    },
+    "project_to_motion": {
+      "sources": [],
+      "tests": [
+        "test/skill-library/project-to-motion/test_retired_skill.py"
+      ],
+      "boundary_tests": []
     }
   },
   "support": {
