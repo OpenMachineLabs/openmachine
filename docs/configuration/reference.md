@@ -95,10 +95,17 @@ For a disposable manual server, stop that server, edit its configuration, run
 `doctor` against the exact paths and restart it. A valid file is not a successful
 remote connection; perform the relevant explicit probe afterward.
 
-For a managed installation, prepare a separate candidate configuration and use
-the compatible update workflow's `--candidate-config`. Preserve the active profile,
-original tasks and retained installations. Current work, incompatible readers or
-a changed target can defer activation; never delete state to force it through.
+For a managed installation, prepare a separate candidate configuration, preserving
+unrelated settings, and use the compatible update workflow's `--candidate-config`.
+When `manage` advertises `update:configuration_consent`, pass the confirmed active
+file digest as `--config-sha256` and the reviewed candidate file digest as
+`--candidate-sha256`, together. Core checks both before admission and verifies the
+retained candidate; later active-configuration or selection drift rejects the
+original transition rather than rebasing it. Read its original `--operation-id`
+after a lost reply. These guards do not migrate renamed workspace references,
+change sharing in other components or fence uncooperative external editors.
+Preserve the active profile, original tasks and retained installations. Current
+work, incompatible readers or a changed target can defer activation; never delete state to force it through.
 
 The schema is defined by the selected version's
 [configuration implementation](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.22/openmachine/config.py).

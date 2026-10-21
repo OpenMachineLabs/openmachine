@@ -58,7 +58,7 @@ After the explicit global paths, use `manage --contract 1 COMMAND`:
 | `start` / `stop` | Clear or persist deliberate Stop under native ownership checks. |
 | `startup` | `--enabled true` or `false`; login preference is independent of Stop. |
 | `install` | `--operation-id`, `--payload`, `--sha256`, `--probe-workspace`, `--probe-path`. |
-| `update` | `--operation-id`, `--payload`, `--sha256`, optional `--candidate-config`. |
+| `update` | `--operation-id`, `--payload`, `--sha256`, optional `--candidate-config`; paired `--config-sha256` / `--candidate-sha256` bind confirmed configuration bytes when advertised. |
 | `operation` | `--operation-id`; read the original maintenance result without retry. |
 | `continue` | `--operation-id`; explicitly advance eligible known-unperformed/deferred work. |
 | `retire` | `--operation-id`; reject only an eligible deferred update proven not activated. |
@@ -68,6 +68,15 @@ After the explicit global paths, use `manage --contract 1 COMMAND`:
 | `machine-test` | `--name`, `--ssh-alias`, `--ssh-worker`; test a prepared route without adding it. |
 | `machine-add` | `--name`, `--ssh-alias`, `--ssh-worker`, verified `--ssh-identity`, original `--operation-id`, observed `--config-sha256`. |
 | `machine-remove` | `--name`, original `--operation-id`, observed `--config-sha256`; guarded configuration removal, not remote data deletion. |
+
+For configuration consent, require the `update:configuration_consent` capability
+and supply both file digests. `--config-sha256` is the active file digest returned
+by `manage machines`; `--candidate-sha256` is the reviewed candidate file digest
+(or the same active digest when no candidate path is supplied). These are SHA256
+hashes of raw file bytes, not MCP's normalized `configuration_sha256`. A changed
+active or candidate file rejects admission; the accepted candidate is retained
+before dispatch. Omitting both flags preserves the older update behavior, not a
+consent guarantee. Read the original operation after any lost reply.
 
 Use fresh IDs for genuinely new authorized operations; use the original ID to
 recover an existing one. Hashes are observed evidence, not arbitrary strings.
