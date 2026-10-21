@@ -98,4 +98,4 @@ errors and nonzero exits. Do not parse only a product version or PID as readines
 There is no CLI `login`, `skill install` or public-server installation shortcut
 in this release. Native GitHub login uses the connection tools, and the tunnel
 has its own separately documented client. Exact release syntax lives in
-[cli.py](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.22/openmachine/cli.py).
+[cli.py](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.23/openmachine/cli.py).

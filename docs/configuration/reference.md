@@ -112,5 +112,5 @@ Preserve the active profile, original tasks and retained installations. Current
 work, incompatible readers or a changed target can defer activation; never delete state to force it through.
 
 The schema is defined by the selected version's
-[configuration implementation](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.22/openmachine/config.py).
+[configuration implementation](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.23/openmachine/config.py).
 Do not add fields from an unreleased checkout to an older runtime.

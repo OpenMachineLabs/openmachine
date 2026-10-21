@@ -16,12 +16,12 @@ Keep the selected Python and all environments needed by original workers.
 
 ## Install and verify a wheel-based service
 
-After building the v0.2.22 wheel, set `CONFIG` and `STATE` to the intended absolute
+After building the v0.2.23 wheel, set `CONFIG` and `STATE` to the intended absolute
 paths. Ensure workspace `project` exists and contains a readable `README.md`:
 
 ```sh
 openmachine --config "$CONFIG" --state-dir "$STATE" service install \
-  --wheel "$PWD/dist/openmachine-0.2.22-py3-none-any.whl" \
+  --wheel "$PWD/dist/openmachine-0.2.23-py3-none-any.whl" \
   --requirements "$PWD/requirements.lock" \
   --probe-workspace project --probe-path README.md
 openmachine --config "$CONFIG" --state-dir "$STATE" service start
