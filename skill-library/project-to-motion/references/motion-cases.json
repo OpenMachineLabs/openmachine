@@ -521,6 +521,629 @@
       "counterexample": "An empty canvas is insufficient evidence that all content inherited a theme.",
       "analysis_basis": "Decoded official media frames inspected at recorded offsets; see frame-observations.json.",
       "id": "PC14"
+    },
+    {
+      "id": "EC13",
+      "source_id": "EX28",
+      "title": "Make delegated work visible through task identity, tool state and artifact proof",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "openai-agent"
+      ],
+      "topics": [
+        "agent-progress",
+        "delegation",
+        "task-identity",
+        "tool-state",
+        "artifact-proof",
+        "multi-task-montage",
+        "user-handoff"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "The official launch article describes an agent that uses tools to research and act, returns deliverables, and can ask the user to take over. These statements provide product context, not measured performance evidence.",
+      "viewer_problem": "What is the agent doing for each delegated task, what has it produced, and where is the user still needed?",
+      "observed": "A blue activity frame recurs around search, browser, PDF and calendar-tool views, with a task title above and short explanatory overlays. Different task titles identify a montage of separate examples. The presentation file later becomes an expanded preview; subsequent outputs include slides and a spreadsheet. The restaurant response visibly asks for user takeover before finalizing a reservation.",
+      "inference": "A repeated tool container supplies orientation while the active surface changes; task labels prevent different examples from collapsing into one imagined workflow. Showing an artifact and an explicit pending handoff makes progress more concrete than an activity indicator alone.",
+      "story_structure": "Labeled tool activity → short status explanation → returned artifact → further tool examples → live-action bridge → results and unresolved user handoff.",
+      "why_motion": "Reframing makes small UI evidence readable, then exposes the resulting artifact at a useful scale. Sequential task states give activity a purpose; the edited montage itself is not a real-time execution trace.",
+      "object_continuity": "The blue container, top task label and white explanatory card recur across tool views. The presentation filename and imagery remain recognizable as a card becomes a larger preview. Different task labels indicate identity changes.",
+      "transfer_rules": [
+        "Give each delegated task a stable name, and keep it visible when switching tools.",
+        "Use one consistent container for active work, then let the concrete output occupy more of the frame when ready.",
+        "Tie every overlay to a visible state change or source; do not decorate browsing with invented internal reasoning.",
+        "In a 30–60s adaptation, prove one task from request to output before adding a brief breadth montage. Label pauses, omitted waiting and required user action explicitly.",
+        "Keep pending approval or takeover visibly distinct from completed work; a polished result card must not erase an unresolved action."
+      ],
+      "applicable_to": [
+        "AI-agent workflow and delegation demonstrations",
+        "Research-to-presentation or data-to-spreadsheet product explanations",
+        "Tool switching and user handoff in complex systems"
+      ],
+      "limits": "The source mixes UI sequences with actors and an aspirational product story. Only the bounded UI proof is transferred. Sampled frames do not establish exact transitions, soundtrack rhythm, real run time, hidden reasoning or reliability. Multiple task examples are intercut; the reservation is not shown as finalized.",
+      "counterexample": "Treat the whole montage as one uninterrupted autonomous run and it invents speed and causality. Replace the visible takeover request with a success checkmark and it changes the demonstrated outcome. Copying the blue glow without task identity or proof communicates activity without understanding.",
+      "observed_timeline": [
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 59.017292,
+          "end_seconds": 64.022292,
+          "observation": "Restaurant search results, a restaurant page and an option dialog appear successively within the same blue activity frame and top task label.",
+          "design_inference": "Preserve the task and tool container as the working surface changes."
+        },
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 65.023292,
+          "end_seconds": 76.034292,
+          "observation": "A citation-gathering card is followed by differently titled finance/PDF and itinerary/reading views with short white explanatory overlays.",
+          "design_inference": "Use labels to identify separate tasks; anchor each explanation to visible tool state."
+        },
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 77.035292,
+          "end_seconds": 81.039292,
+          "observation": "The presentation filename and image appear in a close crop, then a card and expanded slide viewer with thumbnails.",
+          "design_inference": "Let a specific output replace abstract progress while preserving its identity."
+        },
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 82.040292,
+          "end_seconds": 91.049292,
+          "observation": "The film returns to a labeled flight-search view and then a calendar-tool view; white text overlays change over the tool surfaces.",
+          "design_inference": "Keep context stable within a task and signal switches between examples."
+        },
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 92.050292,
+          "end_seconds": 99.057292,
+          "observation": "Live-action room and laptop shots bridge the tool montage and the results.",
+          "design_inference": "This bridge is editorial pacing, not evidence of elapsed agent computation."
+        },
+        {
+          "asset_id": "openai-agent",
+          "start_seconds": 100.058292,
+          "end_seconds": 110.068292,
+          "observation": "A restaurant response asks for user takeover; later samples show a slide and spreadsheet cells at larger readable scales.",
+          "design_inference": "Distinguish unfinished user action from finished artifacts and allocate a result-reading beat."
+        }
+      ]
+    },
+    {
+      "id": "EC14",
+      "source_id": "EX29",
+      "title": "Turn an agent completion into an inspectable change and visible result",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "openai-codex-app"
+      ],
+      "topics": [
+        "coding-agent",
+        "reviewable-change",
+        "semantic-zoom",
+        "diff-review",
+        "code-to-result",
+        "product-proof"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "The official launch article presents the app as a place to direct coding agents, inspect changes and work across tasks. That product description is separate from what the sampled demonstration proves.",
+      "viewer_problem": "What did the coding agent change, where can I inspect it, and what visible behavior resulted?",
+      "observed": "Named Swift files accumulate in a task log, followed by a summary. Framing shifts toward the change badge and then exposes a code diff beside the task context and file list. A line-level comment field appears. Later samples return to the full app; after a presenter bridge, a phone simulator switches from a map to the requested astronomy screen.",
+      "inference": "Maintaining file names while moving between log, diff and output makes the result easier to audit. Enlarging the active control reduces visual search, while restoring the full interface preserves orientation. These are design interpretations, not measured viewer outcomes.",
+      "story_structure": "Visible work log → summary → diff and review affordance → return to app → presenter bridge → working feature.",
+      "why_motion": "Changes in scale and crop direct attention from overall task state to a specific review action; the simulator state change supplies a concrete user-facing consequence.",
+      "object_continuity": "The astronomy request, APOD file names, green diff area and surrounding app remain recognizable across crops. The phone simulator returns to the previously established app before showing the added screen.",
+      "transfer_rules": [
+        "Carry one task label and changed-file identity from progress to diff to visible result.",
+        "Before enlarging a control, establish its location in the whole interface; restore context after the interaction.",
+        "Give the changed state its own readable beat. Showing a control or a green diff is not proof that a commit, test or deployment succeeded.",
+        "For a 30–60s original animation, compress the presenter bridge into a clear phase label and preserve the review and result beats; this is a proposed adaptation, not the source edit."
+      ],
+      "applicable_to": [
+        "Coding-agent product demonstrations",
+        "Review, approval and document-editing workflows with a visible resulting artifact"
+      ],
+      "limits": "The full source includes a presenter; only the selected UI sequence is used as a design reference. Sampling does not establish easing, audio synchronization or real agent latency. Hovered Commit/Open controls do not establish a completed commit. A rendered result does not prove code correctness or test coverage.",
+      "counterexample": "Replace the diff with a decorative code waterfall and the viewer cannot inspect the change. Cutting directly from a prompt to an unrelated polished app invents provenance. A cursor hovering over Commit is not a shipping event.",
+      "observed_timeline": [
+        {
+          "asset_id": "openai-codex-app",
+          "start_seconds": 80.013267,
+          "end_seconds": 89.022267,
+          "observation": "The astronomy request remains at the top while named file-change rows accumulate; later samples add a prose summary and scroll to its details.",
+          "design_inference": "Keep the request and named outputs legible before claiming completion."
+        },
+        {
+          "asset_id": "openai-codex-app",
+          "start_seconds": 90.023267,
+          "end_seconds": 97.030267,
+          "observation": "A blurred intermediate sample precedes a close view of the change badge; following samples show the diff, file list and an inline comment field.",
+          "design_inference": "Move attention to an inspectable review action while preserving surrounding context."
+        },
+        {
+          "asset_id": "openai-codex-app",
+          "start_seconds": 98.031267,
+          "end_seconds": 109.042267,
+          "observation": "Samples emphasize Commit and Open controls, then widen back to the full app and visible terminal area.",
+          "design_inference": "Return from detail to workflow context; do not infer a click or successful commit from a visible control."
+        },
+        {
+          "asset_id": "openai-codex-app",
+          "start_seconds": 110.043267,
+          "end_seconds": 119.052267,
+          "observation": "The video returns to the presenter at a laptop before the next UI proof.",
+          "design_inference": "This is an editorial bridge to shorten or replace in a compact technical animation."
+        },
+        {
+          "asset_id": "openai-codex-app",
+          "start_seconds": 120.053267,
+          "end_seconds": 125.058267,
+          "observation": "A phone simulator overlays the app; the cursor approaches the bottom navigation, and later samples show an astronomy image and text instead of the map.",
+          "design_inference": "Demonstrate the user-facing consequence of the earlier named change."
+        }
+      ]
+    },
+    {
+      "id": "EC15",
+      "source_id": "EX30",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "anthropic-tracing"
+      ],
+      "topics": [
+        "model-mechanism",
+        "interpretability",
+        "planning",
+        "token-generation",
+        "causal-intervention",
+        "persistent-context"
+      ],
+      "applicable_to": [
+        "30–60s model mechanism explanation",
+        "planning versus output-order explanation",
+        "illustrated intervention experiment"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "Anthropic reports advance rhyme planning in studied Claude 3.5 Haiku examples; suppressing a rabbit-related concept can yield habit. The method captures part of computation and may introduce artifacts. These are attributed research claims, not experiments run here.",
+      "observed": "A rhyme target appears before preceding phrase cards fill. After a hand removes the original target, a changed phrase chain ends with habit; an expanding circle then reveals a larger node/link diagram.",
+      "inference": "Making a future endpoint visible before its preceding text separates planning influence from reading/output order. Reusing the same example reduces the cost of comparing an intervention.",
+      "viewer_problem": "How can sequential text generation be influenced by a word planned for later in the sentence?",
+      "story_structure": "Readable example → unresolved continuation → early target → completion → target manipulation → closer mechanism view.",
+      "why_motion": "Appearance order separates a planned endpoint from emitted text; familiar labels survive the shift to dependencies.",
+      "object_continuity": "The first line and repeated phrase cards anchor changes; starburst targets have a distinct role from rectangular phrase cards. These are illustrative word groups, not verified model tokenization or a literal computation graph.",
+      "observed_timeline": [
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 63.0,
+          "end_seconds": 77.0,
+          "observation": "Illustrated hands position phrase cards at 63–64s. A complete first line remains aligned in 65–71s samples. A bent arrow and empty continuation boxes appear by 73–74s and remain beneath it through 77s.",
+          "design_inference": "Allow the viewer to read the concrete setup before introducing an explicit information gap."
+        },
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 78.0,
+          "end_seconds": 91.0,
+          "observation": "Some first-line cards rise relative to neighbors. A small rabbit starburst appears at 81s and is larger at 82s while three earlier continuation slots remain empty. A first lower phrase appears at 88s; the lower line is filled by 89s and still shown at 91s.",
+          "design_inference": "Reveal the endpoint before the route to it. Shape contrast distinguishes the planned target from ordinary text without requiring color alone."
+        },
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 92.0,
+          "end_seconds": 104.0,
+          "observation": "Cards spread around an enlarged central rabbit target in 93–95s samples; a blue burst appears behind it at 96s. After a blank 97s sample and large connector strokes 98–100s, a habit starburst is visible at 101–104s.",
+          "design_inference": "Reframe familiar elements to emphasize a relationship and introduce an alternative target. Sparse samples do not establish the exact intervening transition path."
+        },
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 105.0,
+          "end_seconds": 111.0,
+          "observation": "The two-line layout returns by 106s with rabbit at its endpoint. At 109s a drawn finger touches that endpoint; it is absent at 110–111s while the other phrases remain visible.",
+          "design_inference": "A localized removal makes the intervention legible while retaining a recognizable comparison baseline."
+        },
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 112.0,
+          "end_seconds": 118.0,
+          "observation": "The opening phrase enlarges at 112–114s and gains an outline at 115s. Connected phrase boxes are added at 116–117s; the changed continuation ends with habit in 117–118s samples.",
+          "design_inference": "Keep a recognizable opening while changing the route and endpoint; this illustrates an intervention, without itself measuring the model."
+        },
+        {
+          "asset_id": "anthropic-tracing",
+          "start_seconds": 118.5,
+          "end_seconds": 125.0,
+          "observation": "A beige circle covers more of the phrase chain at 118.5–119s. By 119.5s a beige node field replaces it; connecting branches accumulate in 120–121.5s samples. Four blue-filled nodes form a connected path amid hollow nodes by 122–125s.",
+          "design_inference": "Use a clear visual handoff from the concrete example to a wider abstraction. Repeated connectors and selective fill guide attention without asserting literal neural topology."
+        }
+      ],
+      "transfer_rules": [
+        "Use one short, readable example before introducing a graph or abstract mechanism.",
+        "If explaining planning, reveal a distinct future target before the text/actions that lead to it; do not equate presentation order with measured computation time.",
+        "Keep unchanged context visible during an intervention, and clearly mark the manipulated element.",
+        "Reuse labels and spatial anchors when moving from sentence view to dependency view.",
+        "Label word groups, nodes and arrows as illustrative when they are not literal experimental measurements."
+      ],
+      "limits": "No continuous playback or audio. Samples do not resolve easing, exact cuts or every intervening state. This illustration is not direct hidden-reasoning evidence and does not establish universal planning, literal neuron topology, human-like thought or complete interpretability.",
+      "counterexample": "Type every word strictly left-to-right and reveal the target only at the end while claiming to explain advance planning; or draw decorative neuron paths as if they were experimentally measured connections.",
+      "title": "Reveal a planned endpoint before the words that lead to it"
+    },
+    {
+      "id": "EC16",
+      "source_id": "EX31",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "anthropic-artifacts"
+      ],
+      "topics": [
+        "product-demo",
+        "prompt-to-artifact",
+        "interface-motion",
+        "semantic-zoom",
+        "interaction-feedback"
+      ],
+      "applicable_to": [
+        "30–60s product feature introduction",
+        "prompt-to-app demonstration",
+        "interactive artifact showcase"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "Anthropic presents a dedicated artifacts space and the ability to embed AI capabilities in creations. This publisher claim does not establish that every displayed example uses AI in the same way.",
+      "observed": "Full interface → sidebar affordance → isolated tile → drum-machine request → interactive rhythm grid → faster montage of other artifacts.",
+      "inference": "Prove one interaction before showing range; repeated central framing reduces visual search.",
+      "viewer_problem": "What can I make here, and how is the result more than a static chat answer?",
+      "story_structure": "Locate the feature → specify one goal → inspect an interactive result → broaden examples → invitation.",
+      "why_motion": "State changes make interactivity visible; scale changes focus attention on the output.",
+      "object_continuity": "The sidebar affordance and isolated tile share geometric motifs. The rhythm-machine panel persists through feedback states; later montage panels share framing, not identity.",
+      "transfer_rules": [
+        "Establish navigation once, then enlarge the relevant affordance and output; retain a recognizable anchor.",
+        "Show a readable request, its result, and at least one meaningful change in that same result.",
+        "Give one representative interaction the longest demonstration beat; add breadth afterward.",
+        "Distinguish editable content from playback/progress feedback.",
+        "Fast montage can communicate categories; explaining a new interface needs a sustained shot."
+      ],
+      "limits": "1fps inspection cannot verify continuous motion, exact cuts/easing, audio, generation latency, or live execution. Small montage text is not fully legible. The source branding/artwork is not reproduced.",
+      "counterexample": "Attractive app cards without a readable request or observable response show variety while leaving the capability unexplained; copying the palette/icon cannot supply that missing causal link.",
+      "observed_timeline": [
+        {
+          "asset_id": "anthropic-artifacts",
+          "start_seconds": 0.0,
+          "end_seconds": 5.0,
+          "observation": "0–1s show an app window on a coral field at increasing size; 2–3s crop to the sidebar and cursor near the artifact affordance; 4–5s show a separate geometric tile, with changed orientation.",
+          "design_inference": "Establish where a feature lives, then isolate its visual identifier. The samples do not prove a continuous morph."
+        },
+        {
+          "asset_id": "anthropic-artifacts",
+          "start_seconds": 6.0,
+          "end_seconds": 9.0,
+          "observation": "A blank rounded prompt card at 6s contains partial request text at 7s and a complete drum-machine request at 8s; a rhythm-machine interface appears at 9s.",
+          "design_inference": "Make the requested outcome readable before showing the produced artifact; treat the transition as editorial compression, not measured generation latency."
+        },
+        {
+          "asset_id": "anthropic-artifacts",
+          "start_seconds": 10.0,
+          "end_seconds": 18.0,
+          "observation": "The same rhythm grid fills the frame. Orange cell occupancy differs across early samples; later samples display a Pause control and an outlined column at different horizontal positions while the grid remains recognizable.",
+          "design_inference": "Hold one functional example through several feedback states. Distinguish editable content from the changing playback indicator; 1fps samples cannot resolve every beat or cursor action."
+        },
+        {
+          "asset_id": "anthropic-artifacts",
+          "start_seconds": 19.0,
+          "end_seconds": 40.0,
+          "observation": "Samples move from a colored board game and win state to a drawn curve and score, a 3D landscape, story loading/result panels, an ASCII image, quiz/cards, a dark game, and a two-pane document tool; 38–39s show angled interface planes.",
+          "design_inference": "Accelerate breadth after proving the core interaction. The rapid examples convey categories, not enough reading time to explain each interface."
+        }
+      ],
+      "title": "Prove one interactive artifact before a breadth montage"
+    },
+    {
+      "id": "EC17",
+      "source_id": "EX32",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "anthropic-orchestration"
+      ],
+      "topics": [
+        "agent",
+        "orchestration",
+        "tool-use",
+        "cross-application",
+        "persistent-context",
+        "action-result"
+      ],
+      "applicable_to": [
+        "30–60s agent workflow explanation",
+        "cross-application task demo",
+        "research-to-action product walkthrough"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "Anthropic says Claude generated the computer actions in a controlled demonstration with simplified supporting infrastructure, and describes computer use as experimental and error-prone. These are publisher claims, not independently tested performance.",
+      "observed": "A persistent task/action rail accompanies browser research, route lookup, sunrise search, and a calendar event whose notes grow.",
+      "inference": "Stable intent/evidence placement makes application changes read as one task; the event provides a destination for gathered information.",
+      "viewer_problem": "How does one request connect research in several applications to a useful final action?",
+      "story_structure": "Goal → location research → route and time constraints → calendar artifact and notes.",
+      "why_motion": "Show information gathered in one tool being used in another; preserve task context through window changes.",
+      "object_continuity": "Task/action rail left, desktop right. Applications remain distinct tools. The event detail card persists as notes grow.",
+      "transfer_rules": [
+        "Keep task/status and work surface in consistent regions across tool changes.",
+        "Show each tool’s question, returned constraint, and downstream use.",
+        "End on the changed artifact with time to connect it to the request.",
+        "For 30–60s, enlarge a few semantic checkpoints; avoid reproducing every small action-log row.",
+        "Label time compression; displayed status is not verified internal model reasoning."
+      ],
+      "limits": "No continuous playback or audio. Cursor paths, exact transitions and wall-clock latency remain unverified. The presenter intro/outro are outside the reusable segment. This controlled demo does not establish reliability, unrestricted autonomy, or calendar-data correctness.",
+      "counterexample": "Cut rapidly between unrelated application windows and finish with a success badge while hiding the collected constraints and resulting event; the viewer cannot tell whether the tools contributed to the same task.",
+      "observed_timeline": [
+        {
+          "asset_id": "anthropic-orchestration",
+          "start_seconds": 25.025,
+          "end_seconds": 50.05,
+          "observation": "Coarse samples show a centered sunrise-planning request at 25.025s, a narrow task/action rail beside the desktop at 30.03s, browser search/results at 35.035–45.045s, and a map window at 50.05s.",
+          "design_inference": "Move from one clear goal into a consistent work area; these 5.005s samples do not reveal all intermediate actions."
+        },
+        {
+          "asset_id": "anthropic-orchestration",
+          "start_seconds": 55.013292,
+          "end_seconds": 68.026292,
+          "observation": "The map stays foreground while route controls change. A blue route and travel-time choices are visible by 65.023292s; the route occupies more of the map in 66.024292–68.026292s. The left rail retains status and action text.",
+          "design_inference": "Expose the result of the lookup before switching tools, and preserve the purpose of that lookup in a stable location."
+        },
+        {
+          "asset_id": "anthropic-orchestration",
+          "start_seconds": 69.027292,
+          "end_seconds": 80.038292,
+          "observation": "The browser returns, a fresh search page appears, and progressively longer query text precedes a sunrise result reading 7:22 AM in 76.034292–80.038292s samples.",
+          "design_inference": "Show query → returned constraint as one bounded action-result unit; the displayed time is source content, not a verified real-world fact."
+        },
+        {
+          "asset_id": "anthropic-orchestration",
+          "start_seconds": 81.039292,
+          "end_seconds": 95.053292,
+          "observation": "Calendar comes foreground. Quick-entry text and a red suggestion precede a blue calendar event and an open detail card by 91.049292s. The task/action rail continues alongside it.",
+          "design_inference": "Make the downstream state change visible, rather than ending on a generic agent completion message."
+        },
+        {
+          "asset_id": "anthropic-orchestration",
+          "start_seconds": 96.054292,
+          "end_seconds": 110.068292,
+          "observation": "The event detail card stays open while note text accumulates; the surrounding calendar and blue event remain in place.",
+          "design_inference": "Retain the destination artifact long enough to show information being incorporated, while compressing repetitive typing in an original short adaptation."
+        }
+      ],
+      "title": "Carry one task across applications to a concrete result"
+    },
+    {
+      "id": "EC18",
+      "source_id": "EX33",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "deepmind-protein-folding"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "The official film introduces protein structure as important to biological function and motivates predicting structures whose experimental determination is difficult. This is a historical 2020 explanation.",
+      "viewer_problem": "Why is a chain of building blocks still a difficult shape-prediction problem?",
+      "observed": "A folded example becomes a small item amid many crossed square placeholders. The composition then changes to a linked outline chain on blue, whose configuration varies while the connection remains visible. A circular spotlight isolates a portion, then large problem text is selected and replaced by the model name. See bounded timeline.",
+      "inference": "A concrete example gives the viewer a visual vocabulary before the grid shows the scope of missing knowledge. The connected-chain abstraction exposes the relationship to be explained. Naming the problem after that demonstration can make the later product reveal meaningful; comprehension was not measured.",
+      "story_structure": "Observed: one folded example → expanding field of placeholders → connected chain in changing configurations → isolated local segment → named problem → named solution.",
+      "why_motion": "Scale change relates one example to a larger field; shape changes demonstrate configuration while preserving a visible connecting line. Text selection/replacement bridges the problem and solution names.",
+      "object_continuity": "The pink folded mark remains identifiable in the grid; later outlined geometric marks share one connecting line. The switch at 33–33.5s changes representation and should not be read as a verified molecular unfolding.",
+      "topics": [
+        "protein-folding",
+        "sequence-to-structure",
+        "known-unknown",
+        "scale-reveal",
+        "object-continuity",
+        "typographic-transition"
+      ],
+      "transfer_rules": [
+        "Show one recognizable specimen before expanding to a field; preserve its identity so scale has meaning.",
+        "Use one visible connective structure when explaining rearrangement; add explicit labels for the real input and output.",
+        "Separate illustrative geometry and placeholder counts from measured coordinates or statistics.",
+        "Use a focus window for one local question, then name the problem before the solution reveal. For a 30–60s adaptation, keep one such sequence rather than copying the entire 112s film."
+      ],
+      "applicable_to": [
+        "Amino-acid sequence versus structure introductions",
+        "Configuration spaces and dependency structures",
+        "Explaining a research bottleneck before an AI method"
+      ],
+      "limits": "Sampled frames establish composition and ordering only; no continuous playback, narration, music or exact transition duration was reviewed. Symbolic shapes are not molecular coordinates, the grid is not a verified chart, and the selected segment does not explain AlphaFold architecture. The low-contrast line art and lack of dense on-screen labels may require stronger captions in a silent-first adaptation.",
+      "counterexample": "Copying the text replacement literally can imply that naming an AI model solves the entire problem. Randomly folding generic nodes, or presenting the placeholder grid as a measured coverage percentage, invents mechanism or data.",
+      "observed_timeline": [
+        {
+          "asset_id": "deepmind-protein-folding",
+          "start_seconds": 18.0,
+          "end_seconds": 24.5,
+          "observation": "Pastel biology panels give way between 19.0 and 19.5s to a small pink folded form within rings; it occupies progressively more of the frame through 24.0s, then the rings recede by 24.5s.",
+          "design_inference": "Give the object a distinct silhouette and a brief isolated introduction before asking viewers to compare many examples."
+        },
+        {
+          "asset_id": "deepmind-protein-folding",
+          "start_seconds": 25.0,
+          "end_seconds": 33.0,
+          "observation": "A small folded pink mark sits beside a crossed square at 25.0s; additional pastel crossed squares surround it by 26.5s. The grid becomes denser and individual cells smaller through 32.5s; several cells contain colored folded marks. At 33.0s the view is close to the pink mark again.",
+          "design_inference": "One-to-many scale change can communicate a knowledge gap without separate montage shots; explicitly label any quantitative meaning instead of treating the drawn proportions as data."
+        },
+        {
+          "asset_id": "deepmind-protein-folding",
+          "start_seconds": 33.5,
+          "end_seconds": 45.5,
+          "observation": "The background is dark blue at 33.5s. A thin line links distinct geometric outlines; at 34.0s it is nearly horizontal. Subsequent samples show bends, turns and crossings; by 41.0–45.5s the chain occupies looped configurations. The same outline vocabulary persists.",
+          "design_inference": "Use connection continuity to make configuration changes intelligible. State that the geometry is schematic; projected crossings do not model physical forces."
+        },
+        {
+          "asset_id": "deepmind-protein-folding",
+          "start_seconds": 46.0,
+          "end_seconds": 54.0,
+          "observation": "A white circular spotlight appears around part of the chain at 46.0s. Within it, successive marks receive small circular outlines while the surrounding chain remains on blue. The spotlight moves lower in the composition by 54.0s.",
+          "design_inference": "A focus window can inspect local detail while retaining the larger relationship outside it; do not let it imply an algorithmic scan unless the source supports one."
+        },
+        {
+          "asset_id": "deepmind-protein-folding",
+          "start_seconds": 54.5,
+          "end_seconds": 62.0,
+          "observation": "Problem text is partly assembled at 54.5s and complete at 55.0s. A large pointer is visible by 57.5s, a text cursor by 58.5s, and a blue text selection at 59.0–59.5s. The text becomes Alpha at 60.0s and AlphaFold at 60.5s. At 61.0s the palette flips to blue text on white; surrounding marks appear at 61.5–62.0s.",
+          "design_inference": "A familiar editing action can connect a named problem to a named approach, but the naming transition is rhetorical and supplies no evidence that every scientific limitation is solved."
+        }
+      ],
+      "title": "Establish a specimen before the unknown configuration problem"
+    },
+    {
+      "id": "EC19",
+      "source_id": "EX34",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "deepmind-server-demo"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "The official release presents AlphaFold Server as a way for researchers to generate molecular-structure predictions and hypotheses for experimental testing. The recorded demo introduces input, submission, history, results and confidence displays.",
+      "viewer_problem": "After submitting a scientific prediction job, what state is it in, where is the result, and how should its confidence be read before using it?",
+      "observed": "A fixed laptop contains enlarged UI details, blue cursor pulses and bright focus areas against dimmed surroundings. Top captions change before or with the demonstrated state. The sequence distinguishes confirmation, queue, history and result; then focuses on the matrix, overall scores and download control.",
+      "inference": "Keeping the outer frame stable makes scale changes easier to follow. Each focus answers one question, while restoring the wider page preserves orientation. Introducing confidence before download makes uncertainty part of understanding the output; comprehension was not measured.",
+      "story_structure": "Observed: confirm input → queue/history → completed result → local confidence views → next action.",
+      "why_motion": "Magnification makes small controls readable; a moving bright focus selects one menu item or metric at a time. Holds allow caption reading. Model orientation changes retain a tangible result while separate confidence views are introduced.",
+      "object_continuity": "The laptop remains the outer anchor. History leads to the named result, whose molecular model, matrix and confidence legend recur through focus changes.",
+      "topics": [
+        "product-demo",
+        "workflow-states",
+        "context-preserving-zoom",
+        "spotlight",
+        "progressive-disclosure",
+        "confidence-visualization"
+      ],
+      "observed_timeline": [
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 88,
+          "end_seconds": 98.4,
+          "observation": "A preview modal fills much of the laptop screen; the job-name field is highlighted, then contains a short name. From 92.68s the modal occupies less of the screen. A blue cursor pulse appears on the lower-right confirmation control at 97.36–97.88s; the modal is absent by 98.4s.",
+          "design_inference": "Establish the pending action and its target before the confirmation cue; keep the device frame stable while changing UI scale."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 98.4,
+          "end_seconds": 107.76,
+          "observation": "The caption changes to queue/wait guidance. By 99.44s the surrounding UI is dimmed and the history panel remains bright. The composition holds while the caption changes around 104.12–104.64s to history guidance. The dimming is absent by 107.76s.",
+          "design_inference": "Separate queued work from completion. A held state gives explanatory text time without adding unrelated motion."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 109.84,
+          "end_seconds": 116.6,
+          "observation": "The history list is enlarged by 109.84s. A menu opens; against a dimmed screen a bright focus isolates Open results at 111.92–112.44s, Download at 112.96s, Clone and reuse at 113.48–114.0s, and Rename at 114.52s. By 116.6s the wider page is restored.",
+          "design_inference": "Use one moving focus within a stable menu to teach options; these highlights demonstrate locations, not execution of every action."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 117.64,
+          "end_seconds": 125.44,
+          "observation": "A caption introduces a completed job and confidence-colored structure. A blue pulse appears on a history row at 121.8–122.84s. By 123.36s the page shows a colored molecular model on the left, green matrix on the right and confidence legend above. A caption introducing the matrix is complete by 124.4s.",
+          "design_inference": "Announce what the result means, then reveal the result with its interpretation tools already present."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 125.96,
+          "end_seconds": 130.64,
+          "observation": "The result view becomes larger. At 126.48–130.12s the green matrix stays bright while the model and surrounding interface are dimmed; the model has changing orientations across samples. By 130.64s the wider result view is restored.",
+          "design_inference": "Focus attention on uncertainty information while retaining the output beside it; scale and dimming guide reading order."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 131.68,
+          "end_seconds": 134.8,
+          "observation": "A caption identifies overall confidence; a bright pill isolates two scores below the color legend while the rest of the result is dimmed. The molecular model changes orientation. The dimming is absent by 134.8s.",
+          "design_inference": "Introduce a second confidence view in a separate beat rather than asking viewers to decode all metrics simultaneously."
+        },
+        {
+          "asset_id": "deepmind-server-demo",
+          "start_seconds": 135.84,
+          "end_seconds": 141.56,
+          "observation": "A download instruction appears. The interface is enlarged by 137.92s; a bright focus isolates the download control against a dimmed screen at 138.44–141.04s. By 141.56s the caption changes and the wider result view returns.",
+          "design_inference": "Place the next action after output interpretation, and return to context after the control close-up."
+        }
+      ],
+      "transfer_rules": [
+        "In a 30–60s adaptation, show preview, queued work and completed result as distinct labeled states; do not imply that edited demo timing measures computation latency.",
+        "Preserve a page or device anchor; enlarge one detail, isolate it with contrast, then restore context before the next question.",
+        "Explain output meaning and uncertainty before the next-action control. Introduce a matrix and aggregate scores in separate beats.",
+        "Hold the important state for its caption; shorten the menu tour to options relevant to the viewer task."
+      ],
+      "applicable_to": [
+        "Scientific prediction products",
+        "Agent job submission and result review",
+        "Analytics dashboards with confidence or uncertainty"
+      ],
+      "limits": "This is a 2024 recorded UI demo, not a current product verification. Sampled frames establish visible ordering, layout and bounded changes; continuous playback, narration, exact easing and between-sample transitions were not reviewed. The long tutorial needs selection for a short film. Confidence is not experimental validation, and model rotation does not demonstrate a folding mechanism.",
+      "counterexample": "Skipping queue state can imply instant inference. Spotlighting every control overwhelms the hierarchy. Showing an attractive rotating model without the confidence explanation can overstate certainty; treating the menu highlights as completed operations invents behavior.",
+      "title": "Explain job state and confidence before the next action"
+    },
+    {
+      "id": "EC20",
+      "source_id": "EX35",
+      "title": "Keep a registered comparison legible while moving from whole to detail",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "deepmind-afs-7PNM"
+      ],
+      "topics": [
+        "scientific-visualization",
+        "prediction-vs-reference",
+        "overview-detail",
+        "registered-overlay",
+        "camera-reframe",
+        "readable-hold"
+      ],
+      "analysis_basis": "All samples in the linked asset were visually inspected. Timeline bounds are inspected source PTS, not exact cuts; no continuous playback or audio review.",
+      "source_stated": "The official article identifies blue predicted protein, turquoise antibodies, yellow sugars or ions, and gray experimental reference structures. The clip is an output comparison.",
+      "viewer_problem": "Where does a predicted molecular structure agree with its reference, and where does a small interaction site belong in the whole assembly?",
+      "observed": "The clip retains an accession label and gray-reference legend while the same overlaid structures appear at changing orientations and scales. Whole-view samples lead into turquoise interface and yellow ring details, then return to the whole and retain a common closing orientation.",
+      "inference": "Registered overlays reduce the need to remember separate silhouettes; returning to the whole gives each enlarged detail a spatial address. These are design interpretations, not measured comprehension results.",
+      "story_structure": "Whole and comparison legend → turquoise interface → yellow ring detail → restored whole → sampled closing hold.",
+      "why_motion": "Changing orientation exposes occluded geometry, and larger framing allocates pixels to a small interface. Neither the camera move nor the output overlay depicts physical folding or model computation.",
+      "object_continuity": "The blue/turquoise/yellow component colors, gray reference, accession and fixed screen legend remain recognizable while framing changes.",
+      "transfer_rules": [
+        "Register prediction and reference in the same coordinate frame; label both before inviting comparison.",
+        "Choose one important interface, establish the whole, enlarge the interface, then return to the same recognizable whole.",
+        "Keep explanatory labels anchored to the screen and preserve object colors through reframing.",
+        "Use viewpoint changes to reveal an occluded relationship; end with a readable result hold and one takeaway. These are production instructions for a 30–60s adaptation, not measured optimal timing."
+      ],
+      "applicable_to": [
+        "Scientific output comparison or spatial reconstruction",
+        "Hardware cutaways and CAD differences with a meaningful shared coordinate frame"
+      ],
+      "limits": "Sampled frames do not establish exact easing, audio timing, biological dynamics or numerical accuracy. These are finished structures, not AlphaFold architecture or inference steps. Dense overlays and small legends need simplification for mobile viewing.",
+      "counterexample": "Snapping the prediction into the reference invents convergence or correctness. Animating camera motion as if molecules were physically binding confuses presentation with physical dynamics.",
+      "observed_timeline": [
+        {
+          "asset_id": "deepmind-afs-7PNM",
+          "start_seconds": 0,
+          "end_seconds": 4,
+          "observation": "Whole blue/turquoise assembly appears at successive orientations with the gray reference overlaid; labels stay in fixed corners.",
+          "design_inference": "Establish a common spatial frame and comparison key."
+        },
+        {
+          "asset_id": "deepmind-afs-7PNM",
+          "start_seconds": 4.5,
+          "end_seconds": 7,
+          "observation": "Progressively larger samples concentrate on the turquoise region against the blue protein.",
+          "design_inference": "Allocate screen area to the interface without replacing object identity."
+        },
+        {
+          "asset_id": "deepmind-afs-7PNM",
+          "start_seconds": 7.5,
+          "end_seconds": 10.5,
+          "observation": "Enlarged blue/gray ribbons give way to a focal yellow/gray ring structure in the 9.0–10.5s samples.",
+          "design_inference": "Connect a second detail through recognizable surrounding geometry."
+        },
+        {
+          "asset_id": "deepmind-afs-7PNM",
+          "start_seconds": 11,
+          "end_seconds": 14.5,
+          "observation": "Framing widens back toward the overall assembly.",
+          "design_inference": "Restore the spatial location of the detail."
+        },
+        {
+          "asset_id": "deepmind-afs-7PNM",
+          "start_seconds": 15,
+          "end_seconds": 19,
+          "observation": "Samples retain a common whole-assembly orientation with both corner labels visible.",
+          "design_inference": "Reserve an explicit inspection beat after the moving demonstration."
+        }
+      ]
     }
   ]
 }

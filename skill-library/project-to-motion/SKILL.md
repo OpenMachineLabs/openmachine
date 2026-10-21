@@ -68,6 +68,11 @@ Read [motion grammar](references/motion-grammar.md) for direction and
 [motion-cases.json](references/motion-cases.json) holds original compact analyses.
 Do not load the whole library by default.
 
+For official AI video studies, use the EC13–EC20 routing table in the research
+method. Follow each case's `asset_ids` and `observed_timeline` to its recorded
+samples; use `transfer_rules` for an original scene and retain `limits` and
+`counterexample`. Sample brackets are not exact cuts or continuous viewing.
+
 Sources include videos, animations, interactive explanations, technical articles
 and guidelines. The index distinguishes them. `page_verified` is not watched;
 `frames_inspected` covers only recorded samples. Never invent timecodes, camera
