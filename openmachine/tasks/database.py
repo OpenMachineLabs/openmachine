@@ -64,6 +64,41 @@ CREATE TABLE operation_scopes (task_id TEXT NOT NULL, operation_id TEXT NOT NULL
 CREATE TABLE imports (path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL) STRICT;
 """
 
+# Four declared targets at most. Indexing must not prevent retention of a
+# corrupted original Task row: the reader still detects its invalid digest.
+def target_field(slot: int, field: str) -> str:
+    return (f"CASE WHEN json_valid(current) THEN "
+            f"json_extract(current,'$.contract.targets[{slot}].{field}') END")
+
+
+TARGET_INDEXES = tuple(
+    f"CREATE INDEX task_target_{slot} ON tasks("
+    + ", ".join(target_field(slot, field) for field in
+                ("machine", "workspace", "workspace_identity")) + ")"
+    for slot in range(4)
+) + ("CREATE INDEX task_original_targets ON operations(task_id,kind,machine,target_identity)",)
+
+
+def target_indexes_ready(connection: sqlite3.Connection) -> bool:
+    indexes = {row["name"]: row["sql"] for row in connection.execute(
+        "SELECT name,sql FROM sqlite_master WHERE type='index' AND "
+        "(name LIKE 'task_target_%' OR name='task_original_targets')")}
+    expected = {f"task_target_{i}": sql for i, sql in enumerate(TARGET_INDEXES[:4])}
+    expected["task_original_targets"] = TARGET_INDEXES[-1]
+    if indexes and indexes != expected:
+        raise Fault("corrupt_tasks", "The retained Task target indexes are incomplete or changed.")
+    return bool(indexes)
+
+
+def ensure_target_indexes(connection: sqlite3.Connection) -> None:
+    """One explicit, transactional derived-index upgrade; no Task bytes change."""
+    if target_indexes_ready(connection):
+        return
+    connection.execute("BEGIN IMMEDIATE")
+    for statement in TARGET_INDEXES:
+        connection.execute(statement)
+    commit(connection)
+
 
 def sqlite_runtime() -> dict:
     version = sqlite3.sqlite_version_info
@@ -262,6 +297,8 @@ def create_database(state: Path, *, active: bool, archive: str | None = None,
         for statement in SCHEMA.split(";"):
             if statement.strip():
                 connection.execute(statement)
+        for statement in TARGET_INDEXES:
+            connection.execute(statement)
         connection.execute("INSERT INTO store VALUES (1,?,?,?,?,?,?,0)",
             (SCHEMA_VERSION, uuid.uuid4().hex, int(active), generation, archive, import_digest))
         commit(connection)

@@ -136,6 +136,7 @@ def migrate(state: Path) -> dict:
                 connection.execute("UPDATE store SET active=1 WHERE singleton=1")
                 db.commit(connection)
                 db.sync_directory(state)
+            db.ensure_target_indexes(connection)
         except sqlite3.Error as error:
             raise db._fault(error, True) from error
         finally:

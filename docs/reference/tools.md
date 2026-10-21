@@ -43,7 +43,7 @@ a browser business action.
 | --- | --- |
 | `create_task` | Store a structured goal, scope, authority and stage plan. |
 | `control_task` | Claim/renew, pause/resume/cancel, revise scope, record acceptance and finish under current guards. |
-| `find_tasks` | Locate candidate original tasks through IDs, anchors or keywords. |
+| `find_tasks` | Bounded original Task rows by ID/anchor/query or declared machine/Workspace and pinned historical target; generation-safe paging. |
 | `read_task` | Read current state or paged original operations/history/evidence. |
 | `wait_task` | One bounded observation wait, not a scheduler or automatic wake-up. |
 | `save_task` | Retain legacy checkpoints; not conversion to structured supervision. |

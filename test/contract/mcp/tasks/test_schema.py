@@ -6,6 +6,24 @@ from test.support.mcp import MCPFixture
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_scoped_task_discovery_is_strict_and_passive_on_both_protocols(self):
+        self.launch()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                result = (await self.wire_call(client, "tools/call", {"name": "find_tasks",
+                    "arguments": {"machine": "desktop", "workspace": "example"}})).json()["result"]
+                self.assert_wire_tool_result(result, version)
+                self.assertEqual(result["structuredContent"]["status"], "uninitialized")
+                for arguments, reason in (({"workspace": "example"}, "invalid_task_filter"),
+                                          ({"machine": "bad/name"}, "invalid_tool_call"),
+                                          ({"machine": "desktop", "target_identity": "bad"}, "invalid_tool_call")):
+                    invalid = (await self.wire_call(client, "tools/call", {"name": "find_tasks",
+                        "arguments": arguments})).json()["result"]
+                    self.assert_wire_tool_result(invalid, version)
+                    self.assertIn("error", invalid["structuredContent"], (version, arguments, invalid))
+                    self.assertEqual(invalid["structuredContent"]["error"]["code"], reason)
+        self.assertFalse((self.state / "tasks.db").exists())
+
     async def test_task_history_inputs_are_strict_and_bounded_on_both_protocols(self):
         self.launch()
         for version in ("2025-11-25", "2026-07-28"):

@@ -243,8 +243,11 @@ class Application:
         return self._execution_task_feedback(machine, result)
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
-                   limit: int = 20, expected_generation: int = -1) -> dict:
-        return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation)
+                   limit: int = 20, expected_generation: int = -1, *, machine: str = "",
+                   workspace: str = "", workspace_identity: str = "", target_identity: str = "") -> dict:
+        return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation,
+                          machine=machine, workspace=workspace, workspace_identity=workspace_identity,
+                          target_identity=target_identity)
 
     def _task_view(self, task_id: str, *, wait_expired: bool = False, operation_ids: tuple[str, ...] = ()) -> dict:
         view = self.task_observer.project(tasks.read(self.state, task_id, operation_ids=operation_ids))
