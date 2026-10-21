@@ -309,7 +309,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         from openmachine.config import Settings
         original = Settings.model_validate({"schema_version": 1,
             "machines": {"remote": {"transport": "ssh", "ssh_alias": "owned-ssh",
-                                    "ssh_worker": "/home/fixture/worker.pyz",
+                                    "ssh_worker": "/home/fixture/" + "c" * 64 + ".pyz",
                                     "ssh_identity": "a" * 64}},
             "workspaces": {"remote-project": {"machine": "remote", "root": "/home/fixture/project"}}})
         candidate = original.model_copy(deep=True)
