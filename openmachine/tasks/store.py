@@ -430,8 +430,7 @@ def _target_filter(machine: str, workspace: str, workspace_identity: str,
     values = []
     for slot in range(4):
         sources.append(f"SELECT task_id FROM tasks INDEXED BY task_target_{slot} WHERE "
-                       + " AND ".join(f"json_extract(current,'$.contract.targets[{slot}].{key}')=?"
-                                      for key in keys))
+                       + " AND ".join(f"{db.target_field(slot, key)}=?" for key in keys))
         values.extend((machine, workspace, workspace_identity)[:len(keys)])
     if not workspace:
         sources.append("SELECT task_id FROM operations INDEXED BY operation_target WHERE machine=?")
