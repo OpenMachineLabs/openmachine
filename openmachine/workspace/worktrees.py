@@ -136,6 +136,21 @@ def _registered(root: Path) -> tuple[list[dict], bytes]:
     return entries, raw
 
 
+def has_registered_worktrees(root: Path) -> bool:
+    """Detect other registered worktrees before removing a root's read grant."""
+    try:
+        resolved = root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise Fault("workspace_reference_unavailable", "The original workspace root is unavailable.") from error
+    observed = context(resolved)
+    if observed["git_status"] == "unavailable":
+        raise Fault("workspace_reference_unavailable", "The original repository could not be inspected.")
+    if observed["git_status"] != "observed" or observed["worktree"] != str(resolved):
+        return False
+    return any(item["worktree"] != str(resolved) and not item["prunable"] and not item["bare"]
+               for item in _registered(resolved)[0])
+
+
 def resolve_root(config, machine: str, workspace: str, worktree: str = "") -> Path:
     """Resolve one registered tree without adding a path grant or default binding."""
     selected = _absolute(worktree, allow_empty=True)

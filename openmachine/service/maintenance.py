@@ -37,13 +37,16 @@ CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "inst
                 "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
 
 
+def _selection_digest(record: dict) -> str:
+    # Recovery advances independently; policy, configuration and selection do not.
+    selected = {key: value for key, value in record.items() if key != "recovery"}
+    return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
+
+
 def _selection(state: Path) -> str | None:
     if not os.path.lexists(state / "service/service.json"):
         return None
-    record = service_state._record(state)
-    # Recovery advances independently; policy, configuration and selection do not.
-    record.pop("recovery", None)
-    return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+    return _selection_digest(service_state._record(state))
 
 
 def _activation_basis(record: dict) -> str:
@@ -217,7 +220,8 @@ def _confirmed_configuration(path: Path, expected: str | None, reason: str, *, s
 def submit(config_path: Path, state: Path, action: Literal["install", "update"], identity: str,
            source: Path, sha256: str, *, candidate_config: Path | None = None,
            workspace: str = "", path: str = "", expected_config_sha256: str | None = None,
-           expected_candidate_sha256: str | None = None) -> dict:
+           expected_candidate_sha256: str | None = None,
+           expected_selection_sha256: str | None = None) -> dict:
     destination = _operation_path(state, identity)
     if os.path.lexists(destination):
         return read_operation(config_path, state, identity)
@@ -225,6 +229,11 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
             or any(value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value))
                    for value in (expected_config_sha256, expected_candidate_sha256))):
         raise Fault("invalid_configuration_consent", "Use confirmed lowercase SHA256 file digests; candidate consent also requires the active configuration digest.")
+    if expected_selection_sha256 is not None and (
+            action != "update" or expected_config_sha256 is None or expected_candidate_sha256 is None
+            or not isinstance(expected_selection_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_selection_sha256)):
+        raise Fault("invalid_selection_consent", "Confirm the selected installation along with both configuration digests.")
     if not source.is_absolute() or candidate_config is not None and not candidate_config.is_absolute():
         raise Fault("invalid_service_path", "Payload and candidate configuration paths must be absolute.")
     # Verification is read-only. The expected digest is supplied by the trusted
@@ -251,6 +260,8 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
         else:
             record = service_state._record(state)
             _bound(config_path, state, record)
+            if expected_selection_sha256 is not None and _selection_digest(record) != expected_selection_sha256:
+                raise Fault("selection_changed", "The confirmed Core installation changed before admission; review it again.")
             if record["pending"] is not None:
                 raise Fault("activation_pending", "Read the original transition before submitting another update.")
         private_directory(root / "operations")
@@ -525,8 +536,11 @@ def observe(config_path: Path, state: Path) -> dict:
     if result["status"] == "not_installed":
         return result
     record = service_state._record(state)
+    if result.get("current") is not None and result["current"] != record["current"]:
+        raise Fault("selection_changed", "The selected installation changed during observation; refresh the original status.")
     selected = service_state._installed(state, record["current"])
-    result.update(state_contract=selected["state_contract"], policy=record.get("policy"), startup=runtime._startup(state),
+    result.update(selection_sha256=_selection_digest(record),
+                  state_contract=selected["state_contract"], policy=record.get("policy"), startup=runtime._startup(state),
                   persistent_control_supported=selected["state_contract"] >= 14)
     if result.get("error") == "resource_busy":
         result.update(status="busy", reason="readiness_busy")
@@ -640,7 +654,8 @@ def change_machine(config_path: Path, state: Path, action: str, identity: str, n
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
-                "capabilities": [*CAPABILITIES, "configure:verify_existing", "update:configuration_consent"],
+                "capabilities": [*CAPABILITIES, "configure:verify_existing", "update:configuration_consent",
+                                 "update:selection_consent", "update:workspace_reference_guard"],
                 "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
                 "implementation_state_contract": service_state.STATE_CONTRACT}
     try:
@@ -692,7 +707,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                 and not os.path.lexists(_operation_path(state, inputs["identity"]))):
             result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
         if (action == "update" and code in {"configuration_changed", "candidate_configuration_changed",
-                                            "invalid_configuration_consent"}
+                                            "invalid_configuration_consent", "invalid_selection_consent", "selection_changed"}
                 and not os.path.lexists(_operation_path(state, inputs["identity"]))):
             result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
     return envelope | result | {"observed_at_ms": time.time_ns() // 1000000}

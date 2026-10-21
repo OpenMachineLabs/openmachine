@@ -100,10 +100,14 @@ unrelated settings, and use the compatible update workflow's `--candidate-config
 When `manage` advertises `update:configuration_consent`, pass the confirmed active
 file digest as `--config-sha256` and the reviewed candidate file digest as
 `--candidate-sha256`, together. Core checks both before admission and verifies the
-retained candidate; later active-configuration or selection drift rejects the
-original transition rather than rebasing it. Read its original `--operation-id`
-after a lost reply. These guards do not migrate renamed workspace references,
-change sharing in other components or fence uncooperative external editors.
+retained candidate. When `update:selection_consent` is advertised, also
+confirm the installation from `manage status` and submit its `selection_sha256`
+with `--expected-selection-sha256`. Core rejects changed selection before
+admission, even if both files match. Read the original `--operation-id` after a
+lost reply. With `update:workspace_reference_guard`, safe unreferenced local
+workspace changes use the same candidate update; protected Task, Change and
+registered Git worktree routes are retained or refused, never rewritten.
+These guards do not change Connector sharing or fence uncooperative editors.
 Preserve the active profile, original tasks and retained installations. Current
 work, incompatible readers or a changed target can defer activation; never delete state to force it through.
 

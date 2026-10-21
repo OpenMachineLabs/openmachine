@@ -520,6 +520,23 @@ def references_target(state: Path, machine: str, target_identity: str) -> bool:
         return any(any(item["machine"] == machine for item in db.decode(row["current"], row["sha256"])["contract"]["targets"]) for row in rows)
 
 
+def references_workspace(state: Path, machine: str, workspace: str) -> bool:
+    """Original Task targets are immutable; a saved name cannot be silently rebound."""
+    with db.connect(state) as connection:
+        if connection is None:
+            if not os.path.lexists(state / "tasks"):
+                return False
+            with _legacy_read(state) as root:
+                return any(any(target["machine"] == machine and target["workspace"] == workspace
+                               for target in read_structured(root, identity)[0]["contract"]["targets"])
+                           for identity, item in read_index(root)["tasks"].items()
+                           if item.get("owner") == "structured")
+        rows = connection.execute("SELECT current,sha256 FROM tasks WHERE kind='structured'")
+        return any(any(target["machine"] == machine and target["workspace"] == workspace
+                       for target in db.decode(row["current"], row["sha256"])["contract"]["targets"])
+                   for row in rows)
+
+
 def activation_blockers(state: Path):
     if os.path.lexists(state / "tasks"):
         with _legacy_read(state) as root:

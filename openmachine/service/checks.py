@@ -181,6 +181,36 @@ def _task_operation_blocks_activation(operation: dict, historical: dict | None =
                 and result.get("summary") in _HISTORICAL_CHANGE_NO_EFFECT)
 
 
+def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: str) -> None:
+    """Keep original Task/change/worktree routes when a configured workspace changes."""
+    def target_rebound(machine: str) -> bool:
+        old, new = current.machines[machine], candidate.machines.get(machine)
+        return (new is None or new.transport != old.transport
+                or old.transport == "ssh" and new.ssh_identity != old.ssh_identity)
+
+    changed = {(item.machine, name) for name, item in current.workspaces.items()
+               if candidate.workspaces.get(name) != item or target_rebound(item.machine)}
+    if not changed:
+        return
+    for machine, name in changed:
+        item = current.workspaces[name]
+        if target_rebound(machine):
+            raise Fault("workspace_reference_unavailable", "Changing an existing workspace's machine identity is unsupported.")
+        if name == probe_workspace:
+            raise Fault("workspace_in_use", "The service readiness workspace is pinned; retain it during updates.")
+        if current.machine(machine).transport != "local":
+            raise Fault("workspace_reference_unavailable", "Remote workspace changes need an owner-verified history policy.")
+        if tasks.references_workspace(state, machine, name):
+            raise Fault("workspace_in_use", "A retained Task still names this workspace; preserve its original contract.")
+        # A registered sibling Git worktree is still an original selected project,
+        # even when no Task or file-write receipt references it.
+        if not any(saved.machine == machine and saved.root == item.root
+                   for saved in candidate.workspaces.values()):
+            if workspace.has_registered_worktrees(Path(item.root)):
+                raise Fault("workspace_in_use", "Registered Git worktrees still depend on this workspace root.")
+    workspace.preserve_change_routes(state, current, candidate, changed)
+
+
 def activation_safe(state: Path, *, config=None, candidate_config=None, guards=None) -> None:
     """Admit controller replacement without resolving old work or releasing guards."""
     historical, unresolved, candidate_machines = {}, [], set()

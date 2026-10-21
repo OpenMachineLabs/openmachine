@@ -82,6 +82,7 @@ def main() -> int:
             operation.add_argument("--candidate-config", type=Path)
             operation.add_argument("--config-sha256", help="Confirmed active configuration file SHA256; requires --candidate-sha256")
             operation.add_argument("--candidate-sha256", help="Confirmed candidate configuration file SHA256; requires --config-sha256")
+            operation.add_argument("--expected-selection-sha256", help="Confirmed installation selection from manage status; requires both configuration digests")
     for action in ("operation", "continue", "retire"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
@@ -105,6 +106,9 @@ def main() -> int:
     if (args.command == "manage" and args.management_action == "update"
             and (args.config_sha256 is None) != (args.candidate_sha256 is None)):
         parser.error("--config-sha256 and --candidate-sha256 must be supplied together")
+    if (args.command == "manage" and args.management_action == "update"
+            and args.expected_selection_sha256 is not None and args.config_sha256 is None):
+        parser.error("--expected-selection-sha256 requires both configuration digests")
     args.config = args.config if args.config is not None else DEFAULT_CONFIG
     args.state_dir = args.state_dir if args.state_dir is not None else DEFAULT_STATE
     try:
@@ -123,6 +127,8 @@ def main() -> int:
                     if args.config_sha256 is not None:
                         inputs.update(expected_config_sha256=args.config_sha256,
                                       expected_candidate_sha256=args.candidate_sha256)
+                    if args.expected_selection_sha256 is not None:
+                        inputs["expected_selection_sha256"] = args.expected_selection_sha256
             if action.startswith("machine-"):
                 inputs["name"] = args.name
                 if action in {"machine-test", "machine-add"}:
