@@ -23,6 +23,15 @@ stage_clean_break = _OFFLINE_MODULE.stage
 
 
 class StructuredTaskTests(TaskFixture, unittest.TestCase):
+    def test_original_workspace_references_are_distinct_from_unbound_checkpoints(self):
+        self.assertFalse(tasks.references_workspace(self.state, "desktop", "project"))
+        self.app.save_task("untargeted-note", 0, "No target", "Preserve.", [])
+        self.assertFalse(tasks.references_workspace(self.state, "desktop", "project"))
+        self.create()
+        self.assertTrue(tasks.references_workspace(self.state, "desktop", "project"))
+        self.assertFalse(tasks.references_workspace(self.state, "desktop", "other"))
+        self.assertFalse(tasks.references_workspace(self.state, "other", "project"))
+
     def test_worktree_target_requires_bounded_absolute_path_and_distinct_selection(self):
         from copy import deepcopy
         for path in ("relative/tree", "/project/../tree", "/line\nbreak", "/" + "x" * 1024,

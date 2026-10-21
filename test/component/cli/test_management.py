@@ -25,21 +25,36 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_manage_update_routes_paired_configuration_consent_and_preserves_legacy_calls(self):
         from openmachine.cli import main
-        for guarded in (False, True):
+        for guarded in ("legacy", "config", "selection"):
             with self.subTest(guarded=guarded):
                 source, candidate = self.root / "payload", self.root / "candidate.toml"
                 argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage", "update",
                         "--operation-id", "a" * 32, "--payload", str(source), "--sha256", "b" * 64,
                         "--candidate-config", str(candidate)]
                 consent = {}
-                if guarded:
+                if guarded != "legacy":
                     argv += ["--config-sha256", "c" * 64, "--candidate-sha256", "d" * 64]
                     consent = {"expected_config_sha256": "c" * 64, "expected_candidate_sha256": "d" * 64}
+                if guarded == "selection":
+                    argv += ["--expected-selection-sha256", "e" * 64]
+                    consent["expected_selection_sha256"] = "e" * 64
                 with patch.object(maintenance, "dispatch", return_value={"status": "accepted"}) as dispatch, \
                         patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
                     self.assertEqual(main(), 0)
                 dispatch.assert_called_once_with(self.config, self.state, "update", contract=1, identity="a" * 32,
                     source=source, sha256="b" * 64, candidate_config=candidate, **consent)
+
+    def test_manage_update_rejects_unpaired_selection_before_dispatch(self):
+        from openmachine.cli import main
+        argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage", "update",
+                "--operation-id", "a" * 32, "--payload", str(self.root / "payload"), "--sha256", "b" * 64,
+                "--expected-selection-sha256", "e" * 64]
+        with patch.object(maintenance, "dispatch") as dispatch, patch.object(sys, "argv", argv), \
+                redirect_stderr(io.StringIO()) as output, self.assertRaises(SystemExit) as exit:
+            main()
+        self.assertEqual(exit.exception.code, 2)
+        self.assertIn("requires both configuration digests", output.getvalue())
+        dispatch.assert_not_called()
 
     def test_manage_update_rejects_incomplete_consent_before_dispatch(self):
         from openmachine.cli import main

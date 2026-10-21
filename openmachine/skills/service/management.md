@@ -289,16 +289,27 @@ normalized `configuration_sha256`.
 The owner checks the active digest under maintenance admission and retains only
 the confirmed candidate bytes before publishing the original operation. Changed
 inputs return `configuration_changed` or `candidate_configuration_changed`;
-invalid digests return `invalid_configuration_consent`. A verified rejection
-before a record exists reports `admitted: false`; missing or uncertain replies
-still require original-ID readback. Existing records are read before new inputs
+invalid digests return `invalid_configuration_consent`. When
+`update:selection_consent` is advertised, `manage status` supplies the
+`selection_sha256` of the selected Core installation and stable policy. Submit
+that confirmed value as `--expected-selection-sha256` together with both file
+digests. A changed selection returns `selection_changed` without admitting
+another update; a missing or malformed guard returns `invalid_selection_consent`.
+A verified rejection before a record exists reports `admitted: false`; missing
+or uncertain replies still require original-ID readback. Existing records are read before new inputs
 are considered, never resubmitted. Activation reuses the original selection and
 configuration guards, preserving deliberate Stop and retained results.
 
 Omitting both flags retains the earlier update contract; a consent-dependent
 client must not silently fall back when this capability is absent. Preserve all
-unrelated settings in the candidate. This is not a workspace-reference migration,
-an OS sandbox or permission to modify another component's sharing settings.
+unrelated settings in the candidate. With `update:workspace_reference_guard`,
+rename, root replacement and removal of an existing unreferenced local workspace
+use the same candidate update. The owner checks retained Task target names,
+original workspace Change read routes and registered Git worktrees before
+selection changes. Protected or unprovable changes refuse safely; the service
+probe workspace remains pinned. No project files or historical receipts are
+rewritten, remote workspace rebinding is not supported, and Connector sharing
+requires a separate confirmation. This is not an OS sandbox.
 
 ### Policy and old-Core limits
 
