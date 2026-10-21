@@ -42,6 +42,7 @@ class MotionStudioPackageTests(unittest.TestCase):
     def test_context_label_has_explicit_readable_width(self):
         source = (PILOT / "src" / "Film.tsx").read_text()
         self.assertIn("w={540}", source)
+        self.assertIn("opacity={cp}", source)
         self.assertIn("ACME CORP. / Q2 2023 SEC FILING", source)
 
     def test_research_claims_keep_evaluation_scope_and_caveat(self):
