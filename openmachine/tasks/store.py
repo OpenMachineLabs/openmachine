@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import time
 
@@ -408,8 +409,63 @@ def require_legacy(state: Path, identity: str) -> None:
         raise Fault("supervised_admission_unavailable", "Supply current task_context for structured work; a bare task_id is not authority.")
 
 
+def _target_filter(machine: str, workspace: str, workspace_identity: str,
+                   target_identity: str) -> tuple[str, list[str]]:
+    if (any(not isinstance(value, str) for value in
+            (machine, workspace, workspace_identity, target_identity))
+            or any(value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value)
+                   for value in (machine, workspace))
+            or any(value and not re.fullmatch(r"[0-9a-f]{64}", value)
+                   for value in (workspace_identity, target_identity))
+            or workspace and not machine or workspace_identity and not workspace
+            or target_identity and (not machine or workspace or workspace_identity)):
+        raise Fault("invalid_task_filter", "Select a machine and optional workspace/identity, or a pinned operation target identity.")
+    if not machine:
+        return "", []
+    if target_identity:
+        return ("task_id IN (SELECT task_id FROM operations INDEXED BY operation_target "
+                "WHERE machine=? AND target_identity=?)", [machine, target_identity])
+    keys = ("machine", "workspace", "workspace_identity")[:1 + bool(workspace) + bool(workspace_identity)]
+    sources = []
+    values = []
+    for slot in range(4):
+        sources.append(f"SELECT task_id FROM tasks INDEXED BY task_target_{slot} WHERE "
+                       + " AND ".join(f"json_extract(current,'$.contract.targets[{slot}].{key}')=?"
+                                      for key in keys))
+        values.extend((machine, workspace, workspace_identity)[:len(keys)])
+    if not workspace:
+        sources.append("SELECT task_id FROM operations INDEXED BY operation_target WHERE machine=?")
+        values.append(machine)
+    return "task_id IN (" + " UNION ".join(sources) + ")", values
+
+
+def _list_row(connection, row, store_identity: str) -> dict:
+    value = db.decode(row["current"], row["sha256"])
+    if value.get("task_id", row["task_id"]) != row["task_id"] or value["revision"] != row["revision"]:
+        raise Fault("corrupt_tasks", "Task list metadata differs from its current authority.")
+    structured = row["kind"] == "structured"
+    terminal = value.get("terminal") if structured else None
+    operations = []
+    if structured:
+        observed = connection.execute("""SELECT kind,machine,target_identity FROM operations
+            WHERE task_id=? AND kind IN ('execution','change') AND machine IS NOT NULL
+            GROUP BY kind,machine,target_identity ORDER BY kind,machine,target_identity LIMIT 9""",
+            (row["task_id"],)).fetchall()
+        operations = [dict(item) for item in observed[:8]]
+    return {"task_id": row["task_id"], "title": value["title"], "revision": row["revision"],
+            "kind": row["kind"], "state": value["control"]["state"] if structured else None,
+            "owner_store_identity": store_identity,
+            "targets": value["contract"]["targets"] if structured else [],
+            "operation_targets": operations, "operation_targets_complete": not structured or len(observed) <= 8,
+            "created_at_ms": value["created_at_ms"] if structured else None,
+            "updated_at_ms": value["updated_at_ms"] if structured else None,
+            "finished_at_ms": terminal["finished_at_ms"] if terminal else None}
+
+
 def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "", offset: int = 0,
-         limit: int = 20, expected_generation: int = -1) -> dict:
+         limit: int = 20, expected_generation: int = -1, *, machine: str = "",
+         workspace: str = "", workspace_identity: str = "", target_identity: str = "") -> dict:
+    scoped, scope_args = _target_filter(machine, workspace, workspace_identity, target_identity)
     if identity:
         task_id(identity)
     wanted = validate_metadata("lookup", anchors or [])["anchors"]
@@ -419,9 +475,15 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
     with db.connect(state) as connection:
         if connection is None:
             if os.path.lexists(state / "tasks"):
+                if scoped:
+                    raise Fault("task_migration_required", "Target-scoped discovery needs the canonical Task store.")
                 with _legacy_read(state) as root:
                     index = read_index(root)
-                    matches = [{"task_id": key, "title": item["title"], "revision": item["revision"]}
+                    matches = [{"task_id": key, "title": item["title"], "revision": item["revision"],
+                                "kind": item.get("owner", "legacy"), "state": None, "targets": [],
+                                "operation_targets": [], "operation_targets_complete": False,
+                                "owner_store_identity": None, "created_at_ms": None,
+                                "updated_at_ms": None, "finished_at_ms": None}
                         for key, item in sorted(index["tasks"].items()) if (not identity or key == identity)
                         and set(wanted) <= set(item["anchors"]) and query.casefold() in (key + " " + item["title"]).casefold()]
                     generation = index["generation"]
@@ -432,8 +494,16 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
                 return {"status": "uninitialized", "tasks": [], "next_offset": None, "generation": None,
                         "coverage": "this_store_only", "resume_authorized": False}
         else:
-            generation = db.metadata(connection)["generation"]
+            owner = db.metadata(connection)
+            generation = owner["generation"]
+            if expected_generation != -1 and generation != expected_generation:
+                raise Fault("task_index_changed", "Task lookup changed between pages; use its current generation.")
+            if scoped and not db.target_indexes_ready(connection):
+                raise Fault("task_index_upgrade_required", "Activate the compatible Task target index before scoped discovery.")
             clauses, arguments = [], []
+            if scoped:
+                clauses.append(scoped)
+                arguments.extend(scope_args)
             if identity:
                 clauses.append("task_id=?")
                 arguments.append(identity)
@@ -445,8 +515,9 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
                 arguments.append(anchor)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = connection.execute("SELECT count(*) FROM tasks" + where, arguments).fetchone()[0]
-            rows = connection.execute("SELECT task_id,current,sha256,revision FROM tasks" + where + " ORDER BY task_id LIMIT ? OFFSET ?", [*arguments, limit, offset])
-            page = [{"task_id": row["task_id"], "title": db.decode(row["current"], row["sha256"])["title"], "revision": row["revision"]} for row in rows]
+            rows = connection.execute("SELECT task_id,kind,current,sha256,revision FROM tasks" + where
+                                      + " ORDER BY task_id LIMIT ? OFFSET ?", [*arguments, limit, offset])
+            page = [_list_row(connection, row, owner["identity"]) for row in rows]
         if expected_generation != -1 and generation != expected_generation:
             raise Fault("task_index_changed", "Task lookup changed between pages; use its current generation.")
         exact = bool(identity or wanted) and not query

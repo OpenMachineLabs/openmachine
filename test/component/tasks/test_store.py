@@ -23,6 +23,101 @@ stage_clean_break = _OFFLINE_MODULE.stage
 
 
 class StructuredTaskTests(TaskFixture, unittest.TestCase):
+    def test_indexed_membership_rows_and_generation_paging(self):
+        self.assertEqual(tasks.find(self.state, machine="desktop")["status"], "uninitialized")
+        self.app.save_task("checkpoint", 0, "Legacy note", "No workspace.", [])
+        self.create()
+        view = self.app.find_tasks(machine="desktop", workspace="project",
+                                   workspace_identity=self.context["workspace_identity"])
+        self.assertEqual((view["status"], view["total"]), ("candidates", 1))
+        row = view["tasks"][0]
+        self.assertEqual((row["task_id"], row["kind"], row["state"]),
+                         ("structured-one", "structured", "waiting_for_ai"))
+        self.assertEqual(row["targets"], self.request["contract"]["targets"])
+        self.assertEqual(row["owner_store_identity"], database.storage_state(self.state)["identity"])
+        self.assertIsInstance(row["created_at_ms"], int)
+        self.assertIsInstance(row["updated_at_ms"], int)
+        self.assertIsNone(row["finished_at_ms"])
+        self.assertEqual(row["operation_targets"], [])
+        self.assertTrue(row["operation_targets_complete"])
+        for options in ({"workspace": "other"}, {"workspace_identity": "f" * 64},
+                        {"machine": "foreign"}):
+            with self.subTest(options=options):
+                filters = {"machine": "desktop", "workspace": "project"} | options
+                self.assertEqual(self.app.find_tasks(**filters)["tasks"], [])
+        second = deepcopy(self.request)
+        second["task_id"], second["update_id"] = "structured-two", "3" * 32
+        self.app.create_task(**second)
+        first = self.app.find_tasks(machine="desktop", limit=1)
+        self.assertEqual((first["total"], first["next_offset"]), (2, 1))
+        later = self.app.find_tasks(machine="desktop", offset=1, limit=1,
+                                    expected_generation=first["generation"])
+        self.assertEqual([item["task_id"] for item in first["tasks"] + later["tasks"]],
+                         ["structured-one", "structured-two"])
+        self.assertIsNone(later["next_offset"])
+        self.assertEqual(self.app.find_tasks()["tasks"][0]["kind"], "legacy")
+        current = first["generation"]
+        self.app.save_task("next-note", 0, "Another", "Unrelated.", [])
+        self.fault("task_index_changed", self.app.find_tasks, machine="desktop",
+                   expected_generation=current)
+
+    def test_pinned_operations_and_multiple_declared_targets_remain_distinct(self):
+        request = deepcopy(self.request)
+        request["task_id"], request["update_id"] = "remote-task", "2" * 32
+        request["contract"]["targets"].append({"machine": "remote", "workspace": "backend",
+            "workspace_identity": "a" * 64, "head_sha": None})
+        tasks.create(self.state, request["task_id"], request["update_id"], request["title"],
+                     request["anchors"], request["origin"], request["contract"], request["stages"])
+        def admit(record, now):
+            op = self.operation_fixture(record, now, 1)
+            op["locator"].update(machine="remote", target_identity="b" * 64)
+            record["operations"].append(op)
+        tasks.update(self.state, "remote-task", admit)
+        workspace = self.app.find_tasks(machine="remote", workspace="backend",
+                                        workspace_identity="a" * 64)
+        self.assertEqual([item["task_id"] for item in workspace["tasks"]], ["remote-task"])
+        self.assertEqual(self.app.find_tasks(machine="remote", workspace="backend",
+                                             workspace_identity="c" * 64)["total"], 0)
+        exact = self.app.find_tasks(machine="remote", target_identity="b" * 64)
+        self.assertEqual(exact["tasks"][0]["operation_targets"], [
+            {"kind": "execution", "machine": "remote", "target_identity": "b" * 64}])
+        self.assertEqual(self.app.find_tasks(machine="remote", target_identity="c" * 64)["total"], 0)
+        self.assertEqual(self.app.find_tasks(machine="remote")["total"], 1)
+        self.assertEqual(self.app.find_tasks(machine="remote", workspace="other")["total"], 0)
+
+    def test_derived_target_index_upgrades_old_sqlite_without_rewriting_tasks(self):
+        original = self.create()["record"]
+        with database.connect(self.state) as connection:
+            generation = database.metadata(connection)["generation"]
+            stored = connection.execute("SELECT current,sha256 FROM tasks").fetchone()
+        with sqlite3.connect(self.path) as connection:
+            for slot in range(4):
+                connection.execute(f"DROP INDEX task_target_{slot}")
+            connection.execute("DROP INDEX task_original_targets")
+        self.fault("task_index_upgrade_required", self.app.find_tasks, machine="desktop")
+        self.assertEqual(self.app.find_tasks()["total"], 1)
+        tasks.migrate(self.state)
+        with database.connect(self.state) as connection:
+            self.assertTrue(database.target_indexes_ready(connection))
+            self.assertEqual(database.metadata(connection)["generation"], generation)
+            self.assertEqual(tuple(connection.execute("SELECT current,sha256 FROM tasks").fetchone()), tuple(stored))
+            clause, args = task_store._target_filter("desktop", "project", "", "")
+            plan = [item[3] for item in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT task_id FROM tasks WHERE " + clause, args)]
+            self.assertTrue(any("task_target_" in step for step in plan), plan)
+        self.assertEqual(self.app.find_tasks(machine="desktop", workspace="project")["total"], 1)
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"]["task_id"], original["task_id"])
+
+    def test_task_membership_filter_validation_is_closed_and_read_only(self):
+        for options in ({"workspace": "project"}, {"workspace_identity": "a" * 64},
+                        {"target_identity": "a" * 64},
+                        {"machine": "bad/name"}, {"machine": "desktop", "workspace": "bad/name"},
+                        {"machine": "desktop", "workspace": "project", "target_identity": "a" * 64},
+                        {"machine": "desktop", "workspace": "project", "workspace_identity": "bad"}):
+            with self.subTest(options=options):
+                self.fault("invalid_task_filter", self.app.find_tasks, **options)
+        self.assertFalse(self.path.exists())
+
     def test_original_workspace_references_are_distinct_from_unbound_checkpoints(self):
         self.assertFalse(tasks.references_workspace(self.state, "desktop", "project"))
         self.app.save_task("untargeted-note", 0, "No target", "Preserve.", [])

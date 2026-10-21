@@ -1984,6 +1984,13 @@
             "title": "Limit",
             "type": "integer"
           },
+          "machine": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$",
+            "title": "Machine",
+            "type": "string"
+          },
           "offset": {
             "default": 0,
             "minimum": 0,
@@ -1999,6 +2006,27 @@
           "task_id": {
             "default": "",
             "title": "Task Id",
+            "type": "string"
+          },
+          "target_identity": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Target Identity",
+            "type": "string"
+          },
+          "workspace": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$",
+            "title": "Workspace",
+            "type": "string"
+          },
+          "workspace_identity": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Workspace Identity",
             "type": "string"
           }
         },

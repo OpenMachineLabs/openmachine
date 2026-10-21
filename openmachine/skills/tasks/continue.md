@@ -19,6 +19,19 @@ unrelated command as the task. Continue canonical records through `control_task`
 legacy Markdown remains on the [save path](maintenance.md#legacy-checkpoints).
 Changed inputs invalidate affected results without erasing valid evidence.
 
+For target-scoped listing, `find_tasks(machine=..., workspace=...,
+workspace_identity=...)` matches **current declared** Task targets (including
+multi-target Tasks). `machine` alone also includes original operations on that
+machine; `machine + target_identity` matches only operations pinned to that exact
+target identity, never a guessed workspace. An operation does not prove which
+workspace it used. Unpinned historical identities remain unknown; do not attribute
+them to a newly paired SSH machine by name. Rows provide state, declared targets,
+bounded original operation target identities, owner Task-store identity, and
+available timestamps; null means unavailable. Follow `next_offset` only with
+`expected_generation`; `task_index_changed` requires restarting at zero.
+The derived SQLite indexes are installed on new stores or explicit managed Task
+migration; `task_index_upgrade_required` never triggers a reader-side repair.
+
 `read_task` schema 2 defaults to the complete current authority summary, with
 counts and explicit history/operation references. `record_complete: false` means
 history is separate, not absent. Use `section: operations` with the original
