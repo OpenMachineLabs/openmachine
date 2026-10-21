@@ -83,6 +83,65 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), original)
                 spawn.assert_not_called()
 
+    def test_confirmed_input_loss_or_invalidity_is_rejected_before_admission(self):
+        self.machine_fixture()
+        original = self.config.read_bytes()
+        candidate = self.root / "candidate.toml"
+        for target, reason in ((self.config, "configuration_changed"), (candidate, "candidate_configuration_changed")):
+            for missing in (False, True):
+                for during_admission in (False, True):
+                    with self.subTest(target=target.name, missing=missing, during_admission=during_admission):
+                        self.config.write_bytes(original)
+                        candidate.write_bytes(original + b"\n# reviewed candidate\n")
+                        old, new = maintenance._digest(self.config), maintenance._digest(candidate)
+                        def change():
+                            if missing:
+                                target.unlink()
+                            else:
+                                target.write_bytes(b"[invalid TOML")
+                        if not during_admission:
+                            change()
+                        with patch.object(maintenance.sys, "platform", "darwin"), \
+                                patch.object(maintenance, "_available", side_effect=lambda state: change() if during_admission else None), \
+                                patch.object(maintenance, "_spawn") as spawn:
+                            result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                                source=self.root / "payload", sha256="c" * 64, candidate_config=candidate,
+                                expected_config_sha256=old, expected_candidate_sha256=new)
+                        self.assertEqual((result["status"], result["admitted"], result["reason"]), ("rejected", False, reason))
+                        self.assertFalse((self.state / "service/operations").exists())
+                        if target != self.config:
+                            self.assertEqual(self.config.read_bytes(), original)
+                        spawn.assert_not_called()
+
+    def test_candidate_input_read_failures_do_not_mask_retention_store_failures(self):
+        self.machine_fixture()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes())
+        digest = maintenance._digest(candidate)
+        failures = (
+            (FileNotFoundError(2, "missing input", str(candidate)), True),
+            (OSError(5, "input read failed", str(candidate)), True),
+            (OSError(28, "retention store full", str(self.state / "service/configurations")), False),
+            (maintenance.Fault("configuration_unavailable", "Retained snapshot is invalid."), False),
+        )
+        for error, rejected in failures:
+            with self.subTest(error=type(error).__name__, rejected=rejected), \
+                    patch.object(maintenance.sys, "platform", "darwin"), \
+                    patch.object(service_state, "_snapshot_configuration", side_effect=error), \
+                    patch.object(maintenance, "_spawn") as spawn:
+                result = maintenance.dispatch(self.config, self.state, "update", identity="1" * 32,
+                    source=self.root / "payload", sha256="c" * 64, candidate_config=candidate,
+                    expected_config_sha256=digest, expected_candidate_sha256=digest)
+                if rejected:
+                    self.assertEqual((result["status"], result["admitted"], result["reason"]),
+                                     ("rejected", False, "candidate_configuration_changed"))
+                else:
+                    self.assertEqual(result["status"], "unknown")
+                    self.assertNotIn("admitted", result)
+                self.assertFalse((self.state / "service/operations").exists())
+                self.assertEqual(maintenance._digest(self.config), digest)
+                spawn.assert_not_called()
+
     def test_confirmed_update_rechecks_active_config_inside_admission_lock(self):
         self.machine_fixture()
         candidate = self.root / "candidate.toml"

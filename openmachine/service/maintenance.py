@@ -198,6 +198,22 @@ def _spawn(state: Path, identity: str, lock, python: str) -> None:
                      stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=(lock.fileno(),))
 
 
+def _confirmed_configuration(path: Path, expected: str | None, reason: str, *, state: Path | None = None) -> str:
+    """Classify input drift before admission without hiding retention-store failures."""
+    try:
+        digest = _digest(path) if state is None else service_state._snapshot_configuration(state, path)
+    except (Fault, OSError) as error:
+        input_error = (isinstance(error, Fault) and error.code in {
+            "config_unavailable", "invalid_config", "invalid_service_configuration"}
+            or isinstance(error, OSError) and (state is None or error.filename == str(path)))
+        if expected is None or not input_error:
+            raise
+        raise Fault(reason, "The confirmed configuration is unavailable or invalid; review and confirm it again.") from error
+    if expected is not None and digest != expected:
+        raise Fault(reason, "The confirmed configuration changed; review and confirm it again.")
+    return digest
+
+
 def submit(config_path: Path, state: Path, action: Literal["install", "update"], identity: str,
            source: Path, sha256: str, *, candidate_config: Path | None = None,
            workspace: str = "", path: str = "", expected_config_sha256: str | None = None,
@@ -215,11 +231,8 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
     # product artifact, never a feed-selected command or an arbitrary executable.
     payload.verify(source, sha256)
     selected_config = candidate_config or config_path
-    config_hash, candidate_hash = _digest(config_path), _digest(selected_config)
-    if expected_config_sha256 is not None and config_hash != expected_config_sha256:
-        raise Fault("configuration_changed", "The active configuration changed; review and confirm it again.")
-    if expected_candidate_sha256 is not None and candidate_hash != expected_candidate_sha256:
-        raise Fault("candidate_configuration_changed", "The candidate configuration changed; review and confirm it again.")
+    config_hash = _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
+    candidate_hash = _confirmed_configuration(selected_config, expected_candidate_sha256, "candidate_configuration_changed")
     state = private_directory(state)
     root = private_directory(state / "service")
     private_directory(state / "locks")
@@ -228,11 +241,8 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
             return {"status": "busy", "operation": _read(state, identity)}
         _available(state)
         if expected_config_sha256 is not None:
-            if _digest(config_path) != expected_config_sha256:
-                raise Fault("configuration_changed", "The active configuration changed; review and confirm it again.")
-            digest = service_state._snapshot_configuration(state, selected_config)
-            if digest != candidate_hash:
-                raise Fault("candidate_configuration_changed", "The candidate changed while being retained; no update was admitted.")
+            _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
+            digest = _confirmed_configuration(selected_config, candidate_hash, "candidate_configuration_changed", state=state)
             selected_config = service_state._saved_configuration(state, digest)
         if action == "install":
             if candidate_config is not None or not workspace or not path:
