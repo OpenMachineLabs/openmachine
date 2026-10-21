@@ -691,33 +691,9 @@
       "boundary_tests": []
     },
     "project_to_motion": {
-      "sources": [
-        "skill-library/project-to-motion/.gitignore",
-        "skill-library/project-to-motion/SKILL.md",
-        "skill-library/project-to-motion/agents/openai.yaml",
-        "skill-library/project-to-motion/assets/renderer/.gitignore",
-        "skill-library/project-to-motion/assets/renderer/entry.jsx",
-        "skill-library/project-to-motion/assets/renderer/film.jsx",
-        "skill-library/project-to-motion/assets/renderer/model.mjs",
-        "skill-library/project-to-motion/assets/renderer/package-lock.json",
-        "skill-library/project-to-motion/assets/renderer/package.json",
-        "skill-library/project-to-motion/assets/renderer/render.mjs",
-        "skill-library/project-to-motion/examples/article-motion.json",
-        "skill-library/project-to-motion/examples/article.md",
-        "skill-library/project-to-motion/examples/repository-motion.json",
-        "skill-library/project-to-motion/references/frame-observations.json",
-        "skill-library/project-to-motion/references/motion-cases.json",
-        "skill-library/project-to-motion/references/motion-grammar.md",
-        "skill-library/project-to-motion/references/quality-review.md",
-        "skill-library/project-to-motion/references/research-method.md",
-        "skill-library/project-to-motion/references/source-index.json",
-        "skill-library/project-to-motion/references/usage.md",
-        "skill-library/project-to-motion/scripts/motion.py",
-        "test/skill-library/project-to-motion/renderer.test.mjs"
-      ],
+      "sources": [],
       "tests": [
-        "test/skill-library/project-to-motion/test_catalog.py",
-        "test/skill-library/project-to-motion/test_motion.py"
+        "test/skill-library/project-to-motion/test_retired_skill.py"
       ],
       "boundary_tests": []
     }

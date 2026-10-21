@@ -1,4 +1,0 @@
-interface:
-  display_name: "Project to Motion"
-  short_description: "Turn projects and articles into clear short videos"
-  default_prompt: "Use $project-to-motion to turn this article or repository into a short mechanism explainer for my audience."
