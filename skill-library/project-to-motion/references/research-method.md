@@ -45,3 +45,51 @@ describing a current product. Remove duplicates/empty entries. Keep the runnable
 skill independent of reference network access. New patterns should improve a real
 video before becoming mandatory. Readability, causality and truthful scope are
 reviewable; taste still requires looking at the output.
+
+## Using the official AI video studies
+
+The 2026-10-21 addition covers eight official videos: two from OpenAI, three from
+Anthropic and three from Google DeepMind. EX28–EX35 link to eight cases,
+EC13–EC20, and eight inspected media assets. All use `frames_inspected`:
+**zero continuously watched segments and zero audio inspections**. Related
+screening clips are not counted as additional studies. Presenter or live-action
+bridges are identified separately from the reusable explanatory sequences.
+
+Search by the communication problem, then use `show` to read a case and follow
+its `asset_ids` into `frame-observations.json`:
+
+| Case | Search intent | Design question |
+|---|---|---|
+| EC13 | agent progress delegation handoff | What is active, what is delivered, and what still needs the user? |
+| EC14 | coding agent diff result | How can a viewer inspect a change and its visible consequence? |
+| EC15 | model planning causal intervention | How can a planned later word influence earlier output? |
+| EC16 | prompt artifact interaction feedback | How does one request become an interactive result? |
+| EC17 | cross application persistent context | How do several tools contribute to one task? |
+| EC18 | sequence structure known unknown | Why is the problem difficult before a solution is named? |
+| EC19 | prediction workflow confidence result | How should a completed prediction and its uncertainty be read? |
+| EC20 | whole detail reference overlay | Where does a local detail belong in a registered comparison? |
+
+`observed_timeline` records an asset, inspected start/end timestamps, an
+observation and a separate design inference. These are selected decoded-frame
+presentation timestamps, with the precision documented in each asset. They are
+**sample brackets, not exact cut boundaries**. Intermediate actions, easing,
+sound synchronization and real task latency remain unverified. Source seconds
+also do not prescribe the timing of a new 30–60 second animation.
+
+The seven YouTube assets use video-only format 136 renditions; their SHA256 values
+identify the downloaded video bytes, not an audio track, editorial master or
+every encoding at the same watch URL. The AlphaFold 7PNM asset instead identifies
+the directly linked MP4. Container durations for YouTube are reported to 0.01s; PTS come from FFmpeg showinfo.
+Stable URLs, retrieval dates, format identity and sample
+scope make the notes auditable; expiring delivery URLs and media files stay out
+of the package.
+
+Choose a transfer rule, name the persistent object and meaningful state change,
+then write an original scene for the project's evidence. Preserve the case's
+limitations and counterexample. UI states and overlays explain what was shown;
+they do not independently verify product reliability or hidden model reasoning.
+
+EX24 and EX25 remain page-verified conceptual references for agent patterns.
+Pair them with EC13 or EC17 for observed presentation techniques; the new videos
+do not upgrade those articles' evidence levels. Search existing URLs and media
+locators before adding a source; none of these eight media URLs was already indexed.

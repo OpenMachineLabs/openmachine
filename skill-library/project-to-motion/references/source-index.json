@@ -1197,6 +1197,201 @@
       "evidence_level": "page_verified",
       "observation_scope": "page_text_only",
       "publisher_stated": "The page explains prompting for editable pages and refining layout, components, and breakpoints on the canvas."
+    },
+    {
+      "id": "EX28",
+      "title": "Introducing ChatGPT agent",
+      "url": "https://www.youtube.com/watch?v=Wgn4JeYI9lY",
+      "publisher": "OpenAI",
+      "kind": "official_product_demo",
+      "topics": [
+        "agent-progress",
+        "delegation",
+        "task-identity",
+        "tool-state",
+        "artifact-proof",
+        "multi-task-montage",
+        "user-handoff"
+      ],
+      "learning_targets": [
+        "Keep task identity and tool state readable across application changes.",
+        "Separate in-progress activity, returned artifacts and a pending user handoff."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review.",
+      "official_page_url": "https://openai.com/index/introducing-chatgpt-agent/",
+      "channel_url": "https://www.youtube.com/channel/UCXZCJLdBC09xxGZ6gcdrc6A",
+      "published_at": "2025-07-17"
+    },
+    {
+      "id": "EX29",
+      "title": "Introducing the Codex app",
+      "url": "https://www.youtube.com/watch?v=HFM3se4lNiw",
+      "publisher": "OpenAI",
+      "kind": "official_product_demo",
+      "topics": [
+        "coding-agent",
+        "reviewable-change",
+        "semantic-zoom",
+        "diff-review",
+        "code-to-result",
+        "product-proof"
+      ],
+      "learning_targets": [
+        "Link named file changes to an inspectable diff and a visible application result.",
+        "Use cropped UI details and a return to context to guide attention."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review.",
+      "official_page_url": "https://openai.com/index/introducing-the-codex-app/",
+      "channel_url": "https://www.youtube.com/channel/UCXZCJLdBC09xxGZ6gcdrc6A",
+      "published_at": "2026-02-02"
+    },
+    {
+      "id": "EX30",
+      "title": "Tracing the thoughts of a large language model",
+      "url": "https://www.youtube.com/watch?v=Bj9BD2D3DzA",
+      "publisher": "Anthropic",
+      "kind": "official_technical_explainer_video",
+      "topics": [
+        "model-mechanism",
+        "interpretability",
+        "planning",
+        "token-generation",
+        "causal-intervention",
+        "persistent-context"
+      ],
+      "learning_targets": [
+        "Separate output order from an earlier planning influence using a visible endpoint.",
+        "Explain a mechanism with one concrete example before expanding to a network abstraction."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "official_page_url": "https://www.anthropic.com/research/tracing-thoughts-language-model",
+      "published_at": "2025-03-27",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review."
+    },
+    {
+      "id": "EX31",
+      "title": "Turn ideas into interactive artifacts",
+      "url": "https://www.youtube.com/watch?v=iSn77jvjojA",
+      "publisher": "Anthropic",
+      "kind": "official_product_demo_video",
+      "topics": [
+        "product-demo",
+        "prompt-to-artifact",
+        "interface-motion",
+        "semantic-zoom",
+        "interaction-feedback"
+      ],
+      "learning_targets": [
+        "Carry attention from a recognizable UI affordance into an isolated feature demonstration.",
+        "Prove one prompt-to-interactive-output sequence before a faster breadth montage."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "official_page_url": "https://claude.com/resources/articles/build-artifacts",
+      "published_at": "2025-06-26",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review."
+    },
+    {
+      "id": "EX32",
+      "title": "Claude | Computer use for orchestrating tasks",
+      "url": "https://www.youtube.com/watch?v=jqx18KgIzAE",
+      "publisher": "Anthropic",
+      "kind": "official_product_demo_video",
+      "topics": [
+        "agent",
+        "orchestration",
+        "tool-use",
+        "cross-application",
+        "persistent-context",
+        "action-result"
+      ],
+      "learning_targets": [
+        "Keep task intent and visible tool results connected while applications change.",
+        "Show a downstream artifact that uses information gathered in earlier steps."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "official_page_url": "https://www.anthropic.com/news/3-5-models-and-computer-use",
+      "published_at": "2024-10-22",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review."
+    },
+    {
+      "id": "EX33",
+      "title": "Protein folding explained",
+      "url": "https://www.youtube.com/watch?v=KpedmJdrTpY",
+      "publisher": "Google DeepMind",
+      "kind": "official_technical_animation",
+      "topics": [
+        "protein-folding",
+        "sequence-to-structure",
+        "known-unknown",
+        "scale-reveal",
+        "object-continuity",
+        "typographic-transition"
+      ],
+      "learning_targets": [
+        "Establish an understandable unknown before introducing a solution.",
+        "Retain a linked symbolic chain while changing its shape; distinguish an explanatory abstraction from a molecular simulation."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review.",
+      "official_page_url": "https://deepmind.google/science/alphafold/"
+    },
+    {
+      "id": "EX34",
+      "title": "AlphaFold Server Demo - Google DeepMind",
+      "url": "https://www.youtube.com/watch?v=9ufplEgtq8w",
+      "publisher": "Google DeepMind",
+      "kind": "official_product_demo",
+      "topics": [
+        "product-demo",
+        "workflow-states",
+        "context-preserving-zoom",
+        "spotlight",
+        "progressive-disclosure",
+        "confidence-visualization"
+      ],
+      "learning_targets": [
+        "Teach a stateful workflow through local focus while preserving page context.",
+        "Explain confidence alongside the result before presenting the next action."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Official page/channel verified; decoded samples inspected. See the linked case and frame scope. No continuous playback or audio review.",
+      "official_page_url": "https://blog.google/innovation-and-ai/products/google-deepmind-isomorphic-alphafold-3-ai-model/"
+    },
+    {
+      "id": "EX35",
+      "title": "AlphaFold 3: 7PNM prediction and experimental-reference comparison",
+      "url": "https://blog.google/innovation-and-ai/products/google-deepmind-isomorphic-alphafold-3-ai-model/",
+      "publisher": "Google DeepMind and Isomorphic Labs / Google The Keyword",
+      "kind": "official_video",
+      "topics": [
+        "scientific-visualization",
+        "prediction-vs-reference",
+        "overview-detail",
+        "registered-overlay",
+        "camera-reframe",
+        "readable-hold"
+      ],
+      "learning_targets": [
+        "Compare prediction and experimental reference in one registered view.",
+        "Move from a whole assembly to a specific interface and return to the whole."
+      ],
+      "verified_at": "2026-10-21",
+      "evidence_level": "frames_inspected",
+      "evidence_note": "Official page and its linked 7PNM MP4 verified; 39 decoded source frames inspected at 0.5-second intervals from 0.0 to 19.0s. No continuous playback or audio review. Other related clips were screened but are not counted in this case.",
+      "media_locator": {
+        "kind": "mp4",
+        "url": "https://storage.googleapis.com/gweb-uniblog-publish-prod/original_videos/AFS-anim-7PNM.mp4",
+        "discovery": "Linked from the official AlphaFold 3 announcement."
+      }
     }
   ]
 }
