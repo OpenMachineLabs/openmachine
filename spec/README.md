@@ -22,6 +22,7 @@ status here. Current code and tests describe implemented behavior.
 | [#108](https://github.com/OpenMachineLabs/openmachine/issues/108) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/108#classification) | Transactional Task ledger and migration. |
 | [#114](https://github.com/OpenMachineLabs/openmachine/issues/114) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/114#classification) | Retirement of automatic Chat recovery. |
 | [#117](https://github.com/OpenMachineLabs/openmachine/issues/117) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/117#classification) | Runtime module ownership; Directions A, D, B and C were merged and the Issue closed. |
+| [#204](https://github.com/OpenMachineLabs/openmachine/issues/204) | `direct_issue_contract`, [maintainer approval](https://github.com/OpenMachineLabs/openmachine/issues/204#issuecomment-6319962428) | Motion Studio editorial Skill and Remotion pilot film. |
 
 Packaging authorization and history are in [PR #75](https://github.com/OpenMachineLabs/openmachine/pull/75)
 and [PR #77](https://github.com/OpenMachineLabs/openmachine/pull/77).

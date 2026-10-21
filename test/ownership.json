@@ -272,7 +272,12 @@
         "npm/release-sources.json",
         "npm/scripts/verify-release-sources.cjs",
         "scripts/prepare_npm_release_sources.py",
-        ".github/workflows/npm-release.yml"
+        ".github/workflows/npm-release.yml",
+        "artifacts/motion-studio/README.md",
+        "artifacts/motion-studio/contact-sheet.svg",
+        "artifacts/motion-studio/contextual-retrieval.mp4",
+        "artifacts/motion-studio/mechanism-preview.mp4",
+        "artifacts/motion-studio/poster.png"
       ],
       "tests": [
         "test/repository/test_auto_metadata.py",
@@ -694,6 +699,32 @@
       "sources": [],
       "tests": [
         "test/skill-library/project-to-motion/test_retired_skill.py"
+      ],
+      "boundary_tests": []
+    },
+    "motion_studio": {
+      "sources": [
+        "skill-library/motion-studio/.gitignore",
+        "skill-library/motion-studio/SKILL.md",
+        "skill-library/motion-studio/examples/pilot-film/README.md",
+        "skill-library/motion-studio/examples/pilot-film/art-directions.svg",
+        "skill-library/motion-studio/examples/pilot-film/brief.md",
+        "skill-library/motion-studio/examples/pilot-film/package-lock.json",
+        "skill-library/motion-studio/examples/pilot-film/package.json",
+        "skill-library/motion-studio/examples/pilot-film/scripts/generate_soundtrack.py",
+        "skill-library/motion-studio/examples/pilot-film/scripts/review_sheet.py",
+        "skill-library/motion-studio/examples/pilot-film/src/Film.tsx",
+        "skill-library/motion-studio/examples/pilot-film/src/index.ts",
+        "skill-library/motion-studio/examples/pilot-film/src/root.tsx",
+        "skill-library/motion-studio/examples/pilot-film/tsconfig.json",
+        "skill-library/motion-studio/references/remotion.md",
+        "skill-library/motion-studio/references/sources.md",
+        "skill-library/motion-studio/references/workflow.md",
+        "skill-library/motion-studio/styles/anthropic-editorial/STYLE.md",
+        "skill-library/motion-studio/styles/anthropic-editorial/references.md"
+      ],
+      "tests": [
+        "test/skill-library/motion-studio/test_package.py"
       ],
       "boundary_tests": []
     }

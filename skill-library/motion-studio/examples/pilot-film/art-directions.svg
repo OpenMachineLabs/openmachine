@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<rect width="1600" height="900" fill="#F2EFE8"/>
+<text x="70" y="70" font-family="Arial,sans-serif" font-size="22" fill="#65645E" letter-spacing="3">MOTION STUDIO / DIRECTION STUDY / 2026-10-21</text>
+<path d="M70 100H1530" stroke="#D2CEC4" stroke-width="2"/>
+<g transform="translate(70 150)">
+<text x="0" y="0" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#607C68">A / MECHANISM-FIRST — SELECTED</text>
+<rect x="0" y="30" width="700" height="570" fill="#E8E3D9"/>
+<rect x="55" y="110" width="265" height="300" fill="#FFFEFA" stroke="#D2CEC4"/>
+<text x="80" y="150" font-family="Arial,sans-serif" font-size="15" fill="#65645E">SOURCE DOCUMENT</text>
+<path d="M80 175H290M80 190H260M80 205H290" stroke="#D2CEC4" stroke-width="3"/>
+<rect x="90" y="250" width="210" height="115" fill="#F2EFE8" stroke="#B95438" stroke-width="2"/>
+<text x="110" y="285" font-family="Georgia,serif" font-size="19" fill="#23231F">Revenue grew</text><text x="110" y="310" font-family="Georgia,serif" font-size="19" fill="#23231F">by 3%.</text>
+<path d="M340 305H395" stroke="#8BA0A8" stroke-width="3"/><path d="M385 295L397 305L385 315" fill="none" stroke="#8BA0A8" stroke-width="3"/>
+<rect x="420" y="215" width="235" height="185" fill="#FFFEFA" stroke="#D2CEC4"/>
+<rect x="435" y="230" width="205" height="48" fill="#E4E9E0" stroke="#607C68"/>
+<text x="448" y="250" font-family="Arial,sans-serif" font-size="13" fill="#607C68">ACME · Q2 2023</text><text x="448" y="267" font-family="Arial,sans-serif" font-size="13" fill="#607C68">CONTEXT ADDED</text>
+<text x="445" y="320" font-family="Georgia,serif" font-size="17" fill="#23231F">Revenue grew by 3%.</text>
+<text x="55" y="455" font-family="Arial,sans-serif" font-size="18" fill="#23231F">Same fragment; restored provenance.</text>
+<text x="55" y="495" font-family="Arial,sans-serif" font-size="15" fill="#65645E">Material continuity makes the mechanism visible.</text>
+</g>
+<g transform="translate(830 150)">
+<text x="0" y="0" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#B95438">B / CONSEQUENCE-FIRST — REJECTED</text>
+<rect x="0" y="30" width="700" height="570" fill="#E8E3D9"/>
+<text x="45" y="105" font-family="Georgia,serif" font-size="30" fill="#23231F">Where is the right answer?</text>
+<rect x="45" y="145" width="610" height="60" fill="#FFFEFA" stroke="#D2CEC4"/><text x="65" y="183" font-family="Arial,sans-serif" font-size="20" fill="#65645E">ACME Q2 revenue growth?</text>
+<g fill="#FFFEFA" stroke="#D2CEC4">
+<rect x="45" y="250" width="175" height="95"/><rect x="260" y="250" width="175" height="95"/><rect x="475" y="250" width="175" height="95"/>
+<rect x="45" y="375" width="175" height="95"/><rect x="260" y="375" width="175" height="95"/><rect x="475" y="375" width="175" height="95"/>
+</g>
+<g font-family="Arial,sans-serif" font-size="15" fill="#65645E"><text x="62" y="285">Revenue grew...</text><text x="277" y="285">Quarterly...</text><text x="492" y="285">Company...</text><text x="62" y="410">Revenue...</text><text x="277" y="410">Growth rate...</text><text x="492" y="410">Prior quarter...</text></g>
+<rect x="260" y="375" width="175" height="95" fill="none" stroke="#B95438" stroke-width="4"/>
+<text x="45" y="525" font-family="Arial,sans-serif" font-size="18" fill="#23231F">Query-first search wall.</text>
+<text x="45" y="555" font-family="Arial,sans-serif" font-size="15" fill="#65645E">Readable, but makes generic search UI the hero.</text>
+</g>
+</svg>
