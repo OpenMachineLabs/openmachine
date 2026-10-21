@@ -45,6 +45,36 @@ def _scope(config, state: Path, machine: str, record: dict) -> str:
     raise Fault("scope_unavailable", "Current configuration no longer grants the original canonical workspace.")
 
 
+def preserve_change_routes(state: Path, current, candidate, changed: set[tuple[str, str]]) -> None:
+    """Reject a new binding when an original change would lose its read route."""
+    store = records._store(state)
+    if store is None:
+        return
+    owner = records._owner(state)
+    for directory in records._entries(store):
+        record = records._load(directory)
+        if record["owner_sha256"] != owner:
+            raise Fault("change_store_corrupt", "An original workspace change has a different state owner.")
+        original = []
+        for machine in current.machines:
+            try:
+                original.append((machine, _scope(current, state, machine, record)))
+            except Fault as error:
+                if error.code != "scope_unavailable":
+                    raise
+        if len(original) != 1:
+            raise Fault("workspace_reference_unavailable", "The original workspace change has no unambiguous read route.")
+        machine, name = original[0]
+        if (machine, name) not in changed:
+            continue
+        try:
+            _scope(candidate, state, machine, record)
+        except Fault as error:
+            if error.code != "scope_unavailable":
+                raise
+            raise Fault("workspace_in_use", "A retained workspace change would lose its original read route.") from error
+
+
 def read_change(config, state: Path, machine: str, change_id: str, observe_current: bool = False) -> dict:
     config.machine(machine)
     if not schema.is_hex(change_id, 32) or type(observe_current) is not bool:

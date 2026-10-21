@@ -83,6 +83,50 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 self.assertEqual(self.config.read_bytes(), original)
                 spawn.assert_not_called()
 
+    def test_confirmed_installation_selection_rejects_same_version_switch_before_admission(self):
+        self.machine_fixture()
+        installed = service_state._json(self.state / "service/versions" / self.a / "installation.json")
+        save_json(self.state / "service/versions" / self.b / "installation.json", installed | {"identity": self.b})
+        selection = maintenance._selection(self.state)
+        digest = maintenance._digest(self.config)
+        inputs = dict(identity="1" * 32, source=self.root / "payload", sha256="c" * 64,
+                      expected_config_sha256=digest, expected_candidate_sha256=digest,
+                      expected_selection_sha256=selection)
+        self.save(self.record | {"current": self.b})
+        with patch.object(sys, "platform", "darwin"), patch.object(maintenance, "_spawn") as spawn:
+            refused = maintenance.dispatch(self.config, self.state, "update", **inputs)
+            self.assertEqual((refused["status"], refused["admitted"], refused["reason"]),
+                             ("rejected", False, "selection_changed"))
+            self.assertFalse((self.state / "service/operations").exists())
+            spawn.assert_not_called()
+            self.save(self.record)
+            accepted = maintenance.dispatch(self.config, self.state, "update", **inputs)
+            self.assertEqual(accepted["status"], "accepted")
+            self.assertEqual(accepted["operation"]["request"]["selection_sha256"], selection)
+            self.save(self.record | {"current": self.b})
+            recovered = maintenance.dispatch(self.config, self.state, "update", **inputs)
+            self.assertEqual(recovered["operation"]["operation_id"], inputs["identity"])
+            spawn.assert_called_once()
+        self.assertNotEqual(self.a, self.b)
+
+    def test_selection_drift_after_preflight_is_rejected_under_admission_lock(self):
+        self.machine_fixture()
+        digest = maintenance._digest(self.config)
+        original = maintenance._selection(self.state)
+        def switch(_):
+            self.save(self.record | {"current": self.b})
+        with patch.object(sys, "platform", "darwin"), \
+                patch.object(maintenance, "_available", side_effect=switch), \
+                patch.object(maintenance, "_spawn") as spawn:
+            result = maintenance.dispatch(self.config, self.state, "update",
+                identity="2" * 32, source=self.root / "payload", sha256="c" * 64,
+                expected_config_sha256=digest, expected_candidate_sha256=digest,
+                expected_selection_sha256=original)
+        self.assertEqual((result["status"], result["admitted"], result["reason"]),
+                         ("rejected", False, "selection_changed"))
+        self.assertFalse((self.state / "service/operations").exists())
+        spawn.assert_not_called()
+
     def test_confirmed_input_loss_or_invalidity_is_rejected_before_admission(self):
         self.machine_fixture()
         original = self.config.read_bytes()
@@ -259,6 +303,60 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 self.assertEqual((result["version"], result["product_version"]), ("0.1.0a7", "0.1.0a7"))
                 self.assertEqual((result["commit"], result["product_commit"]), (commit, commit))
                 self.assertEqual(result["implementation_commit"], "e" * 40)
+                self.assertEqual(result["selection_sha256"], maintenance._selection(self.state))
+
+    def test_existing_remote_workspace_cannot_silently_rebind_ssh_identity(self):
+        from openmachine.config import Settings
+        original = Settings.model_validate({"schema_version": 1,
+            "machines": {"remote": {"transport": "ssh", "ssh_alias": "owned-ssh",
+                                    "ssh_worker": "/home/fixture/" + "c" * 64 + ".pyz",
+                                    "ssh_identity": "a" * 64}},
+            "workspaces": {"remote-project": {"machine": "remote", "root": "/home/fixture/project"}}})
+        candidate = original.model_copy(deep=True)
+        candidate.machines["remote"].ssh_identity = "b" * 64
+        self.assert_fault("workspace_reference_unavailable", lambda: service_checks.workspace_bindings_safe(
+            self.state, original, candidate, "local-probe"))
+
+    def test_activation_refuses_protected_workspace_before_stopping_core(self):
+        self.policy_fixture()
+        self.machine_fixture()
+        _, stop, _ = self.activation_mocks()
+        candidate = self.root / "candidate.toml"
+        candidate.write_bytes(self.config.read_bytes())
+        with patch.object(service_checks, "workspace_bindings_safe",
+                          side_effect=Fault("workspace_in_use", "Original workspace retained.")) as guard:
+            self.assert_fault("workspace_in_use", lambda: service_transition._activate(
+                self.state, self.record, self.b, candidate, require_safe=True))
+        guard.assert_called_once()
+        stop.assert_not_called()
+        self.assertEqual(service_state._record(self.state)["current"], self.a)
+
+    def test_workspace_binding_guard_allows_unreferenced_local_lifecycle(self):
+        from openmachine.config import load
+        self.machine_fixture()
+        first, second = self.root / "original", self.root / "replacement"
+        first.mkdir()
+        second.mkdir()
+        self.config.write_text(self.config.read_text() + "\n[workspaces.existing]\nmachine=\"local\"\nroot="
+                               + json.dumps(str(first)) + "\n")
+        original = load(self.config)
+        for action in ("rename", "replace", "remove"):
+            candidate = original.model_copy(deep=True)
+            if action == "rename":
+                candidate.workspaces["renamed"] = candidate.workspaces.pop("existing")
+            elif action == "replace":
+                candidate.workspaces["existing"].root = str(second)
+            else:
+                del candidate.workspaces["existing"]
+            with self.subTest(action=action):
+                service_checks.workspace_bindings_safe(self.state, original, candidate, "project")
+        renamed = original.model_copy(deep=True)
+        renamed.workspaces["renamed"] = renamed.workspaces.pop("existing")
+        self.assert_fault("workspace_in_use", lambda: service_checks.workspace_bindings_safe(
+            self.state, original, renamed, "existing"))
+        with patch.object(service_checks.tasks, "references_workspace", return_value=True):
+            self.assert_fault("workspace_in_use", lambda: service_checks.workspace_bindings_safe(
+                self.state, original, renamed, "project"))
 
     def ledger_operation_fixture(self):
         record = self.operation_fixture()

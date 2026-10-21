@@ -9,6 +9,6 @@ from .database import storage_state, sqlite_runtime
 from .store import (check_state, create, find, read, rebuild_index, require_legacy, save, update,
                     operation, control_update, operation_binding, effect_conflicts,
                     observation_page, locked_read, has_event, first_admission, locator_matches,
-                    references_target, activation_blockers, present, public_read)
+                    references_target, references_workspace, activation_blockers, present, public_read)
 from .migration import migrate, backup
 from .rows import operation_key
