@@ -318,7 +318,12 @@ def ingest_repo(path, includes=None, ref="HEAD"):
         fail("Git did not resolve the revision to a full commit ID.")
     # Query only named candidates; never recursively walk a repository or its worktree.
     candidates = _git(root, "ls-tree", "-z", commit, "--", *README_NAMES)
-    found = {entry.split(b"\t", 1)[1].decode("utf-8") for entry in candidates.split(b"\0") if entry}
+    # Skip non-files during auto-selection; explicit includes still fail closed.
+    found = {
+        entry.split(b"\t", 1)[1].decode("utf-8")
+        for entry in candidates.split(b"\0")
+        if entry.startswith((b"100644 blob ", b"100755 blob "))
+    }
     readme = next((name for name in README_NAMES if name in found), None)
     selected = list(dict.fromkeys(([readme] if readme else []) + selected))
     if not selected:

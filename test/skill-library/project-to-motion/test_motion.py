@@ -387,6 +387,36 @@ class RepositoryTests(unittest.TestCase):
                 with self.assertRaisesRegex(motion.MotionError, "regular committed file"):
                     motion.ingest_repo(self.repo, [include])
 
+    @unittest.skipUnless(hasattr(os, "symlink"), "Symbolic links are unavailable")
+    def test_auto_readme_skips_symlink_and_preserves_explicit_include_checks(self):
+        (self.repo / "README.md").unlink()
+        os.symlink("module.txt", self.repo / "README.md")
+        (self.repo / "README.rst").write_text("Regular fallback overview.\n")
+        self.commit()
+        bundle = motion.ingest_repo(self.repo, ["module.txt"])
+        self.assertEqual(bundle["provenance"]["selected_paths"], ["README.rst", "module.txt"])
+        self.assertEqual(bundle["sources"][0]["text"], "Regular fallback overview.\n")
+        with self.assertRaisesRegex(motion.MotionError, "regular committed file"):
+            motion.ingest_repo(self.repo, ["README.md"])
+
+        (self.repo / "README.rst").unlink()
+        self.commit()
+        explicit = motion.ingest_repo(self.repo, ["module.txt"])
+        self.assertEqual(explicit["provenance"]["selected_paths"], ["module.txt"])
+        self.assertEqual(explicit["sources"][0]["text"], "Worker results are joined.\n")
+
+    def test_auto_readme_skips_directory_and_uses_regular_fallback(self):
+        (self.repo / "README.md").unlink()
+        (self.repo / "README.md").mkdir()
+        (self.repo / "README.md" / "nested.txt").write_text("Not a root README file.\n")
+        (self.repo / "README.rst").write_text("Regular fallback overview.\n")
+        self.commit()
+        bundle = motion.ingest_repo(self.repo)
+        self.assertEqual(bundle["provenance"]["selected_paths"], ["README.rst"])
+        self.assertEqual(bundle["sources"][0]["text"], "Regular fallback overview.\n")
+        with self.assertRaisesRegex(motion.MotionError, "regular committed file"):
+            motion.ingest_repo(self.repo, ["README.md"])
+
     def test_large_committed_files_and_large_total_are_rejected(self):
         (self.repo / "large.txt").write_bytes(b"x" * (motion.MAX_FILE_BYTES + 1))
         for number in range(5):
