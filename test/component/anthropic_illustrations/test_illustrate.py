@@ -1,4 +1,5 @@
 """Offline behavioral checks against the preserved index and real PNG backend."""
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -11,7 +12,7 @@ import unittest
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3] / 'skill-library/anthropic-style-illustrations'
 loader = importlib.util.spec_from_file_location('illustrate', ROOT / 'scripts/illustrate.py')
 m = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(m)
@@ -25,6 +26,19 @@ class IllustrateTests(unittest.TestCase):
         self.out = Path(self.temp.name)
         self.article, self.sha = m.read_article(ROOT / 'examples/article.md')
         self.spec = m.read_json(ROOT / 'examples/figure.json')
+
+    def render(self, *args):
+        if importlib.util.find_spec('fitz') is not None:
+            return m.render(*args)
+        # Hosted Open Machine wheel tests do not install this standalone Skill's
+        # optional PNG backend; verify real SVG XML and the SVG/HTML/QA pipeline.
+        def validate_svg(svg):
+            ET.fromstring(svg)
+            return base64.b64decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC'
+                'AAAAC0lEQVR42mP8/x8AAwMCAO+/GXcAAAAASUVORK5CYII=')
+        with patch.object(m, 'png_bytes', side_effect=validate_svg):
+            return m.render(*args)
 
     def check_bad(self, spec, fragment):
         report = m.qa(self.article, self.sha, spec)
@@ -90,7 +104,7 @@ class IllustrateTests(unittest.TestCase):
     def test_happy_render_and_manual_edit(self):
         self.spec['title'] = 'A manually edited title'
         self.spec['nodes'][0]['label'] = 'Record the research question'
-        report = m.render(self.article, self.sha, self.spec, self.out)
+        report = self.render(self.article, self.sha, self.spec, self.out)
         self.assertTrue(report['ok'])
         self.assertFalse(report['semantic_approval'])
         self.assertFalse(report['visual_approval'])
@@ -111,7 +125,7 @@ class IllustrateTests(unittest.TestCase):
         spec = m.draft(self.article, self.sha)
         self.assertEqual(spec['edges'], [])
         self.assertTrue(all(n['label'] == n['quote'] and n['quote'] in self.article for n in spec['nodes']))
-        m.render(self.article, self.sha, spec, self.out)
+        self.render(self.article, self.sha, spec, self.out)
         self.assertNotIn('<image', (self.out / 'figure.svg').read_text())
 
     def test_unicode_escape_and_citation_links(self):
@@ -119,7 +133,7 @@ class IllustrateTests(unittest.TestCase):
         spec = m.draft(quote, 'hash')
         spec['title'] = '<script>alert("x")</script> & café'
         self.assertTrue(m.qa(quote, 'hash', spec)['ok'])
-        m.render(quote, 'hash', spec, self.out)
+        self.render(quote, 'hash', spec, self.out)
         root = ET.parse(self.out / 'figure.svg').getroot()
         self.assertTrue(root.findall('.//{http://www.w3.org/2000/svg}a'))
         markup = (self.out / 'preview.html').read_text()
@@ -169,7 +183,7 @@ class IllustrateTests(unittest.TestCase):
     def test_all_remaining_families(self):
         for family in ('bar', 'line'):
             article, spec = self.chart(family)
-            m.render(article, 'hash', spec, self.out / family)
+            self.render(article, 'hash', spec, self.out / family)
             ET.parse(self.out / family / 'figure.svg')
         for family in ('matrix', 'cover'):
             spec = m.draft(self.article, self.sha)
@@ -178,13 +192,13 @@ class IllustrateTests(unittest.TestCase):
                 spec['columns'] = ['Evidence']
                 for node in spec['nodes']:
                     node['cells'] = [{'text': 'Exact article excerpt', 'quote': node['quote']}]
-            m.render(self.article, self.sha, spec, self.out / family)
+            self.render(self.article, self.sha, spec, self.out / family)
             ET.parse(self.out / family / 'figure.svg')
 
     def test_output_traversal_and_symlinks(self):
         for path in (ROOT / '..' / 'escape', '/tmp/illustration-escape'):
             with self.assertRaisesRegex(ValueError, 'inside Skill'):
-                m.render(self.article, self.sha, self.spec, path)
+                self.render(self.article, self.sha, self.spec, path)
         link = self.out / 'escape'
         link.symlink_to('/tmp', target_is_directory=True)
         with self.assertRaises(ValueError):
@@ -192,7 +206,7 @@ class IllustrateTests(unittest.TestCase):
         child = self.out / 'figure.svg'
         child.symlink_to(ROOT / 'SKILL.md')
         with self.assertRaisesRegex(ValueError, 'symlink'):
-            m.render(self.article, self.sha, self.spec, self.out)
+            self.render(self.article, self.sha, self.spec, self.out)
         self.assertFalse((self.out / 'figure.png').exists())
 
     def test_cli_qa_failure_and_nonfinite_json(self):
@@ -240,7 +254,7 @@ class IllustrateTests(unittest.TestCase):
         case = m.show('X2')
         edited = copy.deepcopy(self.spec)
         edited['case_refs'] = [{'case_id': 'X2', 'article_url': case['article_url']}]
-        report = m.render(self.article, self.sha, edited, self.out)
+        report = self.render(self.article, self.sha, edited, self.out)
         self.assertTrue(report['ok'])
         self.assertIn('Design case X2', (self.out / 'preview.html').read_text())
         self.assertNotIn('data:image', (self.out / 'figure.svg').read_text())
