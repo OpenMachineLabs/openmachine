@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "title": "Keep the identity of the work",
+  "audience": "Developers using agents to execute commands",
+  "goal": "Explain the original execution ID and observation boundary in Open Machine",
+  "format": "landscape",
+  "fps": 30,
+  "theme": "midnight",
+  "sources": [
+    {
+      "id": "execution-guide",
+      "kind": "repository_excerpt",
+      "locator": "https://github.com/OpenMachineLabs/openmachine/blob/a347b3b8ca5903a4c7d6dc18c1ee219e817ee1f2/openmachine/skills/execution/SKILL.md",
+      "sha256": "51dbacc06f3445f87632cf8bf12f741ded61940a60418a2255d7536f542fda55",
+      "text": "Save one original execution ID before starting an authorized command. Use the\nconfigured machine, exact workspace/cwd, project interpreter and inspected argv\nand preconditions. Native commands are not sandboxed by reader scopes.\n\nRead the original execution after uncertainty; do not allocate a replacement ID.\nCancellation requests termination and does not undo prior effects. Require\n`status=succeeded`, verified exit/output and domain readback for command success;\ncancelled or timed-out commands can also exit zero. A completed command is not a\ncompleted task. For remote setup, use the [SSH guide](../service/ssh.md).\n"
+    }
+  ],
+  "claims": [
+    {
+      "id": "original-id",
+      "text": "Save the original execution ID before starting an authorized command.",
+      "evidence": [
+        {
+          "source_id": "execution-guide",
+          "quote": "Save one original execution ID before starting an authorized command."
+        }
+      ]
+    },
+    {
+      "id": "observe-original",
+      "text": "After uncertainty, read the original execution rather than allocate a replacement.",
+      "evidence": [
+        {
+          "source_id": "execution-guide",
+          "quote": "Read the original execution after uncertainty; do not allocate a replacement ID."
+        }
+      ]
+    },
+    {
+      "id": "completion",
+      "text": "A completed command is not a completed task.",
+      "evidence": [
+        {
+          "source_id": "execution-guide",
+          "quote": "A completed command is not a\ncompleted task."
+        }
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "identity",
+      "label": "Original execution ID",
+      "detail": "Retain before starting"
+    },
+    {
+      "id": "command",
+      "label": "Authorized command",
+      "detail": "One admitted execution"
+    },
+    {
+      "id": "receipt",
+      "label": "Original receipt",
+      "detail": "Observe its actual result"
+    },
+    {
+      "id": "command-done",
+      "label": "Command completed",
+      "detail": "Exit, output and domain result checked"
+    },
+    {
+      "id": "task-done",
+      "label": "Task completed",
+      "detail": "The requested outcome is also verified"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "question",
+      "kind": "hook",
+      "duration": 5,
+      "title": "Lost reply. Same work.",
+      "caption": "When the response is uncertain, what should the agent inspect?",
+      "narration": "When the response is uncertain, what should the agent inspect?",
+      "claim_ids": [],
+      "entities": []
+    },
+    {
+      "id": "identity",
+      "kind": "pipeline",
+      "duration": 9,
+      "title": "Keep one original identity.",
+      "caption": "Save the execution ID, start the authorized command, then inspect its receipt.",
+      "narration": "Save the execution ID, start the authorized command, then inspect its receipt.",
+      "claim_ids": [
+        "original-id",
+        "observe-original"
+      ],
+      "entities": [
+        "identity",
+        "command",
+        "receipt"
+      ]
+    },
+    {
+      "id": "boundary",
+      "kind": "compare",
+      "duration": 8,
+      "title": "A command result is one part of the task.",
+      "caption": "Command success still needs verified output and the requested outcome.",
+      "narration": "Command success still needs verified output and the requested outcome.",
+      "claim_ids": [
+        "completion"
+      ],
+      "entities": [
+        "command-done",
+        "task-done"
+      ]
+    },
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "duration": 5,
+      "title": "Continue from the original evidence.",
+      "caption": "Explore Open Machine execution operations for the full lifecycle.",
+      "narration": "Explore Open Machine execution operations for the full lifecycle.",
+      "claim_ids": [],
+      "entities": []
+    }
+  ],
+  "notes": [
+    "Pinned documentation example at commit a347b3b8ca5903a4c7d6dc18c1ee219e817ee1f2. It explains the documented contract, not an independently audited runtime implementation.",
+    "Embedded source text is a short identified excerpt; its SHA256 binds that excerpt, not the entire upstream file.",
+    "The pipeline is a conceptual lifecycle, not a latency chart. It does not model all failure or cleanup states."
+  ]
+}

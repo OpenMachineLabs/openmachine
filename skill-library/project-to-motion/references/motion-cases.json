@@ -1,0 +1,526 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-21",
+  "evidence_policy": {
+    "page_verified": "The first-party page, text, captions, transcript, or link was retrieved. This does not mean media was played or pixels inspected.",
+    "frames_inspected": "Specific decoded frames were visually inspected; frame-observations.json records scope and provenance. This does not establish continuous playback or audio.",
+    "segment_watched": "Reserved for actual watched temporal segments with observation scope. Not used in this collection.",
+    "source_stated": "Paraphrase of what the source author says.",
+    "observed": "What was actually retrieved or visually inspected within the stated evidence scope. Frame observations require recorded samples; they do not imply continuous playback.",
+    "inference": "Researcher's proposed transfer to a future skill, not an empirically established outcome.",
+    "copyright": "Only short original notes and external locators are stored; no source media, page archives, full transcripts, or copied diagrams."
+  },
+  "cases": [
+    {
+      "id": "EC01",
+      "source_id": "EX01",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "Generation repeatedly extends text using next-word predictions.",
+      "observed": "The adaptation places successive prediction examples next to explanations of probability.",
+      "inference": "A growing object can explain recursion with less reorientation than replacement scenes.",
+      "viewer_problem": "How can one predictor produce a long answer?",
+      "story_structure": "Page: unfinished reply, one prediction, repeated extension, probability.",
+      "why_motion": "Temporal succession makes the output-to-input relationship explicit.",
+      "object_continuity": "Proposed adaptation: retain the same text object and append highlighted tokens.",
+      "transfer_rules": [
+        "Animate state replacement locally.",
+        "Pause on one complete cycle before repetition."
+      ],
+      "limits": "Word-based teaching simplifies tokenization; probabilities do not establish factual truth.",
+      "counterexample": "Fresh cards for each word conceal the feedback relationship."
+    },
+    {
+      "id": "EC02",
+      "source_id": "EX02",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "Identical words need different representations in different contexts.",
+      "observed": "The lesson motivates attention with multiple meanings of 'mole' before computation.",
+      "inference": "A semantic question can make subsequent matrix operations purposeful.",
+      "viewer_problem": "Why should a token's representation change?",
+      "story_structure": "Page: ambiguity, context-sensitive behavior, attention machinery.",
+      "why_motion": "Changing context around a retained token isolates the relevant transformation.",
+      "object_continuity": "Proposed adaptation: keep the token identity while its representation changes.",
+      "transfer_rules": [
+        "State the behavioral goal before equations.",
+        "Separate token identity from vector state."
+      ],
+      "limits": "The lesson explicitly simplifies tokens into words; attention is weighted interaction, not always one selected arrow.",
+      "counterexample": "Animate only one bright edge and imply all other attention weights are zero."
+    },
+    {
+      "id": "EC03",
+      "source_id": "EX05",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "The author selected the frontier after considering inputs, outputs, and internal variables.",
+      "observed": "Design notes discuss shared-data comparisons and progressing from simpler algorithms.",
+      "inference": "Choose the hidden state that answers the viewer's question before choosing visual style.",
+      "viewer_problem": "What determines the next region searched?",
+      "story_structure": "Author's account: problem, simple method, limitation, improved method.",
+      "why_motion": "Frontier evolution exposes decision order invisible in a final path.",
+      "object_continuity": "Proposed adaptation: preserve map, start, goal, and visited cells.",
+      "transfer_rules": [
+        "Highlight one explanatory variable.",
+        "Compare algorithms on an unchanged input."
+      ],
+      "limits": "Design notes describe intent; no animation was inspected. Creative exploration is not a guaranteed recipe.",
+      "counterexample": "Swap maps between algorithms and attribute the different result to the algorithm."
+    },
+    {
+      "id": "EC04",
+      "source_id": "EX07",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "Position can be constrained by distances to known locations.",
+      "observed": "Text builds a positioning example with a person, paired map, and additional distance constraints.",
+      "inference": "Incremental constraints make the reason for a solution visible.",
+      "viewer_problem": "Why does another measurement reduce possible locations?",
+      "story_structure": "Page: familiar location problem, one distance, intersecting constraints, more complete system.",
+      "why_motion": "Each added condition visibly restricts the previous possibility set.",
+      "object_continuity": "Proposed adaptation: keep person and landmarks fixed across representations.",
+      "transfer_rules": [
+        "Add one constraint at a time.",
+        "Retain unresolved possibilities until evidence removes them."
+      ],
+      "limits": "Cartoon regions are not calibrated uncertainty; real GPS also requires timing and dimensional considerations.",
+      "counterexample": "Jump directly to a precise point after one distance measurement."
+    },
+    {
+      "id": "EC05",
+      "source_id": "EX08",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "The simulation slows molecular motion and highlights collisions.",
+      "observed": "Text connects particle events, adjustable time, container changes, and aggregate collision measurements.",
+      "inference": "Time scaling and event markers can bridge invisible causes and macroscopic effects.",
+      "viewer_problem": "How do many small events produce a measurable quantity?",
+      "story_structure": "Page: particles, collisions, confinement, aggregate measurement.",
+      "why_motion": "Event order and accumulation are the mechanism being explained.",
+      "object_continuity": "Proposed adaptation: preserve the population while changing one container parameter.",
+      "transfer_rules": [
+        "Label altered time scales.",
+        "Show event and aggregate views together."
+      ],
+      "limits": "No audio or simulation playback inspected; simplified particles do not establish exact physical scale.",
+      "counterexample": "Speed up particles for excitement while narrating that only volume changed."
+    },
+    {
+      "id": "EC06",
+      "source_id": "EX11",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "The article analyzes momentum through a tractable quadratic model.",
+      "observed": "Definitions introduce step size and momentum alongside a critique of simplistic physical intuition.",
+      "inference": "Parameter comparisons are clearer when geometry and initial conditions remain stable.",
+      "viewer_problem": "Why does accumulated update history change convergence?",
+      "story_structure": "Page: intuition, explicit model, analysis, broader interpretation.",
+      "why_motion": "Trajectories reveal oscillation and accumulation that endpoints omit.",
+      "object_continuity": "Proposed adaptation: retain axes, objective, initial point, and method identity.",
+      "transfer_rules": [
+        "Change one parameter per comparison.",
+        "Keep unsuccessful trajectories visible."
+      ],
+      "limits": "Quadratic analysis does not prove universal behavior on arbitrary neural-network objectives.",
+      "counterexample": "Compare different initial points and label the difference an optimizer improvement."
+    },
+    {
+      "id": "EC07",
+      "source_id": "EX14",
+      "evidence_level": "frames_inspected",
+      "analysis_basis": "Official page plus sampled GIF frames, not continuous playback.",
+      "source_stated": "The author reports direct manipulation, consistent mechanics, and clarity improving prototypes.",
+      "observed": "Sampled propagation frames retain the network topology while bright marks occupy connector positions and different nodes become active. Multiple branches can be bright in the same sample.",
+      "inference": "A film can preserve causality even when it cannot preserve interactive agency.",
+      "viewer_problem": "Which action caused which state change?",
+      "story_structure": "Author's account: failed prototypes, revised controls, consistency, simplification.",
+      "why_motion": "Immediate visible response connects cause and consequence.",
+      "object_continuity": "Proposed adaptation: retain node identities and connection rules.",
+      "transfer_rules": [
+        "Remove intermediate decorative steps.",
+        "For video, choose explicit scenarios and give consequences time to register."
+      ],
+      "limits": "Author feedback is informal; this is design evidence, not validation of medical claims.",
+      "counterexample": "Use the same pulse animation for both strengthening and weakening a connection."
+    },
+    {
+      "id": "EC08",
+      "source_id": "EX15",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "An outbound packet can create firewall state even if the other firewall drops it.",
+      "observed": "The article builds from stateful firewalls to NAT, coordination, retries, and difficult cases.",
+      "inference": "Showing state beside packets explains why an apparent failure can enable later success.",
+      "viewer_problem": "How can two endpoints behind firewalls establish communication?",
+      "story_structure": "Page: simpler obstacle, remembered outbound state, coordinated attempts, harder cases.",
+      "why_motion": "The order of attempts changes what later packets can do.",
+      "object_continuity": "Proposed adaptation: retain endpoint addresses and state-table entries.",
+      "transfer_rules": [
+        "Animate packets and state updates together.",
+        "Include relay fallback when explaining full connectivity."
+      ],
+      "limits": "Conceptual packet timing is not measured latency; direct connectivity is not universal.",
+      "counterexample": "A rejected packet disappears without showing the state it created."
+    },
+    {
+      "id": "EC09",
+      "source_id": "EX17",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "The explainer identifies GPT-2 small and offers sampling controls.",
+      "observed": "Retrieved UI labels connect embedding, transformer processing, output, and temperature/top-k/top-p settings.",
+      "inference": "An identified executable model can anchor abstract mechanism claims.",
+      "viewer_problem": "Which settings affect how a next token is selected?",
+      "story_structure": "Page interface: input, model stages, output distribution and controls.",
+      "why_motion": "A controlled parameter change can show distribution and selection consequences.",
+      "object_continuity": "Proposed adaptation: retain prompt and vocabulary positions across comparisons.",
+      "transfer_rules": [
+        "Label the concrete model.",
+        "Distinguish distribution changes from sampled outcomes."
+      ],
+      "limits": "No generation was run; one stochastic output cannot establish a general effect.",
+      "counterexample": "Change both prompt and temperature, then credit temperature for the new topic."
+    },
+    {
+      "id": "EC10",
+      "source_id": "EX19",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "Carbon recommends semantic/spatial consistency and continuity of shared elements.",
+      "observed": "Guideline sections distinguish consistent motion meanings, shared elements, and choreography.",
+      "inference": "A skill should maintain a small dictionary mapping semantic events to motion.",
+      "viewer_problem": "Is this the same object, a related object, or a new object?",
+      "story_structure": "Guideline: consistent meaning, preserved context, coordinated entrances.",
+      "why_motion": "Transition behavior can encode identity and relationship.",
+      "object_continuity": "Proposed adaptation: retain IDs and persistent anchors across scene changes.",
+      "transfer_rules": [
+        "Use one motion meaning consistently.",
+        "Sequence attention without falsely serializing computation."
+      ],
+      "limits": "IBM's grid style and UI timing are context-specific, not universal film rules.",
+      "counterexample": "Use identical morphs for replacement, selection, and transformation."
+    },
+    {
+      "id": "EC11",
+      "source_id": "EX22",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved source text and page structure; not playback or pixel inspection.",
+      "source_stated": "The talk describes feedback throughout gestures and direct input-response relationships.",
+      "observed": "Transcript discusses flashlight-button response, focus feedback, and behavior before gesture completion.",
+      "inference": "A demonstration should reveal intermediate states rather than only before and after.",
+      "viewer_problem": "What is the system doing while the user acts?",
+      "story_structure": "Transcript: fluidity, direct manipulation, motion behavior, continuous feedback.",
+      "why_motion": "Continuity connects action, progress, and resulting state.",
+      "object_continuity": "Proposed adaptation: keep the manipulated object attached to the demonstrated input.",
+      "transfer_rules": [
+        "Show intermediate response.",
+        "Separate live interaction evidence from an illustrative reconstruction."
+      ],
+      "limits": "Transcript-only review; no exact timing, easing, or frame quality assessed.",
+      "counterexample": "Show an instant final screen while claiming continuous feedback."
+    },
+    {
+      "id": "EC12",
+      "source_id": "EX26",
+      "evidence_level": "frames_inspected",
+      "analysis_basis": "Official page plus sampled GIF frames, not continuous playback.",
+      "source_stated": "Material distinguishes container transforms, shared axes, fade-through, and fades by relationship.",
+      "observed": "Container samples preserve purple surfaces as content expands into detail. Shared-axis samples retain device frames while views change. A slow-motion section is explicitly labelled.",
+      "inference": "Transitions should express a real relationship instead of supplying arbitrary variety.",
+      "viewer_problem": "How is the incoming view related to the previous one?",
+      "story_structure": "Tutorial: relationship categories, examples, implementation.",
+      "why_motion": "A persistent container or axis supplies continuity during a state change.",
+      "object_continuity": "Proposed adaptation: preserve an object when expanding its details; avoid false morph equivalence.",
+      "transfer_rules": [
+        "Choose transition semantics before easing.",
+        "Use separate visual treatment for unrelated content."
+      ],
+      "limits": "Continuous playback was not reviewed. UI transitions do not determine narration or reading duration.",
+      "counterexample": "Morph unrelated services into one another and imply they are identical."
+    },
+    {
+      "source_id": "product-linear-asks",
+      "source_stated": "Slack intake becomes a Linear issue; updates return to Slack.",
+      "observed": "The extracted page lists intake, team inbox, and completion updates. A player control is present; its frames were not inspected.",
+      "inference": "A stable request identity can make an integration understandable without a broad feature tour.",
+      "viewer_problem": "Where did my request go, and how will I know it is done?",
+      "story_structure": "Proposed: request → issue → handling → returned status.",
+      "why_motion": "Movement across tool boundaries can explain a handoff; a return path explains feedback.",
+      "object_continuity": "Keep the same request title or ID across representations.",
+      "transfer_rules": [
+        "Use one representative request.",
+        "Animate only the changed fields at each handoff."
+      ],
+      "limits": "The page does not establish video timing or latency.",
+      "counterexample": "Teleporting between unrelated screenshots hides whether they show the same request.",
+      "id": "PC01",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-supabase-branching-2",
+      "source_stated": "Branches copy project structure without data; changes can be reviewed and merged.",
+      "observed": "The page separates creation, editing, review, synchronization, and merge; it also lists limitations.",
+      "inference": "The central story is controlled divergence and reintegration.",
+      "viewer_problem": "How can I experiment without modifying production?",
+      "story_structure": "Proposed: baseline → isolated branch → visible change → review → merge.",
+      "why_motion": "Divergence and convergence become legible over time.",
+      "object_continuity": "Retain production and preview labels; follow the change set.",
+      "transfer_rules": [
+        "Draw data and schema distinctly.",
+        "Keep production unchanged during preview edits.",
+        "Show a review gate."
+      ],
+      "limits": "Refresh product details before making a current demonstration.",
+      "counterexample": "Duplicating a database full of records implies data copying that this source expressly excludes.",
+      "id": "PC02",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-stripe-connect-making",
+      "source_stated": "Cubes metaphorically represent components; the onboarding demo is code-built and decorative motion honors reduced-motion preferences.",
+      "observed": "The article contains implementation explanations and separate sections for metaphor, UI animation, and accessibility.",
+      "inference": "A consistent material or shape language can unify a film, but explanatory movement needs a semantic job.",
+      "viewer_problem": "What do these building blocks enable?",
+      "story_structure": "Proposed: compact metaphor → concrete interaction → visible outcome.",
+      "why_motion": "Interaction demonstrates behavior; continuous rotation mainly establishes tone.",
+      "object_continuity": "Map a metaphor to a named component before relying on it.",
+      "transfer_rules": [
+        "Use exact code-rendered UI for claims.",
+        "Give each explanatory motion a cause.",
+        "Provide a clear held state."
+      ],
+      "limits": "This is an author's implementation account, not our playback analysis.",
+      "counterexample": "Rotating unlabeled cubes cannot explain request routing by themselves.",
+      "id": "PC03",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-stripe-workbench-lifecycle",
+      "source_stated": "A PaymentIntent exposes lifecycle states that can be inspected and modeled as a state machine.",
+      "observed": "The walkthrough pairs object inspection with named statuses and a state-machine explanation.",
+      "inference": "A tracked object is a strong protagonist for an API explanation.",
+      "viewer_problem": "Why is this transaction waiting, and what event changes it?",
+      "story_structure": "Proposed: create object → inspect state → apply event → inspect changed state.",
+      "why_motion": "A transition can bind a cause to its consequence.",
+      "object_continuity": "Keep one object ID visible; change only its status and relevant fields.",
+      "transfer_rules": [
+        "Label transition conditions.",
+        "Distinguish possible branches from the selected example path."
+      ],
+      "limits": "Do not imply every payment traverses every listed state.",
+      "counterexample": "Animating all states as an inevitable straight line misrepresents a conditional lifecycle.",
+      "id": "PC04",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-vercel-fluid",
+      "source_stated": "A router assigns requests to instances that can handle concurrent work and stream responses.",
+      "observed": "The page explains routing, compute selection, processing, and scaling; it includes diagram placeholders.",
+      "inference": "Separate request lanes can expose otherwise invisible waiting and resource sharing.",
+      "viewer_problem": "What happens while a request waits on an external API?",
+      "story_structure": "Proposed: request arrives → instance waits → another request uses capacity → responses return.",
+      "why_motion": "Overlap is a temporal relationship that a single static occupancy image may hide.",
+      "object_continuity": "Preserve request IDs and instance boundaries.",
+      "transfer_rules": [
+        "Show router-mediated paths.",
+        "Label illustrative timing.",
+        "Make waiting visually distinct from CPU activity."
+      ],
+      "limits": "No source video or numeric speedup was measured.",
+      "counterexample": "Equally fast dots or shortened bars can imply an unsupported performance benchmark.",
+      "id": "PC05",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-figma-make",
+      "source_stated": "Existing frames retain structure and metadata when supplied to an interactive generation workflow.",
+      "observed": "The page describes a settings-panel animation prompt and other interaction examples through image descriptions.",
+      "inference": "Showing a stable design gaining one behavior makes the transformation concrete.",
+      "viewer_problem": "What changes when a static design becomes interactive?",
+      "story_structure": "Proposed: existing frame → specific behavior request → working interaction.",
+      "why_motion": "The claimed result is behavior; the viewer needs to see the state response.",
+      "object_continuity": "Maintain layout, labels, and component identity across before and after.",
+      "transfer_rules": [
+        "Choose one input and response.",
+        "Use a working prototype or clearly labeled reconstruction."
+      ],
+      "limits": "A generated prototype does not prove production readiness.",
+      "counterexample": "Replacing the entire screen with a different design breaks the evidence for a bounded improvement.",
+      "id": "PC06",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-cursor-plan-mode",
+      "source_stated": "Planning researches the codebase, creates an editable Markdown artifact, and supports subsequent building.",
+      "observed": "The page explicitly separates reviewing the plan from building from it.",
+      "inference": "A visible intermediate artifact can communicate user control and workflow progress.",
+      "viewer_problem": "How do I influence the work before implementation begins?",
+      "story_structure": "Proposed: request → researched plan → edit → execution → result.",
+      "why_motion": "State changes clarify progression without implying instantaneous completion.",
+      "object_continuity": "Carry the same task labels from plan items into execution status.",
+      "transfer_rules": [
+        "Make edits legible.",
+        "Distinguish intended work from finished work."
+      ],
+      "limits": "The launch's quality claim is not independently measured here.",
+      "counterexample": "Turning every plan checkbox green as soon as the plan appears falsely signals completion.",
+      "id": "PC07",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-notion-custom-agents",
+      "source_stated": "Routing agents capture requests, create structured records, enrich context, and update teams.",
+      "observed": "The article organizes examples as Q&A, routing, and status reporting; an introductory video is linked.",
+      "inference": "One completed loop is more informative than an abstract agent mascot.",
+      "viewer_problem": "What triggers the automation, and what work reaches me?",
+      "story_structure": "Proposed: incoming request → structured record → enrichment → returned update.",
+      "why_motion": "The sequence makes responsibility and handoffs visible.",
+      "object_continuity": "Follow the request and its added fields.",
+      "transfer_rules": [
+        "Name the trigger and destination.",
+        "Show the resulting artifact.",
+        "Keep permissions visible when they matter."
+      ],
+      "limits": "No autonomous run, frame sequence, or video timing was verified.",
+      "counterexample": "An endlessly spinning agent icon conveys activity without evidence of useful work.",
+      "id": "PC08",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-rive-linkedin",
+      "source_stated": "The recap combines reusable animated modules with personal data, localization, and device constraints.",
+      "observed": "The production account explains modular data-driven assembly and links a creator case study.",
+      "inference": "An automated video skill should separate story content from reusable rendering behaviors.",
+      "viewer_problem": "How can one visual system tell many distinct stories?",
+      "story_structure": "Proposed: input facts → selected modules → coherent personalized recap.",
+      "why_motion": "Shared transitions can maintain coherence across varying content.",
+      "object_continuity": "Bind each metric or entity to a stable data key.",
+      "transfer_rules": [
+        "Define content slots and branch rules.",
+        "Test long text and missing data.",
+        "Recompose for aspect ratio."
+      ],
+      "limits": "An interactive Rive experience is not itself an offline video rendering pipeline.",
+      "counterexample": "Hardcoding one perfect example can fail when the next article has longer labels or fewer facts.",
+      "id": "PC09",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-apple-mac-mini",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "apple-thermal"
+      ],
+      "source_stated": "The release connects compact size with internal thermal architecture.",
+      "observed": "At 0s the exterior is opaque; 1.5–3s expose interior layers with colored paths. At 4.5–7.5s the viewing orientation differs. At 9s the underside and paths are visible; 11–13.8s restore exterior views.",
+      "inference": "Reveal, trace, and reassemble can explain a hidden mechanism while retaining the object.",
+      "viewer_problem": "How does the compact enclosure manage heat?",
+      "story_structure": "Exterior → cutaway → internal paths → underside → exterior.",
+      "why_motion": "Successive views connect internal paths to the recognizable enclosure.",
+      "object_continuity": "One enclosure anchors the spatial changes.",
+      "transfer_rules": [
+        "Reveal only relevant layers.",
+        "Explain color semantics when needed.",
+        "Return to the initial object."
+      ],
+      "limits": "Frames do not measure airflow, cooling performance, transition timing, or exact easing.",
+      "counterexample": "Unlabeled colored paths can suggest physical quantities the diagram never establishes.",
+      "analysis_basis": "Decoded official media frames inspected at recorded offsets; see frame-observations.json.",
+      "id": "PC10"
+    },
+    {
+      "source_id": "product-arc-search-comparison",
+      "source_stated": "The product page presents before-and-after ad-blocking examples.",
+      "observed": "Extracted image descriptions explicitly label the two comparison states.",
+      "inference": "A matched comparison can explain removal of distracting elements with little narration.",
+      "viewer_problem": "What becomes easier to see or use?",
+      "story_structure": "Proposed: recognizable cluttered page → controlled change → readable result.",
+      "why_motion": "A wipe or removal can preserve correspondence between states.",
+      "object_continuity": "Maintain the same page, scale, and scroll position.",
+      "transfer_rules": [
+        "Change the tested variable only.",
+        "Hold the result long enough to read."
+      ],
+      "limits": "No playback or search-speed benchmark was examined.",
+      "counterexample": "Changing page content, zoom, and device size together makes the comparison unfair.",
+      "id": "PC11",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-jitter-project-teaser",
+      "source_stated": "The creator's template is described as gradual anticipation followed by a reveal; the page declares nine seconds and 4:5.",
+      "observed": "Template title, description, credit, duration, aspect ratio, and remix link are present; playback was not inspected.",
+      "inference": "A reveal can open a mechanism explainer if it promptly leads to substance.",
+      "viewer_problem": "Why should I keep watching?",
+      "story_structure": "Proposed: intriguing fragment → identifiable result → mechanism question.",
+      "why_motion": "Controlled disclosure can direct attention toward the reveal.",
+      "object_continuity": "Reveal an object that remains useful in the explanation.",
+      "transfer_rules": [
+        "Keep the hook brief relative to the whole film.",
+        "Connect the revealed object to the next causal beat."
+      ],
+      "limits": "Template metadata does not establish pacing, easing, or readability.",
+      "counterexample": "Repeating teaser suspense throughout an explainer delays the information viewers came for.",
+      "id": "PC12",
+      "evidence_level": "page_verified",
+      "analysis_basis": "Retrieved official page text and structure; proposed motion transfer, not video playback."
+    },
+    {
+      "source_id": "product-linear-agents",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "linear-agents"
+      ],
+      "source_stated": "Identifiable app users can receive issues and mentions.",
+      "observed": "At 4s an assignment menu highlights Codegen; 8s shows selected issues; 12s shows its response. At 16s an agent directory appears. At 20–24s a separate Devin thread shows a proposal and code; 28s shows the product title.",
+      "inference": "Familiar controls can explain delegation before introducing a new product category.",
+      "viewer_problem": "How do agents participate in my existing workflow?",
+      "story_structure": "Sampled sequence: assignment → response → catalog → mention-based example → title.",
+      "why_motion": "Successive interface states connect delegation with visible work.",
+      "object_continuity": "The film contains separate examples; retain identity within each.",
+      "transfer_rules": [
+        "Show a familiar action and its resulting artifact.",
+        "Mark changes of example clearly."
+      ],
+      "limits": "Sparse frames establish sequence, not exact transitions, runtime, or verified code quality.",
+      "counterexample": "Combining different issue threads as one continuous task invents continuity.",
+      "analysis_basis": "Decoded official media frames inspected at recorded offsets; see frame-observations.json.",
+      "id": "PC13"
+    },
+    {
+      "source_id": "product-resend-new-editor",
+      "evidence_level": "frames_inspected",
+      "asset_ids": [
+        "resend-embed",
+        "resend-columns",
+        "resend-global-theme"
+      ],
+      "source_stated": "The release presents columns, themes, and paste-to-embed controls.",
+      "observed": "Embed samples show a placeholder/menu at 0–1.6s, a populated post at 2.4–4s, then a settings preview at 4.8–7.1s. Column samples progress from a menu to a two-cell row. Theme samples show alignment-control changes on an empty canvas.",
+      "inference": "A focused action-result pair can prove one feature without a full-interface tour.",
+      "viewer_problem": "What changes when I use this control?",
+      "story_structure": "Localized control → changed content → inspectable settings.",
+      "why_motion": "Adjacent states link the control with its effect.",
+      "object_continuity": "Keep the edited block identifiable.",
+      "transfer_rules": [
+        "Frame the relevant control and result.",
+        "Hold a readable result."
+      ],
+      "limits": "Sampled frames do not verify every click, exact easing, delivered email behavior, or global style consistency.",
+      "counterexample": "An empty canvas is insufficient evidence that all content inherited a theme.",
+      "analysis_basis": "Decoded official media frames inspected at recorded offsets; see frame-observations.json.",
+      "id": "PC14"
+    }
+  ]
+}

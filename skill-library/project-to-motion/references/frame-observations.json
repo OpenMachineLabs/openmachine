@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-10-21",
+  "evidence_level": "frames_inspected",
+  "scope": "Contact sheets of decoded frames were inspected. No continuous playback, audio or exact easing review. Original media are not included.",
+  "assets": [
+    {
+      "id": "linear-agents",
+      "source_id": "product-linear-agents",
+      "official_page_url": "https://linear.app/changelog/2025-05-20-linear-for-agents",
+      "media_url": "https://webassets.linear.app/files/ornj730p/production/030bddb82af1240fd46ac324e6c43f68cefe41fa.mp4",
+      "media_sha256": "cd0b14a5bf5b18b00ac4699377b0c3798a42ebb666dbbc1fbbabea17fce6e8f0",
+      "media_bytes": 14631769,
+      "duration_seconds": 32.633333,
+      "width": 3840,
+      "height": 2160,
+      "frame_rate": "30/1",
+      "sample_offsets_seconds": [
+        0,
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28,
+        32
+      ],
+      "sampling_method": "ffmpeg accurate input seek, one decoded frame per requested offset, scaled to 960px width",
+      "sampling_precision": "Offsets are requested seek positions; frame selection is constrained by source frame rate. Exact decoded PTS was not separately logged."
+    },
+    {
+      "id": "resend-embed",
+      "source_id": "product-resend-new-editor",
+      "official_page_url": "https://resend.com/changelog/introducing-the-new-email-editor",
+      "media_url": "https://cdn.resend.com/posts/introducing-the-new-email-editor-4.mp4",
+      "media_sha256": "ccc2776219bc1d5ab8c5e7752dd6d29f6b33b2c04b23f3b18f69bce87d9c449f",
+      "media_bytes": 984849,
+      "duration_seconds": 7.166667,
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": "30/1",
+      "sample_offsets_seconds": [
+        0,
+        0.8,
+        1.6,
+        2.4,
+        3.2,
+        4,
+        4.8,
+        5.8,
+        7.1
+      ],
+      "sampling_method": "ffmpeg accurate input seek, one decoded frame per requested offset, scaled to 960px width",
+      "sampling_precision": "Offsets are requested seek positions; frame selection is constrained by source frame rate. Exact decoded PTS was not separately logged."
+    },
+    {
+      "id": "resend-columns",
+      "source_id": "product-resend-new-editor",
+      "official_page_url": "https://resend.com/changelog/introducing-the-new-email-editor",
+      "media_url": "https://cdn.resend.com/posts/introducing-the-new-email-editor-2.mp4",
+      "media_sha256": "74afb90ea511b36b5eb0f1fb96b30d1ad22e600e1320a3a00232958bdf697a61",
+      "media_bytes": 221061,
+      "duration_seconds": 1.933333,
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": "30/1",
+      "sample_offsets_seconds": [
+        0,
+        0.3,
+        0.6,
+        0.9,
+        1.2,
+        1.8
+      ],
+      "sampling_method": "ffmpeg accurate input seek, one decoded frame per requested offset, scaled to 960px width",
+      "sampling_precision": "Offsets are requested seek positions; frame selection is constrained by source frame rate. Exact decoded PTS was not separately logged."
+    },
+    {
+      "id": "resend-global-theme",
+      "source_id": "product-resend-new-editor",
+      "official_page_url": "https://resend.com/changelog/introducing-the-new-email-editor",
+      "media_url": "https://cdn.resend.com/posts/introducing-the-new-email-editor-3.mp4",
+      "media_sha256": "6f3c527e94995c77521fff91d20f62553e7af481119edb0604370596226224cf",
+      "media_bytes": 165405,
+      "duration_seconds": 3.233333,
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": "30/1",
+      "sample_offsets_seconds": [
+        0,
+        0.5,
+        1,
+        1.5,
+        2,
+        2.5,
+        3.1
+      ],
+      "sampling_method": "ffmpeg accurate input seek, one decoded frame per requested offset, scaled to 960px width",
+      "sampling_precision": "Offsets are requested seek positions; frame selection is constrained by source frame rate. Exact decoded PTS was not separately logged."
+    },
+    {
+      "id": "apple-thermal",
+      "source_id": "product-apple-mac-mini",
+      "official_page_url": "https://www.apple.com/newsroom/2024/10/apples-new-mac-mini-is-more-mighty-more-mini-and-built-for-apple-intelligence/",
+      "media_url": "https://www.apple.com/newsroom/videos/videos-2024/autoplay/2024/10/apple-mac-mini-thermal-architecture/large_2x.mp4",
+      "media_sha256": "dcdca603366d66d3309819fdd86b2edf35a28ed93ba2b506e1e7f2ee1d85455f",
+      "media_bytes": 11161979,
+      "duration_seconds": 13.9291,
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": "30000/1001",
+      "sample_offsets_seconds": [
+        0,
+        1.5,
+        3,
+        4.5,
+        6,
+        7.5,
+        9,
+        11,
+        13.8
+      ],
+      "sampling_method": "ffmpeg accurate input seek, one decoded frame per requested offset, scaled to 960px width",
+      "sampling_precision": "Offsets are requested seek positions; frame selection is constrained by source frame rate. Exact decoded PTS was not separately logged."
+    },
+    {
+      "id": "explain-gif-1",
+      "source_id": "EX26",
+      "media_url": "https://codelabs.developers.google.com/static/codelabs/material-motion-flutter/img/11807bdf36c66657.gif",
+      "media_sha256": "6d480f1d1553faacff495cd6adc9506751349e3f3a1376446fd908947bd601be",
+      "duration_seconds": 11.5,
+      "sample_offsets_seconds": [
+        0.0,
+        1.65,
+        3.25,
+        4.9,
+        6.55,
+        8.2,
+        9.8,
+        11.45
+      ],
+      "sampling_method": "Pillow decoded GIF frames selected evenly by frame index; times are cumulative declared frame durations."
+    },
+    {
+      "id": "explain-gif-2",
+      "source_id": "EX26",
+      "media_url": "https://codelabs.developers.google.com/static/codelabs/material-motion-flutter/img/71218f390abae07e.gif",
+      "media_sha256": "523c29b3ac1cf86b5b7753dc59ee5af41d79410ac057fb5b90c1417d66d6de32",
+      "duration_seconds": 9.5,
+      "sample_offsets_seconds": [
+        0.0,
+        1.3,
+        2.7,
+        4.0,
+        5.4,
+        6.7,
+        8.1,
+        9.4
+      ],
+      "sampling_method": "Pillow decoded GIF frames selected evenly by frame index; times are cumulative declared frame durations."
+    },
+    {
+      "id": "explain-gif-3",
+      "source_id": "EX14",
+      "media_url": "https://blog.ncase.me/content/images/2015/09/propagation.gif",
+      "media_sha256": "16be2fa5500be20ee5b69b885600fdf078e4127334a04ab426e757adcd99cdcd",
+      "duration_seconds": 4.0,
+      "sample_offsets_seconds": [
+        0.0,
+        0.6,
+        1.1,
+        1.7,
+        2.2,
+        2.8,
+        3.3,
+        3.9
+      ],
+      "sampling_method": "Pillow decoded GIF frames selected evenly by frame index; times are cumulative declared frame durations."
+    }
+  ]
+}
