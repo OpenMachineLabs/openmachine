@@ -6,6 +6,10 @@ release workflow rejects version or source mismatches rather than editing tagged
 package metadata.
 It is not a rewrite of Core, a generic platform installer or an MCP tunnel.
 
+The installer supports Node.js 22 LTS and 24 LTS, with Node.js 24 LTS
+recommended. EOL and non-LTS release lines are not supported; see the
+[official Node.js release schedule](https://nodejs.org/en/about/previous-releases).
+
 The **published release tarball** embeds one exact macOS ARM64 offline runtime,
 including Python, Git, the Core wheel and locked dependencies. There are no
 npm installation lifecycle scripts. npm installation only unpacks the package:

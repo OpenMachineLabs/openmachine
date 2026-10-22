@@ -59,7 +59,7 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 
 ## Quick start
 
-**macOS Apple Silicon (macOS 13+, Node.js 20+)**
+**macOS Apple Silicon (macOS 13+, Node.js 24 LTS recommended; Node.js 22 LTS also supported)**
 
 ```bash
 npm install -g openmachine@latest

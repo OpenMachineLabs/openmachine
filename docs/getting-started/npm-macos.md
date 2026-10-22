@@ -1,6 +1,6 @@
 # Install with npm (Apple Silicon Mac)
 
-**Requirements:** macOS 13+ on Apple Silicon (ARM64), Node.js 20+.
+**Requirements:** macOS 13+ on Apple Silicon (ARM64), Node.js 24 LTS (recommended) or 22 LTS.
 This is the standard consumer install and update path. The current npm package
 targets Apple Silicon macOS; source installation remains an advanced developer
 path for other platforms until their npm packages are available.

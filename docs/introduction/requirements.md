@@ -2,7 +2,7 @@
 
 ## npm installer (Apple Silicon macOS)
 
-Requires macOS 13+, Apple Silicon (ARM64) and Node.js 20+. The [npm installer](../getting-started/npm-macos.md) bundles Python, Git, Core and its locked dependencies. The checks below apply to manual source installations.
+Requires macOS 13+, Apple Silicon (ARM64) and Node.js 24 LTS (recommended) or 22 LTS. The [npm installer](../getting-started/npm-macos.md) bundles Python, Git, Core and its locked dependencies. The checks below apply to manual source installations.
 
 ## Manual Core requirements
 
@@ -28,7 +28,7 @@ under [Service and runtime](../features/service.md).
 
 | Platform | Supported path | Important condition |
 | --- | --- | --- |
-| macOS Apple Silicon (npm) | npm installer and managed user service | macOS 13+, Node.js 20+; first-run setup required. |
+| macOS Apple Silicon (npm) | npm installer and managed user service | macOS 13+, Node.js 24 LTS recommended or 22 LTS; first-run setup required. |
 | macOS (source) | Manual Core serving and managed user service | Managed lifecycle requires the owning logged-in GUI user. |
 | Linux controller | Manual `openmachine serve` | No managed Linux service is provided by these commands. |
 | Linux SSH target | Explicitly prepared worker | Python 3.12+, Git, OpenSSH access and systemd 255+ user manager for command execution. |
