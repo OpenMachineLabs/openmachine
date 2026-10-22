@@ -33,7 +33,10 @@ silent social article trailer without other constraints, start with 30–39 seco
 helper exports silent video; narration and soundtrack production are outside its
 current scope. Keep existing source assets and previous accepted versions.
 
-Read the whole article, including limitations and future work. Retain a short
+Read the whole article, including limitations and future work. A trailer selects
+a visual argument; it does not put the whole section inventory on screen. Keep
+claim-critical qualifiers beside the claim, and omit secondary branches or whole
+claims that would require unreadable explanation. Retain a short
 project brief with:
 
 - the source locator or local article revision, audience, one main idea and CTA;
@@ -51,7 +54,10 @@ rendering unless the authored module actually reads it.
 ## Direct continuous motion
 
 Use [motion patterns and failure lessons](references/motion-patterns.md) when
-choosing the visual mechanism. Start with the article's strongest supported
+choosing the visual mechanism. When a user supplies an accepted film, inspect its
+actual motion and compare representative intervals before authoring. Record what
+changes in the objects, scale, framing and timing; matching its palette is not
+matching its direction. Start with the article's strongest supported
 result or question. Give the viewer an understandable hook in the opening seconds.
 
 Prefer persistent object identity and meaningful transformations: records gather,
@@ -60,6 +66,14 @@ a stable layer supports a changing agent, or results return to the owning stage.
 Move the camera to reveal the system instead of replacing every scene. A restrained
 cut or fade is useful when meaning changes; adding a moving dot to unrelated slides
 does not establish continuity. Never force causality merely to connect scenes.
+
+Write the action before the caption: what gathers, unfolds, separates, scans,
+compresses or returns, and why? A travelling dot or small card over a mostly
+static diagram is not enough for a request emphasizing animation. Let a dominant
+object visibly change, and vary close detail, field and overview where meaning
+warrants it. Use anticipation, stagger, acceleration and a readable settle rather
+than giving every beat the same slow pan and fade. These are choices, not a
+requirement to add constant movement or 3D.
 
 Keep a consistent visual hierarchy, directional logic and color meaning. Separate
 screen-space captions from moving world objects. Write short copy, budget actual
@@ -70,7 +84,8 @@ particles, 60fps or a warm background with better direction.
 
 Use the [film contract and commands](references/rendering.md). Copy the
 [editable starter](assets/starter.cjs) into a task-owned project and adapt its
-objects, copy and timing to the real article. Its
+objects, copy and timing to the real article. This is a mechanism demonstration,
+not a fixed scene layout or an aesthetic reference to reproduce. Its
 [example brief](assets/example-brief.md) reuses the illustration Skill's existing
 archive-review example; it is not a universal film template or a benchmark.
 
@@ -84,12 +99,22 @@ Preview in this order, continuing autonomously within the user's request:
 
 1. Render and inspect the main compositions at the intended aspect ratio.
 2. Render the opening and the hardest transition as short clips, with enough
-   time on both sides. Inspect the transition midpoint at readable resolution.
-3. View one low-resolution full draft for pacing and continuity. Resolve known
+   time on both sides. Inspect intermediate frames at readable resolution and
+   normal-speed playback. Check whether the action itself explains the change;
+   reject a sequence whose only motion is captions, a cursor or camera drift.
+3. Review one low-resolution full draft for pacing and continuity, comparing
+   representative intervals with an accepted reference when one was supplied.
+   Does the focal object remain readable at playback size? Do consecutive beats
+   change composition and action, or repeat the same title/diagram layout?
+   Resolve known
    copy, font, overlap and semantic issues before the full-resolution export.
 4. Export the final film and inspect its metadata and complete decode. Recheck
    changed intervals; reuse unchanged review evidence rather than repeatedly
    encoding the entire film to discover the same problem.
+
+Record which intervals and intermediate frames were actually inspected. A player
+reaching its endpoint, a contact sheet or a successful decode alone does not prove
+that motion quality was reviewed. Do not report those as full visual approval.
 
 The CLI's `inspect` result covers only technical properties. Separately check
 source fidelity, missing versus rejected branches, frozen versus updated model
