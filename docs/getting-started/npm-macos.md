@@ -1,7 +1,9 @@
 # Install with npm (Apple Silicon Mac)
 
 **Requirements:** macOS 13+ on Apple Silicon (ARM64), Node.js 20+.
-For other supported macOS or Linux setups, [build Core from source](installation.md).
+This is the standard consumer install and update path. The current npm package
+targets Apple Silicon macOS; source installation remains an advanced developer
+path for other platforms until their npm packages are available.
 
 ## Install
 
@@ -29,10 +31,10 @@ openmachine status
 The service should report `ready`. Machine commands and workspace edits remain
 **off by default** unless you explicitly grant them.
 
-The npm `openmachine` command manages setup and service status. Use
-`openmachine core ...` to run Python Core CLI commands. Updating the npm
-package alone does **not** replace an existing managed Core runtime;
-see [Updates](updates.md).
+The npm `openmachine` command manages setup, service status and Core updates.
+Use `openmachine core ...` only for advanced Core management commands. Updating
+the npm package alone does **not** replace an existing managed Core runtime;
+run `openmachine update` as described in [Updates](updates.md).
 
 ## Background service and login startup
 

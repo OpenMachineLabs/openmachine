@@ -9,7 +9,11 @@ On this page:
 
 Core provides an offline runtime preparation path. Preparation does not register
 or start a service, change its selected version, or alter persistent startup policy.
-The existing wheel/requirements lifecycle commands remain supported.
+For consumer installs on supported Apple Silicon macOS, use the official npm
+package and `openmachine update`. This payload producer/preparer is an advanced
+release, developer and offline-management interface; it is not a separate
+consumer update workflow. The existing wheel/requirements lifecycle commands
+remain supported for those uses.
 
 ## One payload, one installer
 

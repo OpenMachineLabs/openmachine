@@ -1,6 +1,8 @@
-# Install OpenMachine Core from source
+# Advanced: Install OpenMachine Core from source
 
-On Apple Silicon macOS, the shorter route is the [npm installer](npm-macos.md).
+For ordinary consumer installations, use the [npm installer](npm-macos.md).
+This source-build path is for development and platforms without a published
+npm runtime package.
 This guide builds the released Python Core from an exact Git tag on macOS or
 Linux. It does not start a service, configure a tunnel, grant write permission
 or connect ChatGPT.

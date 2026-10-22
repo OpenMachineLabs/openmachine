@@ -1,5 +1,11 @@
 # Service and runtime management
 
+For ordinary consumer installations on supported Apple Silicon macOS, install
+and update through the official npm package and `openmachine update`. The
+wheel-based commands below are advanced developer/offline management paths for
+platforms without a published npm runtime package; they are not a second
+consumer installation method.
+
 Manual `serve` runs Core in your terminal. On macOS, the managed user service
 adds verified readiness, retained installations and bounded runtime recovery.
 Neither path manages the tunnel, a remote service or the ChatGPT conversation.

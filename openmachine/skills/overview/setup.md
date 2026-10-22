@@ -14,6 +14,11 @@ On this page:
 
 ## Install
 
+For consumer installs on Apple Silicon macOS, use the official npm-managed
+installation and update flow in [npm setup](../../../docs/getting-started/npm-macos.md)
+and [updates](../../../docs/getting-started/updates.md). The source-build flow
+below is for development and platforms without a published npm runtime package.
+
 Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Task storage requires SQLite 3.51.3 or newer, or the patched 3.50.7+
 (3.50.x) or 3.44.6+ (3.44.x) releases. Build from the exact release tag, not an unpinned default branch:

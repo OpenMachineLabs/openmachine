@@ -32,14 +32,6 @@ jobs:
           path: tagged
           fetch-depth: 0
           persist-credentials: false
-      - name: Checkout audited installer for legacy v0.2.21 only
-        if: github.event_name == 'workflow_dispatch' && inputs.tag == 'v0.2.21'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          path: legacy
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -48,7 +40,7 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Verify existing stable Release and choose source
+      - name: Verify published Release and exact source versions
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,30 +55,17 @@ jobs:
           test "$CORE_SHA" = "$(git -C tagged rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           VERSION="$(printf '%s' "$RELEASE_TAG" | cut -c 2-)"
           grep -Fqx "__version__ = \"$VERSION\"" tagged/openmachine/__init__.py
-          if test -f tagged/npm/package.json; then
-            PACKAGER=tagged
-            npm pkg set "version=$VERSION" --prefix tagged/npm
-            test "$(node -p "require('./tagged/npm/package.json').name")" = openmachine
-            PACKAGE_MODE=tag-exact
-          else
-            test "$GITHUB_EVENT_NAME" = workflow_dispatch
-            test "$RELEASE_TAG" = v0.2.21
-            test "$CORE_SHA" = 6014a3129b989427c7053ff426424963b47e6d4f
-            test -f legacy/npm/package.json
-            PACKAGER=legacy
-            PACKAGE_MODE=legacy-wrapper
-            test "$(node -p "require('./legacy/npm/package.json').version")" = "$VERSION"
-          fi
+          test -f tagged/npm/package.json
+          test "$(node -p "require('./tagged/npm/package.json').name")" = openmachine
+          test "$(node -p "require('./tagged/npm/package.json').version")" = "$VERSION"
           echo "CORE_SHA=$CORE_SHA" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
-          echo "PACKAGER=$PACKAGER" >> "$GITHUB_ENV"
-          echo "PACKAGE_MODE=$PACKAGE_MODE" >> "$GITHUB_ENV"
       - name: Test installer selected from tag
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PACKAGER"
+          cd tagged
           node --test test/repository/npm_installer.test.cjs
       - name: Build tagged Core and audited npm package
         shell: bash
@@ -104,16 +83,11 @@ jobs:
             --wheel "$wheel" --requirements "$PWD/tagged/requirements.lock" \
             --commit "$CORE_SHA" --cache "$RUNNER_TEMP/runtime-inputs" \
             --output "$RUNNER_TEMP/runtime-macos-arm64"
-          "$RUNNER_TEMP/builder/bin/python" "$PACKAGER/scripts/prepare_npm_release_sources.py" \
+          "$RUNNER_TEMP/builder/bin/python" tagged/scripts/prepare_npm_release_sources.py \
             --cache "$RUNNER_TEMP/source-cache" --runtime "$RUNNER_TEMP/runtime-macos-arm64" \
             --output "$RUNNER_TEMP/release-sources"
-          if test "$PACKAGE_MODE" = legacy-wrapper; then
-            node "$PACKAGER/npm/scripts/package.cjs" "$RUNNER_TEMP/runtime-macos-arm64" \
-              "$RUNNER_TEMP/dist" "$RUNNER_TEMP/release-sources" "$RELEASE_TAG"
-          else
-            node "$PACKAGER/npm/scripts/package.cjs" "$RUNNER_TEMP/runtime-macos-arm64" \
-              "$RUNNER_TEMP/dist" "$RUNNER_TEMP/release-sources"
-          fi
+          node tagged/npm/scripts/package.cjs "$RUNNER_TEMP/runtime-macos-arm64" \
+            "$RUNNER_TEMP/dist" "$RUNNER_TEMP/release-sources"
           test -f "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz"
           shasum -a 256 "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz"
       - name: Attest release tarball

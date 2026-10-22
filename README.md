@@ -74,7 +74,7 @@ Optionally enable startup at login:
 openmachine startup on
 ```
 
-For other macOS and Linux setups, [build Core from source](docs/getting-started/installation.md) (Python 3.12+, compatible SQLite, and Git). Windows is not supported.
+The npm-managed route is the default and only supported consumer installer today. The package currently targets Apple Silicon macOS; Linux and other source-based setups remain developer/advanced paths until npm packages for those platforms are published. Windows is not supported.
 
 To use ChatGPT, [connect it separately](docs/getting-started/connect-chatgpt.md) and [verify the connection](docs/getting-started/verification.md). The npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
 
@@ -82,7 +82,7 @@ The npm `openmachine` command manages setup and service status; `openmachine cor
 
 This is an early-development release, not a stable 1.x release.
 
-**Updating?** Updating the npm package does not automatically update the running Core service. See [Updates](docs/getting-started/updates.md).
+**Updating?** Use the same npm-managed path for both launcher and running Core. See [Updates](docs/getting-started/updates.md).
 
 ```bash
 npm install -g openmachine@latest
