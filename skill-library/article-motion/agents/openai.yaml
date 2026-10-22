@@ -1,0 +1,4 @@
+interface:
+  display_name: "Article Motion"
+  short_description: "Create continuous motion films from technical articles"
+  default_prompt: "Use $article-motion to turn this article into a short editorial motion film using $anthropic-style-illustrations."

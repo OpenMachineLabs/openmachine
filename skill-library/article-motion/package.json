@@ -1,0 +1,8 @@
+{
+  "name": "article-motion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local frame rendering for the article-motion Skill",
+  "engines": { "node": ">=20" },
+  "dependencies": { "@napi-rs/canvas": "0.1.100" }
+}

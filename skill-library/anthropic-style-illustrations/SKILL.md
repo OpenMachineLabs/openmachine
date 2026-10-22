@@ -43,3 +43,7 @@ Run from this Skill directory with its pinned PyMuPDF dependency:
 ```
 
 See [usage and reviewed-plan schema](references/usage.md). Generated outputs, caches and source media never belong in the indexed knowledge files. Keep output under this Skill's ignored `runs/` directory. No command here fetches external pages automatically; online lookup and pixel inspection are explicitly performed by the host at use time.
+
+For article trailers and continuous animated workflows, use the companion
+[article-motion Skill](../article-motion/SKILL.md). It reuses these semantic and
+visual rules and adds time-based authoring, previews and video rendering.

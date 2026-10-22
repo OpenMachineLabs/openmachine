@@ -696,6 +696,24 @@
         "test/skill-library/project-to-motion/test_retired_skill.py"
       ],
       "boundary_tests": []
+    },
+    "article_motion": {
+      "sources": [
+        "skill-library/article-motion/.gitignore",
+        "skill-library/article-motion/SKILL.md",
+        "skill-library/article-motion/agents/openai.yaml",
+        "skill-library/article-motion/assets/example-brief.md",
+        "skill-library/article-motion/assets/starter.cjs",
+        "skill-library/article-motion/package-lock.json",
+        "skill-library/article-motion/package.json",
+        "skill-library/article-motion/references/motion-patterns.md",
+        "skill-library/article-motion/references/rendering.md",
+        "skill-library/article-motion/scripts/motion.cjs"
+      ],
+      "tests": [
+        "test/skill-library/article-motion/test_motion.py"
+      ],
+      "boundary_tests": []
     }
   },
   "support": {
