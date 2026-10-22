@@ -4,7 +4,7 @@
 
 On this page:
 
-- [Legacy wheel-based installation and control](#legacy-wheel-based-installation-and-control)
+- [Advanced wheel-based installation and control](#advanced-wheel-based-installation-and-control)
 - [Exact updates and compatible rollback](#exact-updates-and-compatible-rollback)
 - [Bounded runtime recovery](#bounded-runtime-recovery)
 - [Diagnose without replay](#diagnose-without-replay)
