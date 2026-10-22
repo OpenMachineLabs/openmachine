@@ -21,9 +21,8 @@ function command(program, args, cwd) {
 }
 
 async function main(args) {
-  if (![2, 3, 4].includes(args.length) || !args.slice(0, 3).every((s) => path.isAbsolute(s)) ||
-      (args.length === 4 && args[3] !== 'v0.2.21')) {
-    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output [/absolute/release-sources [v0.2.21]]');
+  if (![2, 3].includes(args.length) || !args.slice(0, 3).every((s) => path.isAbsolute(s))) {
+    throw new Error('Usage: node npm/scripts/package.cjs /absolute/payload /absolute/output [/absolute/release-sources]');
   }
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     throw new Error('Build the npm payload on Apple Silicon macOS.');
@@ -36,8 +35,7 @@ async function main(args) {
     throw new Error('npm installer version does not match bundled Core version.');
   }
   const head = command('git', ['rev-parse', 'HEAD'], path.join(source, '..'));
-  const coreCommit = args.length === 4 ? command('git',
-    ['rev-parse', 'refs/tags/v0.2.21^{commit}'], path.join(source, '..')) : head;
+  const coreCommit = head;
   if (!/^[0-9a-f]{40}$/.test(coreCommit) || manifest.core?.commit !== coreCommit) {
     throw new Error('Payload source commit differs from checkout HEAD.');
   }
@@ -100,7 +98,7 @@ async function main(args) {
     }
     process.stdout.write(JSON.stringify({ package: path.join(output, name),
       core_version: manifest.core.version, core_commit: coreCommit, packager_commit: head,
-      legacy_core_tag: args.length === 4 ? args[3] : null, manifest_sha256: digest,
+      manifest_sha256: digest,
       archive_sha256: archiveDigest, source_archives: fullRelease ? expectedSources.archives.length : 0 }, null, 2) + '\n');
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });

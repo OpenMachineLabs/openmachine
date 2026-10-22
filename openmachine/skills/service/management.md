@@ -4,7 +4,7 @@
 
 On this page:
 
-- [Legacy wheel-based installation and control](#legacy-wheel-based-installation-and-control)
+- [Advanced wheel-based installation and control](#advanced-wheel-based-installation-and-control)
 - [Exact updates and compatible rollback](#exact-updates-and-compatible-rollback)
 - [Bounded runtime recovery](#bounded-runtime-recovery)
 - [Diagnose without replay](#diagnose-without-replay)
@@ -19,7 +19,12 @@ The wheel-based commands below remain a compatibility entry point: `service stop
 only unloads the job, whereas `manage stop` preserves Stop until explicit Start.
 Neither command cancels admitted user work.
 
-## Legacy wheel-based installation and control
+## Advanced wheel-based installation and control
+
+For ordinary consumer installations on supported Apple Silicon macOS, prefer
+the official npm package and `openmachine update`. Use the wheel/commit
+commands below only for development, offline management, or platforms without
+a published npm runtime package.
 
 Use the existing logged-in macOS user, a trusted built wheel and its exact lock.
 Choose a stable harmless file in a configured local workspace for readiness.

@@ -369,19 +369,14 @@ test('npm version matches Core and mismatched payload cannot be released', async
 });
 
 
-test('only the historical tag may override the packager HEAD', async (t) => {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+test('obsolete historical-tag packager override is rejected', async (t) => {
   const root = await temp();
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
-  const fixture = await fixturePackage(root, 'f'.repeat(40));
-  assert.equal(spawnSync('/usr/bin/tar',
-    ['-xzf', path.join(fixture, 'runtime.tar.gz'), '-C', root]).status, 0);
-  const payload = path.join(root, 'runtime');
   const result = spawnSync(process.execPath, ['npm/scripts/package.cjs',
-    payload, path.join(root, 'dist'), path.join(root, 'sources'), 'v0.2.21'],
+    path.join(root, 'runtime'), path.join(root, 'dist'), path.join(root, 'sources'), 'v0.2.21'],
   { encoding: 'utf8', timeout: 30000 });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Payload source commit differs from checkout HEAD/);
+  assert.match(result.stderr, /Usage: node npm\/scripts\/package\.cjs/);
   assert.equal(fs.existsSync(path.join(root, 'dist')), false);
 });
 
@@ -390,7 +385,8 @@ test('future npm publication requires the exact published Release tag', () => {
   assert.match(wf, /types: \[published\]/);
   assert.match(wf, /ref: \$\{\{ github\.event\.release\.tag_name \|\| inputs\.tag \}\}/);
   assert.match(wf, /tagged\/openmachine\/__init__\.py/);
-  assert.match(wf, /test "\$GITHUB_EVENT_NAME" = workflow_dispatch/);
   assert.match(wf, /if: github\.event_name == 'release'/);
   assert.match(wf, /npm publish.*VERSION/);
+  assert.doesNotMatch(wf, /v0\.2\.21|legacy-wrapper|npm pkg set/);
+  assert.match(wf, /require\('\.\/tagged\/npm\/package\.json'\)\.version.*VERSION/);
 });

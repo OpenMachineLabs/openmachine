@@ -1,8 +1,9 @@
 # Open Machine npm installer (macOS Apple Silicon)
 
 This directory is the npm distribution wrapper for the existing Python Core.
-The npm release version equals the bundled Python Core version (initially 0.2.21).
-The release packer and prepublish hook both reject mismatches.
+Every published npm version matches its bundled Core and exact source tag. The
+release workflow rejects version or source mismatches rather than editing tagged
+package metadata.
 It is not a rewrite of Core, a generic platform installer or an MCP tunnel.
 
 The **published release tarball** embeds one exact macOS ARM64 offline runtime,
@@ -59,15 +60,14 @@ then verifies the final npm tarball. The release form also embeds the five SHA25
 
 ## Release verification and publication boundary
 
-The manual \`npm-package.yml\` job builds current \`main\` for preview and never
-publishes. The separate \`npm-release.yml\` job builds from an exact published,
+The manual `npm-package.yml` job builds current `main` for preview and never
+publishes. The separate `npm-release.yml` job builds from an exact published,
 non-prerelease GitHub tag and automatically publishes only for new stable
-\`release.published\` events after npm Trusted Publishing is configured. It
-never publishes from workflow_dispatch. For the historical \`v0.2.21\` Release,
-the tagged Core commit is 6014a3129b989427c7053ff426424963b47e6d4f;
-because that tag predates the npm directory, a manual backfill uses the reviewed
-installer from main while the bundled Core is built strictly from that tag.
-Future tags must contain the installer; no other fallback is permitted.
+`release.published` events after npm Trusted Publishing is configured. It
+never publishes from `workflow_dispatch`. Every release tag must contain the npm
+installer, and the tag, Core version and npm package version must match exactly.
+The workflow builds and publishes from that tag; it has no historical packager
+fallback and never rewrites version metadata.
 
 The preview job runs only from the protected main branch. It attests the exact unpublished openmachine-*.tgz with a
 GitHub Actions OIDC/Sigstore SLSA build provenance statement, then uploads

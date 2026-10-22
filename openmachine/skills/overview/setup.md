@@ -14,6 +14,11 @@ On this page:
 
 ## Install
 
+For consumer installs on Apple Silicon macOS, use the official npm-managed
+installation and update flow in [npm setup](../../../docs/getting-started/npm-macos.md)
+and [updates](../../../docs/getting-started/updates.md). The source-build flow
+below is for development and platforms without a published npm runtime package.
+
 Use Python 3.12 or newer on macOS or Linux, with Git available for workspace
 identity. Task storage requires SQLite 3.51.3 or newer, or the patched 3.50.7+
 (3.50.x) or 3.44.6+ (3.44.x) releases. Build from the exact release tag, not an unpinned default branch:
@@ -29,8 +34,9 @@ python3 -m venv .venv
 ```
 
 Release notes use a compact Changes/Changelog format and do not attach installers
-or wheels. Build from the exact tag with its committed lock file as shown above;
-no PyPI, Homebrew or npm publication is implied.
+or wheels. This source-build workflow does not publish the wheel to PyPI or
+Homebrew. Consumer npm releases are handled separately by the stable GitHub
+Release workflow and its exact-tag version checks.
 
 The wheel includes the core, direct adapters and built-in Skills, not tests, private
 state or arbitrary checkout files. Workers use the installed package, never a

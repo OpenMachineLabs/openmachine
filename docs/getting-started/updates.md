@@ -44,16 +44,6 @@ version; `openmachine core --version` reports the bundled Core CLI version, whic
 may differ from the running service. Check `openmachine status` and use the
 explicit managed update process below for advanced wheel or commit inputs.
 
-The commands in the managed macOS section use the Python Core CLI. With npm,
-replace the leading `openmachine` with `openmachine core`, for example:
-
-```sh
-openmachine core --config "$CONFIG" --state-dir "$STATE" update \
-  --commit FULL_40_CHARACTER_LOWERCASE_SHA
-```
-
-Use a reviewed full commit SHA and the paths of your existing managed installation.
-
 ## Choose the version and preserve original work
 
 Read the [release notes](https://github.com/OpenMachineLabs/openmachine/releases)
@@ -62,7 +52,12 @@ Record current version/commit and existing task/execution IDs. Keep the current
 configuration, state, old worker archives and interpreters. Do not clear history
 or locks to force an upgrade or rollback.
 
-## Manual source installation
+## Advanced source/developer installation
+
+This is not the consumer upgrade path. Use the npm instructions above whenever
+the official npm package supports the controller platform. Keep this section
+only for development checkouts and platforms that do not yet have a published
+npm runtime package.
 
 Build the selected release in a **separate directory and virtual environment**
 using [Installation](installation.md) and that release's own lock. Validate its
