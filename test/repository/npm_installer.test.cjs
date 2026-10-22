@@ -12,9 +12,14 @@ const { prepareRuntime, verifyRuntime } = require('../../npm/lib/runtime.cjs');
 const { run, workspacePath, probePath, optionsOf } = require('../../npm/lib/cli.cjs');
 const { verifyReleaseSources } = require('../../npm/scripts/verify-release-sources.cjs');
 
-const VERSION = require('../../npm/package.json').version;
+const PACKAGE = require('../../npm/package.json');
+const VERSION = PACKAGE.version;
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const temp = () => fsp.mkdtemp(path.join(os.tmpdir(), 'om-npm-test-'));
+
+test('npm package only allows maintained Node.js LTS lines', () => {
+  assert.equal(PACKAGE.engines.node, '^22.0.0 || ^24.0.0');
+});
 
 async function fixturePackage(root, commit = 'c'.repeat(40)) {
   const pkg = path.join(root, 'package');
