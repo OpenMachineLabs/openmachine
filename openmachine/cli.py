@@ -97,6 +97,9 @@ def main() -> int:
         if action in {"machine-add", "machine-remove"}:
             operation.add_argument("--operation-id", required=True)
             operation.add_argument("--config-sha256", required=True)
+    ssh_setup = management.add_parser("ssh-setup", help="Inspect, review and prepare one SSH server with original-result recovery")
+    ssh_setup.add_argument("--action", choices=("inspect", "trust", "prepare", "status", "project", "save", "continue", "cancel"), required=True)
+    ssh_setup.add_argument("--operation-id", required=True)
     args = parser.parse_args()
     if args.command == "update" and ((args.wheel is not None and args.requirements is None)
                                      or (args.commit is not None and args.requirements is not None)):
@@ -129,6 +132,15 @@ def main() -> int:
                                       expected_candidate_sha256=args.candidate_sha256)
                     if args.expected_selection_sha256 is not None:
                         inputs["expected_selection_sha256"] = args.expected_selection_sha256
+            if action == "ssh-setup":
+                raw = sys.stdin.buffer.read(32769)
+                if len(raw) > 32768:
+                    raise Fault("request_limit", "Use the bounded SSH setup request.")
+                try:
+                    value = json.loads(raw or b"{}")
+                except (ValueError, UnicodeError):
+                    raise Fault("invalid_request", "Use a typed SSH setup object.") from None
+                inputs.update(setup_action=args.action, identity=args.operation_id, value=value)
             if action.startswith("machine-"):
                 inputs["name"] = args.name
                 if action in {"machine-test", "machine-add"}:

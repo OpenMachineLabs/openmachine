@@ -1,6 +1,8 @@
 """Explicit machines and workspaces; no implicit execution authority."""
 
 import hashlib
+import base64
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -21,25 +23,67 @@ DEFAULT_CONFIG = Path.home() / ".config/openmachine/config.toml"
 DEFAULT_STATE = Path.home() / ".local/state/openmachine"
 
 
+class SshConnection(BaseModel):
+    """A reviewed direct destination; existing aliases retain system SSH configuration."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    host: str = Field(max_length=253)
+    user: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+    port: int = Field(default=22, ge=1, le=65535)
+    identity_file: str | None = None
+    host_key: str = Field(max_length=8192)
+
+    @field_validator("host")
+    @classmethod
+    def single_host(cls, value: str) -> str:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", value):
+                raise ValueError("use one hostname or IP address") from None
+        if "%" in value:
+            raise ValueError("scoped addresses require an existing SSH alias")
+        return value
+
+    @field_validator("identity_file")
+    @classmethod
+    def key_path(cls, value: str | None) -> str | None:
+        if value is not None and (not value.startswith("/") or len(value) > 4096
+                                  or any(ord(c) < 32 for c in value)):
+            raise ValueError("use a native selected absolute key reference")
+        return value
+
+    @field_validator("host_key")
+    @classmethod
+    def public_key(cls, value: str) -> str:
+        parts = value.split(" ")
+        if len(parts) != 2 or parts[0] not in {"ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521"}:
+            raise ValueError("use a verified SSH public host key")
+        raw = base64.b64decode(parts[1], validate=True)
+        if len(raw) < 8 or len(raw) > 6144 or int.from_bytes(raw[:4], "big") != len(parts[0]) or raw[4:4 + len(parts[0])] != parts[0].encode():
+            raise ValueError("invalid SSH host key encoding")
+        return value
+
+
 class Machine(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     transport: Literal["local", "ssh"]
     execution_enabled: bool = False
     workspace_write_enabled: bool | None = None
     ssh_alias: Name | None = None
+    ssh_connection: SshConnection | None = None
     ssh_worker: str | None = None
     ssh_identity: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{64})?$")] = ""
 
     @model_validator(mode="after")
     def transport_settings(self):
         if self.transport == "local":
-            if self.ssh_alias is not None or self.ssh_worker is not None or self.ssh_identity:
+            if self.ssh_alias is not None or self.ssh_connection is not None or self.ssh_worker is not None or self.ssh_identity:
                 raise ValueError("local machines do not accept SSH settings")
-        elif (self.ssh_alias is None or self.ssh_worker is None
+        elif ((self.ssh_alias is None) == (self.ssh_connection is None) or self.ssh_worker is None
               or not self.ssh_worker.startswith("/") or "\0" in self.ssh_worker
               or len(self.ssh_worker) > 4096
               or not re.fullmatch(r"[0-9a-f]{64}\.pyz", Path(self.ssh_worker).name)):
-            raise ValueError("SSH requires an alias and an absolute content-addressed worker archive")
+            raise ValueError("SSH requires one reviewed connection or alias and an absolute content-addressed worker archive")
         elif (self.execution_enabled or self.workspace_write_enabled is True) and not self.ssh_identity:
             raise ValueError("probe and explicitly pin the SSH identity before enabling execution")
         return self
@@ -122,6 +166,8 @@ class Settings(BaseModel):
         if value["check_for_updates"]:
             del value["check_for_updates"]
         for machine in value["machines"].values():
+            if machine["ssh_connection"] is None:
+                del machine["ssh_connection"]
             if machine["workspace_write_enabled"] is None:
                 del machine["workspace_write_enabled"]
         return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()

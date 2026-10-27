@@ -26,7 +26,8 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    return {**executions, **changes, **task_state, **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    from integrations.ssh.setup import check_state as ssh_setup_state
+    return {**executions, **changes, **task_state, **ssh_setup_state(state), **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
             "prefix": str(Path(sys.prefix).resolve()), "configuration_sha256": config.configuration_sha256()}
 
@@ -317,6 +318,11 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):
             raise ValueError("candidate cannot preserve retired Events history without reactivating delivery")
         recovery = _ssh_recovery_state(state)
+        from integrations.ssh.setup import check_state as ssh_setup_state
+        setup = ssh_setup_state(state)
+        if setup["ssh_setup_records"] and (value["state_contract"] < 22 or any(
+                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in setup.items())):
+            raise ValueError("candidate ignores original SSH preparation records")
         if recovery["ssh_recovery_present"] and (value["state_contract"] < 7 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in recovery.items())):
             raise ValueError("candidate ignores or changes retained SSH observation budgets")

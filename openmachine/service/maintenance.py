@@ -34,7 +34,7 @@ PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activat
 TERMINAL = {"completed", "rejected", "restored"}
 CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
 CAPABILITIES = ["status", "bind", "start", "resume", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback",
-                "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
+                "machines", "machine-probe", "machine-test", "machine-add", "machine-remove", "ssh-setup"]
 
 
 def _selection_digest(record: dict) -> str:
@@ -575,21 +575,30 @@ def machines(config_path: Path, state: Path) -> dict:
         raise Fault("configuration_changed", "Configuration changed during observation; refresh again.")
     return {"status": "observed", "config_sha256": digest, "machines": [
         {"name": name, "transport": target.transport, "ssh_alias": target.ssh_alias,
+         **({"ssh_destination": f"{target.ssh_connection.user}@{target.ssh_connection.host}:{target.ssh_connection.port}"} if target.ssh_connection else {}),
          "ssh_worker": target.ssh_worker, "ssh_identity": target.ssh_identity,
          "os": platform.system() if target.transport == "local" else None,
          "architecture": platform.machine() if target.transport == "local" else None}
         for name, target in config.machines.items()]}
 
 
-def _machine_candidate(config, name: str, alias: str, worker: str, pinned: str = ""):
-    if name in config.machines or any(target.ssh_alias == alias or pinned and target.ssh_identity == pinned
+def _machine_candidate(config, name: str, alias: str | None, worker: str, pinned: str = "", *, connection=None, project=None):
+    if name in config.machines or any(alias and target.ssh_alias == alias or pinned and target.ssh_identity == pinned
                                        for target in config.machines.values()):
         raise Fault("duplicate_machine", "That machine name or SSH alias is already configured.")
+    if project and project["name"] in config.workspaces:
+        raise Fault("duplicate_workspace", "That project name is already configured.")
     try:
-        return Settings.model_validate(config.model_dump() | {"machines": {
+        fields = {"machines": {
             **{key: value.model_dump() for key, value in config.machines.items()},
             name: {"transport": "ssh", "ssh_alias": alias, "ssh_worker": worker,
-                   "ssh_identity": pinned, "execution_enabled": False, "workspace_write_enabled": False}}})
+                   "ssh_connection": connection, "ssh_identity": pinned,
+                   "execution_enabled": project["commands"] if project else False,
+                   "workspace_write_enabled": project["writes"] if project else False}}}
+        if project:
+            fields["workspaces"] = {**{key: value.model_dump() for key, value in config.workspaces.items()},
+                                    project["name"]: {"machine": name, "root": project["root"]}}
+        return Settings.model_validate(config.model_dump() | fields)
     except ValidationError as error:
         raise Fault("invalid_machine", "Use a machine name, existing SSH alias and absolute content-addressed worker path.") from error
 
@@ -614,7 +623,8 @@ def probe_machine(config_path: Path, name: str, *, alias: str | None = None, wor
 
 
 def change_machine(config_path: Path, state: Path, action: str, identity: str, name: str,
-                   expected_config_sha256: str, *, alias: str = "", worker: str = "", pinned: str = "") -> dict:
+                   expected_config_sha256: str, *, alias: str | None = "", worker: str = "", pinned: str = "",
+                   connection=None, project=None) -> dict:
     # Repeating an original operation is readback, never another probe or mutation.
     if os.path.lexists(_operation_path(state, identity)):
         return read_operation(config_path, state, identity)
@@ -632,10 +642,12 @@ def change_machine(config_path: Path, state: Path, action: str, identity: str, n
     if action == "machine-add":
         if not re.fullmatch(r"[0-9a-f]{64}", pinned):
             raise Fault("identity_required", "Test the connection and explicitly confirm its reported identity first.")
-        candidate = _machine_candidate(config, name, alias, worker, pinned)
+        candidate = _machine_candidate(config, name, alias, worker, pinned, connection=connection, project=project)
         # The retained candidate verifies SSH before activation. Admit its original
         # operation first so a slow/failed exchange has durable readback.
         raw["machines"][name] = candidate.machines[name].model_dump(exclude_none=True)
+        if project:
+            raw.setdefault("workspaces", {})[project["name"]] = candidate.workspaces[project["name"]].model_dump()
     else:
         target = config.machine(name)
         if target.transport != "ssh":
@@ -679,6 +691,10 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
             result = observe(config_path, state)
         elif action == "machines":
             result = machines(config_path, state)
+        elif action == "ssh-setup":
+            from integrations.ssh.setup import act
+            inputs["action"] = inputs.pop("setup_action")
+            result = act(config_path, state, **inputs)
         elif action in {"machine-probe", "machine-test"}:
             result = probe_machine(config_path, **inputs)
         elif action in {"machine-add", "machine-remove"}:
@@ -706,6 +722,10 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                   "incompatible" if code.startswith("incompatible") else "activation_pending" if code == "activation_pending" else
                   "blocked" if code == "runtime_recovery_blocked" else "unready" if code == "service_unready" else "unknown",
                   "reason": code}
+        if action == "ssh-setup" and inputs.get("action", inputs.get("setup_action")) == "inspect":
+            from integrations.ssh.setup import _path
+            if not os.path.lexists(_path(state, inputs["identity"])):
+                result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
         if (action in {"machine-add", "machine-remove"} and code in {
                 "configuration_changed", "duplicate_machine", "invalid_machine", "identity_required", "identity_mismatch",
                 "ssh_host_key_mismatch", "ssh_authentication_required", "ssh_unavailable", "remote_runtime_unavailable",
