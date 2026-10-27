@@ -714,6 +714,13 @@ def setup_ssh(config_path, state, action, identity, value):
             record = ssh_setup._read(state, identity)
         if record["config"] != str(config_path):
             ssh_setup._fault("configuration_changed")
+        if record["phase"] == "saving":
+            # The setup lease excludes a still-running submitter. Inspect the
+            # original under the admission lock before permitting a fresh save.
+            with lease(state / "service/operation.lock"):
+                if not os.path.lexists(_operation_path(state, identity)):
+                    record["phase"] = "project_ready"
+                    save_json(path, record)
         if action == "cancel":
             if record["phase"] in {"preparing", "saving"}:
                 ssh_setup._fault("original_operation_required")
@@ -787,14 +794,9 @@ def setup_ssh(config_path, state, action, identity, value):
                 record["phase"] = "saving"
                 save_json(path, record)
                 target = ssh_setup._target(record)
-                try:
-                    change_machine(config_path, state, "machine-add", identity, record["candidate"]["name"],
-                        record["config_sha256"], alias=target.ssh_alias, connection=target.ssh_connection,
-                        worker=target.ssh_worker, pinned=target.ssh_identity, project=record["project"])
-                except Fault:
-                    if not _operation_path(state, identity).exists():
-                        record["phase"] = "project_ready"
-                    raise
+                change_machine(config_path, state, "machine-add", identity, record["candidate"]["name"],
+                    record["config_sha256"], alias=target.ssh_alias, connection=target.ssh_connection,
+                    worker=target.ssh_worker, pinned=target.ssh_identity, project=record["project"])
             if record["phase"] == "saving" and _operation_path(state, identity).exists():
                 operation = read_operation(config_path, state, identity)
                 if action == "continue" and operation["status"] == "continuation_required":
@@ -807,7 +809,8 @@ def setup_ssh(config_path, state, action, identity, value):
                     record["phase"] = "save_failed"
             record["reason"] = None
         except (Fault, OSError, TimeoutError, UnicodeError) as error:
-            record["reason"] = error.code if isinstance(error, Fault) else "ssh_unavailable"
+            record["reason"] = error.code if isinstance(error, Fault) else (
+                "management_unavailable" if record["phase"] == "saving" else "ssh_unavailable")
         save_json(path, record)
         return {"status": "observed", "setup": ssh_setup.view(record)}
 

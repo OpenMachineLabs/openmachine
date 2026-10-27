@@ -10,6 +10,7 @@ from unittest.mock import patch
 from integrations.ssh import client, provision, setup
 from openmachine.config import SshConnection, load
 from openmachine.foundation.sanitize import Fault
+from openmachine.foundation.state import lease, save_json
 from openmachine.service import maintenance
 from test.support.service_cases import ServiceCaseFixture
 
@@ -110,6 +111,26 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
                 with self.assertRaises(Fault):
                     checks._candidate_state(Path(sys.executable), self.config, self.state)
 
+    def test_save_before_admission_recovers_without_resubmitting_or_bypassing_lock(self):
+        self.available = True
+        with patch.object(setup, "_discover", return_value=(key(), True)), patch.object(setup, "_remote", side_effect=self.remote), \
+                patch.object(client, "call", return_value={"target_identity": "d" * 64}), \
+                patch.object(maintenance, "change_machine", side_effect=OSError("fixture disk failure")) as change:
+            self.act("inspect", self.request)
+            self.act("project", {"name": "project", "root": "/remote/project", "commands": False, "writes": False})
+            self.assertEqual(self.act("save", {"confirmed": True})["phase"], "saving")
+            with lease(self.state / "service/operation.lock"):
+                with self.assertRaises(Fault):
+                    self.act("status")
+            self.assertEqual(setup._read(self.state, self.operation_id)["phase"], "saving")
+            self.assertEqual(self.act("status")["phase"], "project_ready")
+            # A crashed submitter leaves the same pre-admission state on disk.
+            record = setup._read(self.state, self.operation_id) | {"phase": "saving"}
+            save_json(setup._path(self.state, self.operation_id), record)
+            self.assertEqual(self.act("status")["phase"], "project_ready")
+            change.assert_called_once()
+            self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
+
     def test_wrong_credentials_unsupported_server_and_cancel_never_prepare(self):
         for code in ("ssh_authentication_required", "unsupported_target", "scope_unavailable", "worker_conflict"):
             self.operation_id = hashlib.md5(code.encode(), usedforsecurity=False).hexdigest()
@@ -125,7 +146,9 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
         connection = {"host": "server.example", "user": "operator", "port": 2200, "host_key": key()}
         (self.root / ".ssh").mkdir()
         (self.root / ".ssh/known_hosts").write_text("fixture")
-        with patch.object(Path, "home", return_value=self.root), patch.object(client, "_exchange", side_effect=[
+        with patch.object(Path, "home", return_value=self.root), \
+                patch.object(Path, "is_file", autospec=True, side_effect=lambda path: path == self.root / ".ssh/known_hosts"), \
+                patch.object(client, "_exchange", side_effect=[
                 (0, f"[server.example]:2200 {key(2)}\n".encode()), (0, f"[server.example]:2200 {key()}\n".encode())]):
             with self.assertRaises(Fault) as caught:
                 setup._discover(connection)
