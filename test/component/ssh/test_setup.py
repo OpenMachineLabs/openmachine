@@ -36,7 +36,7 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
                 **({"root": fields["root"]} if action == "project" else {})}
 
     def act(self, action, value=None):
-        return setup.act(self.config, self.state, action, self.id, value or {})["setup"]
+        return maintenance.setup_ssh(self.config, self.state, action, self.id, value or {})["setup"]
 
     def test_unknown_host_requires_review_and_lost_prepare_reads_original_once(self):
         before = self.config.read_bytes()
@@ -76,6 +76,10 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
                 patch.object(client, "call", return_value={"target_identity": "d" * 64}), patch.object(maintenance, "_spawn") as spawn:
             self.assertEqual(self.act("inspect", self.request)["phase"], "prepared")
             self.act("project", {"name": "remote-project", "root": "/remote/project", "commands": False, "writes": True})
+            with patch.object(setup, "_remote", return_value={"root": "/different/project"}):
+                changed = self.act("save", {"confirmed": True})
+            self.assertEqual(changed["reason"], "remote_project_changed")
+            self.assertFalse(maintenance._operation_path(self.state, self.id).exists())
             result = self.act("save", {"confirmed": True})
             self.assertEqual(result["phase"], "saving", result.get("reason"))
             record = maintenance._read(self.state, self.id)
@@ -137,6 +141,15 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             with self.assertRaises(ValueError):
                 SshConnection(**(connection | {"host": host}))
 
+    def test_invalid_typed_input_returns_bounded_rejection_without_an_original(self):
+        for identity, value, reason in (("invalid", self.request, "invalid_operation_id"),
+                                       (self.id, {"name": "build", "alias": ["wrong"]}, "invalid_machine")):
+            with patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance.os, "getuid", return_value=501):
+                result = maintenance.dispatch(self.config, self.state, "ssh-setup", setup_action="inspect",
+                                              identity=identity, value=value)
+            self.assertEqual(result["reason"], reason)
+            self.assertFalse(maintenance._operation_path(self.state, self.id).exists())
+
     def test_remote_preparation_publishes_exact_bytes_without_overwrite_or_symlink(self):
         raw = b"reviewed fixture worker"
         digest = hashlib.sha256(raw).hexdigest()
@@ -152,3 +165,10 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "worker_conflict"):
                 provision.act(request)
             self.assertEqual(destination.read_bytes(), b"conflict")
+            destination.unlink()
+            preserved = self.root / "unrelated-worker"
+            preserved.write_bytes(raw)
+            destination.symlink_to(preserved)
+            with self.assertRaisesRegex(ValueError, "worker_conflict"):
+                provision.act(request)
+            self.assertEqual(preserved.read_bytes(), raw)
