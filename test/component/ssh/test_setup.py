@@ -98,6 +98,89 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             spawn.assert_called_once()
             self.assertNotIn("prepare", self.remote_calls)
 
+    def test_completed_prepare_failure_preserves_original_for_explicit_retry_or_cancel(self):
+        remote = setup._remote
+        before = self.config.read_bytes()
+        for recovery in ("prepare", "cancel"):
+            with self.subTest(recovery=recovery):
+                self.operation_id = hashlib.md5(recovery.encode(), usedforsecurity=False).hexdigest()
+                self.available, self.remote_calls = False, []
+                with patch.object(setup, "_discover", return_value=(key(), True)), \
+                        patch.object(setup, "_remote", side_effect=self.remote), \
+                        patch.object(client, "call", return_value={"target_identity": "d" * 64}):
+                    view = self.act("inspect", self.request)
+                    original = setup._read(self.state, self.operation_id)
+                    consent = {"confirmed": True, "sha256": view["sha256"]}
+                    with patch.object(setup, "_remote", wraps=remote), patch.object(client, "_exchange", return_value=(
+                            0, b'{"error":"ssh_preparation_unavailable"}')) as attempt:
+                        failed = self.act("prepare", consent)
+                    attempt.assert_called_once()
+                    self.assertEqual(failed["phase"], "inspecting")
+                    self.assertEqual(failed["reason"], "ssh_preparation_unavailable")
+                    for _ in range(2):
+                        view = self.act("status")
+                        self.assertEqual(view["phase"], "ready_to_prepare")
+                        self.assertEqual(view["reason"], failed["reason"])
+                        self.assertFalse(view["worker_available"])
+                    self.assertNotIn("prepare", self.remote_calls)
+                    result = self.act(recovery, consent if recovery == "prepare" else {})
+                    self.assertEqual(result["phase"], "prepared" if recovery == "prepare" else "cancelled")
+                    self.assertIsNone(result["reason"])
+                    self.assertEqual(self.remote_calls.count("prepare"), int(recovery == "prepare"))
+                    retained = setup._read(self.state, self.operation_id)
+                    for field in ("operation_id", "candidate", "artifact", "config_sha256"):
+                        self.assertEqual(retained[field], original[field])
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_completed_prepare_error_after_publication_reuses_verified_worker(self):
+        remote = setup._remote
+        with patch.object(setup, "_discover", return_value=(key(), True)), \
+                patch.object(setup, "_remote", side_effect=self.remote), \
+                patch.object(client, "call", return_value={"target_identity": "d" * 64}) as probe:
+            view = self.act("inspect", self.request)
+            consent = {"confirmed": True, "sha256": view["sha256"]}
+            # Publication can succeed before a directory fsync or cleanup fails.
+            self.available = True
+            with patch.object(setup, "_remote", wraps=remote), patch.object(client, "_exchange", return_value=(
+                    0, b'{"error":"ssh_preparation_unavailable"}')):
+                self.assertEqual(self.act("prepare", consent)["phase"], "inspecting")
+            view = self.act("status")
+            self.assertEqual(view["phase"], "prepared")
+            self.assertIsNone(view["reason"])
+            self.assertEqual(view["operation_id"], self.operation_id)
+            self.assertEqual(self.act("prepare", consent)["phase"], "prepared")
+            probe.assert_called_once()
+            self.assertNotIn("prepare", self.remote_calls)
+
+    def test_unknown_prepare_without_worker_preserves_error_and_blocks_replay_and_cancel(self):
+        remote = setup._remote
+        for index, (outcome, reason) in enumerate((
+                (TimeoutError(), "ssh_unavailable"),
+                ((255, b'{"error":"ssh_preparation_unavailable"}'), "ssh_preparation_unavailable"),
+                ((0, b'incomplete JSON'), "ssh_protocol_error"))):
+            with self.subTest(reason=reason):
+                self.operation_id = f"{index + 1:032x}"
+                self.remote_calls = []
+                with patch.object(setup, "_discover", return_value=(key(), True)), \
+                        patch.object(setup, "_remote", side_effect=self.remote):
+                    view = self.act("inspect", self.request)
+                    consent = {"confirmed": True, "sha256": view["sha256"]}
+                    with patch.object(setup, "_remote", wraps=remote), \
+                            patch.object(client, "_exchange", side_effect=[outcome]) as attempt:
+                        self.assertEqual(self.act("prepare", consent)["phase"], "preparing")
+                    attempt.assert_called_once()
+                    for action in ("status", "prepare"):
+                        view = self.act(action, consent if action == "prepare" else {})
+                        self.assertEqual(view["phase"], "preparing")
+                        self.assertEqual(view["reason"], reason)
+                        self.assertFalse(view["worker_available"])
+                        self.assertEqual(view["operation_id"], self.operation_id)
+                    with self.assertRaises(Fault) as caught:
+                        self.act("cancel")
+                    self.assertEqual(caught.exception.code, "original_operation_required")
+                    self.assertNotIn("prepare", self.remote_calls)
+                    self.assertEqual(setup._read(self.state, self.operation_id)["phase"], "preparing")
+
     def test_candidate_must_read_retained_setup_records_and_cannot_ignore_them(self):
         import subprocess
         import sys

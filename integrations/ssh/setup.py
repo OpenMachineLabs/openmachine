@@ -128,7 +128,8 @@ def _remote(record, action, **fields):
     try:
         value = json.loads(raw)
         if isinstance(value, dict) and re.fullmatch(r"[a-z_]{1,64}", str(value.get("error", ""))):
-            _fault(value["error"])
+            raise Fault(value["error"], "The remote setup program reported a failure.",
+                        {"ssh_setup_completed": code == 0})
         expected = f'{value["home"]}/.local/share/openmachine/workers/{request["sha256"]}.pyz'
         if (code or not isinstance(value, dict) or not isinstance(value["home"], str)
                 or not value["home"].startswith("/") or len(value["home"]) > 4096

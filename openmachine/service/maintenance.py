@@ -766,7 +766,13 @@ def setup_ssh(config_path, state, action, identity, value):
                 raw = bundle._archive_bytes(Path(record["artifact"]["path"]))
                 record["phase"] = "preparing"
                 save_json(path, record)
-                record["facts"] = ssh_setup._remote(record, "prepare", archive=base64.b64encode(raw).decode())
+                try:
+                    record["facts"] = ssh_setup._remote(record, "prepare", archive=base64.b64encode(raw).decode())
+                except Fault as error:
+                    if (error.evidence or {}).get("ssh_setup_completed") is True:
+                        # A completed error may follow publication; inspect before retrying.
+                        record["phase"] = "inspecting"
+                    raise
             if record["phase"] == "preparing":
                 record["facts"] = ssh_setup._remote(record, "inspect")
                 if record["facts"]["worker_status"] == "available":
@@ -807,7 +813,8 @@ def setup_ssh(config_path, state, action, identity, value):
                     record["phase"] = "completed"
                 elif operation["status"] in {"rejected", "restored"}:
                     record["phase"] = "save_failed"
-            record["reason"] = None
+            if record["phase"] not in {"ready_to_prepare", "preparing"}:
+                record["reason"] = None
         except (Fault, OSError, TimeoutError, UnicodeError) as error:
             record["reason"] = error.code if isinstance(error, Fault) else (
                 "management_unavailable" if record["phase"] == "saving" else "ssh_unavailable")
