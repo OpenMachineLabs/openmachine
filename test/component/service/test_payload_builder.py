@@ -1,15 +1,65 @@
 """Tests for service behavior at the component layer."""
 
 import io
+import json
 from pathlib import Path
+import plistlib
 import runpy
 import subprocess
 import tarfile
 import unittest
+from unittest.mock import patch
+from openmachine.service import payload
 from test.support.payload_cases import PayloadCaseFixture
 
 
 class PayloadTests(PayloadCaseFixture, unittest.TestCase):
+    def test_signing_precedes_inventory_and_preserves_links(self):
+        builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
+        native = self.source / "python/bin/python3.13"
+        native.write_bytes(b"\xcf\xfa\xed\xfepython")
+        git = self.source / "git/bin/git"
+        git.write_bytes(b"\xcf\xfa\xed\xfegit")
+        (self.source / "manifest.json").unlink()
+
+        def sign(arguments, **kwargs):
+            if "--sign" in arguments:
+                target = Path(arguments[-1])
+                if target == native:
+                    options = Path(arguments[arguments.index("--entitlements") + 1])
+                    self.assertEqual(plistlib.loads(options.read_bytes()),
+                                     {"com.apple.security.cs.disable-library-validation": True})
+                else:
+                    self.assertEqual(target, git)
+                    self.assertNotIn("--entitlements", arguments)
+                target.write_bytes(target.read_bytes() + b"signature")
+
+        with patch.object(subprocess, "run", side_effect=sign) as codesign:
+            digest = builder["seal_payload"](self.source, self.manifest, "Developer ID Application: Fixture")
+        self.assertEqual(codesign.call_count, 4)
+        manifest = payload.verify(self.source, digest)
+        self.assertTrue((self.source / "python/bin/python3").is_symlink())
+        self.assertEqual(manifest["files"]["python/bin/python3.13"]["bytes"], len(native.read_bytes()))
+        self.assertNotEqual(digest, self.digest)
+
+    def test_signing_failure_does_not_publish_a_manifest(self):
+        builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
+        (self.source / "python/bin/python3.13").write_bytes(b"\xcf\xfa\xed\xfepython")
+        manifest = self.source / "manifest.json"
+        manifest.unlink()
+        with patch.object(subprocess, "run", side_effect=subprocess.CalledProcessError(1, "codesign")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                builder["seal_payload"](self.source, self.manifest, "Developer ID Application: Fixture")
+        self.assertFalse(manifest.exists())
+
+    def test_unsigned_payload_keeps_the_existing_manifest_contract(self):
+        builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
+        original = json.loads((self.source / "manifest.json").read_bytes())
+        with patch.object(subprocess, "run") as command:
+            digest = builder["seal_payload"](self.source, self.manifest, None)
+        command.assert_not_called()
+        self.assertEqual(payload.verify(self.source, digest), original)
+
     def test_git_entry_resolves_helpers_after_relocation_and_preserves_arguments(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
         (self.source / "git/bin/git").write_text(
