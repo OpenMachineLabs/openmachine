@@ -458,6 +458,30 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             startup.assert_called_once_with(self.state, False)
             self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
 
+    def test_resume_preserves_stop_login_and_recovery_without_new_intent(self):
+        record = self.policy_fixture()
+        episode = service_runtime._recovery_attempt(self.state, None, 1000000)
+        record = service_state._record(self.state)
+        with patch.object(service_runtime, "_verify_files"), patch.object(service_checks, "_candidate_state"), \
+                patch.object(maintenance, "observe", return_value={}), \
+                patch.object(service_runtime, "_start") as start:
+            maintenance.control(self.config, self.state, "resume")
+            start.assert_not_called()
+            self.assertEqual(service_state._record(self.state), record)
+            running = record | {"policy": {"desired": "running", "start_at_login": False}}
+            self.save(running)
+            maintenance.control(self.config, self.state, "resume")
+            start.assert_called_once_with(self.state, running)
+            self.assertEqual(service_state._record(self.state), running)
+            self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
+            start.reset_mock()
+            # Legacy records have no persisted running intent.
+            legacy = dict(record, format=1)
+            legacy.pop("policy")
+            self.save(legacy)
+            maintenance.control(self.config, self.state, "resume")
+            start.assert_not_called()
+
     def test_retained_management_survives_selected_legacy_installation(self):
         # A valid old payload anchor stays authoritative even when the selected
         # newer Core was installed through the earlier wheel-only updater.
