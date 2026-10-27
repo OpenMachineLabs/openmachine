@@ -74,7 +74,7 @@ def _definition(state: Path, record: dict) -> dict:
             "StandardOutPath": "/dev/null", "StandardErrorPath": str(state / "service/service.log")}
 
 
-def _verify_files(state: Path, record: dict) -> None:
+def _verify_files(state: Path, record: dict) -> dict:
     try:
         path = _plist_path(state)
         for owned in (path, state / "service/launch.py", state / "service/service.log"):
@@ -91,7 +91,8 @@ def _verify_files(state: Path, record: dict) -> None:
             # the exact former definition is admissible, and its old launcher
             # rejects format 2 without ever starting the stopped service.
             definitions.extend(_definition(state, dict(record, current=identity, format=1)) for identity in selections)
-        if (path.read_bytes() not in [plistlib.dumps(item) for item in definitions]
+        contents = path.read_bytes()
+        if (contents not in [plistlib.dumps(item) for item in definitions]
                 or (state / "service/launch.py").read_text() != LAUNCHER):
             raise ValueError("service definition changed")
         if "management" in record:
@@ -103,6 +104,7 @@ def _verify_files(state: Path, record: dict) -> None:
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
                     or info.st_nlink != 1 or entry.read_bytes() != service_state.management_entry(state, record)):
                 raise ValueError("management entry changed")
+        return plistlib.loads(contents)
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
         raise Fault("service_definition_mismatch", "The installed launcher or LaunchAgent differs; do not overwrite or control another service.") from error
 
@@ -158,11 +160,23 @@ def _native(state: Path) -> dict:
         raise Fault("user_service_unavailable", "The macOS GUI user domain is unavailable; log in as the owning user. No privileges were changed.")
     fields = {}
     for line in result.stdout.splitlines():
-        found = re.fullmatch(r"\s*(path|program|pid|state|last exit code) = (.*)", line)
+        found = re.fullmatch(r"\t(path|program|pid|state|last exit code|type|managed_by|working directory) = (.*)", line)
         if found and found[1] not in fields:
             fields[found[1]] = found[2].strip('"')
     if fields.get("path") != str(_plist_path(state)):
-        raise Fault("service_identity_mismatch", "The loaded job does not belong to this installation; it was not controlled.")
+        # ServiceManagement can submit the owned LaunchAgent at login, replacing
+        # its displayed plist path. Verify the actual job against the owned file.
+        if (not re.fullmatch(r"\(submitted by smd\.\d+\)", fields.get("path", ""))
+                or fields.get("type") != "Submitted"
+                or fields.get("managed_by") != "com.apple.xpc.ServiceManagement"):
+            raise Fault("service_identity_mismatch", "The loaded job does not belong to this installation; it was not controlled.")
+        definition = _verify_files(state, service_state._record(state))
+        arguments = re.findall(r"^\targuments = \{\n((?:\t\t[^\n]*\n)*)\t\}$", result.stdout, re.MULTILINE)
+        if (len(arguments) != 1
+                or [line[2:] for line in arguments[0].splitlines()] != definition["ProgramArguments"]
+                or fields.get("program") != definition["ProgramArguments"][0]
+                or fields.get("working directory") != definition["WorkingDirectory"]):
+            raise Fault("service_identity_mismatch", "The submitted job differs from the owned launcher; it was not controlled.")
     pid = fields.get("pid", "")
     return {"loaded": True, "pid": int(pid) if pid.isdigit() else None,
             "process_state": fields.get("state", "unknown"), "last_exit_code": fields.get("last exit code")}

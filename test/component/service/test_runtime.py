@@ -247,6 +247,55 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "path = /other/job.plist\npid = 123\n", "")):
             self.assert_fault("service_identity_mismatch", lambda: service_runtime._native(self.state))
 
+    def test_submitted_native_job_requires_the_verified_launch_definition(self):
+        import plistlib
+        legacy = self.record
+        record = self.policy_fixture()
+        owned = self.root / "fixture job.plist"
+        for path, content in ((self.state / "service/launch.py", service_state.LAUNCHER.encode()),
+                              (self.state / "service/manage.py", service_state.management_entry(self.state, record)),
+                              (self.state / "service/service.log", b"")):
+            path.write_bytes(content)
+            path.chmod(0o600)
+        for selected in (legacy, record):
+            definition = service_runtime._definition(self.state, selected)
+            arguments = definition["ProgramArguments"]
+            owned.write_bytes(plistlib.dumps(definition))
+            owned.chmod(0o600)
+            reply = (f'gui/{os.getuid()}/{service_runtime._label(self.state)} = {{\n'
+                     '\tpath = (submitted by smd.123)\n\ttype = Submitted\n'
+                     '\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = not running\n'
+                     f'\tprogram = {arguments[0]}\n\targuments = {{\n'
+                     + ''.join(f'\t\t{argument}\n' for argument in arguments)
+                     + f'\t}}\n\tworking directory = {self.state}\n\tlast exit code = 0\n'
+                     '\tresource = {\n\t\tstate = active\n\t\tpid = 999\n\t}\n}\n')
+            with self.subTest(format=selected["format"]), patch.object(service_runtime, "_plist_path", return_value=owned), \
+                    patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")) as native:
+                self.assertEqual(service_runtime._native(self.state), {
+                    "loaded": True, "pid": None, "process_state": "not running", "last_exit_code": "0"})
+                native.assert_called_once_with(["/bin/launchctl", "print", f"gui/{os.getuid()}/{service_runtime._label(self.state)}"])
+                native.return_value.stdout = reply.replace('\tstate = not running', '\tstate = running\n\tpid = 321')
+                self.assertEqual(service_runtime._native(self.state)["pid"], 321)
+                native.return_value.stdout = reply.replace('(submitted by smd.123)', str(owned))
+                self.assertIsNone(service_runtime._native(self.state)["pid"])
+                for before, after in (
+                    ('(submitted by smd.123)', '/other/job.plist'),
+                    ('(submitted by smd.123)', '(submitted by another.123)'),
+                    ('\ttype = Submitted', '\ttype = LaunchAgent'),
+                    ('com.apple.xpc.ServiceManagement', 'another.manager'),
+                    (f'\tprogram = {arguments[0]}', '\tprogram = /other/python'),
+                    (f'\t\t{arguments[2]}', '\t\t/other/manage.py'),
+                    ('\targuments = {', '\targuments = {\n\t\t--extra'),
+                    ('\targuments = {', '\tmissing arguments = {'),
+                    (f'\tworking directory = {self.state}', '\tworking directory = /other/state'),
+                ):
+                    with self.subTest(changed=before):
+                        native.return_value.stdout = reply.replace(before, after)
+                        self.assert_fault("service_identity_mismatch", lambda: service_runtime._native(self.state))
+                native.return_value.stdout = reply
+                owned.write_bytes(owned.read_bytes() + b"\n")
+                self.assert_fault("service_definition_mismatch", lambda: service_runtime._native(self.state))
+
     def test_product_definition_selects_retained_git_and_accepts_exact_prior_profile(self):
         import plistlib
         original = service_runtime._definition(self.state, self.record)
