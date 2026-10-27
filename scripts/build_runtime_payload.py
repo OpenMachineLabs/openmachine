@@ -56,6 +56,27 @@ exec "$root/bin/git" "$@"
     entry.chmod(0o755)
 
 
+def seal_payload(root: Path, metadata: dict, sign_identity: str | None) -> str:
+    """Sign native files before freezing the producer's inventory."""
+    if sign_identity:
+        magic = {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe",
+                 b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+        for path in sorted(root.rglob("*")):
+            if path.is_file() and not path.is_symlink():
+                with path.open("rb") as source:
+                    native = source.read(4) in magic
+                if native:
+                    run(["/usr/bin/codesign", "--force", "--options", "runtime", "--timestamp",
+                         "--sign", sign_identity, str(path)], payload.environment(root))
+                    run(["/usr/bin/codesign", "--verify", "--strict", str(path)], payload.environment(root))
+    manifest = {**metadata, "files": payload.inventory(root)}
+    raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    (root / "manifest.json").write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    payload.verify(root, digest)
+    return digest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
@@ -63,6 +84,7 @@ def main() -> None:
     parser.add_argument("--commit", required=True, help="Exact source commit used to build the selected wheel")
     parser.add_argument("--output", type=Path, required=True, help="A new payload directory; never overwrite an existing build")
     parser.add_argument("--cache", type=Path, required=True, help="Directory for checksum-verified input archives")
+    parser.add_argument("--sign-identity", help="Existing Developer ID Application identity; signs before inventory")
     args = parser.parse_args()
     if sys.platform != "darwin" or platform.machine() != "arm64" or not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         parser.error("Build on Apple Silicon and select an exact source commit.")
@@ -130,16 +152,14 @@ def main() -> None:
         "Original input URLs/digests are in manifest.json. Dependency licenses remain in their wheels "
         "and installed distribution metadata. Product publication must fulfill the corresponding-source "
         "and notice obligations for all bundled components; this assembly is not signed product acceptance.\n")
-    manifest = {"format": 1, "target": payload.TARGET,
+    metadata = {"format": 1, "target": payload.TARGET,
                 "core": {"version": version, "commit": args.commit, "wheel": "wheels/" + wheel.name},
-                **inputs, "files": payload.inventory(output)}
-    raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
-    (output / "manifest.json").write_bytes(raw)
-    digest = hashlib.sha256(raw).hexdigest()
-    payload.verify(output, digest)
+                **inputs}
+    digest = seal_payload(output, metadata, args.sign_identity)
+    manifest = json.loads((output / "manifest.json").read_bytes())
     print(json.dumps({"payload": str(output), "sha256": digest, "files": len(manifest["files"]),
                       "bytes": sum(item.get("bytes", 0) for item in manifest["files"].values()),
-                      "signed": False}))
+                      "signed": bool(args.sign_identity)}))
 
 
 if __name__ == "__main__":
