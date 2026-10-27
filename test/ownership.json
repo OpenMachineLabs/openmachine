@@ -812,7 +812,8 @@
       "test/component/service/test_state.py",
       "test/component/service/test_transition.py",
       "test/resilience/service/test_maintenance_process.py",
-      "test/resilience/service/test_subprocess.py"
+      "test/resilience/service/test_subprocess.py",
+      "test/component/ssh/test_setup.py"
     ],
     "test/support/ssh_cases.py": [
       "test/component/app/test_ssh_routes.py",
