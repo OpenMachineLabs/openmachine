@@ -6,11 +6,13 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 
@@ -61,14 +63,20 @@ def seal_payload(root: Path, metadata: dict, sign_identity: str | None) -> str:
     if sign_identity:
         magic = {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe",
                  b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
-        for path in sorted(root.rglob("*")):
-            if path.is_file() and not path.is_symlink():
-                with path.open("rb") as source:
-                    native = source.read(4) in magic
-                if native:
-                    run(["/usr/bin/codesign", "--force", "--options", "runtime", "--timestamp",
-                         "--sign", sign_identity, str(path)], payload.environment(root))
-                    run(["/usr/bin/codesign", "--verify", "--strict", str(path)], payload.environment(root))
+        with tempfile.NamedTemporaryFile(suffix=".plist") as entitlements:
+            # The final venv installs native extensions from the verified wheelhouse.
+            entitlements.write(plistlib.dumps({"com.apple.security.cs.disable-library-validation": True}))
+            entitlements.flush()
+            python = (root / "python/bin/python3").resolve()
+            for path in sorted(root.rglob("*")):
+                if path.is_file() and not path.is_symlink():
+                    with path.open("rb") as source:
+                        native = source.read(4) in magic
+                    if native:
+                        options = ["--entitlements", entitlements.name] if path == python else []
+                        run(["/usr/bin/codesign", "--force", "--options", "runtime", "--timestamp",
+                             *options, "--sign", sign_identity, str(path)], payload.environment(root))
+                        run(["/usr/bin/codesign", "--verify", "--strict", str(path)], payload.environment(root))
     manifest = {**metadata, "files": payload.inventory(root)}
     raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
     (root / "manifest.json").write_bytes(raw)

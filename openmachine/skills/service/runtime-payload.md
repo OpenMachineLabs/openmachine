@@ -71,6 +71,8 @@ identity. The producer signs and verifies native binaries before writing the
 inventory, so its hashes bind the signed bytes. Omitting it preserves the unsigned
 development path. The enclosing product still owns App signing, notarization and
 publication; do not re-sign payload members after the manifest is sealed.
+Only the Python executable receives the library-validation exception needed to
+load native extensions installed from the verified wheelhouse into the final venv.
 
 The output is a bundleable directory plus a printed manifest SHA256;
 it is not a signed DMG. Preserve upstream notices and dependency licenses. Product

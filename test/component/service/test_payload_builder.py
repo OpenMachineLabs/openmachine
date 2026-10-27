@@ -3,6 +3,7 @@
 import io
 import json
 from pathlib import Path
+import plistlib
 import runpy
 import subprocess
 import tarfile
@@ -17,16 +18,25 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
         native = self.source / "python/bin/python3.13"
         native.write_bytes(b"\xcf\xfa\xed\xfepython")
+        git = self.source / "git/bin/git"
+        git.write_bytes(b"\xcf\xfa\xed\xfegit")
         (self.source / "manifest.json").unlink()
 
         def sign(arguments, **kwargs):
             if "--sign" in arguments:
-                self.assertEqual(Path(arguments[-1]), native)
-                native.write_bytes(native.read_bytes() + b"signature")
+                target = Path(arguments[-1])
+                if target == native:
+                    options = Path(arguments[arguments.index("--entitlements") + 1])
+                    self.assertEqual(plistlib.loads(options.read_bytes()),
+                                     {"com.apple.security.cs.disable-library-validation": True})
+                else:
+                    self.assertEqual(target, git)
+                    self.assertNotIn("--entitlements", arguments)
+                target.write_bytes(target.read_bytes() + b"signature")
 
         with patch.object(subprocess, "run", side_effect=sign) as codesign:
             digest = builder["seal_payload"](self.source, self.manifest, "Developer ID Application: Fixture")
-        self.assertEqual(codesign.call_count, 2)
+        self.assertEqual(codesign.call_count, 4)
         manifest = payload.verify(self.source, digest)
         self.assertTrue((self.source / "python/bin/python3").is_symlink())
         self.assertEqual(manifest["files"]["python/bin/python3.13"]["bytes"], len(native.read_bytes()))
