@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 import unittest
+from openmachine.service.state import STATE_CONTRACT
 from unittest.mock import patch
 import uuid
 from openmachine import execution, service
@@ -53,7 +54,7 @@ class InteractiveTests(ExecutionFixture, unittest.TestCase):
                     self.assertEqual(self.finish(started)["status"], "cancelled")
                 before = record_path.read_bytes()
                 result = service.check_state(config_path, self.state)
-                self.assertEqual(result["state_contract"], 21)
+                self.assertEqual(result["state_contract"], STATE_CONTRACT)
                 self.assertEqual(result["execution_records"], 1)
                 self.assertEqual(record_path.read_bytes(), before)
                 self.assertEqual(json.loads(before)["control"]["last"], receipt)

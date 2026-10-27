@@ -144,11 +144,14 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
     def test_invalid_typed_input_returns_bounded_rejection_without_an_original(self):
         for identity, value, reason in (("invalid", self.request, "invalid_operation_id"),
                                        (self.operation_id, {"name": "build", "alias": ["wrong"]}, "invalid_machine")):
-            with patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance.os, "getuid", return_value=501):
-                result = maintenance.dispatch(self.config, self.state, "ssh-setup", setup_action="inspect",
-                                              identity=identity, value=value)
-            self.assertEqual(result["reason"], reason)
+            with self.assertRaises(Fault) as caught:
+                maintenance.setup_ssh(self.config, self.state, "inspect", identity, value)
+            self.assertEqual(caught.exception.code, reason)
             self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
+        with patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance.os, "getuid", return_value=501):
+            result = maintenance.dispatch(self.config, self.state, "ssh-setup", setup_action="inspect",
+                                          identity="invalid", value=self.request)
+        self.assertEqual(result["reason"], "invalid_operation_id")
 
     def test_remote_preparation_publishes_exact_bytes_without_overwrite_or_symlink(self):
         raw = b"reviewed fixture worker"
