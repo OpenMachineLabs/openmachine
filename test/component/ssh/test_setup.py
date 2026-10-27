@@ -21,7 +21,7 @@ def key(byte=1):
 class SetupTests(ServiceCaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.id = "7" * 32
+        self.operation_id = "7" * 32
         self.request = {"name": "build", "host": "server.example", "user": "operator", "port": 22}
         self.available = False
         self.remote_calls = []
@@ -36,7 +36,7 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
                 **({"root": fields["root"]} if action == "project" else {})}
 
     def act(self, action, value=None):
-        return maintenance.setup_ssh(self.config, self.state, action, self.id, value or {})["setup"]
+        return maintenance.setup_ssh(self.config, self.state, action, self.operation_id, value or {})["setup"]
 
     def test_unknown_host_requires_review_and_lost_prepare_reads_original_once(self):
         before = self.config.read_bytes()
@@ -79,10 +79,10 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             with patch.object(setup, "_remote", return_value={"root": "/different/project"}):
                 changed = self.act("save", {"confirmed": True})
             self.assertEqual(changed["reason"], "remote_project_changed")
-            self.assertFalse(maintenance._operation_path(self.state, self.id).exists())
+            self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
             result = self.act("save", {"confirmed": True})
             self.assertEqual(result["phase"], "saving", result.get("reason"))
-            record = maintenance._read(self.state, self.id)
+            record = maintenance._read(self.state, self.operation_id)
             config = load(Path(record["request"]["candidate_config"]))
             self.assertEqual(config.workspaces["remote-project"].root, "/remote/project")
             target = config.machines["build"]
@@ -112,7 +112,7 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_wrong_credentials_unsupported_server_and_cancel_never_prepare(self):
         for code in ("ssh_authentication_required", "unsupported_target", "scope_unavailable", "worker_conflict"):
-            self.id = hashlib.md5(code.encode(), usedforsecurity=False).hexdigest()
+            self.operation_id = hashlib.md5(code.encode(), usedforsecurity=False).hexdigest()
             with patch.object(setup, "_discover", return_value=(key(), True)), \
                     patch.object(setup, "_remote", side_effect=Fault(code, "Fixture refusal")) as remote:
                 view = self.act("inspect", self.request)
@@ -143,12 +143,12 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_invalid_typed_input_returns_bounded_rejection_without_an_original(self):
         for identity, value, reason in (("invalid", self.request, "invalid_operation_id"),
-                                       (self.id, {"name": "build", "alias": ["wrong"]}, "invalid_machine")):
+                                       (self.operation_id, {"name": "build", "alias": ["wrong"]}, "invalid_machine")):
             with patch.object(maintenance.sys, "platform", "darwin"), patch.object(maintenance.os, "getuid", return_value=501):
                 result = maintenance.dispatch(self.config, self.state, "ssh-setup", setup_action="inspect",
                                               identity=identity, value=value)
             self.assertEqual(result["reason"], reason)
-            self.assertFalse(maintenance._operation_path(self.state, self.id).exists())
+            self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
 
     def test_remote_preparation_publishes_exact_bytes_without_overwrite_or_symlink(self):
         raw = b"reviewed fixture worker"
