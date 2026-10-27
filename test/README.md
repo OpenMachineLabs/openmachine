@@ -1,5 +1,31 @@
 # Tests
 
+## Isolated macOS first-use check
+
+For a native installation/startup change, opt in with an explicitly trusted,
+owner-built payload and its reviewed manifest digest:
+
+```sh
+OM_NATIVE_FIRST_USE=1 \
+OM_NATIVE_PAYLOAD=/absolute/trusted/payload \
+OM_NATIVE_PAYLOAD_SHA256=reviewed_manifest_sha256 \
+.venv/bin/python -m unittest \
+  test.resilience.service.test_maintenance_process.NativeFirstUseTests
+```
+
+This uses the current GUI account with a fresh temporary project, configuration,
+state directory and distinct LaunchAgent. It checks offline installation,
+original-operation readback, explicit Start, verified Ready and Stop. It does not
+change the account's default installation, grant commands or writes, or require
+switching macOS users. Stage timings are printed; failed state and original IDs
+are retained with the exact CLI replies for diagnosis. Successful runs unload
+their service and remove only their own fixtures.
+
+The native case is skipped unless explicitly enabled. It proves fresh local
+configuration, not new macOS privacy permissions, login-session behavior, Cloud
+authorization or signed distribution. Reuse unchanged passing evidence; reserve
+those separate acceptance checks for changes that need them.
+
 ## Choose the required scope
 
 Use the owning module during development, then verify the complete changed
