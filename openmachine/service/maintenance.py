@@ -33,7 +33,7 @@ PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activat
           "deferred", "completed", "rejected", "restored", "recovery_required"}
 TERMINAL = {"completed", "rejected", "restored"}
 CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
-CAPABILITIES = ["status", "bind", "start", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback",
+CAPABILITIES = ["status", "bind", "start", "resume", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback",
                 "machines", "machine-probe", "machine-test", "machine-add", "machine-remove"]
 
 
@@ -477,7 +477,7 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         _save(state, record, "recovery_required", reason="maintenance_effect_unverified")
 
 
-def control(config_path: Path, state: Path, action: Literal["start", "stop", "startup", "bind"], *,
+def control(config_path: Path, state: Path, action: Literal["start", "resume", "stop", "startup", "bind"], *,
             enabled: bool | None = None, identity: str | None = None) -> dict:
     with lease(state / "service/operation.lock"):
         record = service_state._record(state)
@@ -485,7 +485,14 @@ def control(config_path: Path, state: Path, action: Literal["start", "stop", "st
         if record["pending"] is not None:
             raise Fault("activation_pending", "Read or explicitly restore the original pending transition first.")
         selected = service_state._installed(state, record["current"])
-        if action == "bind":
+        if action == "resume":
+            # Opening a controller may restore existing intent, never create it.
+            # The operation lock serializes this with deliberate Stop and updates.
+            if record.get("policy", {}).get("desired") == "running":
+                with lease(state / "locks/lifecycle.lock"):
+                    checks._candidate_state(service_state._runtime(state, record["current"]) / "bin/python", config_path, state)
+                runtime._start(state, record)
+        elif action == "bind":
             with lease(state / "locks/lifecycle.lock"):
                 record = service_state._record(state)
                 record = service_state._bind_management(state, record, identity or record["current"])
@@ -689,7 +696,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
             result = retire_operation(config_path, state, **inputs)
         elif action == "rollback":
             result = transition.operate(config_path, state, "rollback", require_safe=True)
-        elif action in {"start", "stop", "startup", "bind"}:
+        elif action in {"start", "resume", "stop", "startup", "bind"}:
             result = control(config_path, state, action, **inputs)
         else:
             raise Fault("invalid_service_request", "Select an advertised management action.")

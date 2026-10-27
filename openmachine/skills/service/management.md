@@ -327,6 +327,13 @@ Start clears Stop. Legacy `service stop` retains its unload-only contract;
 `service start` is also an explicit Start, while restart does not clear deliberate
 Stop. Budget renewal still requires the existing explicit reset command.
 
+Capability `resume` restores only an existing format-2 `desired=running` policy.
+It shares Start's identity, readiness and recovery checks and reuses a live job,
+but never changes Stop, login preference, configuration or recovery budget.
+Stopped and legacy installations are only observed. Controllers may request it
+once on launch after reading the advertised capability; a lost response requires
+status readback, not another Start or resume attempt.
+
 The original `launch.py` remains byte-exact. Format-2 native startup uses the bound
 management entry; exact prior/generated plist definitions cover interrupted policy
 publication without permitting arbitrary changed files. First-upgrade activation

@@ -59,7 +59,7 @@ def main() -> int:
     manage = commands.add_parser("manage", help="Typed product management; explicit config/state binding and original operation readback")
     manage.add_argument("--contract", type=int, default=1)
     management = manage.add_subparsers(dest="management_action", required=True)
-    for action in ("status", "start", "stop", "rollback", "machines"):
+    for action in ("status", "start", "resume", "stop", "rollback", "machines"):
         management.add_parser(action)
     bind = management.add_parser("bind", help="Bind the stable entry to an exact retained payload implementation")
     bind.add_argument("--identity", required=True)
