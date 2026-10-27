@@ -490,7 +490,9 @@
         "integrations/ssh/bundle.py",
         "integrations/ssh/client.py",
         "integrations/ssh/endpoint.py",
-        "integrations/ssh/recovery.py"
+        "integrations/ssh/recovery.py",
+        "integrations/ssh/setup.py",
+        "integrations/ssh/provision.py"
       ],
       "tests": [
         "test/component/ssh/test_recovery.py",
@@ -500,7 +502,8 @@
         "test/component/ssh/test_workspace_reads.py",
         "test/contract/mcp/ssh/test_discovery.py",
         "test/resilience/ssh/test_archive.py",
-        "test/resilience/ssh/test_transport.py"
+        "test/resilience/ssh/test_transport.py",
+        "test/component/ssh/test_setup.py"
       ]
     },
     "task_admission": {
@@ -809,7 +812,8 @@
       "test/component/service/test_state.py",
       "test/component/service/test_transition.py",
       "test/resilience/service/test_maintenance_process.py",
-      "test/resilience/service/test_subprocess.py"
+      "test/resilience/service/test_subprocess.py",
+      "test/component/ssh/test_setup.py"
     ],
     "test/support/ssh_cases.py": [
       "test/component/app/test_ssh_routes.py",

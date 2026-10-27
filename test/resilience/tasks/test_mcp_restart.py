@@ -4,6 +4,7 @@ from contextlib import closing
 import sqlite3
 import sys
 import unittest
+from openmachine.service.state import STATE_CONTRACT
 import uuid
 from mcp import Client
 from test.support.mcp import MCPFixture
@@ -65,7 +66,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((decision.structured_content["items"][0]["state"],
                                   decision.structured_content["items"][0]["evidence"]), ("pending", []))
                 caps = (await client.call_tool("get_capabilities")).structured_content
-                self.assertEqual(caps["lifecycle"]["state_contract"], 21)
+                self.assertEqual(caps["lifecycle"]["state_contract"], STATE_CONTRACT)
                 self.assertTrue(caps["tasks"]["structured_records"])
                 self.assertTrue(caps["tasks"]["supervised_admission"])
                 self.assertFalse(caps["tasks"]["events_delivery"])

@@ -8,6 +8,50 @@ On this page:
 
 ## SSH
 
+### Guided preparation
+
+Management advertises `ssh-setup` when it supports guided setup. Use
+`manage ssh-setup --action ACTION --operation-id ORIGINAL_ID` with one bounded
+JSON object on stdin. The ID is 32 lowercase hex characters. Actions are
+`inspect`, `trust`, `prepare`, `status`, `project`, `save`, `continue` and `cancel`.
+The owning management entry remains bound to its exact configuration and state.
+
+`inspect` accepts a unique `name` and either an existing `alias`, or a single
+`host`, `user`, optional `port` (22) and optional native `identity_file` reference.
+It retains a plan before network discovery, resolves an alias without rewriting
+SSH configuration, and checks the supported prerequisites. It never installs a
+worker or enables permissions. Direct connections compare discovered public keys
+with existing SSH trust. Changed keys block; an unknown key requires a separate
+`trust` request containing the reviewed `fingerprint` and `confirmed: true`.
+Trust belongs to this connection, not to the operator's global known_hosts file.
+Special trust markers and unknown keys on complex aliases require the operator's
+existing SSH trust workflow. Private key bytes and passphrases are never inputs.
+
+`prepare` requires the plan's `sha256` and `confirmed: true`. It copies only the
+current distribution's immutable worker to the displayed checksum-named path
+under the remote account's canonical home. A matching worker there is reused.
+Existing archives, system packages, SSH configuration and lingering remain
+unchanged. The native preparation has no command or file-write grant. Following
+an interrupted reply, use `status` with the same ID: it verifies the exact host,
+account, archive and worker response without copying again. Unverified preparation
+cannot be cancelled or replaced by another automatic attempt.
+
+`project` accepts `name`, an existing remote absolute `root`, and independent
+boolean `commands`/`writes` choices (initially false). The owner validates that
+directory remotely. `save` with `confirmed: true` admits the normal original
+maintenance update with fresh configuration and target preconditions. Retained
+workspaces and work continue to use their existing protections. `continue` only
+advances that same deferred maintenance update. A completed SSH connection does
+not imply any account or AI-client authorization.
+
+Direct routes use the typed `ssh_connection` configuration instead of `ssh_alias`.
+The reviewed host key and native key-file reference remain local; public
+capabilities omit that object. Every exchange retains strict host verification,
+batch authentication, disabled agent forwarding and bounded transport. State
+contract 22 verifies retained setup records before an update or rollback.
+
+### Prepared targets
+
 The supported target baseline is Linux, Python 3.12+ as `python3`, Git and an
 available systemd 255+ user manager. The controller uses existing system OpenSSH,
 authentication and verified host keys, with no password prompt or agent forwarding.

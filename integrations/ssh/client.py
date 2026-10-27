@@ -1,6 +1,7 @@
 """Bounded controller-side SSH requests; no task store or target implementation."""
 
 import json
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ import shlex
 import subprocess
 import time
 import threading
+import tempfile
 from typing import TYPE_CHECKING
 
 from openmachine import __version__
@@ -20,6 +22,29 @@ if TYPE_CHECKING:
     from openmachine.config import Settings
 
 MUTATIONS = {"apply_workspace_patch", "start_execution", "create_worktree", "write_workspace_file", "edit_workspace_file", "cancel_execution", "control_execution"}
+
+
+@contextmanager
+def connection_args(alias: str | None, connection=None):
+    """Use the system alias or exactly one pinned direct route, never trust on first use."""
+    argv = ["ssh", "-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
+            "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR"]
+    if connection is None:
+        yield [*argv, "--", alias]
+        return
+    # The trusted public key is part of Core configuration. A private temporary
+    # known_hosts file avoids modifying the operator's SSH configuration/trust.
+    with tempfile.TemporaryDirectory(prefix="om-ssh-") as directory:
+        known = Path(directory) / "known_hosts"
+        host = connection.host if connection.port == 22 else f"[{connection.host}]:{connection.port}"
+        known.write_text(f"{host} {connection.host_key}\n")
+        os.chmod(known, 0o600)
+        argv.extend(["-F", "/dev/null", "-o", f"UserKnownHostsFile={known}", "-o", "GlobalKnownHostsFile=/dev/null",
+                     "-o", "UpdateHostKeys=no", "-p", str(connection.port), "-l", connection.user])
+        if connection.identity_file:
+            argv.extend(["-o", "IdentitiesOnly=yes", "-i", connection.identity_file])
+        yield [*argv, "--", connection.host]
 
 
 def _exchange(argv: list[str], payload: bytes, *, cancelled: threading.Event | None = None) -> tuple[int, bytes]:
@@ -103,14 +128,12 @@ def call(config: "Settings", machine: str, operation: str, *,
                "workspace_write_enabled": target.execution_enabled if target.workspace_write_enabled is None else target.workspace_write_enabled,
                "operation": operation, "arguments": arguments,
                "workspaces": {name: item.root for name, item in config.workspaces.items() if item.machine == machine}}
-    argv = ["ssh", "-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
-            "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR", "--",
-            target.ssh_alias, shlex.join(["python3", "-I", target.ssh_worker, "rpc"])]
     mutating = operation in MUTATIONS and not (operation in {"edit_workspace_file", "apply_workspace_patch"} and arguments.get("dry_run") is True)
     identity_evidence = {"machine": machine, "change_id": arguments["change_id"]} if arguments.get("change_id") else None
     try:
-        code, raw = _exchange(argv, json.dumps(request, ensure_ascii=True).encode(), cancelled=cancelled)
+        with connection_args(target.ssh_alias, target.ssh_connection) as argv:
+            code, raw = _exchange([*argv, shlex.join(["python3", "-I", target.ssh_worker, "rpc"])],
+                                  json.dumps(request, ensure_ascii=True).encode(), cancelled=cancelled)
     except FileNotFoundError as error:
         raise Fault("ssh_missing", "Install the system OpenSSH client; no target was contacted.") from error
     except (OSError, TimeoutError, subprocess.SubprocessError, Fault) as error:

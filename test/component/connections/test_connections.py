@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+from openmachine.service.state import STATE_CONTRACT
 from unittest.mock import patch
 import uuid
 from integrations import connections, credentials
@@ -586,7 +587,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         config = self.root / "config.toml"
         config.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
         proof = checks.check_state(config, self.state)
-        self.assertEqual(proof["state_contract"], 21)
+        self.assertEqual(proof["state_contract"], STATE_CONTRACT)
         before = (self.state / "connections.json").read_bytes()
         for change in ({"state_contract": 10}, {"connections_present": False}, {"connections_sha256": "a" * 64}):
             with patch.object(processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | change), "")):

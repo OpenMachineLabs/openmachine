@@ -44,6 +44,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         self.assertIs(config.check_for_updates, True)
         legacy = config.model_dump(exclude={"check_for_updates"})
         del legacy["machines"]["local"]["workspace_write_enabled"]
+        del legacy["machines"]["local"]["ssh_connection"]
         expected = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(config.configuration_sha256(), expected)
         explicit = Settings.model_validate(original | {"check_for_updates": True})
