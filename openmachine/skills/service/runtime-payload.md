@@ -66,14 +66,6 @@ must match CPython 3.13 / macOS 13 / arm64; source builds and index fallback dur
 local preparation are prohibited. The same `payload.inventory` / `verify` logic
 seals and consumes the result. A failed build/copy is preserved, not overwritten.
 
-For a Developer ID distribution, pass `--sign-identity` with the existing Keychain
-identity. The producer signs and verifies native binaries before writing the
-inventory, so its hashes bind the signed bytes. Omitting it preserves the unsigned
-development path. The enclosing product still owns App signing, notarization and
-publication; do not re-sign payload members after the manifest is sealed.
-Only the Python executable receives the library-validation exception needed to
-load native extensions installed from the verified wheelhouse into the final venv.
-
 The output is a bundleable directory plus a printed manifest SHA256;
 it is not a signed DMG. Preserve upstream notices and dependency licenses. Product
 publication must also satisfy corresponding-source/redistribution obligations for
