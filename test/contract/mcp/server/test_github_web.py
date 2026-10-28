@@ -135,8 +135,8 @@ class GitHubWebSocketTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         await self.identity()
 
     async def test_native_uid_check_rejects_other_owner(self):
-        self.launch_web("import openmachine.server as server\nimport os\n"
-                        "server._peer_uid = lambda sock: os.getuid() + 1\n")
+        self.launch_web("import openmachine.github_web_http as web_http\nimport os\n"
+                        "web_http._peer_uid = lambda sock: os.getuid() + 1\n")
         status, value = await self.request("GET", "identity?v=1")
         self.assertEqual(status, 403, value)
         self.assertFalse((self.state / "connections.json").exists())

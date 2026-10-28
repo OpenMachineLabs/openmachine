@@ -54,7 +54,7 @@ def _execution_state(state: Path) -> dict:
 
 
 def _connections_state(state: Path) -> dict:
-    from integrations.connections import check_state
+    from integrations.connection_state import check_state
     return check_state(state)
 
 
@@ -258,7 +258,7 @@ def activation_safe(state: Path, *, config=None, candidate_config=None, guards=N
                             "The candidate removes or rebinds an original local execution machine; preserve its Task read route before changing the service.")
     # The owning readers validate their records before classifying in-flight
     # writes or authentication. No service-owned copy of either schema exists.
-    from integrations.connections import check_state as connections_state
+    from integrations.connection_state import check_state as connections_state
     workspace.check_change_state(state, require_idle=True)
     connections_state(state, require_idle=True)
 

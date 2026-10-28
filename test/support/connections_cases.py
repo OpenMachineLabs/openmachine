@@ -12,7 +12,7 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from integrations import connections, credentials
+from integrations import connection_state, credentials
 from integrations.github import auth
 from openmachine import tasks
 from openmachine.bootstrap import create_application
@@ -46,8 +46,8 @@ class ConnectionCaseFixture(TaskFixture):
     def pair(self):
         value = credentials.Credential(account_id=0, phase="unverified",
             access_token="access-fixture-" + uuid.uuid4().hex, refresh_token="refresh-fixture-" + uuid.uuid4().hex,
-            access_expires_at_ms=connections.now_ms() + 28800000,
-            refresh_expires_at_ms=connections.now_ms() + 15897600000)
+            access_expires_at_ms=connection_state.now_ms() + 28800000,
+            refresh_expires_at_ms=connection_state.now_ms() + 15897600000)
         self.tokens[value.access_token] = dict(self.actor)
         return value
 
@@ -98,11 +98,11 @@ class ConnectionCaseFixture(TaskFixture):
         return self.app.list_integrations(connection_id=result["connection_id"])["connections"][0]
 
     def stored(self, item):
-        value = connections._read(self.state).connections[item["id"]]
+        value = connection_state._read(self.state).connections[item["id"]]
         return value, credentials.load(self.state, value.credential_ref, value.credential_store)
 
     def expire_access(self, item):
         value, pair = self.stored(item)
         credentials.save(self.state, value.credential_ref, value.credential_store,
-                         pair.model_copy(update={"access_expires_at_ms": connections.now_ms() + 1000}))
+                         pair.model_copy(update={"access_expires_at_ms": connection_state.now_ms() + 1000}))
         return value
