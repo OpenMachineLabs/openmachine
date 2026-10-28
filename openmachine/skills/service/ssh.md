@@ -8,12 +8,12 @@ On this page:
 
 ## SSH
 
-### Guided preparation
+### SSH machine preparation contract
 
-Management advertises `ssh-setup` when it supports guided setup. Use
+Management advertises `ssh-setup` for a retained machine preparation operation. Use
 `manage ssh-setup --action ACTION --operation-id ORIGINAL_ID` with one bounded
 JSON object on stdin. The ID is 32 lowercase hex characters. Actions are
-`inspect`, `trust`, `prepare`, `status`, `project`, `save`, `continue` and `cancel`.
+`inspect`, `trust`, `prepare`, `status`, `save`, `continue` and `cancel`.
 The owning management entry remains bound to its exact configuration and state.
 
 `inspect` accepts a unique `name` and either an existing `alias`, or a single
@@ -36,13 +36,20 @@ an interrupted reply, use `status` with the same ID: it verifies the exact host,
 account, archive and worker response without copying again. Unverified preparation
 cannot be cancelled or replaced by another automatic attempt.
 
-`project` accepts `name`, an existing remote absolute `root`, and independent
-boolean `commands`/`writes` choices (initially false). The owner validates that
-directory remotely. `save` with `confirmed: true` admits the normal original
-maintenance update with fresh configuration and target preconditions. Retained
-workspaces and work continue to use their existing protections. `continue` only
-advances that same deferred maintenance update. A completed SSH connection does
-not imply any account or AI-client authorization.
+`save` with `confirmed: true` registers the verified machine with both grants
+disabled and no workspace. It admits the existing maintenance update under its
+original identity and configuration preconditions; `continue` advances only that
+deferred update. A completed setup cannot be cancelled or undone by changing its
+recorded status. Historical `project_ready` records retain their original atomic
+save and recovery behavior, but new requests cannot create that phase.
+
+Workspace mappings and machine-wide `execution_enabled` /
+`workspace_write_enabled` grants are independent configuration changes. Use
+the existing confirmed candidate-configuration `manage update` contract with
+original operation identity, matching configuration digest, validation and rollback.
+Clients choose how to present inputs and confirmations; Core returns phases and
+reason codes, not screens or prompts. Machine registration grants neither command,
+workspace-write, account nor AI-client authority.
 
 Direct routes use the typed `ssh_connection` configuration instead of `ssh_alias`.
 The reviewed host key and native key-file reference remain local; public

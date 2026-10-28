@@ -719,9 +719,12 @@ def setup_ssh(config_path, state, action, identity, value):
             # original under the admission lock before permitting a fresh save.
             with lease(state / "service/operation.lock"):
                 if not os.path.lexists(_operation_path(state, identity)):
-                    record["phase"] = "project_ready"
+                    # Earlier setups may contain an atomic project candidate.
+                    record["phase"] = "project_ready" if record.get("project") else "prepared"
                     save_json(path, record)
         if action == "cancel":
+            if record["phase"] == "completed":
+                ssh_setup._fault("setup_completed")
             if record["phase"] in {"preparing", "saving"}:
                 ssh_setup._fault("original_operation_required")
             record["phase"] = "cancelled"
@@ -731,7 +734,7 @@ def setup_ssh(config_path, state, action, identity, value):
                 ssh_setup._fault("ssh_host_key_review_required")
             record["phase"] = "inspecting"
             save_json(path, record)
-        elif action not in {"inspect", "status", "prepare", "project", "save", "continue"}:
+        elif action not in {"inspect", "status", "prepare", "save", "continue"}:
             ssh_setup._fault("invalid_request")
         try:
             if record["phase"] == "discovering":
@@ -778,23 +781,14 @@ def setup_ssh(config_path, state, action, identity, value):
                 if record["facts"]["worker_status"] == "available":
                     ssh_setup._probe(record, config_path)
                     record["phase"] = "prepared"
-            if action == "project" and record["phase"] in {"prepared", "project_ready"}:
-                record["phase"] = "prepared"
-                record.pop("project", None)
-                if (set(value) != {"name", "root", "commands", "writes"} or not isinstance(value["name"], str)
-                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value["name"])
-                        or type(value["commands"]) is not bool or type(value["writes"]) is not bool):
-                    ssh_setup._fault("invalid_remote_project")
-                facts = ssh_setup._remote(record, "project", root=value["root"])
-                ssh_setup._probe(record, config_path)
-                record["project"] = value | {"root": facts["root"]}
-                record["phase"] = "project_ready"
-            if action == "save" and record["phase"] == "project_ready":
+            if action == "save" and record["phase"] in {"prepared", "project_ready"}:
                 if value != {"confirmed": True}:
                     ssh_setup._fault("configuration_consent_required")
                 if _digest(config_path) != record["config_sha256"]:
                     ssh_setup._fault("configuration_changed")
-                if ssh_setup._remote(record, "project", root=record["project"]["root"])["root"] != record["project"]["root"]:
+                # Retain the legacy atomic save for already-prepared projects.
+                project = record.get("project")
+                if project and ssh_setup._remote(record, "project", root=project["root"])["root"] != project["root"]:
                     ssh_setup._fault("remote_project_changed")
                 ssh_setup._probe(record, config_path)
                 record["phase"] = "saving"
@@ -802,7 +796,7 @@ def setup_ssh(config_path, state, action, identity, value):
                 target = ssh_setup._target(record)
                 change_machine(config_path, state, "machine-add", identity, record["candidate"]["name"],
                     record["config_sha256"], alias=target.ssh_alias, connection=target.ssh_connection,
-                    worker=target.ssh_worker, pinned=target.ssh_identity, project=record["project"])
+                    worker=target.ssh_worker, pinned=target.ssh_identity, project=project)
             if record["phase"] == "saving" and _operation_path(state, identity).exists():
                 operation = read_operation(config_path, state, identity)
                 if action == "continue" and operation["status"] == "continuation_required":
