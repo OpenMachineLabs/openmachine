@@ -578,11 +578,53 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             broker.assert_called_once()
         self.assertEqual(self.stored(item)[1].phase, "refreshing")
 
+    def test_locked_store_at_startup_preserves_binding_and_recovers_after_unlock(self):
+        item, _, _ = self.web_connect()
+        binding = connections._read(self.state).connections[item["id"]].binding()
+        saved = (self.state / "connections.json").read_bytes()
+        unavailable = Fault("integration_credential_store_unavailable", "Fixture store is temporarily locked")
+        with patch("integrations.github.web_broker.refresh") as broker:
+            for retry in ("request", "restart"):
+                with self.subTest(retry=retry):
+                    with patch.object(credentials, "load", side_effect=unavailable), \
+                            patch.object(auth, "request") as provider:
+                        self.restart()
+                        listing = self.app.list_integrations()
+                        self.assertEqual(listing["renewal"]["errors"].get(item["id"]), unavailable.code)
+                        self.assertEqual((listing["connections"][0]["status"],
+                                          listing["connections"][0]["authorization_revision"]),
+                                         ("connected", binding["authorization_revision"]))
+                        transport = self.app.connections.request("Example/repo", binding=binding)
+                        with self.assertRaises(Fault) as caught:
+                            transport("GET", "user")
+                        self.assertEqual((caught.exception.code, caught.exception.effect),
+                                         (unavailable.code, "known_no_effect"))
+                        provider.assert_not_called()
+                    if retry == "request":
+                        self.assertEqual(transport("GET", "user"), self.actor)
+                    else:
+                        # Reenter the same owner so the old diagnostic must be cleared.
+                        self.stop()
+                        self.run_owner()
+                    listing = self.app.list_integrations()
+                    self.assertNotIn(item["id"], listing["renewal"]["errors"])
+                    self.assertEqual(self.app.connections.select(binding=binding).binding(), binding)
+                    self.assertEqual(listing["connections"][0]["status"], "connected")
+                    self.assertTrue((self.state / "connections.json").read_bytes() == saved)
+            broker.assert_not_called()
+
     def test_interrupted_refresh_record_is_not_dispatched_after_restart(self):
         item, _, _ = self.web_connect()
         retained, pair = self.stored(item)
         credentials.save(self.state, retained.credential_ref, retained.credential_store,
                          pair.model_copy(update={"phase": "refreshing", "refresh_id": uuid.uuid4().hex}))
+        unavailable = Fault("integration_credential_store_unavailable", "Fixture store is temporarily locked")
+        with patch.object(credentials, "load", side_effect=unavailable):
+            self.restart()
+            listing = self.app.list_integrations()
+            self.assertEqual(listing["connections"][0]["status"], "connected")
+            self.assertEqual(listing["connections"][0]["authorization_revision"], item["authorization_revision"])
+            self.assertEqual(listing["renewal"]["errors"].get(item["id"]), unavailable.code)
         self.restart()
         listing = self.app.list_integrations()["connections"][0]
         self.assertEqual(listing["status"], "reauthorization_required")

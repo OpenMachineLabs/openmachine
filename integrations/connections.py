@@ -542,7 +542,13 @@ class Connections:
                         or pair.account_id != item.account_id or pair.refresh_expires_at_ms <= now_ms())
                 except Fault as error:
                     self._errors[item.id] = error.code
+                    if error.code == "integration_credential_store_unavailable":
+                        # A locked store cannot prove interruption or revoke an account.
+                        continue
                     interrupted = True
+                else:
+                    if self._errors.get(item.id) == "integration_credential_store_unavailable":
+                        self._errors.pop(item.id, None)
                 if interrupted:
                     self._reauthorize(item)
 
@@ -902,6 +908,8 @@ class Connections:
             if error.code in {"integration_credential_missing", "integration_credential_invalid"}:
                 self._reauthorize(item)
             raise
+        if current.source == "web" and self._errors.get(item.id) == "integration_credential_store_unavailable":
+            self._errors.pop(item.id, None)
         if current.account_id != item.account_id:
             self._reauthorize(item)
             raise Fault("integration_credential_invalid", "Credential identity differs from the selected connection.")
