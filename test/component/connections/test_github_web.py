@@ -7,16 +7,17 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from unittest.mock import patch
 import uuid
 
-from integrations import connections, credentials
-from integrations.github import auth
+from integrations import connection_state, credentials
+from integrations.github import auth, web_authorization
 from openmachine.bootstrap import create_application
 from openmachine.config import GitHubConfig
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import save_json
+from openmachine.foundation.state import lease, save_json
 from openmachine.service import checks, processes
 from openmachine.service.state import STATE_CONTRACT
 from test.support.connections_cases import ConnectionCaseFixture
@@ -58,7 +59,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def expire_web(self, item):
         value, pair = self.stored(item)
         credentials.save(self.state, value.credential_ref, value.credential_store,
-                         pair.model_copy(update={"access_expires_at_ms": connections.now_ms() - 1}))
+                         pair.model_copy(update={"access_expires_at_ms": connection_state.now_ms() - 1}))
         return value
 
     def read_repository(self, item):
@@ -80,7 +81,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         read_actor = auth.read_actor
 
         def actor(token):
-            retained = connections._read(self.state).web_intents[original["intent_id"]]
+            retained = connection_state._read(self.state).web_intents[original["intent_id"]]
             observed.append((retained.status, retained.claim_id))
             return read_actor(token)
 
@@ -101,7 +102,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def test_begin_retry_retains_exact_original_deadline(self):
         original = self.begin()
         first = self.app.connections.web_status(original["intent_id"])
-        with patch.object(connections, "now_ms", return_value=first["expires_at_ms"] - 1):
+        with patch.object(web_authorization, "now_ms", return_value=first["expires_at_ms"] - 1):
             self.assertEqual(self.app.connections.web_begin(original), first)
         changed = dict(original, expected_connection_id="a" * 32, expected_authorization_revision=1)
         self.fault("integration_request_conflict", self.app.connections.web_begin, changed)
@@ -110,20 +111,20 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         for expired in (False, True):
             with self.subTest(expired=expired):
                 original = self.begin()
-                retained = connections._read(self.state).web_intents[original["intent_id"]]
+                retained = connection_state._read(self.state).web_intents[original["intent_id"]]
                 approved = self.config.github
-                observed_time = retained.expires_at_ms if expired else connections.now_ms()
+                observed_time = retained.expires_at_ms if expired else connection_state.now_ms()
                 code = "github_web_intent_expired" if expired else "github_web_binding_changed"
                 try:
                     if not expired:
                         self.config.github = GitHubConfig(repositories=["Example/other"])
-                    with patch.object(connections, "now_ms", return_value=observed_time):
+                    with patch.object(web_authorization, "now_ms", return_value=observed_time):
                         conflict = dict(original, expected_connection_id="a" * 32, expected_authorization_revision=1)
                         self.fault("integration_request_conflict", self.app.connections.web_begin, conflict)
                         self.fault(code, self.app.connections.web_begin, original)
                 finally:
                     self.config.github = approved
-                retained = connections._read(self.state).web_intents[original["intent_id"]]
+                retained = connection_state._read(self.state).web_intents[original["intent_id"]]
                 self.assertEqual((retained.status, retained.error_code),
                                  ("expired" if expired else "rejected", code))
                 self.fault("github_web_intent_consumed", self.app.connections.web_begin, original)
@@ -140,7 +141,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
                 self.fault("invalid_github_web_request", self.app.connections.web_begin, request)
         self.fault("github_web_binding_changed", self.app.connections.web_begin,
                    dict(original, intent_id=uuid.uuid4().hex, core_binding="a" * 64))
-        self.assertEqual(len(connections._read(self.state).web_intents), 1)
+        self.assertEqual(len(connection_state._read(self.state).web_intents), 1)
 
     def test_complete_rejects_invalid_envelope_without_provider_io(self):
         original = self.begin()
@@ -196,7 +197,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             status = self.app.connections.web_status(original["intent_id"])
             self.assertEqual((status["status"], status["error_code"]),
                              ("rejected", "github_web_binding_changed"))
-            self.assertEqual(connections._read(self.state).web_intents[original["intent_id"]].status, "rejected")
+            self.assertEqual(connection_state._read(self.state).web_intents[original["intent_id"]].status, "rejected")
             self.config.github = approved
             self.assertEqual(self.app.connections.web_status(original["intent_id"]), status)
             self.fault("github_web_intent_consumed", self.app.connections.web_complete, request)
@@ -212,7 +213,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         with patch.object(auth, "read_actor") as actor:
             self.app = create_application(self.config, self.state)
             self.run_owner()
-            retained = connections._read(self.state).web_intents[original["intent_id"]]
+            retained = connection_state._read(self.state).web_intents[original["intent_id"]]
             self.assertEqual((retained.status, retained.error_code), ("rejected", "github_web_binding_changed"))
             self.config.github = approved
             self.restart()
@@ -241,7 +242,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         original = self.begin(expected_connection_id=item["id"], expected_authorization_revision=2)
         result = self.app.connections.web_complete(self.completion(original))
         self.assertEqual((result["connection_id"], result["authorization_revision"]), (item["id"], 3))
-        retained = connections._read(self.state).connections[item["id"]]
+        retained = connection_state._read(self.state).connections[item["id"]]
         self.assertEqual(retained.policy.repositories, ["Example/repo"])
         self.fault("github_not_allowed", self.app.github_read, "repository", "Example/other",
                    connection_id=item["id"])
@@ -260,9 +261,9 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def test_expiry_uses_original_ten_minute_boundary(self):
         original = self.begin()
         status = self.app.connections.web_status(original["intent_id"])
-        retained = connections._read(self.state).web_intents[original["intent_id"]]
+        retained = connection_state._read(self.state).web_intents[original["intent_id"]]
         self.assertEqual(status["expires_at_ms"] - retained.created_at_ms, 600000)
-        with patch.object(connections, "now_ms", return_value=status["expires_at_ms"]):
+        with patch.object(web_authorization, "now_ms", return_value=status["expires_at_ms"]):
             self.fault("github_web_intent_expired", self.app.connections.web_complete, self.completion(original))
             self.assertEqual(self.app.connections.web_status(original["intent_id"])["status"], "expired")
         self.assertEqual(self.app.connections.web_status(original["intent_id"])["status"], "expired")
@@ -271,10 +272,10 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         original = self.begin()
         request = self.completion(original)
         expires = self.app.connections.web_status(original["intent_id"])["expires_at_ms"]
-        with patch.object(connections, "now_ms", return_value=expires):
+        with patch.object(web_authorization, "now_ms", return_value=expires):
             expired = self.app.connections.web_status(original["intent_id"])
         self.assertEqual((expired["status"], expired["error_code"]), ("expired", "github_web_intent_expired"))
-        self.assertEqual(connections._read(self.state).web_intents[original["intent_id"]].status, "expired")
+        self.assertEqual(connection_state._read(self.state).web_intents[original["intent_id"]].status, "expired")
         self.assertEqual(self.app.connections.web_status(original["intent_id"]), expired)
         with patch.object(auth, "read_actor") as actor:
             self.fault("github_web_intent_consumed", self.app.connections.web_complete, request)
@@ -294,7 +295,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
 
     def test_original_ids_cannot_cross_device_intent_and_claim_families(self):
         device = self.connect()
-        device_id = connections._read(self.state).connections[device["id"]].credential_ref
+        device_id = connection_state._read(self.state).connections[device["id"]].credential_ref
         original = self.begin()
         another = self.begin()
         with patch.object(auth, "read_actor") as actor:
@@ -338,6 +339,57 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             self.fault("github_web_intent_consumed", pending.result, 3)
         self.assertEqual(self.app.connections.web_status(original["intent_id"])["status"], "cancelled")
         self.assertEqual(self.app.list_integrations()["connections"], [])
+
+    def test_shutdown_drains_dispatched_completion_before_releasing_owner(self):
+        original = self.begin()
+        request = self.completion(original)
+        entered, release = threading.Event(), threading.Event()
+        read_actor = auth.read_actor
+        results, failures = {}, []
+
+        def blocked(token):
+            entered.set()
+            if not release.wait(6):
+                raise AssertionError("Fixture actor was not released")
+            return read_actor(token)
+
+        def run(name, operation):
+            try:
+                results[name] = operation()
+            except BaseException as error:
+                failures.append(error)
+
+        completion = threading.Thread(target=run, args=("completion",
+            lambda: self.app.connections.web_complete(request)), daemon=True)
+        shutdown = threading.Thread(target=run, args=("shutdown", self.stop), daemon=True)
+        with patch.object(auth, "read_actor", side_effect=blocked):
+            completion.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                shutdown.start()
+                deadline = time.monotonic() + 3
+                while self.app.list_integrations()["renewal"]["running"] and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertFalse(self.app.list_integrations()["renewal"]["running"])
+                shutdown.join(0.05)
+                self.assertTrue(shutdown.is_alive(), "Shutdown must wait for the dispatched completion")
+                with self.assertRaises(Fault) as caught:
+                    with lease(self.state / "locks/connections-owner.lock"):
+                        pass
+                self.assertEqual(caught.exception.code, "resource_busy")
+            finally:
+                release.set()
+                completion.join(3)
+                if shutdown.ident is not None:
+                    shutdown.join(3)
+        self.assertFalse(completion.is_alive())
+        self.assertFalse(shutdown.is_alive())
+        if failures:
+            raise failures[0]
+        self.assertEqual(results["completion"]["status"], "connected")
+        self.assertEqual(self.app.connections.web_status(original["intent_id"])["status"], "connected")
+        with lease(self.state / "locks/connections-owner.lock"):
+            pass
 
     def test_pending_approval_and_core_identity_survive_restart(self):
         original = self.begin()
@@ -391,7 +443,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             with self.subTest(published=published):
                 original = self.begin()
                 request = self.completion(original)
-                save = self.app.connections._save
+                save = self.app.connections._store.save
                 failed = False
 
                 def fail_once(value):
@@ -403,7 +455,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
                         raise Fault("integration_store_unavailable", "Fixture reservation persistence failure")
                     return save(value)
 
-                with patch.object(self.app.connections, "_save", side_effect=fail_once), \
+                with patch.object(self.app.connections._store, "save", side_effect=fail_once), \
                         patch.object(auth, "read_actor") as actor, patch.object(credentials, "save") as credential_save:
                     self.fault("integration_store_unavailable", self.app.connections.web_complete, request)
                     expected = "outcome_unknown" if published else "rejected"
@@ -427,13 +479,13 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
 
         def changed(*args):
             save(*args)
-            with self.app.connections._writing() as value:
+            with self.app.connections._store.writing() as value:
                 value.connections[item["id"]].authorization_revision += 1
-                self.app.connections._save(value)
+                self.app.connections._store.save(value)
 
         with patch.object(credentials, "save", side_effect=changed):
             self.fault("integration_connection_changed", self.app.connections.web_complete, request)
-        retained = connections._read(self.state).connections[item["id"]]
+        retained = connection_state._read(self.state).connections[item["id"]]
         self.assertEqual((retained.status, retained.authorization_revision), ("disconnected", 3))
         self.assertNotEqual(retained.credential_ref, original["intent_id"])
         self.fault("integration_credential_missing", credentials.load, self.state, original["intent_id"], "file")
@@ -451,7 +503,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             other_request = self.completion(other_original)
             result = other.connections.web_complete(other_request)
             self.assertEqual(result["connection_id"], item["id"])
-            other_item = connections._read(other_state).connections[item["id"]]
+            other_item = connection_state._read(other_state).connections[item["id"]]
             pair = credentials.load(other_state, other_item.credential_ref, other_item.credential_store)
             self.assertNotEqual(pair.access_token, request["tokens"]["access_token"])
             self.app.disconnect_integration(item["id"], 1)
@@ -580,7 +632,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
 
     def test_locked_store_at_startup_preserves_binding_and_recovers_after_unlock(self):
         item, _, _ = self.web_connect()
-        binding = connections._read(self.state).connections[item["id"]].binding()
+        binding = connection_state._read(self.state).connections[item["id"]].binding()
         saved = (self.state / "connections.json").read_bytes()
         unavailable = Fault("integration_credential_store_unavailable", "Fixture store is temporarily locked")
         with patch("integrations.github.web_broker.refresh") as broker:
@@ -619,7 +671,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             with self.subTest(expired=expired):
                 retained, pair = self.stored(item)
                 substitute = pair.model_copy(update={"source": "device_code", "core_binding": None,
-                    "refresh_id": None, "access_expires_at_ms": connections.now_ms() - 1 if expired else pair.access_expires_at_ms})
+                    "refresh_id": None, "access_expires_at_ms": connection_state.now_ms() - 1 if expired else pair.access_expires_at_ms})
                 credentials.save(self.state, retained.credential_ref, retained.credential_store, substitute)
                 unavailable = Fault("integration_credential_store_unavailable", "Fixture store is temporarily locked")
                 with patch.object(auth, "request") as provider, patch.object(auth, "refresh") as direct, \
@@ -670,7 +722,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
 
     def test_refresh_id_collision_with_original_authorization_never_dispatches(self):
         item = self.connect()
-        device_id = connections._read(self.state).connections[item["id"]].credential_ref
+        device_id = connection_state._read(self.state).connections[item["id"]].credential_ref
         self.app.disconnect_integration(item["id"], item["authorization_revision"])
         original = self.begin(expected_connection_id=item["id"], expected_authorization_revision=2)
         complete = self.completion(original)
@@ -679,7 +731,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             with self.subTest(family=index):
                 item = self.app.list_integrations()["connections"][0]
                 self.expire_web(item)
-                with patch.object(connections.secrets, "token_hex", return_value=identity), \
+                with patch.object(web_authorization.secrets, "token_hex", return_value=identity), \
                         patch("integrations.github.web_broker.refresh") as broker:
                     self.fault("github_reauthorization_required", self.read_repository, item)
                     broker.assert_not_called()
@@ -697,7 +749,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             self.read_repository(item)
         _, pair = self.stored(item)
         self.expire_web(item)
-        with patch.object(connections.secrets, "token_hex", return_value=pair.refresh_id), \
+        with patch.object(web_authorization.secrets, "token_hex", return_value=pair.refresh_id), \
                 patch("integrations.github.web_broker.refresh") as broker:
             self.fault("github_reauthorization_required", self.read_repository, item)
             broker.assert_not_called()
@@ -709,7 +761,7 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         legacy = pair.model_dump()
         for key in ("source", "core_binding", "refresh_id"):
             legacy.pop(key, None)
-        legacy["access_expires_at_ms"] = connections.now_ms() + 1000
+        legacy["access_expires_at_ms"] = connection_state.now_ms() + 1000
         save_json(self.state / "credentials/github" / (retained.credential_ref + ".json"), legacy)
         with patch("integrations.github.web_broker.refresh") as broker:
             self.read_repository(item)
@@ -720,18 +772,18 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
     def test_legacy_store_fingerprint_and_new_authority_are_both_preserved(self):
         for version in (1, 2):
             legacy = {"format": version, "connections": {}, "attempts": {}}
-            with self.app.connections._writing():
+            with self.app.connections._store.writing():
                 save_json(self.state / "connections.json", legacy)
             expected = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
             before = (self.state / "connections.json").read_bytes()
-            self.assertEqual(connections.check_state(self.state)["connections_sha256"], expected)
+            self.assertEqual(connection_state.check_state(self.state)["connections_sha256"], expected)
             self.assertEqual((self.state / "connections.json").read_bytes(), before)
         original = self.begin()
-        snapshot = connections.check_state(self.state)
+        snapshot = connection_state.check_state(self.state)
         self.assertEqual(snapshot["connections_format"], 3)
         self.assertNotEqual(snapshot["connections_sha256"], expected)
         self.app.connections.web_cancel(dict(v=1, intent_id=original["intent_id"]))
-        self.assertNotEqual(connections.check_state(self.state)["connections_sha256"], snapshot["connections_sha256"])
+        self.assertNotEqual(connection_state.check_state(self.state)["connections_sha256"], snapshot["connections_sha256"])
 
     def test_pending_approval_is_restartable_but_claimed_completion_defers_activation(self):
         class Interrupted(BaseException):
@@ -739,12 +791,12 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
 
         original = self.begin()
         before = (self.state / "connections.json").read_bytes()
-        self.assertEqual(connections.check_state(self.state, require_idle=True)["connections_format"], 3)
+        self.assertEqual(connection_state.check_state(self.state, require_idle=True)["connections_format"], 3)
         self.assertEqual((self.state / "connections.json").read_bytes(), before)
         with patch.object(auth, "read_actor", side_effect=Interrupted), self.assertRaises(Interrupted):
             self.app.connections.web_complete(self.completion(original))
         claimed = (self.state / "connections.json").read_bytes()
-        self.fault("activation_deferred", connections.check_state, self.state, require_idle=True)
+        self.fault("activation_deferred", connection_state.check_state, self.state, require_idle=True)
         self.assertEqual((self.state / "connections.json").read_bytes(), claimed)
 
     def test_candidate_reader_must_preserve_web_authority_and_contract(self):

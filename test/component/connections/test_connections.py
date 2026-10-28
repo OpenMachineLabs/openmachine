@@ -12,7 +12,7 @@ import unittest
 from openmachine.service.state import STATE_CONTRACT
 from unittest.mock import patch
 import uuid
-from integrations import connections, credentials
+from integrations import connection_state, connections, credentials
 from integrations.github import auth, operations
 from openmachine import tasks
 from openmachine.bootstrap import create_application
@@ -53,7 +53,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.run_owner()
         identity = uuid.uuid4().hex
         created, release, second_started = threading.Event(), threading.Event(), threading.Event()
-        original_guard = connections._guard
+        original_guard = connection_state._guard
         @contextmanager
         def initializing(path, **kwargs):
             if not kwargs.get("shared") and not path.exists():
@@ -66,7 +66,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         def second_request():
             second_started.set()
             return self.app.connect_integration(identity)
-        with patch.object(connections, "_guard", initializing), ThreadPoolExecutor(max_workers=2) as pool:
+        with patch.object(connection_state, "_guard", initializing), ThreadPoolExecutor(max_workers=2) as pool:
             first = pool.submit(self.app.connect_integration, identity)
             try:
                 self.assertTrue(created.wait(3))
@@ -394,9 +394,9 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         value, pair = self.stored(item)
         deadline = connections.now_ms() + 86400000
         credentials.save(self.state, value.credential_ref, value.credential_store, pair.model_copy(update={"refresh_expires_at_ms": deadline}))
-        with self.app.connections._writing() as data:
+        with self.app.connections._store.writing() as data:
             data.connections[item["id"]].refresh_expires_at_ms = deadline
-            self.app.connections._save(data)
+            self.app.connections._store.save(data)
         self.run_owner()
         end = time.monotonic() + 3
         while not self.refresh.called and time.monotonic() < end:
@@ -511,13 +511,13 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         old["contract"]["github_connections"]["Example/repo"] = binding
         old["operations"][0]["locator"]["connection"] = binding
         old = replace_task_record(self.state, old)
-        retained = connections.Connection(id=binding["connection_id"], provider="github", backend="gh",
+        retained = connection_state.Connection(id=binding["connection_id"], provider="github", backend="gh",
             account_id=1, account_login="operator", authorization_revision=1, status="connected",
             policy=self.config.github, verified_at_ms=connections.now_ms())
         attempt_id = "d" * 32
-        attempt = connections.Attempt(intent=dict(provider="github", method="existing_gh", connection_id=""),
+        attempt = connection_state.Attempt(intent=dict(provider="github", method="existing_gh", connection_id=""),
             status="succeeded", created_at_ms=1, expires_at_ms=1000, connection_id=retained.id)
-        save_json(self.state / "connections.json", connections.Store(format=1,
+        save_json(self.state / "connections.json", connection_state.Store(format=1,
             connections={retained.id: retained}, attempts={attempt_id: attempt}).model_dump())
         raw_task, raw_connections = self.task_bytes(), (self.state / "connections.json").read_bytes()
         self.calls.clear()
@@ -610,7 +610,7 @@ class ConnectionTests(ConnectionCaseFixture, unittest.TestCase):
         self.device["interval"] = 60
         identity = uuid.uuid4().hex
         self.app.connect_integration(identity, connection_id=item["id"])
-        self.fault("activation_deferred", connections.check_state, self.state, require_idle=True)
+        self.fault("activation_deferred", connection_state.check_state, self.state, require_idle=True)
         self.app.disconnect_integration(item["id"], disconnected["authorization_revision"])
         end = time.monotonic() + 1
         while identity in self.app.connections._jobs and time.monotonic() < end:

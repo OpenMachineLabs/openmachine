@@ -107,7 +107,9 @@
         "test/contract/mcp/server/test_github_web.py"
       ],
       "sources": [
-        "integrations/connections.py"
+        "integrations/connections.py",
+        "integrations/connection_state.py",
+        "integrations/github/web_authorization.py"
       ],
       "tests": [
         "test/component/connections/test_connections.py",
@@ -317,7 +319,8 @@
         "openmachine/mcp/protocol.py",
         "openmachine/mcp/tasks.py",
         "openmachine/mcp/workspace.py",
-        "openmachine/server.py"
+        "openmachine/server.py",
+        "openmachine/github_web_http.py"
       ],
       "tests": [
         "test/component/server/test_mcp_admission.py",
