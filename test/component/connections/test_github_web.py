@@ -613,6 +613,41 @@ class WebConnectionTests(ConnectionCaseFixture, unittest.TestCase):
                     self.assertTrue((self.state / "connections.json").read_bytes() == saved)
             broker.assert_not_called()
 
+    def test_unlock_rejects_device_source_in_original_web_slot_before_io(self):
+        item, _, _ = self.web_connect()
+        for expired in (False, True):
+            with self.subTest(expired=expired):
+                retained, pair = self.stored(item)
+                substitute = pair.model_copy(update={"source": "device_code", "core_binding": None,
+                    "refresh_id": None, "access_expires_at_ms": connections.now_ms() - 1 if expired else pair.access_expires_at_ms})
+                credentials.save(self.state, retained.credential_ref, retained.credential_store, substitute)
+                unavailable = Fault("integration_credential_store_unavailable", "Fixture store is temporarily locked")
+                with patch.object(auth, "request") as provider, patch.object(auth, "refresh") as direct, \
+                        patch("integrations.github.web_broker.refresh") as broker:
+                    with patch.object(credentials, "load", side_effect=unavailable):
+                        self.restart()
+                        listing = self.app.list_integrations()
+                        self.assertEqual(listing["connections"][0]["status"], "connected")
+                        self.assertEqual(listing["connections"][0]["authorization_revision"], item["authorization_revision"])
+                    with self.assertRaises(Fault) as caught:
+                        self.read_repository(item)
+                    self.assertEqual((caught.exception.code, caught.exception.effect),
+                                     ("integration_credential_invalid", "known_no_effect"))
+                    self.fault("integration_disconnected", self.read_repository, item)
+                    listing = self.app.list_integrations()
+                    observed = listing["connections"][0]
+                    self.assertEqual((observed["status"], observed["authorization_revision"]),
+                                     ("reauthorization_required", item["authorization_revision"] + 1))
+                    self.assertEqual(listing["renewal"]["errors"].get(item["id"]), "integration_credential_invalid")
+                    provider.assert_not_called()
+                    direct.assert_not_called()
+                    broker.assert_not_called()
+                if not expired:
+                    approved = self.begin(expected_connection_id=item["id"],
+                        expected_authorization_revision=observed["authorization_revision"])
+                    self.app.connections.web_complete(self.completion(approved))
+                    item = self.app.list_integrations()["connections"][0]
+
     def test_interrupted_refresh_record_is_not_dispatched_after_restart(self):
         item, _, _ = self.web_connect()
         retained, pair = self.stored(item)

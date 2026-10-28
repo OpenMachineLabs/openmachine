@@ -908,6 +908,14 @@ class Connections:
             if error.code in {"integration_credential_missing", "integration_credential_invalid"}:
                 self._reauthorize(item)
             raise
+        if current.source != "web":
+            value = _read(self.state)
+            if value is None:
+                raise Fault("integration_store_invalid", "The original credential owner is unavailable.")
+            if item.credential_ref in value.web_intents:
+                self._errors[item.id] = "integration_credential_invalid"
+                self._reauthorize(item)
+                raise Fault("integration_credential_invalid", "Credential source differs from its original web authorization.")
         if current.source == "web" and self._errors.get(item.id) == "integration_credential_store_unavailable":
             self._errors.pop(item.id, None)
         if current.account_id != item.account_id:
