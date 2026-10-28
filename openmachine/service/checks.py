@@ -309,7 +309,8 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
                 for key in ("execution_reconciliations", "execution_reconciliation_sha256"))):
             raise ValueError("candidate ignores or changes retained execution reconciliation")
         connections = _connections_state(state)
-        required_connection_contract = 11 if connections["connections_format"] >= 2 else 10
+        required_connection_contract = (23 if connections["connections_format"] >= 3 else
+                                        11 if connections["connections_format"] >= 2 else 10)
         if connections["connections_present"] and (value["state_contract"] < required_connection_contract or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in connections.items())):
             raise ValueError("candidate ignores retained connection authority")

@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory, save_json
 
@@ -30,13 +30,29 @@ class Credential(BaseModel):
     refresh_token: str = Field(min_length=16, max_length=2048, repr=False)
     access_expires_at_ms: Number
     refresh_expires_at_ms: Number
+    source: Literal["device_code", "web"] = "device_code"
+    core_binding: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+    refresh_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")] | None = None
 
     @model_validator(mode="after")
     def valid(self):
         if (not 0 < self.access_expires_at_ms < self.refresh_expires_at_ms
                 or self.phase != "unverified" and not self.account_id):
             raise ValueError("invalid credential identity or deadlines")
+        if (self.source == "web" and (self.core_binding is None
+                or self.phase == "refreshing" and self.refresh_id is None)
+                or self.source == "device_code" and (self.core_binding is not None or self.refresh_id is not None)):
+            raise ValueError("invalid credential source binding")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.source == "device_code":
+            # Device-only writers retain the old credential schema for old readers.
+            for key in ("source", "core_binding", "refresh_id"):
+                value.pop(key, None)
+        return value
 
 
 def select() -> StoreName:

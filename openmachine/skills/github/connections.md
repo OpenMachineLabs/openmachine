@@ -5,7 +5,7 @@
 ## Account connections
 
 Connection protocol **2** provides one runtime-owned native account lifecycle on
-existing private MCP. New accounts use GitHub App Device Flow; `existing_gh`
+existing private MCP. Assistant-initiated accounts use GitHub App Device Flow; `existing_gh`
 onboarding and the gh request backend are retired. Runtime requests require a
 selected native connection and an explicit transport; there is no CLI fallback.
 Saved gh connections, login attempts, task bindings and receipts remain readable.
@@ -13,6 +13,14 @@ Their stored status describes history, not current execution support; capabiliti
 report `legacy_gh: retired`. Requests through an old binding or an unbound historical
 GitHub task fail with `integration_legacy_connection` before provider dispatch.
 No account migration, automatic reconnection or mutation replay occurs.
+
+Native owners may also use Core's version-1 private web authorization handlers on
+the same owner-only Unix service. These are not MCP tools or token import arguments.
+They retain original local approval and Core/account/revision binding, consume
+claims before processing, and report success only after independent account and
+credential readback. Use the original private intent status after a lost response.
+See the [native contract](https://github.com/OpenMachineLabs/openmachine/blob/main/docs/reference/github-web-authorization.md)
+for the fixed IPC schemas and owner checks; Device Flow remains the public fallback.
 
 Repository CI may still use GitHub CLI with its own Actions credentials. This is
 independent of runtime account connections, as is an operator's Git credential helper.
@@ -56,11 +64,19 @@ credential slots, so late results cannot overwrite another account or undo a
 cancel/disconnect. New work accepts native bindings only; old task identities and
 serialized evidence are not migrated to a different authentication backend.
 
-Normal requests refresh access tokens near expiry. The same owner checks refresh
+Device Flow requests refresh access tokens near expiry. The same owner checks refresh
 grant deadlines every six hours and renews within the final 30 days, including
 otherwise idle accounts. No high-frequency keepalive or always-open network
 connection is needed. GitHub currently returns eight-hour access tokens and
 six-month rotating refresh grants; routine successful rotation renews both.
+
+For web credentials, Core uses only the fixed owner-authenticated local Connector
+broker for refresh. An unexpired local token remains usable without Cloud; web
+rotation starts on expiry or a definite authentication rejection. Core saves the
+original refresh ID before dispatch and durably verifies the rotated pair. A lost
+reply, offline broker, failed write or interrupted rotation requires fresh
+authorization; never restore or repeat the old grant. Legacy credential records
+default to Device Flow. Normal GitHub API operations stay local.
 
 The original credential is marked before exchange, then the complete replacement
 is persisted and identity-verified before use. A lost rotating-token response or

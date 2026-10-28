@@ -98,3 +98,4 @@ nav:
       - Troubleshooting: troubleshooting.md
       - CLI: reference/cli.md
       - MCP tools: reference/tools.md
+      - GitHub web authorization: reference/github-web-authorization.md
