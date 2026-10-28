@@ -38,6 +38,12 @@ known. Core owns the finite login attempt; passive reads do not start another.
 No PAT, App private key, client secret or custom App registration is required.
 The retired `existing_gh` backend is not a fallback for current runtime requests.
 
+Native clients can also use the [private web authorization contract](../reference/github-web-authorization.md).
+Core retains local approval, independently verifies the authorized account and
+saves credentials in the same pinned store. Browser authorization and web-token
+refresh use an external broker; ordinary GitHub operations still run directly
+on Core. These private interfaces are not public assistant tools.
+
 With the selected absolute `CONFIG` and `STATE`, probe the intended repository:
 
 ```sh

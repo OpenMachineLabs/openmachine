@@ -1,4 +1,4 @@
-"""GitHub App Device Flow and bounded HTTP; no account or task ownership."""
+"""GitHub App token parsing, Device Flow and bounded direct GitHub HTTP."""
 
 import json
 import re
@@ -14,6 +14,8 @@ API = "https://api.github.com/"
 VERIFY_URL = "https://github.com/login/device"
 CLIENT_ID = "Iv23li3ZkAK2uC1mTD4q"  # Official OpenMachineLabs Open Machine Connector App.
 INSTALL_URL = "https://github.com/apps/open-machine-connector/installations/new"
+WEB_TOKEN_FIELDS = frozenset({"access_token", "refresh_token", "expires_in",
+                              "refresh_token_expires_in", "token_type"})
 
 
 def _integer_header(headers, name: str) -> int | None:
@@ -131,6 +133,24 @@ def poll_device(device_code: str, interval: int) -> tuple[Credential | None, int
             error, "github_authentication_required")
         raise Fault(code, "GitHub did not complete the original device authorization.")
     return _credential(value), interval
+
+
+def accept_web_tokens(tokens: dict, *, core_binding: str) -> Credential:
+    """Parse only the private owner handoff; actor/intent verification is separate."""
+    try:
+        if (not isinstance(tokens, dict) or set(tokens) != WEB_TOKEN_FIELDS
+                or not isinstance(core_binding, str) or not re.fullmatch(r"[0-9a-f]{64}", core_binding)):
+            raise ValueError
+        for name in ("access_token", "refresh_token"):
+            token = tokens[name]
+            if (not isinstance(token, str) or not 16 <= len(token) <= 2048
+                    or not token.isascii() or any(ord(char) <= 32 or ord(char) == 127 for char in token)):
+                raise ValueError
+        pair = _credential(tokens | {"scope": ""})
+        return Credential.model_validate(pair.model_dump() | {"source": "web", "core_binding": core_binding})
+    except (Fault, ValueError, TypeError, KeyError):
+        # Validation errors may embed the supplied token pair. Never retain them.
+        raise Fault("github_invalid_response", "The private GitHub token handoff is invalid.") from None
 
 
 def refresh(refresh_token: str) -> Credential:
