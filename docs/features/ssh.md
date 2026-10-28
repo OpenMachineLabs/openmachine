@@ -4,6 +4,11 @@ OpenMachine uses your existing authenticated OpenSSH connection and a prepared
 worker on a Linux account. The same workspace and execution tools then operate
 on that target, with results retained on the target rather than guessed locally.
 
+Managed installations expose `manage ssh-setup` to verify, prepare and register
+an SSH machine without selecting a workspace or granting execution permissions.
+Workspaces and machine-wide permissions use separate confirmed configuration
+updates. The procedure below is the manual alternative, not a required UI flow.
+
 ## 1. Prepare the account and connection
 
 The target needs Linux, **Python 3.12+ as `python3`**, Git and an available

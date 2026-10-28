@@ -1,4 +1,4 @@
-"""Guided setup effects, exact identities and recovery without live servers."""
+"""Core SSH machine preparation and recovery with isolated remote fixtures."""
 
 import base64
 import hashlib
@@ -62,32 +62,30 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(self.act("status")["phase"], "prepared")
             self.act("prepare", {"confirmed": True, "sha256": view["sha256"]})
             self.assertEqual(self.remote_calls.count("prepare"), 1)
-            view = self.act("project", {"name": "remote-project", "root": "/remote/project", "commands": False, "writes": False})
-            self.assertEqual(view["phase"], "project_ready")
-            self.assertEqual(view["project"]["root"], "/remote/project")
+            with self.assertRaises(Fault) as caught:
+                self.act("project", {"name": "remote-project", "root": "/remote/project", "commands": False, "writes": False})
+            self.assertEqual(caught.exception.code, "invalid_request")
+            view = self.act("status")
+            self.assertEqual(view["phase"], "prepared")
+            self.assertIsNone(view["project"])
         self.assertEqual(self.config.read_bytes(), before)
         self.assertNotIn("identity_file", json.dumps(view))
         self.assertEqual(setup.check_state(self.state)["ssh_setup_records"], 1)
 
-    def test_known_worker_reused_and_remote_project_saved_through_existing_maintenance(self):
+    def test_prepared_machine_saves_without_workspace_or_grants(self):
         self.policy_fixture()
         self.machine_fixture()
         self.available = True
         with patch.object(setup, "_discover", return_value=(key(), True)), patch.object(setup, "_remote", side_effect=self.remote), \
                 patch.object(client, "call", return_value={"target_identity": "d" * 64}), patch.object(maintenance, "_spawn") as spawn:
             self.assertEqual(self.act("inspect", self.request)["phase"], "prepared")
-            self.act("project", {"name": "remote-project", "root": "/remote/project", "commands": False, "writes": True})
-            with patch.object(setup, "_remote", return_value={"root": "/different/project"}):
-                changed = self.act("save", {"confirmed": True})
-            self.assertEqual(changed["reason"], "remote_project_changed")
-            self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
             result = self.act("save", {"confirmed": True})
             self.assertEqual(result["phase"], "saving", result.get("reason"))
             record = maintenance._read(self.state, self.operation_id)
             config = load(Path(record["request"]["candidate_config"]))
-            self.assertEqual(config.workspaces["remote-project"].root, "/remote/project")
+            self.assertNotIn("remote-project", config.workspaces)
             target = config.machines["build"]
-            self.assertEqual((target.execution_enabled, target.workspace_write_enabled), (False, True))
+            self.assertEqual((target.execution_enabled, target.workspace_write_enabled), (False, False))
             self.assertEqual(target.ssh_connection.host_key, key())
             from openmachine.bootstrap import create_application
             target.ssh_connection.identity_file = "/native/selected-key"
@@ -97,6 +95,41 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
             self.act("save", {"confirmed": True})
             spawn.assert_called_once()
             self.assertNotIn("prepare", self.remote_calls)
+
+    def test_completed_setup_cannot_be_cancelled_or_relabeled(self):
+        self.available = True
+        with patch.object(setup, "_discover", return_value=(key(), True)), \
+                patch.object(setup, "_remote", side_effect=self.remote), \
+                patch.object(client, "call", return_value={"target_identity": "d" * 64}):
+            self.act("inspect", self.request)
+            retained = setup._read(self.state, self.operation_id) | {"phase": "completed"}
+            save_json(setup._path(self.state, self.operation_id), retained)
+            with self.assertRaises(Fault) as caught:
+                self.act("cancel")
+            self.assertEqual(caught.exception.code, "setup_completed")
+            self.assertEqual(self.act("status")["phase"], "completed")
+            self.assertEqual(setup._read(self.state, self.operation_id), retained)
+
+    def test_legacy_project_ready_record_keeps_atomic_save(self):
+        self.policy_fixture()
+        self.machine_fixture()
+        self.available = True
+        with patch.object(setup, "_discover", return_value=(key(), True)), \
+                patch.object(setup, "_remote", side_effect=self.remote), \
+                patch.object(client, "call", return_value={"target_identity": "d" * 64}), \
+                patch.object(maintenance, "_spawn"):
+            self.act("inspect", self.request)
+            retained = setup._read(self.state, self.operation_id)
+            retained["phase"] = "project_ready"
+            retained["project"] = {"name": "remote-project", "root": "/remote/project",
+                                   "commands": False, "writes": True}
+            save_json(setup._path(self.state, self.operation_id), retained)
+            self.assertEqual(self.act("save", {"confirmed": True})["phase"], "saving")
+            operation = maintenance._read(self.state, self.operation_id)
+            config = load(Path(operation["request"]["candidate_config"]))
+            self.assertEqual(config.workspaces["remote-project"].root, "/remote/project")
+            self.assertEqual((config.machines["build"].execution_enabled,
+                              config.machines["build"].workspace_write_enabled), (False, True))
 
     def test_completed_prepare_failure_preserves_original_for_explicit_retry_or_cancel(self):
         remote = setup._remote
@@ -200,17 +233,16 @@ class SetupTests(ServiceCaseFixture, unittest.TestCase):
                 patch.object(client, "call", return_value={"target_identity": "d" * 64}), \
                 patch.object(maintenance, "change_machine", side_effect=OSError("fixture disk failure")) as change:
             self.act("inspect", self.request)
-            self.act("project", {"name": "project", "root": "/remote/project", "commands": False, "writes": False})
             self.assertEqual(self.act("save", {"confirmed": True})["phase"], "saving")
             with lease(self.state / "service/operation.lock"):
                 with self.assertRaises(Fault):
                     self.act("status")
             self.assertEqual(setup._read(self.state, self.operation_id)["phase"], "saving")
-            self.assertEqual(self.act("status")["phase"], "project_ready")
+            self.assertEqual(self.act("status")["phase"], "prepared")
             # A crashed submitter leaves the same pre-admission state on disk.
             record = setup._read(self.state, self.operation_id) | {"phase": "saving"}
             save_json(setup._path(self.state, self.operation_id), record)
-            self.assertEqual(self.act("status")["phase"], "project_ready")
+            self.assertEqual(self.act("status")["phase"], "prepared")
             change.assert_called_once()
             self.assertFalse(maintenance._operation_path(self.state, self.operation_id).exists())
 

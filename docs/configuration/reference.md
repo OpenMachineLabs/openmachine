@@ -70,11 +70,13 @@ one does not change the configured default root or grant ownership of other tree
 identity verification, independent grants and remote result retrieval. Do not set
 an archive checksum as the target identity. Local machines reject SSH-only fields.
 
-Management-capable macOS installations also provide `manage machines`,
-`machine-probe`, `machine-test`, `machine-add` and `machine-remove`. Writes use an
-original operation ID and the observed configuration SHA256, rather than an
-unconditional overwrite. Their CLI arguments are in [CLI reference](../reference/cli.md).
-They do not provision an SSH worker or authorize deletion of remote files.
+Management-capable macOS installations provide `manage machines`,
+`machine-probe`, `machine-test`, `machine-add`, `machine-remove` and
+`ssh-setup`. The latter can verify and prepare a worker and register a read-only
+SSH machine without a workspace. Add workspaces and change machine-wide grants
+separately through the confirmed candidate-configuration `manage update` contract.
+Writes retain original operation IDs and observed configuration digests; they
+never authorize deletion of remote files.
 
 ## GitHub and Skills
 

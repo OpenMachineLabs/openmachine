@@ -97,8 +97,8 @@ def main() -> int:
         if action in {"machine-add", "machine-remove"}:
             operation.add_argument("--operation-id", required=True)
             operation.add_argument("--config-sha256", required=True)
-    ssh_setup = management.add_parser("ssh-setup", help="Inspect, review and prepare one SSH server with original-result recovery")
-    ssh_setup.add_argument("--action", choices=("inspect", "trust", "prepare", "status", "project", "save", "continue", "cancel"), required=True)
+    ssh_setup = management.add_parser("ssh-setup", help="Verify, prepare and register an SSH machine with original-result recovery")
+    ssh_setup.add_argument("--action", choices=("inspect", "trust", "prepare", "status", "save", "continue", "cancel"), required=True)
     ssh_setup.add_argument("--operation-id", required=True)
     args = parser.parse_args()
     if args.command == "update" and ((args.wheel is not None and args.requirements is None)
