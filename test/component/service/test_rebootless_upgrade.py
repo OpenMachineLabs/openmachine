@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine import __version__, execution
+from openmachine import __version__, execution, tasks
 from openmachine.app import task_receipts
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
@@ -73,13 +73,13 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
         return directory, original, task_operation
 
     def admit(self, operations, *, candidate_config=None):
-        with ExitStack() as guards, patch.object(checks.tasks, "activation_blockers", return_value=operations):
+        with ExitStack() as guards, patch.object(tasks, "activation_blockers", return_value=operations):
             checks.activation_safe(self.state, config=self.config,
                                    candidate_config=candidate_config or self.config, guards=guards)
 
     def test_cleanup_only_unknown_upgrade_requires_no_reboot_and_retains_original_history(self):
         directory, before, task = self.cleanup_unknown()
-        with patch.object(checks.tasks, "activation_blockers", return_value=[task]):
+        with patch.object(tasks, "activation_blockers", return_value=[task]):
             with self.assertRaises(Fault) as error:
                 checks.activation_safe(self.state)
             self.assertEqual(error.exception.code, "activation_deferred")

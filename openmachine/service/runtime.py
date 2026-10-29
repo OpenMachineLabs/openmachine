@@ -17,11 +17,10 @@ import tempfile
 import threading
 import time
 
-from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 
-from . import checks, processes, state as service_state
+from . import processes, state as service_state
 from .state import HEALTH_INTERVAL_SECONDS, LAUNCHER, READINESS_SECONDS, RECOVERY_ATTEMPTS, RECOVERY_MS
 
 
@@ -208,6 +207,8 @@ def _stop(state: Path) -> None:
 
 
 def _start(state: Path, record: dict) -> dict:
+    from . import checks
+
     if service_state.stopped(record):
         raise Fault("runtime_stopped", "Explicit Start is required before launching a deliberately stopped runtime.")
     if record["pending"] is None and service_state._installed(state, record["current"])["state_contract"] >= 8:
@@ -293,6 +294,8 @@ def _stop_mcp(child: subprocess.Popen) -> None:
 
 
 def _monitor_mcp(state: Path, record: dict, child: subprocess.Popen, stop: threading.Event) -> None:
+    from . import checks
+
     next_check = time.monotonic() + HEALTH_INTERVAL_SECONDS
     while child.poll() is None and not stop.is_set():
         remaining = next_check - time.monotonic()
@@ -314,6 +317,9 @@ def _monitor_mcp(state: Path, record: dict, child: subprocess.Popen, stop: threa
 
 def supervise(config_path: Path, state: Path) -> None:
     """Own only the selected MCP child; launchd retains the service lifetime."""
+    from openmachine.config import load
+    from . import checks
+
     stop = threading.Event()
     previous = signal.signal(signal.SIGTERM, lambda *_: stop.set())
     child = None
@@ -444,6 +450,7 @@ def status(config_path: Path, state: Path) -> dict:
     if recovery and recovery["episode"] and observed["loaded"]:
         result["status"] = "blocked" if recovery["episode"]["reason"].startswith("blocked_") else "recovering"
     elif observed["pid"] is not None:
+        from . import checks
         try:
             if managed:
                 with lease(state / "service/readiness.lock"):

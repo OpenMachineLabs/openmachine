@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import call, patch
 import zipfile
-from openmachine import service, tasks
+from openmachine import execution, service, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -115,9 +115,9 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(identities, [identity])
             yield {identity: unsettled}
 
-        with patch.object(service_checks.execution, "read_record", return_value=unsettled), \
-                patch.object(service_checks.execution, "activation_guard", side_effect=original_guard), \
-                patch.object(service_checks.tasks, "activation_blockers", return_value=[]):
+        with patch.object(execution, "read_record", return_value=unsettled), \
+                patch.object(execution, "activation_guard", side_effect=original_guard), \
+                patch.object(tasks, "activation_blockers", return_value=[]):
             self.assert_fault("activation_deferred", lambda: service_transition._activate(
                 self.state, self.record, self.b, candidate_config=candidate, require_safe=True))
         stop.assert_not_called()

@@ -8,6 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 from openmachine import tasks
+from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -38,8 +39,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                         candidate_config=candidate, expected_config_sha256=maintenance._digest(self.config),
                         expected_candidate_sha256=maintenance._digest(candidate))
                     record = accepted["operation"]
-                    saved = maintenance.load(Path(record["request"]["candidate_config"]))
-                    baseline = maintenance.load(self.config)
+                    saved = load(Path(record["request"]["candidate_config"]))
+                    baseline = load(self.config)
                     self.assertEqual((saved.machines["local"].execution_enabled,
                                       saved.machines["local"].workspace_write_enabled), (commands, writes))
                     self.assertEqual((saved.github, saved.skills, saved.workspaces["existing"]),
@@ -282,7 +283,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual((original["status"], original["operation"]["outcome"]["status"]), ("completed", "stopped"))
         self.assertEqual(self.config.read_bytes(), expected)
         self.assertEqual(service_state._record(self.state)["policy"], original_policy)
-        config = maintenance.load(self.config)
+        config = load(self.config)
         self.assert_fault("execution_disabled", lambda: config.machine("local", write=True))
         self.assert_fault("workspace_write_disabled", lambda: config.workspace_machine("local"))
         start.assert_not_called()
@@ -354,7 +355,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         renamed.workspaces["renamed"] = renamed.workspaces.pop("existing")
         self.assert_fault("workspace_in_use", lambda: service_checks.workspace_bindings_safe(
             self.state, original, renamed, "existing"))
-        with patch.object(service_checks.tasks, "references_workspace", return_value=True):
+        with patch.object(tasks, "references_workspace", return_value=True):
             self.assert_fault("workspace_in_use", lambda: service_checks.workspace_bindings_safe(
                 self.state, original, renamed, "project"))
 

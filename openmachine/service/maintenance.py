@@ -17,14 +17,10 @@ import time
 from typing import Literal
 
 from openmachine import __version__
-from pydantic import ValidationError
-
-from integrations.ssh import bundle, client as ssh_client, setup as ssh_setup
-from openmachine.config import Settings, SshConnection, initialize, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-from . import checks, install, payload, processes, runtime, state as service_state, transition
+from . import payload, processes, runtime, state as service_state
 from .state import _configuration_digest as _digest
 
 MAX_OPERATIONS = 128
@@ -60,6 +56,8 @@ def _activation_basis(record: dict) -> str:
 
 def _cutover_selection(state: Path, record: dict) -> dict | None:
     """Recognize only this maintenance intent after its irreversible Task cutover."""
+    from . import transition
+
     if (record["phase"] not in {"activating", "recovery_required"}
             or record["request"]["action"] != "update" or record["prepared"] is None):
         return None
@@ -391,6 +389,8 @@ def _inputs_unchanged(state: Path, record: dict) -> Path:
 
 def run_operation(state: Path, identity: str, lock_fd: int) -> None:
     """One admitted operation; the caller owns the inherited operation flock."""
+    from . import install, transition
+
     record = _read(state, identity)
     if record["phase"] not in CONTINUABLE | {"activating", "recovery_required"}:
         return
@@ -480,6 +480,8 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
 
 def control(config_path: Path, state: Path, action: Literal["start", "resume", "stop", "startup", "bind"], *,
             enabled: bool | None = None, identity: str | None = None) -> dict:
+    from . import checks
+
     with lease(state / "service/operation.lock"):
         record = service_state._record(state)
         _bound(config_path, state, record)
@@ -570,6 +572,8 @@ def observe(config_path: Path, state: Path) -> dict:
 
 def machines(config_path: Path, state: Path) -> dict:
     """Read configuration through its owner, independently of service readiness."""
+    from openmachine.config import load
+
     digest = _digest(config_path)
     config = load(config_path)
     if _digest(config_path) != digest:
@@ -584,6 +588,9 @@ def machines(config_path: Path, state: Path) -> dict:
 
 
 def _machine_candidate(config, name: str, alias: str | None, worker: str, pinned: str = "", *, connection=None, project=None):
+    from pydantic import ValidationError
+    from openmachine.config import Settings
+
     if name in config.machines or any(alias and target.ssh_alias == alias or pinned and target.ssh_identity == pinned
                                        for target in config.machines.values()):
         raise Fault("duplicate_machine", "That machine name or SSH alias is already configured.")
@@ -605,6 +612,9 @@ def _machine_candidate(config, name: str, alias: str | None, worker: str, pinned
 
 
 def probe_machine(config_path: Path, name: str, *, alias: str | None = None, worker: str = "", pinned: str = "") -> dict:
+    from integrations.ssh import client as ssh_client
+    from openmachine.config import load
+
     digest = _digest(config_path)
     config = load(config_path)
     if alias is not None:
@@ -626,6 +636,9 @@ def probe_machine(config_path: Path, name: str, *, alias: str | None = None, wor
 def change_machine(config_path: Path, state: Path, action: str, identity: str, name: str,
                    expected_config_sha256: str, *, alias: str | None = "", worker: str = "", pinned: str = "",
                    connection=None, project=None) -> dict:
+    from openmachine.config import load
+    from . import checks
+
     # Repeating an original operation is readback, never another probe or mutation.
     if os.path.lexists(_operation_path(state, identity)):
         return read_operation(config_path, state, identity)
@@ -673,6 +686,10 @@ def change_machine(config_path: Path, state: Path, action: str, identity: str, n
 
 
 def setup_ssh(config_path, state, action, identity, value):
+    from pydantic import ValidationError
+    from integrations.ssh import bundle, client as ssh_client, setup as ssh_setup
+    from openmachine.config import SshConnection, load
+
     path = ssh_setup._path(state, identity)
     root = private_directory(path.parent)
     if root != path.parent or not isinstance(value, dict):
@@ -844,6 +861,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
         elif action in {"machine-add", "machine-remove"}:
             result = change_machine(config_path, state, action, **inputs)
         elif action == "configure":
+            from openmachine.config import initialize
             _uninstalled(state)
             result = {"status": "configured", **initialize(config_path, **inputs)}
         elif action in {"install", "update"}:
@@ -855,6 +873,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
         elif action == "retire":
             result = retire_operation(config_path, state, **inputs)
         elif action == "rollback":
+            from . import transition
             result = transition.operate(config_path, state, "rollback", require_safe=True)
         elif action in {"start", "resume", "stop", "startup", "bind"}:
             result = control(config_path, state, action, **inputs)
@@ -868,6 +887,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                   "reason": code}
         if (action == "ssh-setup" and inputs.get("action", inputs.get("setup_action")) == "inspect"
                 and isinstance(inputs.get("identity"), str) and re.fullmatch(r"[0-9a-f]{32}", inputs["identity"])):
+            from integrations.ssh import setup as ssh_setup
             if not os.path.lexists(ssh_setup._path(state, inputs["identity"])):
                 result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
         if (action in {"machine-add", "machine-remove"} and code in {
