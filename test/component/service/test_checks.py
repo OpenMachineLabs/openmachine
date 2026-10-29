@@ -7,7 +7,7 @@ import sys
 import time
 import unittest
 from unittest.mock import call, patch
-from openmachine import service, tasks
+from openmachine import execution, service, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks as service_checks
@@ -452,7 +452,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         path.write_bytes(b'{}')
         self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         path.write_bytes(original)
-        with patch.object(service_checks.tasks, "activation_blockers", return_value=[{"state": "unknown", "result": None}]):
+        with patch.object(tasks, "activation_blockers", return_value=[{"state": "unknown", "result": None}]):
             self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         historical = [
             {"state": "unknown", "locator": {"kind": "github"},
@@ -461,17 +461,17 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             {"state": "unknown", "locator": {"kind": "change"},
              "result": {"status": "unknown", "receipt_sha256": None, "summary": "Domain failure: invalid_edits."}},
         ]
-        with patch.object(service_checks.tasks, "activation_blockers", return_value=historical):
+        with patch.object(tasks, "activation_blockers", return_value=historical):
             service_checks.activation_safe(self.state)
         for operation in (
                 {"state": "unknown", "locator": {"kind": "change"},
                  "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original change outcome is unresolved."}},
                 {"state": "unknown", "locator": {"kind": "execution"},
                  "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original execution outcome is unresolved."}}):
-            with self.subTest(operation=operation), patch.object(service_checks.tasks, "activation_blockers", return_value=[operation]):
+            with self.subTest(operation=operation), patch.object(tasks, "activation_blockers", return_value=[operation]):
                 self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         private_directory(self.state / "executions/original")
-        with patch.object(service_checks.execution, "read_record", return_value={"status": "running"}):
+        with patch.object(execution, "read_record", return_value={"status": "running"}):
             self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
         self.assertEqual(path.read_bytes(), records.canonical(created["record"]))
 

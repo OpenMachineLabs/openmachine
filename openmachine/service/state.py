@@ -9,7 +9,6 @@ import stat
 import sys
 import tempfile
 
-from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory, save_json
 
@@ -293,6 +292,8 @@ def _save_recovery(state: Path, episode: dict | None) -> None:
 
 
 def _configuration_digest(path: Path) -> str:
+    from openmachine.config import load
+
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
             or info.st_size > 65536):
@@ -315,6 +316,8 @@ def _saved_configuration(state: Path, digest: str) -> Path:
 
 
 def _snapshot_configuration(state: Path, source: Path) -> str:
+    from openmachine.config import load
+
     load(source)
     data = source.read_bytes()
     if len(data) > 65536:

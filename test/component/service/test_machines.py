@@ -7,8 +7,9 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import call, patch
-from openmachine import __version__
-from openmachine.config import Settings
+from integrations.ssh import client as ssh_client
+from openmachine import __version__, tasks
+from openmachine.config import Settings, load
 from openmachine.foundation.state import lease
 from openmachine.service import maintenance
 from openmachine.service import checks as service_checks
@@ -22,7 +23,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         before = self.config.read_bytes()
         original = sorted(str(path.relative_to(self.state)) for path in self.state.rglob("*"))
         with patch.object(maintenance.runtime, "status", side_effect=AssertionError("Must not require a running service")), \
-                patch.object(maintenance.ssh_client, "call", return_value=result) as probe:
+                patch.object(ssh_client, "call", return_value=result) as probe:
             catalog = maintenance.machines(self.config, self.state)
             self.assertEqual([item["name"] for item in catalog["machines"]], ["local"])
             probe.assert_not_called()
@@ -41,7 +42,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         result = self.machine_fixture()
         before = self.config.read_bytes()
         digest = hashlib.sha256(before).hexdigest()
-        with patch.object(maintenance.ssh_client, "call", return_value=result) as probe, \
+        with patch.object(ssh_client, "call", return_value=result) as probe, \
                 patch.object(maintenance, "_spawn") as spawn:
             accepted = maintenance.change_machine(self.config, self.state, "machine-add", "1" * 32,
                 "server-a", digest, alias="prepared-a", worker="/workers/" + "e" * 64 + ".pyz", pinned="d" * 64)
@@ -72,14 +73,14 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         original = maintenance.read_operation(self.config, self.state, record["operation_id"])
         self.assertEqual(original["status"], "completed")
         self.assertEqual(original["operation"]["outcome"]["status"], "stopped")
-        self.assertEqual(maintenance.load(self.config).machines["server-a"].ssh_identity, "d" * 64)
+        self.assertEqual(load(self.config).machines["server-a"].ssh_identity, "d" * 64)
         self.assertTrue(any(call.kwargs.get("check_remote") for call in verify.call_args_list))
         start.assert_not_called()
 
     def test_machine_add_rejects_duplicates_changed_config_and_failed_identity_without_saving(self):
         result = self.machine_fixture()
         digest = maintenance._digest(self.config)
-        with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.ssh_client, "call", return_value=result) as probe:
+        with patch.object(maintenance, "_spawn") as spawn, patch.object(ssh_client, "call", return_value=result) as probe:
             self.assert_fault("duplicate_machine", lambda: maintenance.probe_machine(self.config, "local", alias="prepared", worker="/" + "e" * 64 + ".pyz"))
             self.assert_fault("invalid_machine", lambda: maintenance.probe_machine(self.config, "remote", alias="-option", worker="/" + "e" * 64 + ".pyz"))
             self.assert_fault("configuration_changed", lambda: maintenance.change_machine(self.config, self.state, "machine-add", "1" * 32,
@@ -97,13 +98,13 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_machine_removal_preserves_local_and_refuses_retained_references(self):
         self.machine_fixture()
         self.config.write_text(self.config.read_text() + '\n[machines.remote]\ntransport="ssh"\nssh_alias="prepared"\nssh_worker="/' + "e" * 64 + '.pyz"\nssh_identity="' + "d" * 64 + '"\n')
-        config = maintenance.load(self.config)
+        config = load(self.config)
         digest = maintenance._digest(self.config)
         self.assert_fault("local_machine_required", lambda: maintenance.change_machine(self.config, self.state, "machine-remove", "1" * 32, "local", digest))
         unpinned = config.model_copy(update={"machines": {**config.machines,
             "remote": config.machines["remote"].model_copy(update={"ssh_identity": ""})}})
         self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(unpinned, self.state, "remote"))
-        with patch.object(service_checks.tasks, "references_target", return_value=True) as references:
+        with patch.object(tasks, "references_target", return_value=True) as references:
             self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(config, self.state, "remote"))
             references.assert_called_once_with(self.state, "remote", "d" * 64)
         # Use the public settings validator rather than manufacturing a workspace owner.
@@ -111,17 +112,17 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(config, self.state, "remote"))
         unused = [{"workspace_change_records": 0}, {"executions": [], "unreadable": [], "next_cursor": None}]
         for records in ({"executions": [{"execution_id": "retained"}]}, {"executions": [], "unreadable": ["corrupt"]}):
-            with patch.object(maintenance.ssh_client, "call", side_effect=[unused[0], records]):
-                self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(maintenance.load(self.config), self.state, "remote"))
-        with patch.object(maintenance.ssh_client, "call", side_effect=unused):
-            service_checks.machine_unused(maintenance.load(self.config), self.state, "remote")
-        with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.ssh_client, "call", side_effect=AssertionError("SSH runs after admission")):
+            with patch.object(ssh_client, "call", side_effect=[unused[0], records]):
+                self.assert_fault("machine_in_use", lambda: service_checks.machine_unused(load(self.config), self.state, "remote"))
+        with patch.object(ssh_client, "call", side_effect=unused):
+            service_checks.machine_unused(load(self.config), self.state, "remote")
+        with patch.object(maintenance, "_spawn") as spawn, patch.object(ssh_client, "call", side_effect=AssertionError("SSH runs after admission")):
             accepted = maintenance.change_machine(self.config, self.state, "machine-remove", "1" * 32, "remote", digest)
             candidate = tomllib.loads(Path(accepted["operation"]["request"]["candidate_config"]).read_text())
             self.assertEqual(set(candidate["machines"]), {"local"})
             self.assertEqual(candidate["skills"]["roots"], ["/retained/skills"])
             spawn.assert_called_once()
-        self.assertIn("remote", maintenance.load(self.config).machines)
+        self.assertIn("remote", load(self.config).machines)
 
 
 if __name__ == "__main__":

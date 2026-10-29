@@ -10,7 +10,7 @@ import stat
 import sys
 import time
 
-from openmachine import __version__, execution, tasks, workspace
+from openmachine import __version__
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
@@ -21,6 +21,8 @@ from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
 
 def check_state(config_path: Path, state: Path) -> dict:
     """Use the candidate's actual readers; never rewrite existing persistent data."""
+    from openmachine import execution, tasks, workspace
+
     config = load(config_path)
     executions = _execution_state(state)
     task_state = tasks.check_state(state)
@@ -34,6 +36,8 @@ def check_state(config_path: Path, state: Path) -> dict:
 
 def _execution_state(state: Path) -> dict:
     """Bind compatible readers to retained original-ID reconciliation outcomes."""
+    from openmachine import execution
+
     count = reconciliations = 0
     fingerprint = hashlib.sha256()
     root = state / "executions"
@@ -123,7 +127,9 @@ def _ssh_recovery_state(state: Path) -> dict:
 
 def machine_unused(config, state: Path, name: str, *, check_remote: bool = True) -> None:
     """Never strand a configured workspace, task reference or remote receipt."""
+    from openmachine import tasks
     from integrations.ssh import client, recovery
+
     target = config.machine(name)
     if any(item.machine == name for item in config.workspaces.values()):
         raise Fault("machine_in_use", "A configured workspace still references this machine.")
@@ -184,6 +190,8 @@ def _task_operation_blocks_activation(operation: dict, historical: dict | None =
 
 def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: str) -> None:
     """Keep original Task/change/worktree routes when a configured workspace changes."""
+    from openmachine import tasks, workspace
+
     def target_rebound(machine: str) -> bool:
         old, new = current.machines[machine], candidate.machines.get(machine)
         return (new is None or new.transport != old.transport
@@ -214,6 +222,8 @@ def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: st
 
 def activation_safe(state: Path, *, config=None, candidate_config=None, guards=None) -> None:
     """Admit controller replacement without resolving old work or releasing guards."""
+    from openmachine import execution, tasks, workspace
+
     historical, unresolved, candidate_machines = {}, [], set()
     root = state / "executions"
     if root.exists():
@@ -265,6 +275,8 @@ def activation_safe(state: Path, *, config=None, candidate_config=None, guards=N
 
 def _change_support(value: dict) -> set[int]:
     """Interpret an actual reader's coverage, including W1/W2's format-1 report."""
+    from openmachine import workspace
+
     latest = value.get("workspace_change_format")
     formats = value.get("workspace_change_read_formats", [latest])
     if (type(latest) is not int or latest not in workspace.READ_CHANGE_FORMATS or
@@ -294,6 +306,8 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
 
 def _candidate_state_once(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
                           *, env: dict[str, str] | None = None) -> dict:
+    from openmachine import execution, tasks, workspace
+
     result = processes.run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
                   **({"env": env} if env is not None else {}))
     try:
@@ -482,6 +496,8 @@ def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None 
 
 def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
     """Ask that exact installed controller and pinned endpoint to validate target history."""
+    from openmachine import workspace
+
     target = load(config_path).machines[name]
     result = processes.run([str(python), "-I", "-m", "openmachine.cli", "--config", str(config_path),
                    "doctor", "--machine", name], timeout=35)

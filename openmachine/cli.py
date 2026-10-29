@@ -6,7 +6,6 @@ from pathlib import Path
 import sys
 
 from openmachine import __version__
-from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE, initialize, load
 from openmachine.foundation.sanitize import Fault
 
 
@@ -112,8 +111,10 @@ def main() -> int:
     if (args.command == "manage" and args.management_action == "update"
             and args.expected_selection_sha256 is not None and args.config_sha256 is None):
         parser.error("--expected-selection-sha256 requires both configuration digests")
-    args.config = args.config if args.config is not None else DEFAULT_CONFIG
-    args.state_dir = args.state_dir if args.state_dir is not None else DEFAULT_STATE
+    if args.config is None or args.state_dir is None:
+        from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
+        args.config = args.config if args.config is not None else DEFAULT_CONFIG
+        args.state_dir = args.state_dir if args.state_dir is not None else DEFAULT_STATE
     try:
         if args.command == "manage":
             from openmachine.service.maintenance import dispatch
@@ -165,6 +166,7 @@ def main() -> int:
             print(json.dumps(prepare_payload(args.config, args.state_dir, args.payload, args.sha256)))
             return 0
         if args.command == "init":
+            from openmachine.config import initialize
             print(json.dumps(initialize(args.config, args.workspace, commands=args.enable_commands,
                                         workspace_writes=args.enable_workspace_writes)))
             return 0
@@ -186,6 +188,7 @@ def main() -> int:
             from openmachine.service import supervise
             supervise(args.config, args.state_dir)
             return 0
+        from openmachine.config import load
         config = load(args.config)
         if args.command == "rebuild-task-index":
             from openmachine.bootstrap import create_application
