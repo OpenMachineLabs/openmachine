@@ -79,6 +79,8 @@ with unchanged nonempty notes are required. Only `draft=false` is submitted;
 readback verifies publication, preserved metadata and the acting account.
 Publication may trigger repository automation and never changes an OM runtime.
 Concurrent changes or lost responses require original-ID readback, never replay.
+Without retained pre-write metadata, recovery reports observation rather than
+claiming verified publication; only the immediate complete readback verifies it.
 No general update/delete/upload-assets interface is exposed.
 
 Read Releases with github_read(action="releases") or action="release", ref=exact

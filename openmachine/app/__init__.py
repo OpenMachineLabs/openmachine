@@ -471,8 +471,9 @@ class Application:
         with self._admit():
             return self.task_admission.run("github_release", dict(
                 action=action, repository=repository, tag_name=tag_name, name=name, body=body,
-                draft=draft, prerelease=prerelease, release_id=release_id,
-                expected_body_sha256=expected_body_sha256,
+                draft=draft, prerelease=prerelease,
+                **({"release_id": release_id, "expected_body_sha256": expected_body_sha256}
+                   if action == "publish" else {}),
                 **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_project(self, action: Literal["add_item", "update_field"], repository: str, project_number: int,

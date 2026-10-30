@@ -1215,7 +1215,7 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
                                     expected_body_sha256=digest, transport=self.transport)
             self.assertEqual(result["status"], "write_outcome_unknown")
             self.assertEqual(github.reconcile(settings(), locator, request,
-                                              transport=self.transport)["status"], "verified")
+                                              transport=self.transport)["status"], "observed")
             self.assertEqual(github.reconcile(settings(), locator, dict(request, release_id=99),
                                               transport=self.transport)["status"], "observed")
         self.assertEqual(writes, [{"draft": False}])
@@ -1238,7 +1238,13 @@ class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
             result = github.release(settings(), "publish", REPO, tag, release_id=94,
                                     expected_body_sha256=hashlib.sha256(body.encode()).hexdigest(),
                                     transport=self.transport)
+            locator = dict(self.task_locator("release", 94), tag_name=tag)
+            request = dict(action="publish", tag_name=tag, release_id=94,
+                           expected_body_sha256=hashlib.sha256(body.encode()).hexdigest())
+            recovered = github.reconcile(settings(), locator, request, transport=self.transport)
         self.assertEqual(result["status"], "write_unverified")
+        self.assertEqual(recovered["status"], "observed")
+        self.assertFalse(recovered["fields_verified"])
         self.assertEqual(writes, [{"draft": False}])
 
     def test_create_release_verifies_draft_and_prevents_duplicate(self):

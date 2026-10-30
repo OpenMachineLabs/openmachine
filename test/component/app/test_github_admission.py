@@ -15,6 +15,19 @@ from test.support.github_cases import BASE, HEAD, MERGE, REPO, ROOT, TREE, GitHu
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_release_create_retains_legacy_arguments_used_by_task_fingerprint(self):
+        with patch.object(self.app.task_admission, "run", return_value={"status": "fixture"}) as run:
+            self.app.github_release("create", REPO, "v1.2.3", body="Notes")
+            self.assertEqual(run.call_args.args[1], {
+                "action": "create", "repository": REPO, "tag_name": "v1.2.3",
+                "name": "", "body": "Notes", "draft": True, "prerelease": False})
+            self.app.github_release("publish", REPO, "v1.2.3", release_id=91,
+                                    expected_body_sha256="a" * 64)
+            self.assertEqual(run.call_args.args[1], {
+                "action": "publish", "repository": REPO, "tag_name": "v1.2.3",
+                "name": "", "body": "", "draft": True, "prerelease": False,
+                "release_id": 91, "expected_body_sha256": "a" * 64})
+
     def test_lost_merge_response_is_reconciled_after_restart_without_original_arguments(self):
         fixture = GitHubCaseFixture()
         fixture.setUp()

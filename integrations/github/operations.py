@@ -535,11 +535,10 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
             return _public(unknown)
         publishing = request is not None and request.get("action") == "publish"
         if publishing:
-            body = value.get("body")
-            matches = (number is not None and request.get("release_id") == number
-                       and request.get("tag_name") == tag_name and value.get("draft") is False
-                       and isinstance(body, str)
-                       and hashlib.sha256(body.encode("utf-8")).hexdigest() == request.get("expected_body_sha256"))
+            # Post-write ID/tag/notes alone cannot prove the original name,
+            # prerelease and target were preserved. Never promote an uncertain
+            # publication to verified without those pre-write values.
+            matches = False
         else:
             matches = (request is not None and request.get("action") == "create"
                        and request.get("tag_name") == tag_name
