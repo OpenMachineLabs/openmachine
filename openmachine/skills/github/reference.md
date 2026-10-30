@@ -72,7 +72,14 @@ response is not permission to call create again: use the original task/operation
 ID and read the original tag. It does not deploy or update an OM runtime.
 GitHub may create a missing Git tag at the repository default branch on creation;
 check the intended tag/commit before authorizing the call.
-No update/delete/upload-assets interface is exposed.
+To publish an existing draft, first read its exact tag, `id` and `body_sha256`,
+then call `github_release(action="publish", repository, tag_name, release_id,
+expected_body_sha256)`. Scoped write permission and a matching draft ID/tag
+with unchanged nonempty notes are required. Only `draft=false` is submitted;
+readback verifies publication, preserved metadata and the acting account.
+Publication may trigger repository automation and never changes an OM runtime.
+Concurrent changes or lost responses require original-ID readback, never replay.
+No general update/delete/upload-assets interface is exposed.
 
 Read Releases with github_read(action="releases") or action="release", ref=exact
 tag name; use action="file_history", path=relative document path, optional ref

@@ -1136,6 +1136,111 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
 
 
 class ProjectReleaseTests(GitHubCaseFixture, unittest.TestCase):
+    def test_publish_draft_only_changes_flag_and_preserves_metadata(self):
+        tag, body = "v1.2.7", "Release notes"
+        release = dict(id=91, tag_name=tag, body=body, name="Named",
+                       draft=True, prerelease=True, target_commitish=HEAD,
+                       author={"id": ACTOR["id"] + 1})
+        original, writes = copy.deepcopy(release), []
+        digest = hashlib.sha256(body.encode()).hexdigest()
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint in (f"{ROOT}/releases/91", f"{ROOT}/releases/tags/{tag}"):
+                return copy.deepcopy(release)
+            if method == "PATCH" and endpoint == f"{ROOT}/releases/91":
+                writes.append(payload)
+                release.update(payload)
+                return copy.deepcopy(release)
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=api):
+            read = github.read(settings(), "release", REPO, ref=tag, transport=self.transport)
+            self.assertEqual(read["data"]["body_sha256"], digest)
+            result = github.release(settings(), "publish", REPO, tag, release_id=91,
+                                    expected_body_sha256=digest, transport=self.transport)
+            self.assertEqual(result["status"], "verified")
+        self.assertEqual(writes, [{"draft": False}])
+        self.assertEqual(result["receipt"]["draft"], False)
+        self.assertEqual({key: release[key] for key in original if key != "draft"},
+                         {key: original[key] for key in original if key != "draft"})
+
+    def test_publish_preflight_rejects_stale_drafts_and_invalid_inputs(self):
+        tag, body = "v1.2.8", "Changelog"
+        release = dict(id=92, tag_name=tag, body=body, draft=True)
+        digest = hashlib.sha256(body.encode()).hexdigest()
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint == f"{ROOT}/releases/92":
+                return copy.deepcopy(release)
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=api) as calls:
+            for code, kwargs in (
+                ("invalid_github_request", dict(release_id=0, expected_body_sha256=digest)),
+                ("invalid_github_request", dict(release_id=92, expected_body_sha256="")),
+                ("invalid_github_request", dict(release_id=92, expected_body_sha256=digest, body="changed")),
+                ("github_object_changed", dict(release_id=92, expected_body_sha256="0" * 64)),
+            ):
+                with self.subTest(kwargs=kwargs):
+                    self.assert_fault(code, github.release, settings(), "publish", REPO, tag,
+                                      transport=self.transport, **kwargs)
+            self.assert_fault("github_object_changed", github.release, settings(), "publish",
+                              REPO, "wrong", release_id=92, expected_body_sha256=digest,
+                              transport=self.transport)
+            release["draft"] = False
+            self.assert_fault("github_conflict", github.release, settings(), "publish",
+                              REPO, tag, release_id=92, expected_body_sha256=digest,
+                              transport=self.transport)
+            self.assertFalse(any(call.args[0] in {"POST", "PATCH"} for call in calls.call_args_list))
+
+    def test_publish_uncertain_response_reconciles_exact_original_destination(self):
+        tag, body = "v1.2.9", "Changelog"
+        release = dict(id=93, tag_name=tag, body=body, draft=True)
+        digest = hashlib.sha256(body.encode()).hexdigest()
+        writes = []
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint == f"{ROOT}/releases/93":
+                return copy.deepcopy(release)
+            if method == "PATCH" and endpoint == f"{ROOT}/releases/93":
+                writes.append(payload)
+                release["draft"] = False
+                raise OSError("Lost response after write")
+            return self.response(method, endpoint, payload)
+
+        locator = dict(self.task_locator("release", 93), tag_name=tag)
+        request = dict(action="publish", tag_name=tag, release_id=93, expected_body_sha256=digest)
+        with patch.object(self, "transport", side_effect=api):
+            result = github.release(settings(), "publish", REPO, tag, release_id=93,
+                                    expected_body_sha256=digest, transport=self.transport)
+            self.assertEqual(result["status"], "write_outcome_unknown")
+            self.assertEqual(github.reconcile(settings(), locator, request,
+                                              transport=self.transport)["status"], "verified")
+            self.assertEqual(github.reconcile(settings(), locator, dict(request, release_id=99),
+                                              transport=self.transport)["status"], "observed")
+        self.assertEqual(writes, [{"draft": False}])
+
+    def test_publish_changed_readback_never_claims_success(self):
+        tag, body = "v1.2.10", "Changelog"
+        release = dict(id=94, tag_name=tag, body=body, name="Original", draft=True)
+        writes = []
+
+        def api(method, endpoint, payload=None):
+            if method == "GET" and endpoint == f"{ROOT}/releases/94":
+                return copy.deepcopy(release)
+            if method == "PATCH" and endpoint == f"{ROOT}/releases/94":
+                writes.append(payload)
+                release.update(draft=False, name="Changed during publication")
+                return copy.deepcopy(release)
+            return self.response(method, endpoint, payload)
+
+        with patch.object(self, "transport", side_effect=api):
+            result = github.release(settings(), "publish", REPO, tag, release_id=94,
+                                    expected_body_sha256=hashlib.sha256(body.encode()).hexdigest(),
+                                    transport=self.transport)
+        self.assertEqual(result["status"], "write_unverified")
+        self.assertEqual(writes, [{"draft": False}])
+
     def test_create_release_verifies_draft_and_prevents_duplicate(self):
         published, posts = {}, []
         tag = "v1.2.3"

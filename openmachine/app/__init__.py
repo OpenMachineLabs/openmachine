@@ -461,16 +461,18 @@ class Application:
             path=path, page=page, limit=limit, cursor=cursor, expected_head_sha=expected_head_sha,
             expected_base_sha=expected_base_sha, offset=offset, connection_id=connection_id))
 
-    def github_release(self, action: Literal["create"], repository: str, tag_name: str,
+    def github_release(self, action: Literal["create", "publish"], repository: str, tag_name: str,
                        name: str = "", body: str = "", draft: bool = True,
                        prerelease: bool = False, task_context: dict | None = None,
-                       connection_id: str = "") -> dict:
-        if not isinstance(body, str) or not body.strip():
+                       connection_id: str = "", release_id: int = 0,
+                       expected_body_sha256: str = "") -> dict:
+        if action == "create" and (not isinstance(body, str) or not body.strip()):
             raise Fault("invalid_github_request", "Release notes must contain nonempty text.")
         with self._admit():
             return self.task_admission.run("github_release", dict(
                 action=action, repository=repository, tag_name=tag_name, name=name, body=body,
-                draft=draft, prerelease=prerelease,
+                draft=draft, prerelease=prerelease, release_id=release_id,
+                expected_body_sha256=expected_body_sha256,
                 **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_project(self, action: Literal["add_item", "update_field"], repository: str, project_number: int,

@@ -78,7 +78,7 @@ Neither passing CI nor creating a PR grants merge permission.
 | Comments / reviews | Top-level comment create/update/delete, review create/update, thread resolve/unresolve with guards. |
 | Merge | Checked merge using explicit current head/base; verify the destination commit. |
 | Projects | Read supported organization Projects metadata; add an existing Issue/PR and update a supported field. |
-| Releases | Create a Release for an existing verified tag with explicit notes; default is draft. |
+| Releases | Create a Release for an existing tag (draft by default), or explicitly publish an unchanged draft by ID, tag and notes hash. |
 
 This is not an arbitrary GitHub API proxy. It does not supply Git push, repository
 administration, asset upload or unlimited Project mutation through these tools.

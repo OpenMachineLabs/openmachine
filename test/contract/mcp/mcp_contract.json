@@ -4393,7 +4393,10 @@
       "inputSchema": {
         "properties": {
           "action": {
-            "const": "create",
+            "enum": [
+              "create",
+              "publish"
+            ],
             "title": "Action",
             "type": "string"
           },
@@ -4442,6 +4445,18 @@
             "default": "",
             "pattern": "^(?:[0-9a-f]{32})?$",
             "title": "Connection Id",
+            "type": "string"
+          },
+          "release_id": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Release Id",
+            "type": "integer"
+          },
+          "expected_body_sha256": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Body Sha256",
             "type": "string"
           }
         },
