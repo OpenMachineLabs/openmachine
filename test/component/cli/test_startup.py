@@ -160,7 +160,7 @@ from pathlib import Path
 from openmachine.foundation.sanitize import Fault
 from openmachine.service import probe_service
 try:
-    probe_service(Path(sys.argv[2]), Path(sys.argv[1]), {"workspace": "missing", "path": "file"}, "0.2.23")
+    probe_service(Path(sys.argv[2]), Path(sys.argv[1]), {"workspace": "missing", "path": "file"}, "0.2.24")
 except Fault as error:
     assert error.code == "invalid_service_probe", error.code
 else:

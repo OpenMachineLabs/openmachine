@@ -14,18 +14,18 @@ first. The following commands run in a terminal on your controller.
 Choose a parent directory that does not already contain an `openmachine` clone:
 
 ```sh
-git clone --branch v0.2.23 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.24 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 git rev-parse HEAD
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.23-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.24-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
 For this release, `git rev-parse HEAD` must match
-`git rev-parse refs/tags/v0.2.23^{commit}`. The CLI must report version `0.2.23`.
+`git rev-parse refs/tags/v0.2.24^{commit}`. The CLI must report version `0.2.24`.
 A locally built wheel may report an unknown installed commit; the source checkout
 SHA is build provenance, not proof of an installed runtime's recorded commit.
 
@@ -64,5 +64,5 @@ Next, create a disposable workspace in
 | Another version appears | Check which executable your shell selected; source checkout version is not installed version. |
 
 Release notes and artifacts are listed on the
-[release page](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.23).
+[release page](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.24).
 This source-build route is independent of the npm installer.

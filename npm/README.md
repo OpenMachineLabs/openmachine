@@ -77,7 +77,7 @@ The preview job runs only from the protected main branch. It attests the exact u
 GitHub Actions OIDC/Sigstore SLSA build provenance statement, then uploads
 the tarball. After downloading the artifact, verify its digest and identity:
 
-    gh attestation verify /absolute/openmachine-0.2.23.tgz --repo OpenMachineLabs/openmachine
+    gh attestation verify /absolute/openmachine-0.2.24.tgz --repo OpenMachineLabs/openmachine
 
 Build provenance is not Apple Developer signing/notarization or a substitute
 for a trusted registry publication. Do not release until a maintainer has:
