@@ -126,8 +126,11 @@ def _project_item(project_id: str, item_id: str, *, transport) -> dict:
 
 def _release(value: dict) -> dict:
     release = object_response(value)
-    return {key: release[key] for key in ("id", "tag_name", "name", "body", "html_url", "draft",
-            "prerelease", "created_at", "published_at", "target_commitish") if key in release}
+    result = {key: release[key] for key in ("id", "tag_name", "name", "body", "html_url", "draft",
+              "prerelease", "created_at", "published_at", "target_commitish") if key in release}
+    if isinstance(release.get("body"), str):
+        result["body_sha256"] = hashlib.sha256(release["body"].encode("utf-8")).hexdigest()
+    return result
 
 
 def _release_by_tag(root: str, tag_name: str, *, transport) -> tuple[dict | None, bool]:
@@ -530,11 +533,18 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         if (value.get("tag_name") != tag_name or type(value.get("id")) is not int
                 or value["id"] < 1 or number is not None and value["id"] != number):
             return _public(unknown)
-        matches = (request is not None and request.get("action") == "create"
-                   and request.get("tag_name") == tag_name
-                   and (value.get("author") or {}).get("id") == actor["id"]
-                   and marker in (value.get("body") or ""))
-        if request is not None:
+        publishing = request is not None and request.get("action") == "publish"
+        if publishing:
+            # Post-write ID/tag/notes alone cannot prove the original name,
+            # prerelease and target were preserved. Never promote an uncertain
+            # publication to verified without those pre-write values.
+            matches = False
+        else:
+            matches = (request is not None and request.get("action") == "create"
+                       and request.get("tag_name") == tag_name
+                       and (value.get("author") or {}).get("id") == actor["id"]
+                       and marker in (value.get("body") or ""))
+        if request is not None and not publishing:
             submitted = request.get("body", "")
             matches &= (value.get("body") in {submitted, *(_append(submitted, footer) for footer in FOOTERS)}
                         and value.get("name") == (request.get("name") or tag_name)
@@ -726,7 +736,7 @@ def _receipt(result: dict) -> dict:
 
 def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback,
             *, settings: Settings | None = None, actor: dict | None = None,
-            verify_author: bool = False, transport) -> dict:
+            verify_author: bool = False, expected_readback: dict | None = None, transport) -> dict:
     try:
         result = object_response(connection.mutation_request(method, endpoint, payload, transport=transport))
     except Fault as error:
@@ -755,6 +765,8 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
                 matches &= _named_match(observed, key, expected)
             else:
                 matches &= observed.get(key) == expected
+        if expected_readback is not None:
+            matches &= all(observed.get(key) == value for key, value in expected_readback.items())
         if settings is not None:
             matches &= connection.read_actor(settings, transport=transport) == actor
         if verify_author:
@@ -773,35 +785,61 @@ def _mutate(repository: str, method: str, endpoint: str, payload: dict, readback
             "verified_fields": list(payload), "fields_verified": True, "body_verified": "body" not in payload or observed.get("body") == payload["body"]}
 
 
-def release(settings: Settings, action: Literal["create"], repository: str, tag_name: str,
+def release(settings: Settings, action: Literal["create", "publish"], repository: str, tag_name: str,
             name: str = "", body: str = "", draft: bool = True, prerelease: bool = False,
-            *, transport) -> dict:
-    """Create one Release document, defaulting to a draft. Never retry an uncertain POST."""
+            release_id: int = 0, expected_body_sha256: str = "", *, transport) -> dict:
+    """Create a Release or publish one observed draft; never replay an uncertain write."""
     with connection.preflight():
-        if (action != "create" or not isinstance(tag_name, str)
+        if (action not in {"create", "publish"} or not isinstance(tag_name, str)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+/-]{0,254}", tag_name)
                 or ".." in tag_name or tag_name.endswith(("/", ".lock"))
                 or any(part in {"", ".", ".."} for part in tag_name.split("/"))):
             raise Fault("invalid_github_request", "Select one valid exact Release tag.")
-        if (not isinstance(name, str) or len(name) > 256
-                or any(ord(char) < 32 or ord(char) == 127 for char in name)
-                or not isinstance(body, str) or not body.strip() or len(body) > 60000
-                or type(draft) is not bool or type(prerelease) is not bool):
-            raise Fault("invalid_github_request", "Release name, nonempty notes and draft flags must be valid.")
+        if action == "create":
+            if (not isinstance(name, str) or len(name) > 256
+                    or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                    or not isinstance(body, str) or not body.strip() or len(body) > 60000
+                    or type(draft) is not bool or type(prerelease) is not bool
+                    or type(release_id) is not int or release_id != 0 or expected_body_sha256):
+                raise Fault("invalid_github_request", "Release name, nonempty notes and draft flags must be valid.")
+        elif (type(release_id) is not int or release_id < 1
+              or not isinstance(expected_body_sha256, str)
+              or not re.fullmatch(r"[0-9a-f]{64}", expected_body_sha256)
+              or name != "" or body != "" or draft is not True or prerelease is not False):
+            raise Fault("invalid_github_request", "Publishing requires an observed Release ID and notes SHA256; create-only fields are forbidden.")
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
         root = f"repos/{repository}/releases"
-        existing, complete = _release_by_tag(f"repos/{repository}", tag_name, transport=transport)
-        if existing is not None:
-            raise Fault("github_conflict", "A Release already exists for this tag, including drafts.")
-        if not complete:
-            raise Fault("github_evidence_unavailable",
-                        "The bounded Release listing cannot prove this tag is unused; creation was not sent.")
-        payload = {"tag_name": tag_name, "name": name or tag_name,
-                   "body": _attribute(settings, body, CREATED_FOOTER),
-                   "draft": draft, "prerelease": prerelease}
-    result = _mutate(repository, "POST", root, payload,
-                     lambda value: f"{root}/{value['id']}",
-                     settings=settings, actor=actor, verify_author=True, transport=transport)
+        if action == "create":
+            existing, complete = _release_by_tag(f"repos/{repository}", tag_name, transport=transport)
+            if existing is not None:
+                raise Fault("github_conflict", "A Release already exists for this tag, including drafts.")
+            if not complete:
+                raise Fault("github_evidence_unavailable",
+                            "The bounded Release listing cannot prove this tag is unused; creation was not sent.")
+            payload = {"tag_name": tag_name, "name": name or tag_name,
+                       "body": _attribute(settings, body, CREATED_FOOTER),
+                       "draft": draft, "prerelease": prerelease}
+            method, endpoint = "POST", root
+            readback = lambda value: f"{root}/{value['id']}"
+            preserved, verify_author = None, True
+        else:
+            endpoint = f"{root}/{release_id}"
+            current = object_response(transport("GET", endpoint))
+            if current.get("id") != release_id or current.get("tag_name") != tag_name:
+                raise Fault("github_object_changed", "The selected Release ID or tag has changed.")
+            if current.get("draft") is not True:
+                raise Fault("github_conflict", "Only an existing draft Release can be published.")
+            notes = current.get("body")
+            if (not isinstance(notes, str) or not notes.strip()
+                    or hashlib.sha256(notes.encode("utf-8")).hexdigest() != expected_body_sha256):
+                raise Fault("github_object_changed", "Release notes changed since the draft was read.")
+            payload = {"draft": False}
+            preserved = {key: current[key] for key in ("id", "tag_name", "name", "body",
+                         "prerelease", "target_commitish") if key in current}
+            method, readback, verify_author = "PATCH", lambda value: endpoint, False
+    result = _mutate(repository, method, endpoint, payload, readback,
+                     settings=settings, actor=actor, verify_author=verify_author,
+                     expected_readback=preserved, transport=transport)
     return _public(result)
 
 

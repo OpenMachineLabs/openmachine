@@ -69,7 +69,7 @@ machine or GitHub authority. Never copy old revision/epoch values into new work.
 | `github_review_thread` | Resolve/unresolve an exact current PR review thread. |
 | `github_merge` | Merge an authorized current PR only through the applicable checks. |
 | `github_project` | Add an existing Issue/PR to a supported Project or update a supported field. |
-| `github_release` | Create an explicitly authorized Release for an existing verified tag. |
+| `github_release` | Create a Release or publish an observed draft by ID, tag and notes hash. |
 
 The `github_*` tools are configuration-dependent. Native connection selection,
 Core scope and provider permissions remain separate. See [GitHub](../features/github.md)

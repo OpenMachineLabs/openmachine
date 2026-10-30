@@ -213,6 +213,8 @@ class TaskAdmission:
             kind = method.removeprefix("github_")
             number = (arguments.get("project_number") if kind == "project" else
                       arguments.get("comment_id" if kind == "comment" else "review_id" if kind == "review" else "number", 0))
+            if kind == "release" and arguments.get("action") == "publish":
+                number = arguments.get("release_id")
             return {"kind": "github", "repository": arguments["repository"], "object_type": kind,
                     "number": number or None, "parent_number": arguments.get("number") or None if kind in {"comment", "review"} else None,
                     "anchor": anchor, **({"tag_name": arguments["tag_name"]} if kind == "release" else {}),
@@ -252,7 +254,7 @@ class TaskAdmission:
                 raise Fault("task_operation_conflict", "A control or cancellation has its own operation ID; retain the original execution ID.")
             if method == "control_execution":
                 value.update(execution.control_request(value["expected_control_seq"], value["action"], value["text"], value["terminal_size"]))
-        elif (method in GITHUB_METHODS and value.get("action") != "delete"
+        elif (method in GITHUB_METHODS and value.get("action") not in {"delete", "publish"}
               and (value.get("body") is not None or value.get("action") == "create")):
             marker = f"<!-- om-task:{context['task_id']}:{context['operation_id']} -->"
             value["body"] = value.get("body") or ""
