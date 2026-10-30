@@ -1,6 +1,6 @@
 # Current limitations
 
-This guide describes Core **v0.2.23**, not a roadmap. The release tag
+This guide describes Core **v0.2.24**, not a roadmap. The release tag
 and the live runtime's version/commit are the starting points for compatibility.
 
 ## Product and distribution
@@ -44,7 +44,7 @@ guarantee that arbitrary output contains no sensitive data.
 
 ## Release versus main
 
-Version 0.2.23 includes client-call diagnostics, catalog fingerprints and advisory
+Version 0.2.24 includes client-call diagnostics, catalog fingerprints and advisory
 release notices. Older runtimes may not expose those fields. Compare the actual
 client schema with the running server catalog and preserve the original error.
 A release notice does not install or activate an update.

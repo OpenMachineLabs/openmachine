@@ -11,7 +11,6 @@ from integrations.connection_state import (
     MAX_CONNECTIONS, MAX_LOGINS, Store, _guard, now_ms,
 )
 import integrations.credentials as credentials
-from integrations.github.web_authorization import WebAuthorization
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
@@ -31,7 +30,15 @@ class Connections:
         self._running = False
         self._errors: dict[str, str] = {}
         self._store = ConnectionStore(state)
-        self._web = WebAuthorization(self)
+        self._web_owner = None
+
+    @property
+    def _web(self):
+        with self._mutex:
+            if self._web_owner is None:
+                from integrations.github.web_authorization import WebAuthorization
+                self._web_owner = WebAuthorization(self)
+            return self._web_owner
 
     @contextmanager
     def running(self):

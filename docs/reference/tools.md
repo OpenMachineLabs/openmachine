@@ -86,6 +86,6 @@ not be worked around by replaying or using an unapproved backend.
 
 The [packaged Skills](https://github.com/OpenMachineLabs/openmachine/tree/main/openmachine/skills)
 own detailed technical contracts. The
-[MCP contract baseline](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.23/test/contract/mcp/mcp_contract.json)
+[MCP contract baseline](https://github.com/OpenMachineLabs/openmachine/blob/v0.2.24/test/contract/mcp/mcp_contract.json)
 records the released schemas. Compare both with the actual live catalog when
 diagnosing a version mismatch.
