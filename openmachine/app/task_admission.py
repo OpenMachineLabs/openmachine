@@ -399,9 +399,26 @@ class TaskAdmission:
             expected = {operation["id"]: records.digest(operation)}
             dispatch_arguments = (dict(arguments, expected_base_ref=locator["merge"]["base_ref"])
                                   if method == "github_merge" else arguments)
+            acknowledged = False
+            if method == "github_review_thread":
+                def retain_acknowledgement(receipt):
+                    nonlocal operation, expected, acknowledged
+                    result = task_receipts.receipt_result("unknown", receipt,
+                        "Original mutation acknowledged; destination verification pending.", effect="effect_unknown")
+                    saved = self._publish(record["task_id"], [(operation["id"], result, locator)], expected=expected)
+                    operation = next(item for item in saved["record"]["operations"] if item["id"] == operation["id"])
+                    if operation["result"] != result:
+                        raise Fault("task_result_unverified", "Original acknowledgement was not retained; do not replay.")
+                    expected = {operation["id"]: records.digest(operation)}
+                    acknowledged = True
+                dispatch_arguments = dict(arguments, on_acknowledgement=retain_acknowledgement)
             try:
                 observed = self._dispatch(method, dispatch_arguments, supervised=True, binding=locator.get("connection"))
             except (Fault, OSError) as error:
+                if acknowledged:
+                    # The original acknowledgement is already durable. A later
+                    # failure cannot replace its proof or classify it as unsent.
+                    raise
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
                 owner_effect = getattr(error, "effect", None)
                 # Creation errors may arrive after dispatch or without an SSH

@@ -10,12 +10,99 @@ import uuid
 
 from integrations import github
 from openmachine import tasks
+from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import records
 from test.support.tasks import TaskFixture, replace_task_record, task_contract
 
 
 class ScopedSupervisionTests(TaskFixture, unittest.TestCase):
+    def test_thread_success_after_acknowledgement_freezes_original_result(self):
+        args = dict(action="resolve", repository="Owner/repo", number=7, thread_id="PRRT_fixture",
+                    expected_head_sha="e" * 40, task_context=self.context_for(uuid.uuid4().hex))
+        def writer(*_, on_acknowledgement, **kwargs):
+            on_acknowledgement({"acknowledged": "fixture"})
+            return {"status": "verified", "receipt": {"number": 7, "thread_id": "PRRT_fixture",
+                    "requested_isResolved": True, "isResolved": True}}
+        self.provider.review_thread.side_effect = writer
+        self.assertEqual(self.app.github_review_thread(**args)["status"], "verified")
+        original = deepcopy(self.view()["record"]["operations"][0])
+        self.assertEqual(original["result"]["status"], "succeeded")
+        self.assertEqual(self.app.github_review_thread(**args)["status"], "retained_task_evidence")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.provider.reconcile.assert_not_called()
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+
+    def test_thread_acknowledgement_persists_before_lost_reply_and_new_reader(self):
+        args = dict(action="resolve", repository="Owner/repo", number=7,
+                    thread_id="PRRT_fixture", expected_head_sha="e" * 40,
+                    task_context=self.context_for(uuid.uuid4().hex))
+        receipt = {"kind": "github_review_thread_ack_v1", "repository": "owner/repo", "number": 7,
+                   "thread_id": "PRRT_fixture", "head_sha": "e" * 40, "actor_id": 1, "isResolved": True}
+        def interrupted(*_, on_acknowledgement, **kwargs):
+            on_acknowledgement(receipt)
+            self.assertEqual(self.view()["record"]["operations"][0]["result"]["receipt_sha256"], records.digest(receipt))
+            raise SystemExit("Caller lost before final reply")
+        self.provider.review_thread.side_effect = interrupted
+        with self.assertRaises(SystemExit):
+            self.app.github_review_thread(**args)
+        original = deepcopy(self.view()["record"]["operations"][0])
+        self.assertEqual(original["state"], "unknown")
+        self.app = create_application(self.config, self.state)
+        self.app.github = self.provider
+        self.app.connections.request = Mock()
+        self.assertFalse(self.app.github_review_thread(**args)["task_operation_replayed"])
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        self.assertEqual(self.provider.reconcile.call_args.kwargs["acknowledgement_sha256"], records.digest(receipt))
+        self.provider.reconcile.return_value = {"status": "verified", "receipt": receipt}
+        self.assertEqual(self.app.github_review_thread(**args)["status"], "verified")
+        self.assertEqual(self.view()["record"]["operations"][0]["result"]["status"], "succeeded")
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+
+    def test_thread_acknowledgement_excludes_concurrent_replay(self):
+        entered, finish = threading.Event(), threading.Event()
+        args = dict(action="resolve", repository="Owner/repo", number=7, thread_id="PRRT_fixture",
+                    expected_head_sha="e" * 40, task_context=self.context_for(uuid.uuid4().hex))
+        failures = []
+        def writer(*_, on_acknowledgement, **kwargs):
+            on_acknowledgement({"acknowledged": "fixture"})
+            entered.set()
+            if not finish.wait(5):
+                raise AssertionError("Test controller did not release writer")
+            return {"status": "write_unverified"}
+        def invoke():
+            try:
+                self.app.github_review_thread(**args)
+            except Exception as error:
+                failures.append(error)
+        self.provider.review_thread.side_effect = writer
+        thread = threading.Thread(target=invoke)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            self.fault("resource_busy", self.app.github_review_thread, **args)
+        finally:
+            finish.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+        self.assertFalse(self.app.github_review_thread(**args)["task_operation_replayed"])
+
+    def test_failed_acknowledgement_save_keeps_unknown_and_does_not_replay(self):
+        args = dict(action="resolve", repository="Owner/repo", number=7, thread_id="PRRT_fixture",
+                    expected_head_sha="e" * 40, task_context=self.context_for(uuid.uuid4().hex))
+        def writer(*_, on_acknowledgement, **kwargs):
+            on_acknowledgement({"acknowledged": "fixture"})
+            self.fail("A failed save must stop post-write work")
+        self.provider.review_thread.side_effect = writer
+        with patch.object(self.app.task_admission, "_publish", side_effect=OSError("Disk unavailable")):
+            with self.assertRaises(OSError):
+                self.app.github_review_thread(**args)
+        self.assertFalse(self.app.github_review_thread(**args)["task_operation_replayed"])
+        self.assertEqual(self.provider.review_thread.call_count, 1)
+        self.assertEqual(self.view()["record"]["operations"][0]["state"], "unknown")
+
     def setUp(self):
         super().setUp()
         self.provider = SimpleNamespace(DEFINITE_FAILURES=github.DEFINITE_FAILURES,

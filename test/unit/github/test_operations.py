@@ -3,6 +3,7 @@
 import base64
 import copy
 import hashlib
+import json
 import unittest
 from unittest.mock import patch
 from pydantic import ValidationError
@@ -13,6 +14,60 @@ from test.support.github_cases import ACTOR, BASE, CREATED, GitHubCaseFixture, H
 
 
 class GitHubTests(GitHubCaseFixture, unittest.TestCase):
+    def test_thread_acknowledgement_survives_failed_readback_but_not_missing_proof(self):
+        for action, desired in (("resolve", True), ("unresolve", False)):
+            with self.subTest(action=action):
+                self.threads = [{"id": "PRRT_fixture", "isResolved": not desired, "isOutdated": False}]
+                receipts, writes = [], []
+                def api(method, endpoint, payload=None):
+                    if endpoint == "graphql" and payload["query"].startswith("mutation("):
+                        writes.append(payload)
+                        self.threads[0]["isResolved"] = desired
+                        mutation = "resolveReviewThread" if desired else "unresolveReviewThread"
+                        return {"data": {mutation: {"thread": {"id": "PRRT_fixture", "isResolved": desired}}}}
+                    if writes:
+                        self.assertEqual(len(receipts), 1)  # Saved before post-write IO.
+                        raise OSError("Readback disconnected")
+                    return self.response(method, endpoint, payload)
+                result = github.review_thread(settings(), action, REPO, 2, "PRRT_fixture", HEAD, BASE,
+                                              transport=api, on_acknowledgement=receipts.append)
+                self.assertEqual(result["status"], "write_unverified")
+                digest = lambda value: hashlib.sha256((json.dumps(value, sort_keys=True, ensure_ascii=False,
+                    separators=(",", ":")) + "\n").encode()).hexdigest()
+                proof = digest(receipts[0])
+                locator = dict(self.task_locator("review_thread", 2), thread_id="PRRT_fixture", expected_head_sha=HEAD)
+                recovered = github.reconcile(settings(), locator, transport=self.transport,
+                                             acknowledgement_sha256=proof)
+                self.assertEqual(recovered["status"], "verified")
+                self.assertEqual(len(writes), 1)
+                # A legacy intent hash, a mismatched account/HEAD, or no acknowledgement is not proof.
+                for invalid in (None, digest(result["receipt"]), digest(dict(receipts[0], actor_id=99)),
+                                digest(dict(receipts[0], head_sha=BASE))):
+                    self.assertEqual(github.reconcile(settings(), locator, transport=self.transport,
+                        acknowledgement_sha256=invalid)["status"], "write_outcome_unknown")
+                self.threads[0]["isResolved"] = not desired
+                self.assertEqual(github.reconcile(settings(), locator, transport=self.transport,
+                    acknowledgement_sha256=proof)["status"], "write_outcome_unknown")
+
+    def test_thread_bad_or_lost_mutation_reply_never_emits_acknowledgement(self):
+        for reply in (OSError("Lost response"), {"errors": [{"message": "Rejected"}]},
+                      {"data": {"resolveReviewThread": {"thread": {"id": "PRRT_other", "isResolved": True}}}},
+                      {"data": {"resolveReviewThread": {"thread": {"id": "PRRT_fixture", "isResolved": 1}}}}):
+            with self.subTest(reply=reply):
+                self.threads = [{"id": "PRRT_fixture", "isResolved": False, "isOutdated": False}]
+                ack = []
+                def api(method, endpoint, payload=None):
+                    if endpoint == "graphql" and payload["query"].startswith("mutation("):
+                        self.threads[0]["isResolved"] = True
+                        if isinstance(reply, Exception):
+                            raise reply
+                        return reply
+                    return self.response(method, endpoint, payload)
+                result = github.review_thread(settings(), "resolve", REPO, 2, "PRRT_fixture", HEAD,
+                                              transport=api, on_acknowledgement=ack.append)
+                self.assertNotEqual(result["status"], "verified")
+                self.assertEqual(ack, [])
+
     def test_review_thread_resolve_and_unresolve_verify_exact_destination(self):
         thread_id = "PRRT_fixture"
         for action, initial, expected in (("resolve", False, True), ("unresolve", True, False)):

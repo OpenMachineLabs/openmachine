@@ -502,7 +502,15 @@ def _merge_destination(root: str, sha: str, base_ref: str, *, transport) -> tupl
     return commit, tip
 
 
-def reconcile(settings: Settings, locator: dict, request: dict | None = None, *, transport) -> dict:
+def _thread_acknowledgement(repository, number, thread_id, head, actor_id, resolved):
+    # A domain-separated receipt of a validated mutation reply, not current state.
+    return {"kind": "github_review_thread_ack_v1", "repository": repository.casefold(),
+            "number": number, "thread_id": thread_id, "head_sha": head,
+            "actor_id": actor_id, "isResolved": resolved}
+
+
+def reconcile(settings: Settings, locator: dict, request: dict | None = None, *, transport,
+              acknowledgement_sha256: str | None = None) -> dict:
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
@@ -631,6 +639,13 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
         thread = evidence.review_thread(repository, number, head, pr["base"]["sha"], thread_id, transport=transport)
         if connection.read_actor(settings, transport=transport) != actor:
             raise Fault("github_identity_changed", "The acting account changed during original-result observation.")
+        receipt = _thread_acknowledgement(repository, number, thread_id, head, actor["id"], thread["isResolved"])
+        digest = hashlib.sha256((json.dumps(receipt, sort_keys=True, ensure_ascii=False,
+                                           separators=(",", ":")) + "\n").encode()).hexdigest()
+        if acknowledgement_sha256 == digest and (request is None or
+                request.get("action") == ("resolve" if thread["isResolved"] else "unresolve")):
+            return _public({"status": "verified", "repository": repository, "actor": actor,
+                            "receipt": receipt, "fields_verified": True})
         return _public({**unknown, "receipt": {"number": number, "thread_id": thread_id,
             "isResolved": thread["isResolved"]}})
     if kind == "merge":
@@ -1108,7 +1123,7 @@ def review(settings: Settings, action: Literal["create", "update"], repository: 
 
 def review_thread(settings: Settings, action: Literal["resolve", "unresolve"], repository: str,
                   number: int, thread_id: str, expected_head_sha: str,
-                  expected_base_sha: str = "", *, transport) -> dict:
+                  expected_base_sha: str = "", *, transport, on_acknowledgement=None) -> dict:
     desired = action == "resolve"
     with connection.preflight():
         actor, _ = connection.access(settings, repository, write=True, transport=transport)
@@ -1139,13 +1154,23 @@ def review_thread(settings: Settings, action: Literal["resolve", "unresolve"], r
         return _public({"status": "write_outcome_unknown", "repository": repository, "receipt": receipt,
                         "error_code": "github_response_unknown"})
 
-    verified = False
+    acknowledged = False
     try:
         reply = object_response(object_response(object_response(response["data"])[mutation])["thread"])
+        acknowledged = (not response.get("errors") and reply.get("id") == thread_id
+                        and reply.get("isResolved") is desired)
+    except (Fault, KeyError, TypeError):
+        pass
+    # Persist through the existing supervised Task owner before another network
+    # read. A failed save must propagate; neither it nor a lost reply permits replay.
+    if acknowledged and on_acknowledgement is not None:
+        on_acknowledgement(_thread_acknowledgement(
+            repository, number, thread_id, expected_head_sha, actor["id"], desired))
+    verified = False
+    try:
         pr = evidence.pull_request(repository, number, expected_head_sha, base, open_only=True, transport=transport)
         observed = evidence.review_thread(repository, number, expected_head_sha, pr["base"]["sha"], thread_id, transport=transport)
-        verified = (not response.get("errors") and reply.get("id") == thread_id
-                    and reply.get("isResolved") is desired and observed["isResolved"] is desired
+        verified = (acknowledged and observed["isResolved"] is desired
                     and connection.read_actor(settings, transport=transport) == actor)
     except (Fault, OSError, KeyError, TypeError):
         pass

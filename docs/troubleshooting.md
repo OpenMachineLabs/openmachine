@@ -89,6 +89,16 @@ For output loss, heed `output_gap` and raw cursors. For eligible local cleanup-o
 uncertainty, inspect `reconcile_execution` requirements; it cannot recreate a
 missing exit result or authorize another command.
 
+For an uncertain GitHub review-thread resolution, use the same Task, operation ID
+and original arguments. New supervised writes retain a fingerprint of the validated
+mutation acknowledgement before destination reads. Recovery compares that retained
+proof with the original repository, thread, HEAD, account and resolution state;
+it never resends the mutation. A reply lost before validation/persistence, a failed
+receipt save, changed destination or historical intent-only receipt remains unknown.
+The current resolved state alone cannot prove who performed a historical write.
+The existing Task receipt format is unchanged; older readers preserve uncertainty
+but cannot use the new acknowledgement proof to recover it.
+
 ## SSH connection or remote command fails
 
 Test the existing SSH alias with batch mode and strict host-key verification.
