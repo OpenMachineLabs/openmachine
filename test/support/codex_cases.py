@@ -47,6 +47,13 @@ assert not (home/"AGENTS.md").exists() and not (home/"AGENTS.override.md").exist
 assert (home/"auth.json").is_symlink()
 packet=json.loads(text.rsplit("Delegated request:\\n",1)[1])
 args=sys.argv[1:]
+if packet["goal"]=="forwarded-environment":
+    assert os.environ.get("BROWSER_USE_ACCESS_EXECUTOR_ID")=="fixture-executor"
+    assert os.environ.get("BROWSER_USE_ACCESS_PIPE_PATH")=="fixture-pipe"
+    assert os.environ.get("BROWSER_USE_ACCESS_VERIFYING_IDENTITY")=="fixture-identity"
+    assert "UNAPPROVED_SECRET" not in os.environ
+    assert "NODE_REPL_NODE_PATH" not in os.environ
+    assert all(value not in " ".join(args) for value in ["fixture-executor","fixture-pipe","fixture-identity"])
 assert all(k in args for k in ["--ephemeral","--ignore-user-config","--json","--sandbox"])
 assert args[args.index("--sandbox")+1]=="read-only"
 assert "never-inherit" not in " ".join(args)

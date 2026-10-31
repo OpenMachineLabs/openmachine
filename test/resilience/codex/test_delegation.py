@@ -14,6 +14,24 @@ from test.support.codex_cases import CodexCaseFixture
 
 
 class CodexTests(CodexCaseFixture, unittest.TestCase):
+    def test_only_configured_bridge_environment_reaches_the_child(self):
+        forwarded = {"BROWSER_USE_ACCESS_EXECUTOR_ID": "fixture-executor",
+                     "BROWSER_USE_ACCESS_PIPE_PATH": "fixture-pipe",
+                     "BROWSER_USE_ACCESS_VERIFYING_IDENTITY": "fixture-identity"}
+        (self.home / "config.toml").write_text(self.config_text.replace(
+            "args=[]", "args=[]\nenv_vars=" + json.dumps(list(forwarded))))
+        args = self.arguments("forwarded-environment")
+        with patch.dict(os.environ, forwarded | {"UNAPPROVED_SECRET": "never-inherit",
+                                                 "NODE_REPL_NODE_PATH": "not-configured-for-forwarding"}):
+            report = self.finished(args)
+        self.assertEqual(report["status"], "completed", report)
+        job = self.report_path(args["execution_id"]).parent
+        output = self.app.read_execution("desktop", args["execution_id"])["output"]
+        for value in forwarded.values():
+            self.assertNotIn(value, output)
+            self.assertNotIn(value, self.report_path(args["execution_id"]).read_text())
+            self.assertNotIn(value, (job / "record.json").read_text())
+
     def test_original_execution_report_restart_and_identical_retry_do_not_replay(self):
         args = self.arguments()
         report = self.finished(args)

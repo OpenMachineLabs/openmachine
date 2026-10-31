@@ -32,6 +32,10 @@ BRIDGE_ENV = {
     "BROWSER_USE_CODEX_APP_VERSION", "NODE_REPL_TRUSTED_SERVICES",
     "SKY_CUA_SERVICE_PATH", "CODEX_CLI_PATH",
 }
+BRIDGE_ENV_VARS = BRIDGE_ENV | {
+    "BROWSER_USE_ACCESS_EXECUTOR_ID", "BROWSER_USE_ACCESS_PIPE_PATH",
+    "BROWSER_USE_ACCESS_VERIFYING_IDENTITY",
+}
 
 
 class Model(BaseModel):
@@ -119,11 +123,14 @@ def discover() -> tuple[str, Path, dict]:
     home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     config = tomllib.loads(_bytes(home / "config.toml", 131072).decode())
     bridge = config.get("mcp_servers", {}).get("node_repl")
-    keys = {"command", "args", "env", "startup_timeout_sec", "tool_timeout_sec", "enabled", "required"}
+    keys = {"command", "args", "env", "env_vars", "startup_timeout_sec", "tool_timeout_sec", "enabled", "required"}
     if (not isinstance(bridge, dict) or bridge.get("enabled") is False
             or set(bridge) - keys or not isinstance(bridge.get("command"), str)
             or not isinstance(bridge.get("env", {}), dict) or set(bridge.get("env", {})) - BRIDGE_ENV):
         raise ValueError("native bridge unavailable or unsupported")
+    forwarded = bridge.get("env_vars", [])
+    if not isinstance(forwarded, list) or any(not isinstance(name, str) or name not in BRIDGE_ENV_VARS for name in forwarded):
+        raise ValueError("unsupported native bridge environment forwarding")
     executable = Path(bridge["command"])
     if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
         raise ValueError("native bridge executable unavailable")
@@ -390,6 +397,10 @@ def run(job: Path, packet: dict) -> int:
         env = {k: v for k, v in os.environ.items() if k in {
             "HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE",
             "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}}
+        # Keep configured bridge context in the child environment, never CLI arguments or receipts.
+        for name in overrides["mcp_servers"]["node_repl"].get("env_vars", []):
+            if name in os.environ:
+                env[name] = os.environ[name]
         env["CODEX_HOME"] = home.name
         stage = "codex_start"
         print(canonical({"phase": stage}), flush=True)

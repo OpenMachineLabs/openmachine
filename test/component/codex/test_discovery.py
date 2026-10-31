@@ -63,6 +63,24 @@ class CodexTests(CodexCaseFixture, unittest.TestCase):
         self.fault("execution_disabled", app.start_codex_task, **self.arguments())
         self.assertFalse((self.state / "executions").exists())
 
+    def test_native_bridge_environment_forwarding_is_explicit_and_bounded(self):
+        configured = self.config_text.replace('args=[]', 'args=[]\nenv_vars=['
+            '"BROWSER_USE_ACCESS_EXECUTOR_ID", "BROWSER_USE_ACCESS_PIPE_PATH", '
+            '"BROWSER_USE_ACCESS_VERIFYING_IDENTITY"]')
+        (self.home / "config.toml").write_text(configured)
+        with patch.dict(codex.os.environ, {"BROWSER_USE_ACCESS_EXECUTOR_ID": "private-fixture-value"}):
+            binary, _, options = codex.discover()
+        names = options["mcp_servers"]["node_repl"]["env_vars"]
+        self.assertEqual(names, ["BROWSER_USE_ACCESS_EXECUTOR_ID", "BROWSER_USE_ACCESS_PIPE_PATH",
+                                 "BROWSER_USE_ACCESS_VERIFYING_IDENTITY"])
+        self.assertNotIn("private-fixture-value", " ".join(codex.command(binary, self.root, options)))
+        for value in ('"BROWSER_USE_ACCESS_EXECUTOR_ID"', '["UNAPPROVED_SECRET"]',
+                      '[42]', '[{ name="BROWSER_USE_ACCESS_EXECUTOR_ID", source="remote" }]'):
+            with self.subTest(value=value):
+                (self.home / "config.toml").write_text(self.config_text.replace('args=[]', 'args=[]\nenv_vars=' + value))
+                with self.assertRaises(ValueError):
+                    codex.discover()
+
 
 if __name__ == "__main__":
     unittest.main()
