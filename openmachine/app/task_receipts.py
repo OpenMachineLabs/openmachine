@@ -81,7 +81,9 @@ class TaskReceipts:
                 # merge/state gates belong to the subsequent owner operation.
                 return {"status": "retained_task_evidence", "locator": locator,
                         "result": operation["result"], "current_state_observed": False}
-            observed = self.github_call("reconcile", dict(locator=locator, request=arguments),
+            proof = ({"acknowledgement_sha256": (operation.get("result") or {}).get("receipt_sha256")}
+                     if locator["object_type"] == "review_thread" else {})
+            observed = self.github_call("reconcile", dict(locator=locator, request=arguments, **proof),
                                         binding=locator.get("connection"), historical_unbound="connection" not in locator)
             return observed
         target = self.config.machine(locator["machine"])
