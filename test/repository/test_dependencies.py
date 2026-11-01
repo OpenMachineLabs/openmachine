@@ -19,6 +19,8 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
 
     def test_import_check_rejects_forbidden_edges_and_unowned_modules(self):
         cases = (
+            ("openmachine.projects.catalog", "import openmachine.app", "must not depend"),
+            ("openmachine.projects.catalog", "import integrations.connections", "must not depend"),
             ("openmachine.foundation.files", "import openmachine.tasks", "must not depend"),
             ("openmachine.foundation.files", "from ..tasks import read", "must not depend"),
             ("openmachine.foundation.files", "def read():\n    import openmachine.tasks", "must not depend"),

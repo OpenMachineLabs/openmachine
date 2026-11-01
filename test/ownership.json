@@ -13,7 +13,9 @@
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/tasks/test_schema.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/resilience/tasks/test_mcp_restart.py"
+        "test/resilience/tasks/test_mcp_restart.py",
+        "test/component/projects/test_catalog.py",
+        "test/contract/mcp/projects/test_catalog.py"
       ],
       "sources": [
         "openmachine/app/__init__.py",
@@ -89,7 +91,8 @@
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
         "test/contract/mcp/ssh/test_discovery.py",
-        "test/contract/mcp/server/test_updates.py"
+        "test/contract/mcp/server/test_updates.py",
+        "test/component/projects/test_catalog.py"
       ],
       "sources": [
         "openmachine/config.py"
@@ -191,7 +194,8 @@
         "test/component/workspace/test_reads.py",
         "test/resilience/execution/test_process.py",
         "test/resilience/tasks/test_persistence.py",
-        "test/unit/github/test_operations.py"
+        "test/unit/github/test_operations.py",
+        "test/component/projects/test_catalog.py"
       ],
       "sources": [
         "openmachine/__init__.py",
@@ -310,7 +314,8 @@
         "test/contract/mcp/workspace/test_reads.py",
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/execution/test_mcp_sessions.py",
-        "test/resilience/github/test_mcp_connection.py"
+        "test/resilience/github/test_mcp_connection.py",
+        "test/contract/mcp/projects/test_catalog.py"
       ],
       "sources": [
         "openmachine/mcp/__init__.py",
@@ -655,7 +660,8 @@
         "test/resilience/app/test_mcp_admission.py",
         "test/resilience/execution/test_worktrees.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/component/app/test_target_environment.py"
+        "test/component/app/test_target_environment.py",
+        "test/component/projects/test_catalog.py"
       ],
       "sources": [
         "openmachine/workspace/__init__.py",
@@ -721,6 +727,20 @@
         "test/skill-library/project-to-motion/test_retired_skill.py"
       ],
       "boundary_tests": []
+    },
+    "projects": {
+      "boundary_tests": [
+        "test/contract/mcp/server/test_catalog.py"
+      ],
+      "sources": [
+        "openmachine/projects/__init__.py",
+        "openmachine/projects/catalog.py",
+        "openmachine/mcp/projects.py"
+      ],
+      "tests": [
+        "test/component/projects/test_catalog.py",
+        "test/contract/mcp/projects/test_catalog.py"
+      ]
     }
   },
   "support": {
@@ -804,7 +824,8 @@
       "test/resilience/workspace/test_mcp_edit_restart.py",
       "test/resilience/workspace/test_mcp_patch_restart.py",
       "test/contract/mcp/server/test_updates.py",
-      "test/contract/mcp/server/test_github_web.py"
+      "test/contract/mcp/server/test_github_web.py",
+      "test/contract/mcp/projects/test_catalog.py"
     ],
     "test/support/payload_cases.py": [
       "test/component/service/test_install_payload.py",
@@ -889,7 +910,8 @@
       "test/component/workspace/test_patch.py",
       "test/component/workspace/test_reads.py",
       "test/component/workspace/test_worktrees.py",
-      "test/resilience/workspace/test_leases.py"
+      "test/resilience/workspace/test_leases.py",
+      "test/component/projects/test_catalog.py"
     ]
   }
 }

@@ -9,7 +9,7 @@ import time
 from types import ModuleType
 from typing import Literal
 
-from openmachine import __version__, execution, service, skills, tasks, workspace
+from openmachine import __version__, execution, projects, service, skills, tasks, workspace
 from openmachine.config import Settings
 from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
@@ -102,6 +102,7 @@ class Application:
         has_ssh = any(item.transport == "ssh" for item in self.config.machines.values())
         return {
             "environment_observation": environment.capabilities(),
+            "project_catalog": projects.capabilities(),
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
             "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled,
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
@@ -179,6 +180,12 @@ class Application:
                           expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
         return self.machines.inspect_workspace(machine, workspace_name, action, path, offset, limit, query,
                                                staged, expected_snapshot, path_glob, worktree)
+
+    def inspect_projects(self, machine: str, workspace_name: str = "", action: str = "list", path: str = ".",
+                         offset: int = 0, limit: int = 50, expected_snapshot: str = "",
+                         expected_target_id: str = "") -> dict:
+        return projects.inspect(self.config, machine, workspace_name, action, path, offset, limit,
+                                expected_snapshot, expected_target_id)
 
     def inspect_skills(self, action: Literal["list", "read", "files"] = "list", skill: str = "", path: str = "",
                        query: str = "", offset: int = 0, limit: int = 100, expected_snapshot: str = "",
@@ -324,7 +331,7 @@ class Application:
                              check_identity: bool = True) -> None:
         contract = request["contract"]
         tools = set(contract["tools"])
-        known = {"inspect_context", "get_capabilities", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
+        known = {"inspect_context", "get_capabilities", "inspect_projects", "inspect_workspace", "inspect_skills", "read_workspace_file", "create_worktree",
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_release", "github_issue",

@@ -115,6 +115,11 @@
       "base_commit": "e6caf18b88d19fc4b732981f3ad6fd57cdcd66c3",
       "change": "Extend inspect_context only: four opt-in target sections, executables and TCP ports. Preserve default selection and all other tool contracts. Target RPC observation version 1 is additive within protocol 7.",
       "issue": "https://github.com/OpenMachineLabs/openmachine/issues/138#classification"
+    },
+    {
+      "approval": "Current maintainer request authorizes an independent Core project catalog, focused tests, self-review and merge.",
+      "base_commit": "a4756f11ca3f909d0f9de7cee9f4163e63b538dd",
+      "change": "Add only inspect_projects, a local-only read-only metadata catalog with stable target validation. Expectations are independently authored; existing tool inputs and annotations remain unchanged."
     }
   ],
   "baseline": {
@@ -4521,6 +4526,73 @@
         "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": true
+      }
+    },
+    "inspect_projects": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "default": "list",
+            "enum": [
+              "list",
+              "inspect"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_snapshot": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Snapshot",
+            "type": "string"
+          },
+          "expected_target_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Expected Target Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 50,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "machine": {
+            "title": "Machine",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "maximum": 2000,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "maxLength": 1024,
+            "title": "Path",
+            "type": "string"
+          },
+          "workspace_name": {
+            "default": "",
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine"
+        ],
+        "title": "inspect_projectsArguments",
+        "type": "object"
       }
     }
   }

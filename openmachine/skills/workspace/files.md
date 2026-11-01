@@ -148,3 +148,46 @@ establish every attempt or receipt durability. Unattempted suffixes stay unattem
 No automatic rollback/replay occurs. Current `current.files` is not historical
 proof. Run validation explicitly, retain change/execution IDs and verify touched
 hashes before/after; a file receipt or old test PASS is not current acceptance.
+
+## Project catalog
+
+Require `get_capabilities.project_catalog.protocol == 1` before using
+`inspect_projects`. This optional local-only reader changes no existing workspace
+operation, grant, configuration or persistent state. SSH targets return
+`unsupported_operation`; never fall back to the controller.
+
+Omit `workspace_name` to page configured roots for the named machine. Supply it
+to list direct child directories under that approved root; `path` defaults to
+`.`. Lists contain metadata only, sorted by workspace name or relative path.
+Echo `snapshot` with `next_offset`; changed listings return `source_changed`.
+Credential paths, descendant symlinks and non-directories are excluded. A row
+with `error` has no usable identity; unavailable Git is never a plain folder.
+
+Use `action="inspect"`, a workspace and a relative path to select a directory.
+Retain the exact `(machine, workspace_name, relative_path, target_id)` tuple.
+Revalidate it with `expected_target_id` before use; never substitute a new ID
+after rejection. The opaque digest binds the configured/canonical root, every
+descendant directory's device/inode and Git root/control/common-directory
+identities. It excludes branch, HEAD and ordinary content/timestamps. Replacement,
+movement, retargeting or unverifiable metadata requires explicit reselection.
+This is an observed filesystem identity, not a permanent UUID, bearer grant,
+reservation or atomic fence against an uncooperative native process.
+
+Clients must enforce approved target scope and current native authority at
+dispatch and result delivery. A parent selection does not authorize a nested
+repository/worktree automatically. Existing `workspace_identity` and source/HEAD
+guards remain mandatory; `target_id` is not a replacement. Native commands remain
+OS-account operations, not a sandbox.
+
+No catalog call registers workspaces. A subfolder can remain bound to its parent,
+avoiding overlapping non-Git registrations. When an operation requires an
+independent workspace (notably a nested repository), use the existing locally
+approved candidate-configuration management update with its confirmation hashes
+and original receipt, then select the resulting workspace. A remote selection
+cannot approve an external discovery root or widen local grants.
+
+Limits: 50 rows per page, 2,000 raw directory entries per scan (including excluded
+entries), 1,024 UTF-8 path bytes, 32 relative components and 64 KiB JSON metadata.
+Oversized directories fail explicitly, not with a misleading complete list.
+Select a narrower known directory or reduce the page size for a large response.
+There is no recursive crawl, content index, background job or ID store.
