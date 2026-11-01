@@ -53,6 +53,8 @@ external publication, or use of another project's runners.
 
 ## Verify and deliver
 
+For release notes, follow [Codex releases](https://github.com/openai/codex/releases) and [Open Machine v0.2.15](https://github.com/OpenMachineLabs/openmachine/releases/tag/v0.2.15). Use only the existing sections and fields; do not invent new ones.
+
 Run the documented repository checks and the smallest relevant behavior tests.
 Do not lower requirements or delete necessary cases to obtain a pass. State
 actual PASS, FAIL, and NOT RUN results separately; CI is not product acceptance.
