@@ -33,6 +33,7 @@ from openmachine.mcp.protocol import READ, _reply, _result, MAX_WAITERS
 from openmachine.mcp.connections import register_connections, register_github_tools
 from openmachine.mcp.workspace import register_workspace_tools
 from openmachine.mcp.environment import register_environment_tools
+from openmachine.mcp.projects import register_project_tools
 from openmachine.mcp.tasks import register_task_tools
 from openmachine.mcp.execution import register_execution_tools
 
@@ -99,7 +100,7 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
         if not validator.is_valid({} if arguments is None else arguments):
             return invalid("invalid_arguments")
         # The new contract forbids extra fields before SDK argument filtering.
-        guarded = {"inspect_context", "read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
+        guarded = {"inspect_projects", "inspect_context", "read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue", "github_release",
                    "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
                    "list_integrations", "connect_integration", "read_integration_login",
@@ -166,6 +167,8 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
     register_connections(application, guided_tool)
 
     register_environment_tools(application, guided_tool, machine_read)
+
+    register_project_tools(application, guided_tool)
 
     register_workspace_tools(application, guided_tool, machine_read, file_write)
 
