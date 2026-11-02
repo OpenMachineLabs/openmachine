@@ -814,7 +814,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         database = self.state / "tasks.db"
         database.write_bytes(b"x" * (records.MAX_RECORD + 1))
         before = database.stat()
-        locator = {"kind": "change", "change_id": "a" * 32}
+        locator = {"kind": "change", "machine": "desktop", "change_id": "a" * 32}
         self.fault("corrupt_tasks", tasks.operation_binding, self.state, tasks.operation_key(locator))
         self.assertEqual(database.stat().st_mtime_ns, before.st_mtime_ns)
         self.assertEqual(database.stat().st_size, records.MAX_RECORD + 1)

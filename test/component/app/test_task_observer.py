@@ -205,9 +205,9 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
             time.sleep(0.2)
             read.assert_not_called()
             self.assertGreater(self.app.task_observer._cursor, 0)
-        self.assertIsNone(self.raw(identities[0])["recovery"])
+        self.assertEqual(self.raw(identities[0])["recovery"]["reason_code"], "blocked_unknown_machine")
         self.assertIsNone(self.raw(identities[1])["recovery"])
-        self.assertTrue(self.raw(identities[2])["recovery"]["reason_code"].startswith("blocked_"))
+        self.assertEqual(self.raw(identities[2])["recovery"]["reason_code"], "blocked_unknown_machine")
 
     def test_discovery_pages_only_return_committed_changes_without_history(self):
         for index in range(55):

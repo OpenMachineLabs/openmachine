@@ -228,12 +228,12 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
 
     def test_task_membership_filter_validation_is_closed_and_read_only(self):
         for options in ({"workspace": "project"}, {"workspace_identity": "a" * 64},
-                        {"target_identity": "a" * 64},
                         {"machine": "bad/name"}, {"machine": "desktop", "workspace": "bad/name"},
-                        {"machine": "desktop", "workspace": "project", "target_identity": "a" * 64},
                         {"machine": "desktop", "workspace": "project", "workspace_identity": "bad"}):
             with self.subTest(options=options):
                 self.fault("invalid_task_filter", self.app.find_tasks, **options)
+        with self.assertRaises(TypeError):
+            self.app.find_tasks(machine="desktop", target_identity="a" * 64)
         self.assertFalse(self.path.exists())
 
     def test_original_workspace_references_are_distinct_from_unbound_checkpoints(self):
