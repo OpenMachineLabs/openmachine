@@ -97,7 +97,7 @@ def stage(source_db: Path, destination_db: Path) -> dict:
                 owner = candidate.execute(
                     "SELECT schema,identity,active,generation,restore_required FROM store WHERE singleton=1"
                 ).fetchone()
-                if (owner is None or owner["schema"] != 1 or owner["active"] != 1
+                if (owner is None or owner["schema"] != database.SCHEMA_VERSION or owner["active"] != 1
                         or owner["restore_required"] != 0):
                     raise ValueError("Unknown/inactive/unreconciled Task store cannot be migrated")
                 original_opaque = {table: _rows(candidate, table) for table in OPAQUE_TABLES}

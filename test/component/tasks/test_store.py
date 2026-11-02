@@ -163,7 +163,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
             self.assertNotIn("target_identity", columns)
             self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
             self.assertTrue(database.target_indexes_ready(conn))
-        restored = tasks.read(self.state, "structured-one", section="operations", operation_id=f"{1:032x}")
+        restored = self.app.read_task("structured-one", section="operations", operation_id=f"{1:032x}")
         self.assertEqual(restored["items"][0]["locator"]["machine"], "desktop")
         self.assertNotIn("target_identity", restored["items"][0]["locator"])
         self.assertEqual(tasks.migrate(self.state)["schema"], database.SCHEMA_VERSION)
