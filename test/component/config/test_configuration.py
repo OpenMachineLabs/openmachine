@@ -34,7 +34,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
                 initialize(path, self.work, commands=not commands, workspace_writes=not writes)
             self.assertEqual(path.read_bytes(), before)
 
-    def test_release_check_preference_preserves_old_default_fingerprint(self):
+    def test_unapproved_local_config_cannot_keep_old_authority(self):
         import hashlib
         import json
         from openmachine.config import Settings
@@ -47,9 +47,16 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         del legacy["machines"]["local"]["ssh_connection"]
         del legacy["machines"]["local"]["local_access"]
         expected = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
-        self.assertEqual(config.configuration_sha256(), expected)
+        self.assertNotEqual(config.configuration_sha256(), expected)
+        self.assertIsNone(config.machine("local").local_access)
+        from openmachine.workspace.files import root_for
+        with self.assertRaises(Fault) as denied:
+            root_for(config, "local", str(self.work))
+        self.assertEqual(denied.exception.code, "local_approval_required")
+        with self.assertRaises(ValidationError):
+            Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "workspace"}}})
         explicit = Settings.model_validate(original | {"check_for_updates": True})
-        self.assertEqual(explicit.configuration_sha256(), expected)
+        self.assertEqual(explicit.configuration_sha256(), config.configuration_sha256())
         disabled = Settings.model_validate(original | {"check_for_updates": False})
         self.assertIs(disabled.check_for_updates, False)
         self.assertNotEqual(disabled.configuration_sha256(), expected)

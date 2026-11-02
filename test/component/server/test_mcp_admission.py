@@ -21,7 +21,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_task_pages_preserve_values_and_bound_the_complete_wire_result(self):
         with tempfile.TemporaryDirectory(prefix="om-task-wire-", dir="/tmp") as directory:
             root = Path(directory)
-            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}},
                                               "workspaces": {"work": {"machine": "local", "root": str(root)}}})
             application = Mock()
             payload = {"task_id": "wire-bound", "read_schema": 2, "section": "history",
@@ -68,7 +68,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_waiter_cap_and_cancelled_await_retain_the_actual_thread_slot(self):
         with tempfile.TemporaryDirectory(prefix="om-read-limit-", dir="/tmp") as directory:
             root = Path(directory)
-            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}},
                                               "workspaces": {"work": {"machine": "local", "root": str(root)}}})
             application = Mock()
             application.get_capabilities.return_value = {"alive": True}
@@ -121,7 +121,7 @@ class ObservationAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancellation_has_capacity_when_immediate_reads_fill_default_executor(self):
         with tempfile.TemporaryDirectory(prefix="om-cancel-capacity-", dir="/tmp") as directory:
             root = Path(directory)
-            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}},
+            config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}},
                                               "workspaces": {"work": {"machine": "local", "root": str(root)}}})
             application = Mock()
             release = threading.Event()

@@ -352,7 +352,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_actual_local_change_reader_blocks_old_candidate_that_ignores_store(self):
         from openmachine import workspace
-        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nexecution_enabled=true\n'
+        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nlocal_access="full_access"\nexecution_enabled=true\n'
                                '[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
         config = service_checks.load(self.config)
         file = self.root / "source.py"
@@ -374,7 +374,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_change_format_coverage_is_directional_and_requires_actual_readers(self):
         from openmachine import workspace
-        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nworkspace_write_enabled=true\n'
+        self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nlocal_access="full_access"\nworkspace_write_enabled=true\n'
                                '[workspaces.project]\nmachine="local"\nroot='+json.dumps(str(self.root))+'\n')
         config = service_checks.load(self.config)
         file = self.root / "source.py"

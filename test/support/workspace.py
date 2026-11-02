@@ -21,7 +21,7 @@ class WorkspaceFixture(object):
         self.file.write_bytes(b"answer = 41\r\nuntouched = 7")
         self.state = self.root / "state"
         self.config = Settings.model_validate({"schema_version": 1,
-            "machines": {"local": {"transport": "local", "execution_enabled": True}},
+            "machines": {"local": {"transport": "local", "local_access": "full_access", "execution_enabled": True}},
             "workspaces": {"project": {"machine": "local", "root": str(self.work)}}})
         self.app = create_application(self.config, self.state)
 

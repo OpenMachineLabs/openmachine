@@ -44,7 +44,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         root = self.root.resolve()
         file = self.work / "source"
         file.write_text("old\n")
-        config = Settings.model_validate({"schema_version":1,"machines":{"local":{"transport":"local","workspace_write_enabled":True}},
+        config = Settings.model_validate({"schema_version":1,"machines":{"local":{"transport":"local","local_access":"full_access","workspace_write_enabled":True}},
                                          "workspaces":{"project":{"machine":"local","root":str(self.work.resolve())}}})
         state = root / "patch-state"
         app = create_application(config,state)
@@ -101,7 +101,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             file = root / "source.py"
             file.write_text("answer = 41")
             config = Settings.model_validate({"schema_version": 1,
-                "machines": {"local": {"transport": "local", "workspace_write_enabled": True}},
+                "machines": {"local": {"transport": "local", "local_access": "full_access", "workspace_write_enabled": True}},
                 "workspaces": {"p": {"machine": "local", "root": str(root)}}})
             app = create_application(config, root / "state")
             read = app.read_workspace_file("local", "p", "source.py")

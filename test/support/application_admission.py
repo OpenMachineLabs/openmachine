@@ -43,7 +43,7 @@ class ApplicationAdmissionFixture(object):
     def assert_admission_dispatch(self, names):
         import inspect
         config = Settings.model_validate({"schema_version": 1,
-            "machines": {"local": {"transport": "local", "execution_enabled": True}},
+            "machines": {"local": {"transport": "local", "local_access": "full_access", "execution_enabled": True}},
             "github": {"repositories": ["example/project"]}})
         app = create_application(config, self.state)
         issue = ("update", "example/project", "Title", "Body", 1, "closed", "observed-time")

@@ -32,7 +32,7 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
 
     def test_configured_roots_are_paged_without_cross_machine_or_path_leaks(self):
         self.config.workspaces["absent"] = Workspace(machine="local", root=str(self.root / "absent"))
-        self.config.machines["other"] = Machine(transport="local")
+        self.config.machines["other"] = Machine(transport="local", local_access="full_access")
         self.config.workspaces["private"] = Workspace(machine="other", root=str(self.root))
         first = self.app.inspect_projects("local", limit=1)
         self.assertEqual(first["projects"][0]["error"], "project_unavailable")

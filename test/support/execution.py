@@ -21,7 +21,7 @@ class ExecutionFixture(object):
         self.work.mkdir()
         self.state = self.root / "state"
         self.config = Settings.model_validate({
-            "schema_version": 1, "machines": {"local": {"transport": "local", "execution_enabled": True}},
+            "schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access", "execution_enabled": True}},
             "workspaces": {"project": {"machine": "local", "root": str(self.work)}},
         })
         self.ids = []
@@ -62,6 +62,8 @@ class ExecutionFixture(object):
     def assert_owned_cleanup(self):
         other = self.root / "other"
         other.mkdir()
+        # An independent Git worktree has its own lock; two non-Git paths share '/'.
+        subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
         self.config.workspaces["other"] = Workspace(machine="local", root=str(other))
         child = 'import os,signal,time; from pathlib import Path; os.setpgid(0,0); signal.signal(signal.SIGTERM,signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1); Path("escaped").touch(); time.sleep(2)'
         code = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(4)'

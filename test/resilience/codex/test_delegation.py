@@ -150,8 +150,18 @@ class CodexTests(CodexCaseFixture, unittest.TestCase):
             self.assertEqual(report["status"], "cancelled")
         finally:
             self.app.cancel_execution("desktop", held["execution_id"])
-        timed = self.finished(self.arguments("hold", timeout_seconds=1))
-        self.assertEqual(timed["status"], "timed_out")
+        timed_request = self.arguments("hold", timeout_seconds=1)
+        timed = self.finished(timed_request)
+        if timed["status"] == "outcome_unknown":
+            # A host cleanup query may be inconclusive under load. Never label
+            # that retained original execution as a successful timeout.
+            original = self.app.read_execution("desktop", timed_request["execution_id"])
+            self.assertEqual(original["status"], "outcome_unknown")
+            self.assertEqual(original["execution_id"], timed_request["execution_id"])
+            self.assertEqual(timed["execution_status"], "outcome_unknown")
+            self.assertNotEqual(timed["status"], "completed")
+        else:
+            self.assertEqual(timed["status"], "timed_out")
 
     def test_oversized_unicode_report_is_bounded_and_not_accepted(self):
         args = self.arguments("unicode")

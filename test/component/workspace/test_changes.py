@@ -44,8 +44,8 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual(patched["status"], "applied")
         self.assertEqual((self.work / "new.txt").read_text(), "new\n")
         self.assertEqual(self.config.workspaces, {})
-        self.config.machines["local"].local_access = "workspace"
-        self.fault("scope_unavailable", lambda: self.app.read_workspace_change("local", args["change_id"]))
+        self.config.machines["local"].local_access = None
+        self.fault("local_approval_required", lambda: self.app.read_workspace_change("local", args["change_id"]))
 
     def test_exact_bytes_staged_work_and_modes_survive(self):
         self.initialize_git()
@@ -250,7 +250,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         args = self.arguments()
         identity = uuid.uuid4().hex
         first = self.apply(args, change_id=identity)
-        self.config.machines["alias"] = Machine(transport="local", execution_enabled=True)
+        self.config.machines["alias"] = Machine(transport="local", local_access="full_access", execution_enabled=True)
         self.config.workspaces["alias-project"] = Workspace(machine="alias", root=str(self.work))
         again = self.apply(args, machine="alias", workspace_name="alias-project", change_id=identity)
         self.assertEqual(again["created_at"], first["created_at"])
@@ -261,7 +261,10 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         other = self.root / "other"
         other.mkdir()
         self.config.workspaces["project"].root = str(other)
-        self.fault("scope_unavailable", lambda: self.app.read_workspace_change("local", result["change_id"]))
+        receipt = self.app.read_workspace_change("local", result["change_id"])
+        self.assertEqual(receipt["context"]["root"], str(self.work))
+        self.config.machines["local"].local_access = None
+        self.fault("local_approval_required", lambda: self.app.read_workspace_change("local", result["change_id"]))
 
     def test_durable_whole_write_checks_hash_before_unchanged_but_legacy_does_not(self):
         content = self.file.read_bytes().decode()
@@ -457,13 +460,13 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
             result = git.context(self.work)
         self.assertEqual((result["git_state"], result["context_error"]), ("unavailable", "unsupported_git_object_format"))
 
-    def test_overlapping_non_git_roots_reject_mutation_but_not_read(self):
+    def test_overlapping_context_roots_use_single_native_write_lease(self):
         nested = self.work / "nested"
         nested.mkdir()
         self.config.workspaces["nested"] = Workspace(machine="local", root=str(nested))
         self.assertTrue(self.app.read_workspace_file("local", "project", "source.py")["exists"])
         result = self.apply()
-        self.assertEqual((result["status"], result["error"]), ("rejected", "ambiguous_workspace"))
+        self.assertEqual(result["status"], "applied")
 
     def test_ambiguous_historical_non_git_root_requires_free_original_lease(self):
         nested = self.work / "nested"
@@ -492,22 +495,22 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         execution_api.check_workspace_leases(self.config, self.state, legacy_candidate=True)
         self.assertEqual((path.read_bytes(), old_lock.stat().st_ino), (retained, inode))
         self.assertEqual(self.config.configuration_sha256(), fingerprint)
-        self.assertEqual(self.apply()["error"], "ambiguous_workspace", "New ambiguous writes still reject")
-        self.fault("ambiguous_workspace", lambda: self.app.start_execution(
-            "local", uuid.uuid4().hex, str(nested), [sys.executable, "-I", "-c", "pass"]))
-        self.assertEqual(len(list((self.state / "executions").iterdir())), 1)
+        self.assertEqual(self.apply()["status"], "applied", "New native writes are not gated by overlapping Workspace context")
+        new_id = uuid.uuid4().hex
+        started = self.app.start_execution("local", new_id, str(nested), [sys.executable, "-I", "-c", "pass"])
+        self.assertEqual(started["execution_id"], new_id)
         old_lock.unlink()
         self.fault("legacy_workspace_busy", lambda: execution_api.check_workspace_leases(self.config, self.state))
         self.assertFalse(old_lock.exists(), "Missing old evidence must never be recreated")
         self.assertEqual(path.read_bytes(), retained)
 
-    def test_legacy_omitted_edit_grant_keeps_configuration_fingerprint(self):
+    def test_native_mode_and_typed_write_grants_change_configuration_identity(self):
         value = self.config.model_dump()
         # A default advisory update preference is also omitted from legacy identity.
         self.assertTrue(value.pop("check_for_updates"))
         for target in value["machines"].values():
             target.pop("workspace_write_enabled")
-            self.assertEqual(target.pop("local_access"), "workspace")
+            self.assertEqual(target["local_access"], "full_access")
             self.assertIsNone(target.pop("ssh_connection"))
         expected = hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(self.config.configuration_sha256(), expected)

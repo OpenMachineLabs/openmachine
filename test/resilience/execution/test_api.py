@@ -59,9 +59,13 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
             other = self.root / "other"
             other.mkdir()
             self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
-            self.assertEqual(self.wait(self.start('print("independent")', cwd=other))["status"], "succeeded")
+            # Whole-device Full serializes separate non-Git directories under one lock.
+            with self.assertRaises(Fault) as denied:
+                self.start('print("non-git-conflict")', cwd=other)
+            self.assertEqual(denied.exception.code, "resource_busy")
         finally:
             self.assertEqual(self.wait(first)["status"], "succeeded")
+        self.assertEqual(self.wait(self.start('print("after-release")', cwd=other))["status"], "succeeded")
 
     def test_git_repositories_under_one_parent_can_run_independently(self):
         first_repo, second_repo = self.work / "first", self.work / "second"
@@ -162,6 +166,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
     def test_cancellation_cleans_owned_children_and_preserves_other_work(self):
         other = self.root / "other"
         other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
         self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
         child = 'import signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1.5); Path("escaped").touch(); time.sleep(10)'
         command = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(10)'

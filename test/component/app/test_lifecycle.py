@@ -11,7 +11,7 @@ from test.support.application_admission import ApplicationAdmissionFixture
 class ServiceTests(ApplicationAdmissionFixture, unittest.TestCase):
     def test_task_creation_and_index_maintenance_share_lifecycle_admission(self):
         from test.support.tasks import task_contract
-        config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local"}}})
+        config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}}})
         app = create_application(config, self.state)
         self.record["pending"] = {"from": self.a, "to": self.b, "previous": None}
         self.save(self.record)

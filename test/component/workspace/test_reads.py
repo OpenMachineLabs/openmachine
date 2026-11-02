@@ -14,7 +14,8 @@ from test.support.workspace import WorkspaceFixture
 class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
     def test_whole_device_read_requires_explicit_native_authority_not_workspace_selection(self):
         self.config.workspaces.clear()
-        self.fault("unknown_workspace", lambda: self.app.read_workspace_file("local", str(self.work), "source.py"))
+        self.config.machines["local"].local_access = None
+        self.fault("local_approval_required", lambda: self.app.read_workspace_file("local", str(self.work), "source.py"))
         self.config.machines["local"].local_access = "read_only"
         read = self.app.read_workspace_file("local", str(self.work), "source.py")
         self.assertEqual(read["sha256"], hashlib.sha256(self.file.read_bytes()).hexdigest())

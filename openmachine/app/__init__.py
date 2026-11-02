@@ -105,7 +105,7 @@ class Application:
             "project_catalog": projects.capabilities(),
             "device_access": {"protocol": 1, "directory_selector": "workspace_name", "absolute_local_directories": True},
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
-            "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": item.local_access != "read_only" and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
+            "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": (item.transport == "ssh" or item.local_access == "full_access") and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,

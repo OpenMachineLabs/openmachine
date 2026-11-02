@@ -80,8 +80,9 @@ def _canonical(path: Path, *, missing: bool = False) -> Path:
 def _authorized(config, machine: str, path: Path) -> bool:
     if excluded(Path(*(part.casefold() for part in path.parts))):
         return False
-    if config.machine(machine).local_access != "workspace":
-        return True
+    if not getattr(config, "is_ssh_worker", False):
+        return config.machine(machine).local_access in {"read_only", "full_access"}
+    # SSH remains independently constrained to its verified remote roots.
     for item in config.workspaces.values():
         if item.machine == machine:
             try:
@@ -156,10 +157,10 @@ def resolve_root(config, machine: str, workspace: str, worktree: str = "") -> Pa
     observed = _repository(root)
     common_identity = _identity(Path(observed["common_dir"]))
     if not _authorized(config, machine, Path(selected)):
-        raise Fault("path_denied", "The selected worktree is outside this machine's configured roots.")
+        raise Fault("path_denied", "The selected worktree is outside the independently authorized SSH roots.")
     candidate = _canonical(Path(selected))
     if not _authorized(config, machine, candidate):
-        raise Fault("path_denied", "The selected worktree is outside this machine's configured roots.")
+        raise Fault("path_denied", "The selected worktree is outside the independently authorized SSH roots.")
     entries, _ = _registered(root)
     if not any(item["worktree"] == str(candidate) and not item["bare"] and not item["prunable"] for item in entries):
         raise Fault("unknown_worktree", "Select an available worktree registered to this repository.")

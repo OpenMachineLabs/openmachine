@@ -64,6 +64,24 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
 
         return patch.object(api.subprocess, "Popen", side_effect=launch)
 
+    def test_long_whole_device_directory_does_not_corrupt_worktree_receipts(self):
+        self.config.workspaces.clear()
+        self.config.machines["local"].local_access = "full_access"
+        source = self.root / ("native-" + "x" * 135)
+        subprocess.run(["git", "clone", "--quiet", str(self.work), str(source)],
+                       check=True, capture_output=True)
+        self.assertGreater(len(str(source)), 128)
+        args = {"workspace_name": str(source), "destination": str(self.destinations / "long"),
+                "base_ref": "HEAD", "new_branch": "feature/long",
+                "expected_workspace_identity": context(source)["workspace_identity"]}
+        result = self.finish(self.create(**args))
+        self.assertEqual(result["status"], "succeeded")
+        receipt = execution.read_record(self.receipt_path(result["execution_id"]).parent)
+        self.assertEqual(receipt["request"]["worktree_creation"]["workspace"], str(source))
+        again = self.create(execution_id=result["execution_id"], **args)
+        self.assertEqual(again["execution_id"], result["execution_id"])
+        self.assertEqual(self.finish(self.start('print("next")', cwd=source))["status"], "succeeded")
+
     def test_whole_device_worktree_receipt_and_new_checkout_without_registration(self):
         self.config.workspaces.clear()
         self.config.machines["local"].local_access = "full_access"

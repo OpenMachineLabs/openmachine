@@ -87,13 +87,19 @@ def context(cwd: Path) -> dict:
     return result
 
 
+def whole_device_writes(config) -> bool:
+    """One local Full grant makes every non-Git local alias share the global lease."""
+    return not getattr(config, "is_ssh_worker", False) and any(
+        m.transport == "local" and m.local_access == "full_access" for m in config.machines.values())
+
+
 def lock_root(config, machine: str, cwd: Path, observed: dict) -> str:
-    """Preserve Git lock names; one unambiguous configured root owns non-Git work."""
+    """Preserve Git lock names; all local aliases coordinate non-Git writers."""
     if observed["git_status"] == "unavailable":
         raise Fault("context_unavailable", "Git/workspace identity could not be verified.")
     if observed["git_status"] == "observed":
         return observed["worktree"]
-    if config.machine(machine).local_access != "workspace":
+    if whole_device_writes(config):
         # One conservative non-Git lease domain prevents parent/child aliases
         # from creating independent writers without introducing a root registry.
         return "/"

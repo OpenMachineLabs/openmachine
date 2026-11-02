@@ -4,6 +4,9 @@ schema_version = 1
 
 [machines.local]
 transport = "local"
+# Explicit device authority; never infer it from a registered Workspace.
+local_access = "read_only"
+# To use native commands or writes, explicitly approve "full_access" instead.
 execution_enabled = false
 workspace_write_enabled = false
 

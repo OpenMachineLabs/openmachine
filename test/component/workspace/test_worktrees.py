@@ -30,8 +30,8 @@ class WorktreeTests(WorkspaceFixture, unittest.TestCase):
         self.config.machines["local"].local_access = "read_only"
         self.assertTrue(self.app.read_workspace_file("local", str(self.target), "source.py")["exists"])
         self.fault("execution_disabled", lambda: self.app.create_worktree("local", str(self.work), str(self.root / "second"), "HEAD", "a"*32, request["expected_workspace_identity"]))
-        self.config.machines["local"].local_access = "workspace"
-        self.fault("unknown_workspace", lambda: self.app.read_workspace_file("local", str(self.target), "source.py"))
+        self.config.machines["local"].local_access = None
+        self.fault("local_approval_required", lambda: self.app.read_workspace_file("local", str(self.target), "source.py"))
 
     def setUp(self):
         super().setUp()
@@ -64,7 +64,7 @@ class WorktreeTests(WorkspaceFixture, unittest.TestCase):
                                    offset=first["next_offset"], expected_snapshot=first["snapshot"])
         self.assertEqual(second["entries"][0]["worktree"], str(self.target))
         self.assertTrue(second["entries"][0]["detached"])
-        self.assertFalse(second["entries"][0]["authorized"])
+        self.assertTrue(second["entries"][0]["authorized"])
         self.assertEqual(self.file.read_text(), "unfinished source work\n")
         self.assertEqual((self.work / ".git/index").read_bytes(), index)
         self.grant()
@@ -100,11 +100,13 @@ class WorktreeTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual(receipt["context"]["root"], str(self.target))
         self.assertEqual(receipt["current"]["sha256"], workspace.read_text_file(selected, "local", "project", "source.py")["sha256"])
         self.config.workspaces.pop("trees")
-        self.fault("scope_unavailable", lambda: workspace.read_change(self.config, self.state, "local", change_id))
+        self.assertEqual(workspace.read_change(self.config, self.state, "local", change_id)["change_id"], change_id)
+        self.config.machines["local"].local_access = None
+        self.fault("local_approval_required", lambda: workspace.read_change(self.config, self.state, "local", change_id))
 
     def test_selection_requires_same_repository_registration_and_existing_scope(self):
         self.git("worktree", "add", "--quiet", "--detach", str(self.target), "HEAD")
-        self.fault("path_denied", lambda: worktrees.select(self.config, "local", "project", str(self.target)))
+        self.assertEqual(worktrees.select(self.config, "local", "project", str(self.target)).workspaces["project"].root, str(self.target))
         self.grant()
         unrelated = self.root / "unrelated"
         subprocess.run(["git", "clone", "--quiet", str(self.work), str(unrelated)], check=True, capture_output=True)
@@ -154,8 +156,8 @@ class WorktreeTests(WorkspaceFixture, unittest.TestCase):
 
     def test_creation_rejects_ungranted_occupied_control_and_symlink_paths(self):
         identity = context(self.work)["workspace_identity"]
-        self.fault("path_denied", lambda: worktrees.prepare_creation(self.config, "local", "project",
-            str(self.target), "HEAD", "isolated-task", identity))
+        self.assertEqual(worktrees.prepare_creation(self.config, "local", "project",
+            str(self.target), "HEAD", "isolated-task", identity)["source_root"], str(self.work))
         self.grant()
         self.target.mkdir()
         (self.target / "preserve").write_text("unrelated\n")

@@ -195,7 +195,7 @@ def _validate_creation(record: dict) -> None:
     if not isinstance(intent, dict) or set(intent) != {
             "workspace", "destination", "base_ref", "new_branch", "expected_workspace_identity", "worktree"}:
         raise ValueError("invalid worktree request")
-    if not isinstance(intent["workspace"], str) or not 1 <= len(intent["workspace"]) <= 128:
+    if not isinstance(intent["workspace"], str) or not 1 <= len(intent["workspace"]) <= 1024 or "\0" in intent["workspace"]:
         raise ValueError("invalid worktree workspace")
     try:
         normalized = worktrees.normalize_creation(**{key: value for key, value in intent.items() if key != "workspace"})

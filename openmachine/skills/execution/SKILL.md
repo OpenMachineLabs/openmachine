@@ -12,7 +12,7 @@ and preconditions. Native commands are not sandboxed by reader scopes.
 
 For single-repository work, set `cwd` directly to that repository or worktree.
 With explicit native whole-device Full authority, `cwd` need not belong to a
-configured Workspace. Historical workspace authority keeps its existing bounds.
+configured Workspace. Retired Workspace-scoped authorization cannot execute.
 The original execution ID, native permissions, leases and Task checks still apply.
 
 Read [terminal execution and controls](terminal.md) for timeouts, leases, output

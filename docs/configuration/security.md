@@ -11,13 +11,13 @@ execution identity, task authority and scoped GitHub destinations. The client
 and external service can impose additional approval and access requirements.
 No one of these checks replaces the others.
 
-For local machines, `local_access` defaults to `workspace`, retaining historical
-configured-Workspace scope. An explicit `read_only` approval permits typed reads
-from canonical absolute local directories without registering Workspaces; it
-forbids native mutations and commands. Explicit `full_access` permits typed
-operations and commands in those directories under the existing independent
-write and execution grants. Configured Workspaces remain names and contexts,
-not whole-device directory allowlists. OS permissions, credential protections,
+Historical Workspace-scoped authorization grants no local authority. Without an
+explicit new native device approval, access fails closed. `read_only` permits
+typed reads from canonical absolute local directories without registering
+Workspaces but forbids mutations and commands. `full_access` permits native
+reads, typed writes, Tasks, commands and worktrees within the current OS account,
+subject to independent native execution and write grants. Configured
+Workspaces remain names and contexts, not whole-device directory allowlists. OS permissions, credential protections,
 original receipts, and SSH machine grants remain separate boundaries. An allowed
 command's `cwd` is not process confinement.
 

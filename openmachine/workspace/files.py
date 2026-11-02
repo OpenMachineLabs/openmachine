@@ -20,12 +20,15 @@ if TYPE_CHECKING:
 
 
 def root_for(config: "Settings", machine: str, workspace: str) -> Path:
-    if config.machine(machine).transport != "local":
+    target = config.machine(machine)
+    if target.transport != "local":
         raise Fault("remote_path", "Resolve this workspace through its SSH adapter, not the controller filesystem.")
+    if not getattr(config, "is_ssh_worker", False) and target.local_access is None:
+        raise Fault("local_approval_required", "Retired Workspace approvals do not permit local directory reads.")
     item = config.workspaces.get(workspace)
     if item is not None and item.machine == machine:
         selected = Path(item.root)
-    elif config.machine(machine).local_access != "workspace" and Path(workspace).is_absolute():
+    elif Path(workspace).is_absolute():
         selected = Path(workspace)
         if (len(workspace.encode()) > 1024 or ".." in selected.parts or "\\" in workspace
                 or any(ord(c) < 32 or ord(c) == 127 for c in workspace)
@@ -35,7 +38,7 @@ def root_for(config: "Settings", machine: str, workspace: str) -> Path:
         if any(p.is_symlink() for p in (selected, *selected.parents)):
             raise Fault("path_denied", "Select the canonical directory without filesystem links.")
     else:
-        raise Fault("unknown_workspace", "Select a configured workspace or explicitly enable whole-device access.")
+        raise Fault("unknown_workspace", "Select a configured Workspace name or a canonical absolute local directory.")
     root = selected.resolve(strict=True)
     if excluded(Path(*(part.casefold() for part in root.parts))):
         raise Fault("path_denied", "Credential directories cannot be selected as typed file roots.")

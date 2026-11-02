@@ -210,7 +210,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
     def test_pre_dispatch_busy_is_failed_and_old_unknown_reconciles(self):
         self.accept_plan()
         args = self.start_arguments()
-        key = hashlib.sha256(str(self.work).encode()).hexdigest()
+        key = hashlib.sha256(b"/").hexdigest()
         with lease(self.state / "locks" / f"workspace-{key}.lock"):
             self.fault("resource_busy", self.app.start_execution, **args)
         original = self.view()["record"]["operations"][0]
