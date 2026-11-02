@@ -14,6 +14,20 @@ from test.support.runtime_cases import RuntimeCaseFixture
 
 
 class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
+    def test_whole_device_nonconfigured_command_retains_original_id_without_replay(self):
+        self.config.workspaces.clear()
+        self.config.machines["my-laptop"].local_access = "full_access"
+        code = 'from pathlib import Path; p=Path("counter"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1")'
+        first = self.wait(self.start(code))
+        self.assertEqual(first["status"], "succeeded")
+        again = self.start(code, execution_id=first["execution_id"])
+        self.assertEqual(again["execution_id"], first["execution_id"])
+        self.assertEqual((self.work / "counter").read_text(), "1")
+        self.config.machines["my-laptop"].local_access = "read_only"
+        with self.assertRaises(Fault) as caught:
+            self.start('print("denied")')
+        self.assertEqual(caught.exception.code, "execution_disabled")
+
     def test_native_write_readback_and_identical_id_deduplication(self):
         code = 'from pathlib import Path; p=Path("counter"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print("written")'
         first = self.wait(self.start(code))
@@ -45,9 +59,13 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
             other = self.root / "other"
             other.mkdir()
             self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
-            self.assertEqual(self.wait(self.start('print("independent")', cwd=other))["status"], "succeeded")
+            # Whole-device Full serializes separate non-Git directories under one lock.
+            with self.assertRaises(Fault) as denied:
+                self.start('print("non-git-conflict")', cwd=other)
+            self.assertEqual(denied.exception.code, "resource_busy")
         finally:
             self.assertEqual(self.wait(first)["status"], "succeeded")
+        self.assertEqual(self.wait(self.start('print("after-release")', cwd=other))["status"], "succeeded")
 
     def test_git_repositories_under_one_parent_can_run_independently(self):
         first_repo, second_repo = self.work / "first", self.work / "second"
@@ -148,6 +166,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
     def test_cancellation_cleans_owned_children_and_preserves_other_work(self):
         other = self.root / "other"
         other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
         self.config.workspaces["other"] = Workspace(machine="my-laptop", root=str(other))
         child = 'import signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); print("child-ready",flush=True); time.sleep(1.5); Path("escaped").touch(); time.sleep(10)'
         command = 'import signal,subprocess,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); subprocess.Popen([sys.executable,"-c",' + repr(child) + ']); time.sleep(10)'

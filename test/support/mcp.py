@@ -26,7 +26,7 @@ class MCPFixture(object):
         self.work.mkdir()
         (self.work / "AGENTS.md").write_text("Only modify this disposable project.\n")
         self.config = self.root / "config.toml"
-        self.config.write_text('schema_version = 1\ncheck_for_updates = false\n[machines.desktop]\ntransport = "local"\nexecution_enabled = true\n'
+        self.config.write_text('schema_version = 1\ncheck_for_updates = false\n[machines.desktop]\ntransport = "local"\nlocal_access = "full_access"\nexecution_enabled = true\n'
                                '[workspaces.example]\nmachine = "desktop"\nroot = ' + json.dumps(str(self.work)) + '\n'
                                '[github]\nrepositories = ["Example/repo"]\nattribution = false\n')
         self.state = self.root / "state"
@@ -129,7 +129,15 @@ class MCPFixture(object):
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
             response = await session.call_tool("read_execution", identity | {"wait_seconds": 0.25})
-            self.assertFalse(response.is_error)
+            if response.is_error:
+                error = ((response.structured_content or {}).get("error") or {})
+                # The reader can return a transient busy result while the original
+                # worker updates its receipt. Only retry explicitly transient locks.
+                # Missing IDs, denied access and corrupt evidence must fail here.
+                if error.get("code") in {"observation_busy", "resource_busy"}:
+                    await asyncio.sleep(0.04)
+                    continue
+                self.assertFalse(response.is_error, error)
             observed = response.structured_content
             if predicate(observed):
                 return observed

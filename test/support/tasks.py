@@ -57,7 +57,7 @@ class ContinuityFixture(object):
         self.work.mkdir()
         self.state = self.root / "state"
         self.config = Settings.model_validate({"schema_version": 1,
-            "machines": {"desktop": {"transport": "local", "execution_enabled": True}},
+            "machines": {"desktop": {"transport": "local", "local_access": "full_access", "execution_enabled": True}},
             "workspaces": {"project": {"machine": "desktop", "root": str(self.work)}}})
 
     def fault(self, code, operation, *args, **kwargs):

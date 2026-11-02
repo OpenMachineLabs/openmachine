@@ -21,6 +21,12 @@ class Machines:
             raise Fault("not_ssh", "Select a configured SSH target, or omit the explicit doctor target.")
         return self.ssh_call(self.config, machine, operation, **arguments)
 
+    def _native_read(self, machine: str):
+        selected = self.config.machine(machine)
+        if selected.transport == "local" and selected.local_access is None:
+            raise Fault("local_approval_required", "Explicit Read Only or Full Access is required for local native reads.")
+        return selected
+
     def probe(self, machine: str) -> dict:
         self.config.machine(machine)
         return self._ssh(machine, "probe")
@@ -29,7 +35,7 @@ class Machines:
                             executables=None, ports=None, limit: int = 10) -> dict:
         arguments = dict(workspace_name=workspace_name, section=section, worktree=worktree,
                          executables=executables, ports=ports, limit=limit)
-        if self.config.machine(machine).transport == "ssh":
+        if self._native_read(machine).transport == "ssh":
             return self._ssh(machine, "inspect_environment", observation_version=execution.OBSERVATION_VERSION, **arguments)
         return execution.inspect_environment(self.config, machine, **arguments)
 
@@ -117,7 +123,7 @@ class Machines:
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False,
                               *, cancelled: threading.Event | None = None) -> dict:
-        if self.config.machine(machine).transport == "ssh":
+        if self._native_read(machine).transport == "ssh":
             return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current, cancelled=cancelled)
         return workspace.read_change(self.config, self.state, machine, change_id, observe_current)
 
@@ -151,14 +157,14 @@ class Machines:
                        max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,
                        *, cancelled: threading.Event | None = None) -> dict:
         execution.validate_read(offset, max_bytes, wait_seconds)
-        if self.config.machine(machine).transport == "ssh":
+        if self._native_read(machine).transport == "ssh":
             return self._ssh(machine, "read_execution", execution_id=execution_id, offset=offset,
                              max_bytes=max_bytes, wait_seconds=wait_seconds, cancelled=cancelled)
         return execution.read(self.config, self.state, machine, execution_id, offset, max_bytes,
                               wait_seconds, cancelled=cancelled)
 
     def list_executions(self, machine: str, cursor: str = "", limit: int = 20) -> dict:
-        if self.config.machine(machine).transport == "ssh":
+        if self._native_read(machine).transport == "ssh":
             return self._ssh(machine, "list_executions", cursor=cursor, limit=limit)
         return execution.list_records(self.config, self.state, machine, cursor, limit)
 

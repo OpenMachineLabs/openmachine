@@ -1146,9 +1146,7 @@
                 "type": "string"
               },
               "workspace": {
-                "maxLength": 64,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "maxLength": 1024,
                 "title": "Workspace",
                 "type": "string"
               },
@@ -1555,9 +1553,7 @@
                 "type": "string"
               },
               "workspace": {
-                "maxLength": 64,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                "maxLength": 1024,
                 "title": "Workspace",
                 "type": "string"
               },
@@ -2022,8 +2018,7 @@
           },
           "workspace": {
             "default": "",
-            "maxLength": 64,
-            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$",
+            "maxLength": 1024,
             "title": "Workspace",
             "type": "string"
           },

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
@@ -87,13 +88,18 @@ class Origin(Model):
 
 class Target(Model):
     machine: Name
-    workspace: Name
+    workspace: Text1024
     workspace_identity: SHA
     head_sha: Head | None
     worktree: Text1024 = ""
 
     @model_validator(mode="after")
     def selected_worktree(self):
+        _line(self.workspace)
+        if not self.workspace or (not self.workspace.startswith("/") and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", self.workspace)):
+            raise ValueError("use a workspace name or absolute local directory")
+        if self.workspace.startswith("/") and ".." in PurePosixPath(self.workspace).parts:
+            raise ValueError("directory selectors cannot traverse parents")
         if self.worktree:
             path = PurePosixPath(self.worktree)
             if not path.is_absolute() or ".." in path.parts:

@@ -53,12 +53,13 @@ class WorkspaceReferenceTests(WorkspaceFixture, unittest.TestCase):
                 root.mkdir()
                 candidate.workspaces["project"].root = str(root)
             with self.subTest(root=root):
-                self.fault("workspace_in_use", lambda: workspace.preserve_change_routes(
-                    self.state, self.config, candidate, changed))
+                workspace.preserve_change_routes(self.state, self.config, candidate, changed)
+                retained = workspace.read_change(candidate, self.state, "local", change_id)
+                self.assertEqual(retained["context"]["root"], str(self.work))
         renamed = self.config.model_copy(deep=True)
         renamed.workspaces["renamed"] = renamed.workspaces.pop("project")
         workspace.preserve_change_routes(self.state, self.config, renamed, changed)
-        self.assertEqual(workspace.read_change(renamed, self.state, "local", change_id)["workspace"], "renamed")
+        self.assertEqual(workspace.read_change(renamed, self.state, "local", change_id)["context"]["root"], str(self.work))
         self.assertTrue(self.file.exists())
 
 

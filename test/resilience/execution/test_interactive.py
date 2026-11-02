@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import shlex
 import socket
+import subprocess
 import sys
 import time
 import unittest
@@ -39,7 +40,7 @@ class InteractiveTests(ExecutionFixture, unittest.TestCase):
 
     def test_candidate_reader_preserves_live_and_terminal_control_receipts(self):
         config_path = self.root / "config.toml"
-        config_path.write_text('schema_version=1\n[machines.local]\ntransport="local"\n')
+        config_path.write_text('schema_version=1\n[machines.local]\ntransport="local"\nlocal_access="full_access"\n')
         started = self.start('print("ready",flush=True); input(); print("received",flush=True); input()')
         identity = started["execution_id"]
         self.ready(identity)
@@ -271,6 +272,7 @@ class InteractiveTests(ExecutionFixture, unittest.TestCase):
         self.ready(identity)
         other = self.root / "other"
         other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
         self.config.workspaces["other"] = self.config.workspaces["project"].model_copy(update={"root": str(other)})
         independent = self.start('import time; print("ready",flush=True); time.sleep(5)', cwd=other)["execution_id"]
         self.ready(independent)

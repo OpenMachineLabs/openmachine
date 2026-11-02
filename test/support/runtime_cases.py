@@ -31,7 +31,7 @@ class RuntimeCaseFixture(object):
         self.work.mkdir()
         self.state = self.root / "state"
         self.config = Settings.model_validate({
-            "schema_version": 1, "machines": {"my-laptop": {"transport": "local", "execution_enabled": True}},
+            "schema_version": 1, "machines": {"my-laptop": {"transport": "local", "local_access": "full_access", "execution_enabled": True}},
             "workspaces": {"project": {"machine": "my-laptop", "root": str(self.work)}},
         })
 

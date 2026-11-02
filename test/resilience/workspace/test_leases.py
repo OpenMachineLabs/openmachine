@@ -15,6 +15,48 @@ from test.support.workspace import WorkspaceFixture
 
 
 class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
+    def test_mixed_local_machine_authorities_share_non_git_lease(self):
+        from openmachine.config import Machine
+        from openmachine.workspace.git import context, lock_root
+        legacy = self.app.start_execution("local", uuid.uuid4().hex, str(self.work),
+                                          [sys.executable, "-c", "import time; time.sleep(10)"])
+        self.config.machines["whole"] = Machine(
+            transport="local", local_access="full_access", execution_enabled=True,
+            workspace_write_enabled=True)
+        self.assertEqual(lock_root(self.config, "local", self.work, context(self.work)), "/")
+        self.assertEqual(lock_root(self.config, "whole", self.work, context(self.work)), "/")
+        try:
+            self.fault("resource_busy", lambda: self.app.start_execution(
+                "whole", uuid.uuid4().hex, str(self.work), [sys.executable, "-c", "pass"]))
+            denied = self.apply()
+            self.assertEqual((denied["status"], denied["error"]), ("rejected", "resource_busy"))
+        finally:
+            self.app.cancel_execution("local", legacy["execution_id"])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                original = self.app.read_execution("local", legacy["execution_id"])
+                if original["cleanup"]["status"] == "verified":
+                    break
+                time.sleep(0.03)
+            self.assertEqual(original["cleanup"]["status"], "verified")
+
+        global_writer = self.app.start_execution("whole", uuid.uuid4().hex, str(self.work),
+            [sys.executable, "-c", "import time; time.sleep(10)"])
+        try:
+            self.fault("resource_busy", lambda: self.app.start_execution(
+                "local", uuid.uuid4().hex, str(self.work), [sys.executable, "-c", "pass"]))
+            denied = self.apply()
+            self.assertEqual((denied["status"], denied["error"]), ("rejected", "resource_busy"))
+        finally:
+            self.app.cancel_execution("whole", global_writer["execution_id"])
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                original = self.app.read_execution("whole", global_writer["execution_id"])
+                if original["cleanup"]["status"] == "verified":
+                    break
+                time.sleep(0.03)
+            self.assertEqual(original["cleanup"]["status"], "verified")
+
     def test_non_git_subdirectory_and_idle_pty_hold_the_same_edit_lease(self):
         nested = self.work / "nested"
         nested.mkdir()
@@ -25,7 +67,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
             edited = self.apply()
             self.assertEqual((edited["status"], edited["error"]), ("rejected", "resource_busy"))
             record = execution.read_record(self.state / "executions" / identity)
-            self.assertEqual(record["context"]["workspace_lock_root"], str(self.work))
+            self.assertEqual(record["context"]["workspace_lock_root"], "/")
             self.fault("legacy_workspace_busy", lambda: execution_api.check_workspace_leases(self.config, self.state, legacy_candidate=True))
         finally:
             self.app.cancel_execution("local", identity)
@@ -70,8 +112,11 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
             read = self.app.read_workspace_file("local", "independent", "source.py")
             separate = self.apply(args, workspace_name="independent",
                 expected_workspace_identity=read["context"]["workspace_identity"], expected_sha256=read["sha256"])
-            self.assertEqual(separate["status"], "applied")
+            self.assertEqual((separate["status"], separate["error"]), ("rejected", "legacy_workspace_busy"))
         self.assertEqual(self.apply(args)["status"], "applied")
+        self.assertEqual(self.apply(args, workspace_name="independent",
+            expected_workspace_identity=read["context"]["workspace_identity"],
+            expected_sha256=read["sha256"])["status"], "applied")
 
 
 if __name__ == "__main__":

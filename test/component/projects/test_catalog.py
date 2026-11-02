@@ -12,6 +12,18 @@ from test.support.workspace import WorkspaceFixture
 
 
 class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
+    def test_nonconfigured_repository_and_folder_have_native_stable_identities(self):
+        self.config.workspaces.clear()
+        self.config.machines["local"].local_access = "read_only"
+        first = self.app.inspect_projects("local", str(self.work), "inspect")["project"]
+        self.assertEqual(first["kind"], "folder")
+        self.initialize_git()
+        repo = self.app.inspect_projects("local", str(self.work), "inspect")["project"]
+        self.assertEqual(repo["kind"], "git_repo")
+        self.assertNotEqual(repo["target_id"], first["target_id"])
+        self.fault("project_changed", lambda: self.app.inspect_projects("local", str(self.work), "inspect", expected_target_id=first["target_id"]))
+        self.assertEqual(self.config.workspaces, {})
+
     def target(self, path=".", **kwargs):
         return self.app.inspect_projects("local", "project", "inspect", path, **kwargs)["project"]
 
@@ -20,7 +32,7 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
 
     def test_configured_roots_are_paged_without_cross_machine_or_path_leaks(self):
         self.config.workspaces["absent"] = Workspace(machine="local", root=str(self.root / "absent"))
-        self.config.machines["other"] = Machine(transport="local")
+        self.config.machines["other"] = Machine(transport="local", local_access="full_access")
         self.config.workspaces["private"] = Workspace(machine="other", root=str(self.root))
         first = self.app.inspect_projects("local", limit=1)
         self.assertEqual(first["projects"][0]["error"], "project_unavailable")

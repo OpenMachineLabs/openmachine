@@ -33,7 +33,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             for index, (commands, writes) in enumerate(((False, False), (False, True), (True, False), (True, True)), 1):
                 with self.subTest(commands=commands, writes=writes):
                     candidate.write_text(original.decode().replace('transport="local"',
-                        f'transport="local"\nexecution_enabled={str(commands).lower()}\nworkspace_write_enabled={str(writes).lower()}')
+                        f'transport="local"\nlocal_access="read_only"\nexecution_enabled={str(commands).lower()}\nworkspace_write_enabled={str(writes).lower()}')
                         + '\n[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
                     accepted = maintenance.submit(self.config, self.state, "update", f"{index:032x}", self.root / "payload", "c" * 64,
                         candidate_config=candidate, expected_config_sha256=maintenance._digest(self.config),
@@ -46,14 +46,10 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                     self.assertEqual((saved.github, saved.skills, saved.workspaces["existing"]),
                                      (baseline.github, baseline.skills, baseline.workspaces["existing"]))
                     self.assertEqual(saved.workspaces["project"].root, str(self.root))
-                    if commands:
-                        saved.machine("local", write=True)
-                    else:
-                        self.assert_fault("execution_disabled", lambda: saved.machine("local", write=True))
-                    if writes:
-                        saved.workspace_machine("local")
-                    else:
-                        self.assert_fault("workspace_write_disabled", lambda: saved.workspace_machine("local"))
+                    self.assertEqual(saved.machines["local"].local_access, "read_only")
+                    # Neither old command nor write toggles expands a native Read Only grant.
+                    self.assert_fault("execution_disabled", lambda: saved.machine("local", write=True))
+                    self.assert_fault("workspace_write_disabled", lambda: saved.workspace_machine("local"))
                     self.assertEqual(self.config.read_bytes(), original)
                     self.assertEqual(service_state._record(self.state), selection)
                     # No fixture worker was dispatched; settle its admission for the next combination.
@@ -284,8 +280,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), expected)
         self.assertEqual(service_state._record(self.state)["policy"], original_policy)
         config = load(self.config)
-        self.assert_fault("execution_disabled", lambda: config.machine("local", write=True))
-        self.assert_fault("workspace_write_disabled", lambda: config.workspace_machine("local"))
+        self.assert_fault("local_approval_required", lambda: config.machine("local", write=True))
+        self.assert_fault("local_approval_required", lambda: config.workspace_machine("local"))
         start.assert_not_called()
 
     def test_status_separates_selected_and_running_commits(self):

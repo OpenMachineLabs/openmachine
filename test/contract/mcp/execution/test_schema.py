@@ -19,7 +19,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 identity = uuid.uuid4().hex
-                key = hashlib.sha256(str(self.work).encode()).hexdigest()
+                key = hashlib.sha256(b"/").hexdigest()
                 with lease(self.state / "locks" / f"workspace-{key}.lock"):
                     result = await session.call_tool("start_execution", {
                         "machine": "desktop", "execution_id": identity, "cwd": str(nested),
@@ -28,8 +28,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 value = result.structured_content
                 self.assertEqual(value["error"]["code"], "resource_busy")
                 self.assertEqual(value["cwd"], str(nested))
-                self.assertEqual(value["workspace_lock_root"], str(self.work))
-                self.assertIn("cd or -C", value["error"]["message"])
+                self.assertEqual(value["workspace_lock_root"], "/")
+                self.assertIn("accepted task scope", value["error"]["message"])
                 self.assertEqual(json.loads(result.content[0].text), value)
                 self.assertFalse((self.state / "executions" / identity).exists())
 

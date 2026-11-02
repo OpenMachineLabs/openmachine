@@ -597,9 +597,6 @@ class TaskAdmission:
             if accepted["machine"] != machine:
                 continue
             name = accepted["workspace"]
-            configured = self.app.config.workspaces.get(name)
-            if configured is None or configured.machine != machine:
-                continue
             selection = accepted.get("worktree", "")
             if method in FILE_METHODS | {"create_worktree"} and (
                     arguments["workspace_name"] != name or arguments.get("worktree", "") != selection):

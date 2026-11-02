@@ -83,14 +83,15 @@ def _target(config: "Settings", machine: str, workspace: str, path: str) -> dict
                 with file_parent(root, (*parts, "unused"), identities=attached):
                     if attached != ancestors or root_for(config, machine, workspace) != root:
                         raise Fault("project_changed", "The directory changed during observation; select it again.")
-            observations.append([1, machine, workspace, config.workspaces[workspace].root,
+            observations.append([1, machine, workspace, config.workspaces[workspace].root if workspace in config.workspaces else workspace,
                                  str(root), path, ancestors, git])
     except (OSError, RuntimeError) as error:
         raise Fault("project_unavailable", "The selected directory is missing, linked or unreadable.") from error
     if observations[0] != observations[1]:
         raise Fault("project_changed", "The project changed during observation; select it again.")
     return {"machine": machine, "workspace_name": workspace, "relative_path": path,
-            "name": parts[-1] if parts else workspace, "kind": kind if parts else "workspace",
+            "name": parts[-1] if parts else Path(workspace).name or workspace,
+            "kind": "workspace" if not parts and workspace in config.workspaces else kind,
             "target_id": _digest(observations[1])}
 
 

@@ -9,6 +9,25 @@ from test.support.runtime_cases import RuntimeCaseFixture
 
 
 class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
+    def test_retired_local_approval_cannot_read_originals_or_environment(self):
+        from openmachine.app.machines import Machines
+        result = self.wait(self.start('print("original receipt")'))
+        machine = Machines(self.config, self.state, None)
+        self.config.machines["my-laptop"].local_access = None
+        reads = [
+            lambda: machine.read_execution("my-laptop", result["execution_id"]),
+            lambda: machine.list_executions("my-laptop"),
+            lambda: machine.read_workspace_change("my-laptop", "f" * 32),
+            lambda: machine.inspect_environment("my-laptop", "project", "processes"),
+        ]
+        for reader in reads:
+            with self.subTest(reader=reader), self.assertRaises(Fault) as denied:
+                reader()
+            self.assertEqual(denied.exception.code, "local_approval_required")
+        self.config.machines["my-laptop"].local_access = "read_only"
+        receipt = machine.read_execution("my-laptop", result["execution_id"])
+        self.assertEqual(receipt["execution_id"], result["execution_id"])
+
     def test_disabled_machine_cannot_execute(self):
         self.config.machines["my-laptop"].execution_enabled = False
         with self.assertRaises(Fault) as caught:
@@ -35,16 +54,18 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         nested.mkdir()
         private_directory(self.state)
         locks = private_directory(self.state / "locks")
-        key = hashlib.sha256(str(self.work).encode()).hexdigest()
         for git in (False, True):
             if git:
                 self._git("init", "-q")
+            from openmachine.workspace.git import context, lock_root
+            selected = lock_root(self.config, "my-laptop", nested, context(nested))
+            key = hashlib.sha256(selected.encode()).hexdigest()
             identity = uuid.uuid4().hex
             with self.subTest(git=git), lease(locks / f"workspace-{key}.lock"), self.assertRaises(Fault) as caught:
                 self.start('raise SystemExit("must not launch")', cwd=nested, execution_id=identity)
             self.assertEqual(caught.exception.code, "resource_busy")
             self.assertEqual(caught.exception.evidence,
-                             {"cwd": str(nested), "workspace_lock_root": str(self.work)})
+                             {"cwd": str(nested), "workspace_lock_root": selected})
             self.assertIn("accepted task scope", str(caught.exception))
             self.assertFalse((self.state / "executions" / identity).exists())
 

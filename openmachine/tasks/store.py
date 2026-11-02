@@ -436,7 +436,10 @@ def _target_filter(machine: str, workspace: str, workspace_identity: str,
     if (any(not isinstance(value, str) for value in
             (machine, workspace, workspace_identity, target_identity))
             or any(value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value)
-                   for value in (machine, workspace))
+                   for value in (machine,))
+            or workspace and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", workspace) and (
+                not Path(workspace).is_absolute() or len(workspace.encode()) > 1024 or ".." in Path(workspace).parts
+                or any(ord(c) < 32 or ord(c) == 127 for c in workspace))
             or any(value and not re.fullmatch(r"[0-9a-f]{64}", value)
                    for value in (workspace_identity, target_identity))
             or workspace and not machine or workspace_identity and not workspace

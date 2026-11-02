@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 import re
 import stat
+from types import SimpleNamespace
 
 from openmachine.foundation.files import excluded
 from openmachine.foundation.sanitize import Fault
 
 from .git import capture, context
+from .files import root_for
 
 MAX_FILTERS = 8
 
@@ -33,18 +35,10 @@ def _absolute(value: str, *, allow_empty: bool = False, control_path: bool = Fal
 
 
 def _root(config, machine: str, workspace: str) -> Path:
-    if config.machine(machine).transport != "local":
-        raise Fault("remote_path", "Resolve remote worktrees on their original SSH target.")
-    item = config.workspaces.get(workspace)
-    if item is None or item.machine != machine:
-        raise Fault("unknown_workspace", "Select a workspace configured on this machine.")
     try:
-        root = Path(item.root).resolve(strict=True)
-        if not root.is_dir():
-            raise OSError
+        return root_for(config, machine, workspace)
     except (OSError, RuntimeError) as error:
-        raise Fault("source_unavailable", "The configured workspace is not an available directory.") from error
-    return root
+        raise Fault("source_unavailable", "The selected directory is unavailable.") from error
 
 
 def ensure_local_objects(root: Path) -> None:
@@ -86,6 +80,9 @@ def _canonical(path: Path, *, missing: bool = False) -> Path:
 def _authorized(config, machine: str, path: Path) -> bool:
     if excluded(Path(*(part.casefold() for part in path.parts))):
         return False
+    if not getattr(config, "is_ssh_worker", False):
+        return config.machine(machine).local_access in {"read_only", "full_access"}
+    # SSH remains independently constrained to its verified remote roots.
     for item in config.workspaces.values():
         if item.machine == machine:
             try:
@@ -160,10 +157,10 @@ def resolve_root(config, machine: str, workspace: str, worktree: str = "") -> Pa
     observed = _repository(root)
     common_identity = _identity(Path(observed["common_dir"]))
     if not _authorized(config, machine, Path(selected)):
-        raise Fault("path_denied", "The selected worktree is outside this machine's configured roots.")
+        raise Fault("path_denied", "The selected worktree is outside the independently authorized SSH roots.")
     candidate = _canonical(Path(selected))
     if not _authorized(config, machine, candidate):
-        raise Fault("path_denied", "The selected worktree is outside this machine's configured roots.")
+        raise Fault("path_denied", "The selected worktree is outside the independently authorized SSH roots.")
     entries, _ = _registered(root)
     if not any(item["worktree"] == str(candidate) and not item["bare"] and not item["prunable"] for item in entries):
         raise Fault("unknown_worktree", "Select an available worktree registered to this repository.")
@@ -183,9 +180,7 @@ def select(config, machine: str, workspace: str, worktree: str = ""):
         return config
     selected = copy(config)
     selected.workspaces = dict(config.workspaces)
-    item = copy(config.workspaces[workspace])
-    item.root = str(root)
-    selected.workspaces[workspace] = item
+    selected.workspaces[workspace] = SimpleNamespace(machine=machine, root=str(root))
     return selected
 
 

@@ -156,7 +156,7 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
             or any(type(item) is not str or item not in SECTIONS for item in selected)
             or len(set(selected)) != len(selected) or type(limit) is not int or not 1 <= limit <= MAX_LIMIT):
         raise Fault("invalid_context_request", "Select distinct implemented sections and a limit from 1 to 50.")
-    for value in (machine, workspace_name):
+    for value in (machine,):
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value):
             raise Fault("invalid_context_request", "Select a configured machine and workspace name.")
     if not isinstance(task_id, str) or task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id):
@@ -167,9 +167,8 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
     if executables and "environment" not in selected or ports and "services" not in selected:
         raise Fault("invalid_context_request", "Select environment for executables and services for TCP ports explicitly.")
     target_machine = app.config.machine(machine)
-    workspace = app.config.workspaces.get(workspace_name)
-    if workspace is None or workspace.machine != machine:
-        raise Fault("unknown_workspace", "Select a workspace configured on this machine.")
+    if not isinstance(workspace_name, str) or not workspace_name or len(workspace_name.encode()) > 1024:
+        raise Fault("unknown_workspace", "Select a bounded workspace name or absolute local directory.")
     selection = {"machine": machine, "workspace_name": workspace_name, **({"worktree": worktree} if worktree else {})}
     started = time.time_ns() // 1000000
     # The existing reader owns scope and canonical identity, including SSH routing.
