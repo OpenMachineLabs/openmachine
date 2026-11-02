@@ -387,7 +387,7 @@ class RepositoryChecks(unittest.TestCase):
     def test_all_workflows_use_explicit_github_hosted_runners(self):
         expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
-                         "documentation.yml": 2, "npm-package.yml": 1, "npm-release.yml": 1,
+                         "npm-package.yml": 1, "npm-release.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}
         workflows = {path.name: path.read_text()

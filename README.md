@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 
 **Open Machine (OM Core)** connects your existing AI Agents to your machines through a local-first MCP runtime. Your AI plans the work; OM provides permission-controlled tools to carry it out and return results.
 
-[Documentation](https://openmachinelabs.github.io/openmachine/) · [Getting started](docs/getting-started/installation.md) · [GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 <div align="center">
 
@@ -43,18 +43,18 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 
 ## What you can do
 
-| Capability | Guide |
+| Capability | Description |
 | --- | --- |
-| Local machines and context | [Inspect the intended project and environment](docs/features/local-machine.md) before acting. |
-| Workspace files and worktrees | [Read, search and apply guarded edits](docs/features/workspace.md) in the intended tree. |
-| Native commands and terminals | [Run commands, retrieve original results and verify cleanup](docs/features/execution.md). |
-| Persistent tasks | [Keep goals, stages and evidence; continue original work explicitly](docs/features/tasks.md). |
-| GitHub | [Use scoped repositories, Issues, PRs, reviews, Projects and Releases](docs/features/github.md). |
-| Browser subtasks | [Delegate a bounded web task](docs/features/browser.md) through a compatible, authorized native Codex installation. |
-| Skills | [Discover packaged operating guides and reviewed external Skill roots](docs/features/skills.md). |
-| Service and runtime | [Manage the macOS service, retained updates and compatible rollback](docs/features/service.md). |
+| Local machines and context | Inspect the selected machine, project and environment before acting. |
+| Workspace files and worktrees | Read, search and apply guarded edits in the intended tree. |
+| Native commands and terminals | Execute authorized commands, observe results and verify cleanup. |
+| Persistent tasks | Record goals and evidence, then explicitly continue interrupted work. |
+| GitHub | Work with scoped repositories, Issues, PRs, reviews, Projects and Releases. |
+| Browser subtasks | Delegate bounded web tasks through a compatible native Codex installation. |
+| Skills | Discover packaged operating guides and reviewed external Skill roots. |
+| Service and runtime | Manage the macOS service, retained updates and compatible rollback. |
 
-**Long-running jobs and task continuation:** Already-started jobs can keep running after a ChatGPT conversation disconnects. A job's execution status (running, completed, or failed) is separate from whether ChatGPT is ready to continue or needs user input. Finishing a job **does not automatically wake ChatGPT or start the next stage**. For a structured task, use the original [Task ID](docs/features/tasks.md) in a new conversation to review recorded results, failures, and pending approvals, then explicitly continue the remaining authorized work without rerunning completed steps. Optional integrations have separate prerequisites. See [current limitations](docs/introduction/limitations.md).
+**Long-running jobs and task continuation:** Already-started jobs can keep running after a ChatGPT conversation disconnects. A job's execution status (running, completed, or failed) is separate from whether ChatGPT is ready to continue or needs user input. Finishing a job **does not automatically wake ChatGPT or start the next stage**. For a structured task, keep the original Task ID to review results and explicitly continue the remaining authorized work without rerunning completed steps.
 
 ## Quick start
 
@@ -75,13 +75,13 @@ openmachine startup on
 
 The npm-managed route is the default and only supported consumer installer today. The package currently targets Apple Silicon macOS; Linux and other source-based setups remain developer/advanced paths until npm packages for those platforms are published. Windows is not supported.
 
-To use ChatGPT, [connect it separately](docs/getting-started/connect-chatgpt.md) and [verify the connection](docs/getting-started/verification.md). The npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
+To use ChatGPT, configure and verify the connection separately. The npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
 
-The npm `openmachine` command manages setup and service status; `openmachine core ...` runs the underlying Python CLI. See the [npm setup guide](docs/getting-started/npm-macos.md).
+The npm `openmachine` command manages setup and service status; `openmachine core ...` runs the underlying Python CLI. See the [npm installer README](npm/README.md).
 
 This is an early-development release, not a stable 1.x release.
 
-**Updating?** Use the same npm-managed path for both launcher and running Core. See [Updates](docs/getting-started/updates.md).
+**Updating?** Use the same npm-managed path for both launcher and running Core. See the [npm installer README](npm/README.md).
 
 ```bash
 npm install -g openmachine@latest
@@ -98,21 +98,13 @@ Your request flows from **AI Agent → OM Core → your machines**, and executio
 
 The **Personal Context layer and automatic context updates** in the diagram illustrate planned functionality for bringing data from sources such as Gmail and Slack into OM and keeping it up to date as tasks are completed.
 
-## Documentation
+## Technical references
 
-The [user documentation](https://openmachinelabs.github.io/openmachine/) covers every important released Core capability. Start with [requirements](docs/introduction/requirements.md), [installation](docs/getting-started/installation.md), [configuration](docs/getting-started/configuration.md) and [layer-by-layer verification](docs/getting-started/verification.md).
-
-For existing installations, use [updates](docs/getting-started/updates.md), the [configuration reference](docs/configuration/reference.md) and [troubleshooting](docs/troubleshooting.md). The [CLI](docs/reference/cli.md) and [MCP tools](docs/reference/tools.md) references link to detailed operating contracts without duplicating them.
-
-The [operating Skill](openmachine/skills/overview/SKILL.md) and [Skills directory](openmachine/skills/README.md) remain the technical starting points for AI agents. A source checkout, published release, running runtime and approved client catalog can differ; read the running version's guide before acting.
-
-## Roadmap
-
-The [current development roadmap](ROADMAP.md) outlines planned features and longer-term directions. Scope and priorities may change.
+The [operating Skill](openmachine/skills/overview/SKILL.md) and [Skills directory](openmachine/skills/README.md) are technical references for AI agents. The [npm installer README](npm/README.md) describes distribution and service setup. A source checkout, published release, running runtime and approved client catalog can differ; read the running version's guide before acting.
 
 ## Security
 
-Open Machine is a trusted, single-operator native runtime, **not an OS sandbox** or multi-tenant executor. Native commands can access resources beyond read-only tool scopes. Keep the listener private, grant access deliberately, and remember that files and logs returned to an AI client may leave your machine. Cancellation and software rollback do not undo completed effects. Read [Security and data](docs/configuration/security.md) before enabling execution or remote access; never put secrets in prompts, command arguments or committed configuration. Report vulnerabilities privately via the [Security Policy](SECURITY.md).
+Open Machine is a trusted, single-operator native runtime, **not an OS sandbox** or multi-tenant executor. Native commands can access resources beyond read-only tool scopes. Keep the listener private, grant access deliberately, and remember that files and logs returned to an AI client may leave your machine. Cancellation and software rollback do not undo completed effects. Never put secrets in prompts, command arguments or committed configuration. Report vulnerabilities privately via the [Security Policy](SECURITY.md).
 
 ## Contributors
 

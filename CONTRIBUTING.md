@@ -35,7 +35,7 @@ git clone https://github.com/YOUR-USERNAME/openmachine.git
 cd openmachine
 git remote add upstream https://github.com/OpenMachineLabs/openmachine.git
 git fetch upstream main
-git switch -c docs/your-change upstream/main
+git switch -c fix/your-change upstream/main
 
 python3 -m venv .venv
 . .venv/bin/activate
