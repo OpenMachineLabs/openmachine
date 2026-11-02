@@ -15,8 +15,8 @@ On this page:
 ## Install
 
 For consumer installs on Apple Silicon macOS, use the official npm-managed
-installation and update flow in [npm setup](../../../docs/getting-started/npm-macos.md)
-and [updates](../../../docs/getting-started/updates.md). The source-build flow
+installation and update flow in [npm setup](../../../npm/README.md)
+and [service management](../service/management.md#exact-updates-and-compatible-rollback). The source-build flow
 below is for development and platforms without a published npm runtime package.
 
 Use Python 3.12 or newer on macOS or Linux, with Git available for workspace

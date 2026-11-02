@@ -18,7 +18,7 @@ npm installation lifecycle scripts. npm installation only unpacks the package:
     openmachine
 
 For requirements and a quick verification check, see the
-[npm installation guide](https://openmachinelabs.github.io/openmachine/getting-started/npm-macos/).
+[Quick start](../README.md#quick-start) and [install guide](../openmachine/skills/overview/setup.md#install).
 
 The first run prompts for an **existing project directory** with a harmless
 readable file such as README.md. It uses Core management contract 1 to configure
@@ -40,7 +40,7 @@ The second command applies the verified bundled Core through its existing manage
 update checks. It preserves configuration, history and service policy, verifies
 the selected installation, and reads the same original operation on repeated calls.
 It does not download releases, automatically retry deferred/failed updates or
-repair incomplete history. See the [update guide](https://openmachinelabs.github.io/openmachine/getting-started/updates/)
+repair incomplete history. See [service management](../openmachine/skills/service/management.md)
 for original-operation recovery and deliberate new attempts after rollback or failure.
 
 Setup does not auto-enable login startup, and npm package installation does not

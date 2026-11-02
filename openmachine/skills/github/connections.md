@@ -19,7 +19,7 @@ the same owner-only Unix service. These are not MCP tools or token import argume
 They retain original local approval and Core/account/revision binding, consume
 claims before processing, and report success only after independent account and
 credential readback. Use the original private intent status after a lost response.
-See the [native contract](https://github.com/OpenMachineLabs/openmachine/blob/main/docs/reference/github-web-authorization.md)
+See the [native web authorization code](../../../integrations/github/web_authorization.py)
 for the fixed IPC schemas and owner checks; Device Flow remains the public fallback.
 
 Repository CI may still use GitHub CLI with its own Actions credentials. This is
