@@ -100,7 +100,7 @@ def ensure_target_indexes(connection: sqlite3.Connection) -> None:
     commit(connection)
 
 
-def upgrade_native_schema(connection: sqlite3.Connection) -> None:
+def upgrade_native_schema(connection: sqlite3.Connection, *, verify_operation) -> None:
     """Managed-only atomic removal of the retired SSH column, without rewriting receipts."""
     owner = connection.execute("SELECT schema FROM store WHERE singleton=1").fetchone()
     if owner is None or owner["schema"] not in (1, SCHEMA_VERSION):
@@ -132,7 +132,6 @@ def upgrade_native_schema(connection: sqlite3.Connection) -> None:
     if target is None or target["sql"] != (
             "CREATE INDEX operation_target ON operations(machine,target_identity)"):
         raise Fault("corrupt_tasks", "Retained operation target index is missing or changed.")
-    from .rows import decode_operation
     connection.execute("BEGIN IMMEDIATE")
     try:
         for row in connection.execute("SELECT * FROM operations"):
@@ -144,7 +143,7 @@ def upgrade_native_schema(connection: sqlite3.Connection) -> None:
                     or (locator.get("kind") in ("execution", "change")
                         and ("target_identity" not in locator or locator["target_identity"] is not None))):
                 raise Fault("task_migration_incompatible", "Original operation is not a local receipt.")
-            decode_operation(row)
+            verify_operation(row)
         connection.execute("DROP INDEX operation_target")
         if indexes:
             connection.execute("DROP INDEX task_original_targets")

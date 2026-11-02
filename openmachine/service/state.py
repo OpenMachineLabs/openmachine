@@ -15,9 +15,9 @@ from openmachine.foundation.state import private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
-# Contract 24 reads additive Task format 5 goal evidence and fences persisted
-# Task targets that select unconfigured absolute local directories.
-STATE_CONTRACT = 24
+# Contract 25 reads retained native Task receipts and upgrades the SQLite
+# Task schema once, without admitting SSH worker or target identity semantics.
+STATE_CONTRACT = 25
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

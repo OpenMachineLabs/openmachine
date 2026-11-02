@@ -82,7 +82,7 @@ def migrate(state: Path) -> dict:
                 db.create_database(state, active=False)
         connection = db._open(state, write=True)
         try:
-            db.upgrade_native_schema(connection)
+            db.upgrade_native_schema(connection, verify_operation=decode_operation)
             owner = db.metadata(connection)
             if owner["restore_required"]:
                 raise Fault("task_restore_unreconciled", "Migration cannot grant restored history new write authority.")

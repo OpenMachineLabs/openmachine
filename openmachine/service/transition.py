@@ -73,14 +73,19 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
                 tasks.migrate(state)
             ready = _start_selected(state, record)
         except (Fault, OSError) as error:
-            if installed["state_contract"] >= 18 and service_state._installed(state, previous)["state_contract"] < 18:
+            prior_contract = service_state._installed(state, previous)["state_contract"]
+            first_ledger = installed["state_contract"] >= 18 and prior_contract < 18
+            native_schema = installed["state_contract"] >= 25 and prior_contract < 25
+            if first_ledger or native_schema:
                 try:
                     storage = tasks.storage_state(state)
-                    cutover = storage["kind"] == "sqlite" or storage["fenced"]
+                    cutover = ((storage["kind"] == "sqlite" or storage["fenced"]) if first_ledger
+                               else storage["kind"] == "sqlite" and storage.get("schema") == 2)
                 except (Fault, OSError):
-                    cutover = True  # An unreadable authority cannot justify an old writer.
+                    cutover = True  # Unreadable original evidence cannot authorize an old writer.
                 if cutover:
-                    raise Fault("task_activation_pending", "Task cutover requires this candidate. Continue the original maintenance operation, or explicitly restart this pending service activation.") from error
+                    raise Fault("task_activation_pending", "The native Task cutover needs the new Core. "
+                                "Continue the original maintenance operation; never restart an older writer.") from error
             restored = {**original, "current": previous, "previous": previous_previous,
                         "configurations": configurations,
                         "pending": record["pending"]}
