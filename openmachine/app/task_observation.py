@@ -130,6 +130,8 @@ def apply_observations(record: dict, now_ms: int, observations: list[tuple[str, 
             continue
         if operation["result"] == result and operation["locator"] == locator:
             continue
+        if effects.goal_witness(record, operation) is not None:
+            continue  # The independent goal proof never reclassifies historical uncertainty.
         if operation["locator"]["kind"] == "github" and operation["result"] is not None and not records.pending(operation):
             continue
         # A transient unavailable read never erases a verified historical outcome.

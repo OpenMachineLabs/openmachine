@@ -80,14 +80,16 @@ def stage_has_operations(record: dict, stage_id: str) -> bool:
 
 
 def finish_record(record: dict, outcome: str, acceptance: list[dict], limitations: str, now_ms: int) -> None:
-    if outcome != "abandoned" and any(effects.unresolved(operation) for operation in record["operations"]):
+    if outcome != "abandoned" and any(effects.blocks_completion(record, operation) for operation in record["operations"]):
         raise Fault("task_effect_unresolved", "Original live, partial or unknown effects must be reconciled before terminal retirement.")
     record["control"].update(state=outcome, current_stage_id=None, owner=None, pending_decision=None,
                               epoch=record["control"]["epoch"] + 1)
     record["handoff"] = record["recovery"] = None
     record["terminal"] = {"outcome": outcome, "finished_at_ms": now_ms,
         "summary": f"Task {outcome}: {record['contract']['objective']}", "acceptance": acceptance, "limitations": limitations}
-    material(record, now_ms, "terminal", f"Task {outcome}; original evidence retained.")
+    summary = (f"Task {outcome}; independent goal evidence retained; original unknown writes remain unproven."
+               if record.get("goal_witnesses") else f"Task {outcome}; original evidence retained.")
+    material(record, now_ms, "terminal", summary)
 
 
 def acceptance_refs(record: dict, evidence: list[dict], *, complete: bool) -> None:
@@ -106,7 +108,8 @@ def acceptance_refs(record: dict, evidence: list[dict], *, complete: bool) -> No
             if stage["evidence"]:
                 raise Fault("task_evidence_invalid", "A non-command decision cannot replace existing operation evidence.")
         elif (identity not in stage["evidence"] or identity not in operations
-                or effects.unresolved(operations[identity]) or operations[identity]["result"]["status"] != "succeeded"
+                or effects.blocks_completion(record, operations[identity])
+                or (operations[identity]["result"]["status"] != "succeeded" and not effects.goal_usable(record, operations[identity]))
                 or operations[identity]["source_sha256"] != stage["source_sha256"]):
             raise Fault("task_evidence_invalid", "Final evidence must retain a validated, applicable original result.")
     if complete and {item[0] for item in seen} != {stage["id"] for stage in record["plan"]["stages"]}:
@@ -258,12 +261,13 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             for key in change["evidence"]:
                 operation = operations.get(key)
                 if (operation is None or operation["stage_id"] != stage["id"]
-                        or operation["plan_revision"] != record["plan"]["revision"]
-                        or operation["source_sha256"] != stage["source_sha256"] or pending(operation)
-                        or change["outcome"] == "accepted" and operation["result"]["status"] != "succeeded"):
+                        or operation["source_sha256"] != stage["source_sha256"]
+                        or not effects.goal_usable(record, operation) and (
+                            operation["plan_revision"] != record["plan"]["revision"] or pending(operation)
+                            or change["outcome"] == "accepted" and operation["result"]["status"] != "succeeded")):
                     raise Fault("task_evidence_invalid", "Decision evidence must identify applicable, verified original results.")
             if change["outcome"] == "accepted":
-                outstanding = [item for item in record["operations"] if effects.unresolved(item)]
+                outstanding = [item for item in record["operations"] if effects.blocks_completion(record, item)]
                 if outstanding and (not change["evidence"] or any(
                         effects.conflicts(record, item, record, operations[key])
                         for item in outstanding for key in change["evidence"])):

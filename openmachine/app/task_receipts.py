@@ -112,6 +112,19 @@ class TaskReceipts:
             return {**observed, "control_result": last}
         return observed
 
+    def verify_goal(self, operation: dict, witness: dict) -> dict:
+        """Recheck business completion without attributing the historical write."""
+        locator = operation["locator"]
+        # The base commit may advance, but changing destination or HEAD requires
+        # new intent. No old snapshot can replace the subsequent merge gate.
+        arguments = dict(witness["arguments"], expected_base_sha="")
+        observed = self.github_call("reconcile", dict(locator=locator, request=arguments), binding=locator["connection"])
+        goal = observed.get("goal_state")
+        if (not isinstance(goal, dict) or set(goal) != set(witness["goal"])
+                or any(goal[key] != value for key, value in witness["goal"].items() if key != "base_sha")):
+            raise Fault("task_evidence_changed", "The current review-thread goal no longer matches its retained witness.")
+        return records.ReviewThreadGoalState.model_validate(goal).model_dump()
+
     def unstarted_local(self, operation: dict) -> bool:
         # A missing receipt alone never proves non-execution. Only the recorded
         # local start rejection and its original free launch lock can do so.
