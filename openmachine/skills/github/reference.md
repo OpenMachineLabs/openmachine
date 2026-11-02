@@ -217,6 +217,7 @@ dispatches again.
 | Labels or assignees replacement | The same field; disjoint body/title, reviews and merge can continue |
 | PR state or draft transition | Overlapping state/draft changes, submitted reviews and merge |
 | Submitted review | The same review collection and dependent merge/state transitions |
+| Review thread resolve/unresolve | The exact proven PR thread; merge remains dependent until an audited resolve goal is verified |
 | Review body replacement | The same review body; it does not resubmit the review decision |
 | Merge | Another merge or dependent state change; omitted commit messages also depend on PR title/body |
 | Comment mutation | The same comment or unresolved parent collection; an unchecked parent argument cannot narrow a comment ID |
@@ -242,7 +243,7 @@ Explicit changes to unrelated repositories remain possible under ordinary scope
 validation and stage invalidation.
 
 For a retained 0.2.11 task, first inspect the running server's capabilities and
-the actual `control_task` schema. The scoped reader supports record formats 1..4;
+the actual `control_task` schema. The scoped reader supports record formats 1..5;
 `bind_effect_scope` is a `control_task.transition.action`, not a separate tool.
 The original 0.2.11 runtime lacks this action even when newer source or Skill text
 is present. Update through the managed compatibility checks only under explicit
@@ -272,4 +273,43 @@ subsequent bot comments, timestamps and metadata do not replace their digest.
 Current acceptance remains separate: each merge reads the current HEAD/base,
 protections, checks, review decisions and discussions. A stage can accept nonempty,
 successful evidence independent of all unresolved scopes, while the unresolved
-IDs remain visible. Finish still blocks every original unresolved effect.
+IDs remain visible. Finish blocks unresolved effects except independently verified
+resolve goals described below; it never reclassifies their original receipts.
+
+### Audited review-thread goal recovery
+
+When the original resolve acknowledgement is missing, call the existing
+`github_review_thread` method with the exact normalized original arguments and
+original operation ID. This is an original-result read, never a second mutation.
+Core first tries the original acknowledgement. If it cannot establish historical
+success, a read-only target check may retain a separate `goal_witness` while the
+returned write status and original operation remain unknown.
+
+Only a one-way `resolve` intent with an exactly matching request fingerprint,
+source, repository, PR, thread, HEAD and native account binding is eligible. The
+read must prove resolved state, stable HEAD/base destination and observer identity.
+Missing arguments, unbound legacy identity, unknown `unresolve`, incomplete
+provider evidence and conflicting live/unknown effects cannot create this proof.
+Another client may have resolved the thread: the witness proves the current goal,
+not who performed the original write. Do not describe it as recovered success.
+
+The witness is an immutable, versioned Task evidence event tied to the unchanged
+original operation digest. Only Tasks receiving this evidence advance to format 5;
+formats 1..4 remain readable without rewriting historical bytes. Compatibility
+checks require state contract 24 and format-5 support once that format is retained;
+an older reader must refuse it rather than ignore the new semantics.
+
+A witnessed resolve no longer excludes a merge of the same PR, HEAD, base branch
+and native binding. It never permits another uncertain write to that same thread.
+Merge still independently checks current HEAD/base, CI, reviews, every thread and
+GitHub protection rules. Stage decisions and completion re-read the goal under
+current authority, source and repository exclusion; reopened threads invalidate
+acceptance. Base commit advancement is revalidated on the same destination branch,
+not accepted from a historical snapshot. Read `read_task(section="evidence")` for
+the witness and `section="operations"` with the original ID for unchanged history.
+
+This path runs only under a valid current claim and authorization. It does not
+renew authority, bypass Stop or a foreground end-of-turn boundary, schedule AI
+work, or repeat the original write. Independent safe work may continue in the
+current turn; an unknown historical result alone is not a reason to ask the user
+to repeat an already authorized continuation.

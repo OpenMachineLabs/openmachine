@@ -14,12 +14,112 @@ from openmachine.tasks.rows import put_legacy
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract, terminal_task_fixture, replace_task_record
+from test.support.goal_recovery import GoalRecoveryFixture
 
 _OFFLINE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts/retire_chat_recovery_once.py"
 _OFFLINE_SPEC = importlib.util.spec_from_file_location("one_time_task_retirement", _OFFLINE_SCRIPT)
 _OFFLINE_MODULE = importlib.util.module_from_spec(_OFFLINE_SPEC)
 _OFFLINE_SPEC.loader.exec_module(_OFFLINE_MODULE)
 stage_clean_break = _OFFLINE_MODULE.stage
+
+
+class GoalRecoveryStoreTests(GoalRecoveryFixture, unittest.TestCase):
+    def test_missing_original_native_binding_cannot_adopt_current_authority(self):
+        arguments, original = self.lose_ack()
+        record = self.view()["record"]
+        record["operations"][0]["locator"].pop("connection")
+        # A newer plan may bind an account; it cannot retroactively bind an old write.
+        record["plan"]["revision"] += 1
+        record["handoff"]["plan_revision"] = record["plan"]["revision"]
+        replace_task_record(self.state, record)
+        historical = deepcopy(tasks.operation(self.state, "structured-one", original["id"]))
+        self.fault("task_scope_denied", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), historical)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_other_client_goal_acceptance_retains_unknown_operation_bytes_and_audit(self):
+        self.write_applies = False
+        arguments, original = self.lose_ack()
+        self.provider.threads[0]["isResolved"] = True
+        with database.connect(self.state) as connection:
+            before = tuple(connection.execute("SELECT payload,sha256 FROM operations WHERE id=?", (original["id"],)).fetchone())
+        result = self.recover(arguments)
+        self.assertEqual(result["status"], "write_outcome_unknown")
+        witness = result["goal_witness"]
+        self.assertEqual(witness["original_sha256"], records.digest(original))
+        self.assertTrue(witness["goal"]["isResolved"])
+        self.assertEqual(self.recover(arguments)["goal_witness"], witness)
+        self.connect()
+        self.assertEqual(self.recover(arguments)["goal_witness"], witness)
+        self.accept_goal(original)
+        result = self.control("finish", outcome="completed", acceptance=[
+            {"stage_id": "verify", "operation_id": original["id"]}], limitations="Historical write attribution remains unknown.")
+        self.assertEqual(result["record"]["terminal"]["outcome"], "completed")
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        with database.connect(self.state) as connection:
+            self.assertEqual(tuple(connection.execute("SELECT payload,sha256 FROM operations WHERE id=?", (original["id"],)).fetchone()), before)
+            self.assertEqual(connection.execute("SELECT count(*) FROM task_events WHERE kind='goal_witness'").fetchone()[0], 1)
+        evidence = self.app.read_task("structured-one", section="evidence", limit=50)
+        self.assertTrue(evidence["complete"])
+        self.assertTrue(any(item["kind"] == "goal_witness" and item["witness"] == witness for item in evidence["items"]))
+        self.assertEqual(tasks.check_state(self.state)["structured_task_formats_present"], [5])
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_legacy_unscoped_unknown_requires_exact_intent_and_preserves_old_bytes(self):
+        arguments, original = self.lose_ack()
+        record = self.view()["record"]
+        record["format"] = 3
+        record.pop("control_revision")
+        record.pop("effect_scopes")
+        historical = record["operations"][0]
+        historical.pop("effect_scope")
+        historical["result"].pop("effect", None)
+        historical["result"].pop("failure_code", None)
+        replace_task_record(self.state, record)
+        historical = deepcopy(tasks.operation(self.state, "structured-one", original["id"]))
+        self.assertEqual(self.view()["record"]["format"], 3)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.recover(arguments)
+        self.assertEqual(self.view()["record"]["format"], 5)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), historical)
+        self.accept_goal(historical)
+
+    def test_opposite_historical_unknown_prevents_goal_recovery(self):
+        arguments, original = self.lose_ack()
+        record = self.view()["record"]
+        reverse = deepcopy(original)
+        reverse["id"] = "f" * 32
+        reverse["locator"]["anchor"] = "om-task:structured-one:" + reverse["id"]
+        intent = {key: value for key, value in arguments.items() if key != "task_context"}
+        intent["action"] = "unresolve"
+        reverse["request_sha256"] = records.digest({"method": "github_review_thread", "arguments": intent,
+            "plan_revision": reverse["plan_revision"], "source_sha256": reverse["source_sha256"]})
+        record["operations"].append(reverse)
+        replace_task_record(self.state, record)
+        self.fault("task_effect_unresolved", self.recover, arguments)
+        self.fault("task_effect_unresolved", self.merge)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_witness_and_original_unknown_are_immutable_and_corruption_is_rejected(self):
+        arguments, original = self.lose_ack()
+        self.recover(arguments)
+        def rewrite(value, now):
+            value["operations"][0]["result"]["status"] = "succeeded"
+            value["operations"][0]["state"] = "observed"
+        self.fault("task_identity_conflict", tasks.update, self.state, "structured-one", rewrite)
+        self.fault("task_identity_conflict", tasks.update, self.state, "structured-one",
+                   lambda value, now: value.update(goal_witnesses=[]))
+        with database.connect(self.state, write=True) as connection:
+            row = connection.execute("SELECT seq,payload FROM task_events WHERE kind='goal_witness'").fetchone()
+            event = json.loads(row["payload"])
+            event["witness"]["arguments"]["action"] = "unresolve"
+            payload, sha = database.encoded(event)
+            connection.execute("UPDATE task_events SET payload=?,sha256=? WHERE seq=?", (payload, sha, row["seq"]))
+        self.fault("corrupt_tasks", tasks.read, self.state, "structured-one")
+        self.fault("corrupt_tasks", tasks.check_state, self.state)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
 
 
 class StructuredTaskTests(TaskFixture, unittest.TestCase):

@@ -19,7 +19,7 @@ MAX_EVENT_BYTES = 65536
 MAX_PAGE_BYTES = 65536
 MAX_PAGE_ITEMS = 50
 MAX_INTEGER = 2**53 - 1
-READ_FORMATS = (1, 2, 3, 4)
+READ_FORMATS = (1, 2, 3, 4, 5)
 
 
 def _text(value: str, limit: int) -> str:
@@ -371,6 +371,87 @@ class EffectScopeWitness(Model):
     at_ms: Integer
 
 
+class ReviewThreadResolveIntent(Model):
+    action: Literal["resolve"]
+    repository: Repository
+    number: Revision
+    thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")]
+    expected_head_sha: Head
+    expected_base_sha: Head | Literal[""]
+    connection_id: ID | None = None
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.connection_id is None:
+            value.pop("connection_id")
+        return value
+
+
+class ReviewThreadGoalState(Model):
+    kind: Literal["github_review_thread_resolved_v1"]
+    repository: Repository
+    number: Revision
+    thread_id: Annotated[str, Field(pattern=r"^PRRT_[A-Za-z0-9_-]{1,128}$")]
+    head_sha: Head
+    base_sha: Head
+    base_ref: Annotated[Text256, Field(min_length=1)]
+    observer_account_id: Revision
+    isResolved: bool
+
+    @model_validator(mode="after")
+    def resolved(self):
+        if self.isResolved is not True or self.repository != self.repository.casefold():
+            raise ValueError("goal evidence requires a resolved thread and canonical repository")
+        return self
+
+
+class GoalStateWitness(Model):
+    """Independent read evidence, never a replacement operation receipt."""
+
+    id: ID
+    operation_id: ID
+    request_sha256: SHA
+    source_sha256: SHA
+    original_sha256: SHA
+    arguments: ReviewThreadResolveIntent
+    goal: ReviewThreadGoalState
+    goal_sha256: SHA
+    principal_ref: Annotated[Text256, Field(min_length=1)]
+    at_ms: Integer
+
+    @model_validator(mode="after")
+    def digests(self):
+        if (self.goal_sha256 != digest(self.goal.model_dump()) or self.id != digest(
+                ["goal-state-v1", self.operation_id, self.original_sha256, self.goal_sha256])[:32]):
+            raise ValueError("goal witness identity or evidence digest differs")
+        return self
+
+
+def validate_goal_witness(witness: dict, operation: dict) -> dict:
+    value = GoalStateWitness.model_validate(witness).model_dump()
+    arguments, goal, locator = value["arguments"], value["goal"], operation["locator"]
+    binding = locator.get("connection")
+    fingerprint = digest({"method": "github_review_thread", "arguments": arguments,
+                          "plan_revision": operation["plan_revision"], "source_sha256": operation["source_sha256"]})
+    if (locator["kind"] != "github" or locator.get("object_type") != "review_thread" or not binding
+            or operation["state"] != "unknown" or operation["observed_at_ms"] is None
+            or (operation.get("result") or {}).get("status") != "unknown"
+            or (operation["result"].get("effect") not in {None, "effect_unknown"})
+            or value["original_sha256"] != digest(operation) or value["operation_id"] != operation["id"]
+            or value["request_sha256"] != operation["request_sha256"] or fingerprint != operation["request_sha256"]
+            or value["source_sha256"] != operation["source_sha256"] or value["at_ms"] < operation["observed_at_ms"]
+            or goal["repository"] != locator["repository"].casefold()
+            or arguments["repository"].casefold() != goal["repository"]
+            or any(arguments[key] != locator.get(key) or goal[key] != arguments[key] for key in ("number", "thread_id"))
+            or goal["head_sha"] != locator.get("expected_head_sha") or arguments["expected_head_sha"] != goal["head_sha"]
+            or arguments["expected_base_sha"] and arguments["expected_base_sha"] != goal["base_sha"]
+            or goal["observer_account_id"] != binding["account_id"]
+            or arguments.get("connection_id", binding["connection_id"]) != binding["connection_id"]):
+        raise ValueError("goal witness does not prove the original resolve intent and target")
+    return value
+
+
 class History(Model):
     at_ms: Integer
     kind: Literal["accepted", "plan_changed", "decision", "recovery", "stopped", "terminal"]
@@ -419,7 +500,7 @@ class LastUpdate(Model):
 
 
 class Current(Model):
-    format: Annotated[int, Field(strict=True, ge=1, le=4)]
+    format: Annotated[int, Field(strict=True, ge=1, le=5)]
     task_id: TaskID
     revision: Revision
     title: Title
@@ -442,6 +523,8 @@ class Current(Model):
         if self.format < 4:
             value.pop("control_revision", None)
             value.pop("effect_scopes", None)
+        if not value.get("goal_witnesses"):
+            value.pop("goal_witnesses", None)
         return value
 
     @model_validator(mode="after")
@@ -498,11 +581,12 @@ class Current(Model):
 
 
 class Record(Current):
-    """Exact formats 1-4 decoder, used only at the legacy import boundary."""
+    """Exact historical decoder, also used by disposable compatibility fixtures."""
 
     operations: Annotated[list[Operation], Field(max_length=64)]
     history: Annotated[list[History], Field(max_length=64)]
     effect_scopes: Annotated[list[EffectScopeWitness], Field(max_length=64)] = Field(default_factory=list)
+    goal_witnesses: Annotated[list[GoalStateWitness], Field(max_length=64)] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def references(self):
@@ -539,6 +623,12 @@ class Record(Current):
                     raise ValueError("operation account differs from the accepted repository binding")
         _unique([item.id for item in self.effect_scopes])
         _unique([item.operation_id for item in self.effect_scopes])
+        _unique([item.operation_id for item in self.goal_witnesses])
+        for witness in self.goal_witnesses:
+            operation = operations.get(witness.operation_id)
+            if self.format < 5 or operation is None or witness.at_ms > self.updated_at_ms:
+                raise ValueError("goal witnesses require format 5 and original operation evidence")
+            validate_goal_witness(witness.model_dump(), operation.model_dump())
         for witness in self.effect_scopes:
             operation = operations.get(witness.operation_id)
             if (operation is None or not isinstance(operation.locator, GitHubLocator)

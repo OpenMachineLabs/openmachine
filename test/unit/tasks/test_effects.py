@@ -47,6 +47,21 @@ class EffectScopeTests(unittest.TestCase):
         another["locator"]["number"] = another["effect_scope"]["number"] = 8
         self.assertFalse(self.conflict(thread, another))
 
+    def test_exact_threads_are_independent_but_missing_or_opaque_identity_is_not(self):
+        first = self.operation("github_review_thread", thread_id="PRRT_first")
+        first["locator"]["thread_id"] = "PRRT_first"
+        second = deepcopy(first)
+        second["locator"]["thread_id"] = "PRRT_second"
+        self.assertFalse(self.conflict(first, second))
+        second["locator"]["thread_id"] = "PRRT_first"
+        self.assertTrue(self.conflict(first, second))
+        second["locator"].pop("thread_id")
+        self.assertTrue(self.conflict(first, second))
+        second["locator"]["thread_id"] = "PRRT_second"
+        second.pop("effect_scope")
+        self.assertTrue(self.conflict(first, second))
+        self.assertTrue(self.conflict(first, self.operation("github_merge")))
+
     def creation(self, kind="pull_request", head="topic", base="main"):
         operation = self.operation("github_" + kind)
         operation["locator"]["number"] = None

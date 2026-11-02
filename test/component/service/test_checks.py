@@ -244,6 +244,25 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                     Path(sys.executable), self.config, self.state))
         self.assertEqual([item.read_bytes() for item in paths], before)
 
+    def test_format_5_goal_semantics_require_a_reader_that_preserves_the_new_contract(self):
+        from test.support.tasks import task_contract
+        from openmachine.tasks import records
+        value = self.legacy_task_fixture(task_contract())["record"]
+        value["format"] = 5
+        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
+        path = self.state / "tasks/structured-one/task.json"
+        before = path.read_bytes()
+        proof = service.check_state(self.config, self.state)
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (24, [5]))
+        self.assertIn(5, proof["structured_task_read_formats"])
+        for delta in ({"state_contract": 23}, {"structured_task_read_formats": [1, 2, 3, 4]},
+                      {"structured_task_formats_present": [4]}):
+            with self.subTest(delta=delta), patch.object(service_processes, "run",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                    Path(sys.executable), self.config, self.state))
+        self.assertEqual(path.read_bytes(), before)
+
     def test_format_3_history_keeps_directional_contract_15_compatibility(self):
         from test.support.tasks import task_contract
         from openmachine.tasks import records

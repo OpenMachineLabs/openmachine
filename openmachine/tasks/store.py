@@ -15,7 +15,7 @@ from openmachine.foundation.sanitize import Fault, redact
 from openmachine.foundation.state import lease
 from . import database as db, effects, records
 from .rows import (append_event, decode_operation, insert_record, operation_key, pack_current,
-                   put_legacy, put_operation, read_current, read_decision, read_witnesses,
+                   put_legacy, put_operation, read_current, read_decision, read_goal_witnesses, read_witnesses,
                    record_core, task_row, validate_operation)
 from .index import (INDEX_PAGE, MAX_CHECKPOINT, metadata as validate_metadata,
                     private_path, read_checkpoint, read_index, read_structured, task_id)
@@ -86,6 +86,9 @@ def _view(connection, identity: str, operation_ids=()) -> dict:
     facts = _facts(connection, row, current, operations)
     current.update(operations=operations, history=[], effect_scopes=read_witnesses(connection, identity, operations), _facts=facts,
                    _decisions=versions)
+    goals = read_goal_witnesses(connection, current, operations)
+    if goals:
+        current["goal_witnesses"] = goals
     return {"task_id": identity, "record": current, "facts": facts, "read_schema": 2, "record_complete": False,
             "observed_at_ms": time.time_ns() // 1000000, "index_status": "current",
             "generation": db.metadata(connection)["generation"], "sequence": row["change_seq"],
@@ -250,7 +253,9 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             value["last_update"] = last_update
         if value == original:
             return {**view, "status": "unchanged"}
-        if value["format"] != original["format"] and not (original["format"] == 3 and value["format"] == 4 and upgrade):
+        if value["format"] != original["format"] and not (upgrade and (
+                original["format"] == 3 and value["format"] == 4
+                or original["format"] in {3, 4} and value["format"] == 5 and value.get("goal_witnesses"))):
             raise Fault("task_identity_conflict", "Unsupported Task record format transition.")
         for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
             if value[key] != original[key]:
@@ -279,6 +284,8 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     continue
                 item = validate_operation(item, core)
                 if old is not None:
+                    if effects.goal_witness(original, old) is not None:
+                        raise Fault("task_identity_conflict", "A goal witness cannot rewrite its original unknown operation.")
                     for key in ("id", "stage_id", "plan_revision", "epoch", "request_sha256", "source_sha256", "admitted_at_ms", "effect_scope"):
                         if old.get(key) != item.get(key):
                             raise Fault("task_identity_conflict", "Original operation intent and scope are immutable.")
@@ -322,6 +329,19 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                 payload, sha = db.encoded(witness)
                 connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, key, db.encoded(witness["scope"])[0], payload, sha))
                 append_event(connection, identity, {"kind": "scope_bound", "at_ms": now, "operation_id": key, "witness": witness})
+            old_goals = {item["operation_id"]: item for item in original.get("goal_witnesses", [])}
+            new_goals = {item["operation_id"]: item for item in value.get("goal_witnesses", [])}
+            if (len(new_goals) != len(value.get("goal_witnesses", [])) or not old_goals.keys() <= new_goals.keys()
+                    or any(new_goals[key] != item for key, item in old_goals.items())):
+                raise Fault("task_identity_conflict", "Original goal witnesses are immutable and unique.")
+            for key in new_goals.keys() - old_goals.keys():
+                if key not in old_operations or selected[key] != old_operations[key] or core["format"] < 5:
+                    raise ValueError("goal recovery requires a separately retained original unknown operation")
+                witness = records.validate_goal_witness(new_goals[key], old_operations[key])
+                if witness["at_ms"] != now:
+                    raise ValueError("goal witness must use the current transaction observation time")
+                append_event(connection, identity, {"kind": "goal_witness", "at_ms": now,
+                    "stage_id": selected[key]["stage_id"], "operation_id": key, "witness": witness})
             for stage in core["plan"]["stages"]:
                 if stage not in original["plan"]["stages"]:
                     for key in stage["evidence"]:
@@ -334,7 +354,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     if op is None or op["stage_id"] != item["stage_id"]:
                         raise ValueError("terminal evidence differs")
             if (core["terminal"] is not None and core["terminal"]["outcome"] != "abandoned"
-                    and connection.execute("SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 LIMIT 1", (identity,)).fetchone()):
+                    and any(effects.blocks_completion(value, item) for item in value["operations"])):
                 raise Fault("task_effect_unresolved", "Original live, partial or unknown effects prevent retirement.")
             for event in value["history"]:
                 records.History.model_validate(event)
@@ -399,6 +419,8 @@ def effect_conflicts(state: Path, proposed_record: dict, proposed: dict) -> list
                 continue
             item = decode_operation(row)
             scope = {"effect_scopes": read_witnesses(connection, row["task_id"], [item])}
+            current, _ = read_current(connection, task_row(connection, row["task_id"]))
+            scope["goal_witnesses"] = read_goal_witnesses(connection, current, [item])
             if effects.conflicts(scope, item, proposed_record, proposed):
                 return [{"task_id": row["task_id"], "operations": [item]}]
         return []
@@ -835,6 +857,7 @@ def check_state(state: Path) -> dict:
                             raise Fault("corrupt_tasks", "An original declared scope differs from its conflict index.")
                     elif scope is not None:
                         read_witnesses(connection, row["task_id"], [op])
+                    read_goal_witnesses(connection, core, [op])
                 events = 0
                 for item in connection.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY seq", (row["task_id"],)):
                     event = db.decode(item["payload"], item["sha256"])
@@ -842,6 +865,10 @@ def check_state(state: Path) -> dict:
                         raise Fault("corrupt_tasks", "Audit lookup columns differ from their retained event.")
                     if item["kind"] == "snapshot" and event.get("task_id") != row["task_id"]:
                         raise Fault("corrupt_tasks", "The initial authority snapshot belongs to another Task.")
+                    if item["kind"] == "goal_witness" and not connection.execute(
+                            "SELECT 1 FROM operations WHERE task_id=? AND id=?",
+                            (row["task_id"], item["operation_id"])).fetchone():
+                        raise Fault("corrupt_tasks", "A retained goal witness lost its original operation.")
                     events += 1
                     if item["seq"] != events:
                         raise Fault("corrupt_tasks", "An original audit event is missing.")

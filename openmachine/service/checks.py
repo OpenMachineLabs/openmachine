@@ -370,7 +370,7 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
             raise _TaskGenerationMoved()
         retained_formats = retained_tasks["structured_task_formats_present"]
         if any(item >= 3 for item in retained_formats):
-            minimum_contract = 16 if 4 in retained_formats else 15
+            minimum_contract = 24 if 5 in retained_formats else 16 if 4 in retained_formats else 15
             present = value.get("structured_task_formats_present")
             if (value["state_contract"] < minimum_contract or not isinstance(present, list)
                     or any(type(item) is not int for item in present) or present != retained_formats):

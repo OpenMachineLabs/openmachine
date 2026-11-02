@@ -6,7 +6,7 @@ import json
 from openmachine.foundation.sanitize import Fault
 from . import database as db, effects, records
 
-HISTORICAL = {"operations", "history", "effect_scopes", "_facts", "_decisions"}
+HISTORICAL = {"operations", "history", "effect_scopes", "goal_witnesses", "_facts", "_decisions"}
 
 
 def operation_key(locator: dict) -> tuple:
@@ -124,6 +124,31 @@ def read_witnesses(connection, identity: str, operations: list[dict]) -> list[di
     return result
 
 
+def read_goal_witnesses(connection, current: dict, operations: list[dict]) -> list[dict]:
+    """Read immutable goal evidence from the existing audit ledger, not receipts."""
+    selected = {item["id"]: item for item in operations}
+    result, seen = [], set()
+    rows = connection.execute("SELECT * FROM task_events WHERE task_id=? AND kind='goal_witness' "
+                              "AND operation_id IN (SELECT value FROM json_each(?)) ORDER BY seq",
+                              (current["task_id"], json.dumps(list(selected))))
+    for row in rows:
+        try:
+            event = db.decode(row["payload"], row["sha256"])
+            operation = selected[row["operation_id"]]
+            witness = records.validate_goal_witness(event["witness"], operation)
+            if (current["format"] < 5 or operation["id"] in seen
+                    or set(event) != {"kind", "at_ms", "stage_id", "operation_id", "witness"}
+                    or any(event[key] != row[key] for key in ("kind", "at_ms", "stage_id", "operation_id"))
+                    or event["stage_id"] != operation["stage_id"] or event["at_ms"] != witness["at_ms"]
+                    or witness["at_ms"] > current["updated_at_ms"]):
+                raise ValueError("goal witness audit binding differs")
+            seen.add(operation["id"])
+            result.append(witness)
+        except (ValueError, TypeError, KeyError) as error:
+            raise Fault("corrupt_tasks", "A goal witness lost its immutable original intent or audit binding.") from error
+    return result
+
+
 def validate_operation(operation: dict, current: dict) -> dict:
     value = records.Operation.model_validate(operation).model_dump()
     stages = {stage["id"]: stage for stage in current["plan"]["stages"]}
@@ -197,6 +222,13 @@ def insert_record(connection, record: dict, *, sequence: int | None = None) -> N
         connection.execute("INSERT INTO operation_scopes VALUES (?,?,?,?,?)", (identity, witness["operation_id"], scope, payload, sha))
     for event in record["history"]:
         append_event(connection, identity, event)
+    for witness in record.get("goal_witnesses", []):
+        operation = next(item for item in record["operations"] if item["id"] == witness["operation_id"])
+        records.validate_goal_witness(witness, operation)
+        if core["format"] < 5 or witness["at_ms"] > core["updated_at_ms"]:
+            raise ValueError("goal witness needs its versioned authority record")
+        append_event(connection, identity, {"kind": "goal_witness", "at_ms": witness["at_ms"],
+            "stage_id": operation["stage_id"], "operation_id": operation["id"], "witness": witness})
     connection.execute("INSERT INTO task_updates VALUES (?,?,?)", (identity, record["last_update"]["id"], record["last_update"]["request_sha256"]))
 
 

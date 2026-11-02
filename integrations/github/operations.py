@@ -646,8 +646,25 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
                 request.get("action") == ("resolve" if thread["isResolved"] else "unresolve")):
             return _public({"status": "verified", "repository": repository, "actor": actor,
                             "receipt": receipt, "fields_verified": True})
-        return _public({**unknown, "receipt": {"number": number, "thread_id": thread_id,
-            "isResolved": thread["isResolved"]}})
+        result = {**unknown, "receipt": {"number": number, "thread_id": thread_id,
+                  "isResolved": thread["isResolved"]}}
+        if (request is not None and request.get("action") == "resolve" and thread["isResolved"] is True
+                and request.get("repository", "").casefold() == repository.casefold()
+                and request.get("number") == number and request.get("thread_id") == thread_id
+                and request.get("expected_head_sha") == head
+                and (not request.get("expected_base_sha") or request["expected_base_sha"] == pr["base"]["sha"])
+                and isinstance(pr["base"].get("ref"), str) and pr["base"]["ref"]):
+            current = evidence.pull_request(repository, number, head, pr["base"]["sha"], transport=transport)
+            if current["base"].get("ref") != pr["base"]["ref"]:
+                raise Fault("github_candidate_changed", "The PR destination changed during goal verification.")
+            if connection.read_actor(settings, transport=transport) != actor:
+                raise Fault("github_identity_changed", "The observing account changed during goal verification.")
+            # This is current target evidence, not attribution of the original
+            # write. Only the Task owner can bind it to retained normalized intent.
+            result["goal_state"] = {"kind": "github_review_thread_resolved_v1", "repository": repository.casefold(),
+                "number": number, "thread_id": thread_id, "head_sha": head, "base_sha": pr["base"]["sha"],
+                "base_ref": pr["base"]["ref"], "observer_account_id": actor["id"], "isResolved": True}
+        return _public(result)
     if kind == "merge":
         if number is None:
             return unknown

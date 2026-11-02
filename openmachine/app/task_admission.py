@@ -68,6 +68,18 @@ class TaskAdmission:
 
     def control(self, request: dict) -> dict:
         request = records.normalize_control(request)
+        # Keep fresh goal validation and its decision commit in the same native
+        # writer exclusion. The Task transaction itself never spans network IO.
+        goals = []
+        if request["transition"]["action"] in {"record_decision", "finish"}:
+            goals = tasks.read(self.app.state, request["task_id"]).get("record", {}).get("goal_witnesses", [])
+        names = {"task-github-repository-" + records.digest(item["goal"]["repository"]) for item in goals}
+        with ExitStack() as locks:
+            for name in sorted(names):
+                locks.enter_context(lease(self.app.state / "locks" / (name + ".lock")))
+            return self._control(request)
+
+    def _control(self, request: dict) -> dict:
         change = request["transition"]
         action = change["action"]
         selected = change.get("evidence", []) if action == "record_decision" else [
@@ -80,6 +92,7 @@ class TaskAdmission:
         update = {"id": request["update_id"], "request_sha256": records.digest(
             {"method": "control_task", "principal": self.principal, **request})}
         retained = tasks.control_update(self.app.state, request["task_id"], update["id"])
+        verified_goals = {}
         if retained is None:
             transitions.guards(record, request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
             if action not in {"pause", "cancel", "release", "abandon"}:
@@ -94,10 +107,20 @@ class TaskAdmission:
             if action in {"record_decision", "finish", "revise_plan"}:
                 view = self.reconcile(view)
                 transitions.guards(view["record"], request["expected_revision"], request["expected_plan_revision"], request["expected_epoch"])
+                if action in {"record_decision", "finish"}:
+                    for operation in view["record"]["operations"]:
+                        witness = effects.goal_witness(view["record"], operation)
+                        if witness is not None and (action == "finish" or operation["id"] in selected):
+                            if not effects.goal_usable(view["record"], operation):
+                                raise Fault("task_evidence_invalid", "The goal witness no longer matches the current source and authority.")
+                            self._check_goal_scope(view["record"], operation, witness["arguments"])
+                            verified_goals[operation["id"]] = self.app.task_receipts.verify_goal(operation, witness)
                 for identity in selected:
                     operation = next((item for item in view["record"]["operations"] if item["id"] == identity), None)
                     if operation is None:
                         raise Fault("task_evidence_invalid", "Acceptance must reference an original task operation.")
+                    if identity in verified_goals:
+                        continue
                     observed = self.app.task_receipts.read(operation, verify=True)
                     current, _ = task_receipts.observation(operation, observed)
                     if current != operation["result"]:
@@ -106,14 +129,67 @@ class TaskAdmission:
             self._check_abandon(record)
         scope = self._scope_witness(record, request) if (
             action == "bind_effect_scope" and retained is None) else None
+        def commit(value, now):
+            if action == "bind_effect_scope":
+                self._bind_scope(value, request, scope, now)
+            else:
+                transitions.apply_control(value, request, self.principal, now)
+            for identity, goal in verified_goals.items():
+                operation = next(item for item in value["operations"] if item["id"] == identity)
+                witness = effects.goal_witness(value, operation)
+                transitions.material(value, now, "decision",
+                    f"Goal witness {witness['id']} revalidated at HEAD {goal['head_sha']}, base {goal['base_sha']}; digest {records.digest(goal)}.",
+                    operation["stage_id"], identity)
         view = tasks.update(self.app.state, request["task_id"],
-            lambda value, now: self._bind_scope(value, request, scope, now) if action == "bind_effect_scope"
-                else transitions.apply_control(value, request, self.principal, now),
+            commit,
             expected_revision=request["expected_revision"], last_update=update,
             upgrade=True, operation_ids=operation_ids)
         if action == "cancel" and view["record"]["terminal"] is None:
             view = self._cancel_owned(view, request["update_id"])
         return view
+
+    def _check_goal_scope(self, record: dict, operation: dict, arguments: dict) -> None:
+        locator = deepcopy(operation["locator"])
+        self._scope(record, "github_review_thread", arguments, locator)
+        if locator != operation["locator"]:
+            raise Fault("task_scope_denied", "Goal recovery must retain the original native account binding.")
+        probe = dict(operation, effect_scope=effects.github_scope("github_review_thread", arguments))
+        conflicts = tasks.effect_conflicts(self.app.state, {"effect_scopes": []}, probe)
+        if conflicts:
+            raise Fault("task_effect_unresolved", "An overlapping original effect prevents goal verification.", {"conflicts": conflicts})
+
+    def _recover_goal(self, view: dict, operation: dict, arguments: dict, context: dict, goal: dict) -> dict:
+        record = view["record"]
+        transitions.guards(record, context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)
+        self._require_foreground_clear(view)
+        self.app._validate_task_scope({"contract": record["contract"]})
+        self._check_goal_scope(record, operation, arguments)
+        original_sha = records.digest(operation)
+        goal_sha = records.digest(goal)
+        witness_id = records.digest(["goal-state-v1", operation["id"], original_sha, goal_sha])[:32]
+
+        def commit(value, now):
+            transitions.guards(value, context["task_revision"], context["plan_revision"], context["continuation_epoch"], allow_observations=True)
+            transitions.require_owner(value, self.principal, now)
+            original = next(item for item in value["operations"] if item["id"] == operation["id"])
+            if records.digest(original) != original_sha:
+                raise Fault("task_evidence_changed", "Original operation evidence changed during goal recovery.")
+            try:
+                witness = records.validate_goal_witness({"id": witness_id, "operation_id": original["id"],
+                    "request_sha256": original["request_sha256"], "source_sha256": original["source_sha256"],
+                    "original_sha256": original_sha, "arguments": arguments, "goal": goal, "goal_sha256": goal_sha,
+                    "principal_ref": self.principal, "at_ms": now}, original)
+            except (ValueError, TypeError, KeyError) as error:
+                raise Fault("task_evidence_invalid", "Goal evidence does not prove the original resolve intent and target.") from error
+            value.setdefault("goal_witnesses", []).append(witness)
+            if not effects.goal_usable(value, original):
+                raise Fault("task_evidence_invalid", "Goal recovery requires the unchanged accepted source and native authority.")
+            value["format"] = 5
+            value["control"].update(state="waiting_for_ai", pending_decision=None)
+            transitions.handoff(value, witness_id, now, "result_ready")
+
+        return tasks.update(self.app.state, record["task_id"], commit, expected_revision=context["task_revision"],
+                            allow_observations=True, upgrade=True, operation_ids=[operation["id"]])
 
     def _check_abandon(self, record: dict) -> None:
         """Only terminal uncertainty may be abandoned; original effect scopes survive."""
@@ -352,6 +428,22 @@ class TaskAdmission:
                     raise Fault("task_operation_conflict", "The original operation ID belongs to different intent; do not replace or replay it.")
                 expected = {operation["id"]: records.digest(operation)}
                 observed = self.app.task_receipts.read(operation, arguments)
+                witness = effects.goal_witness(record, operation)
+                if witness is not None:
+                    # Retained current-goal evidence never changes or attributes
+                    # the original unknown write, even on a later observation.
+                    return {"status": "write_outcome_unknown", "goal_witness": witness,
+                            "task": _reference(view), "task_operation_replayed": False}
+                if method == "github_review_thread" and observed.get("goal_state") is not None:
+                    if operation["result"] is None:
+                        # A crash may leave only admission durable. Publish its
+                        # uncertainty first, separately from the goal witness.
+                        result, enriched = task_receipts.observation(operation, observed)
+                        view = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
+                        operation = next(item for item in view["record"]["operations"] if item["id"] == context["operation_id"])
+                    current = self._recover_goal(view, operation, arguments, context, observed["goal_state"])
+                    return {**observed, "goal_witness": effects.goal_witness(current["record"], operation),
+                            "task": _reference(current), "task_operation_replayed": False}
                 result, enriched = task_receipts.observation(operation, observed)
                 current = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
                 return {**observed, "task": _reference(current), "task_operation_replayed": False}
@@ -579,7 +671,7 @@ class TaskAdmission:
             return view
         changes, expected = [], {}
         for operation in record["operations"]:
-            if not records.pending(operation):
+            if not records.pending(operation) or effects.goal_witness(record, operation) is not None:
                 continue
             expected[operation["id"]] = records.digest(operation)
             try:

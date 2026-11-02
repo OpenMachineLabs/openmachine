@@ -793,7 +793,15 @@
     "test/support/github_cases.py": [
       "test/component/app/test_github_admission.py",
       "test/component/github/test_transport.py",
+      "test/component/tasks/test_store.py",
+      "test/resilience/tasks/test_persistence.py",
       "test/unit/github/test_operations.py"
+    ],
+    "test/support/goal_recovery.py": [
+      "test/component/app/test_github_admission.py",
+      "test/component/github/test_transport.py",
+      "test/component/tasks/test_store.py",
+      "test/resilience/tasks/test_persistence.py"
     ],
     "test/support/mcp.py": [
       "test/component/server/test_mcp_workspace.py",
@@ -899,7 +907,8 @@
       "test/resilience/tasks/test_persistence.py",
       "test/resilience/workspace/test_legacy_lock.py",
       "test/component/app/test_target_environment.py",
-      "test/component/connections/test_github_web.py"
+      "test/component/connections/test_github_web.py",
+      "test/component/github/test_transport.py"
     ],
     "test/support/workspace.py": [
       "test/component/service/test_workspace_compatibility.py",
