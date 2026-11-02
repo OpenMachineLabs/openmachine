@@ -435,6 +435,12 @@ class TaskAdmission:
                     return {"status": "write_outcome_unknown", "goal_witness": witness,
                             "task": _reference(view), "task_operation_replayed": False}
                 if method == "github_review_thread" and observed.get("goal_state") is not None:
+                    if operation["result"] is None:
+                        # A crash may leave only admission durable. Publish its
+                        # uncertainty first, separately from the goal witness.
+                        result, enriched = task_receipts.observation(operation, observed)
+                        view = self._publish(record["task_id"], [(operation["id"], result, enriched)], expected=expected)
+                        operation = next(item for item in view["record"]["operations"] if item["id"] == context["operation_id"])
                     current = self._recover_goal(view, operation, arguments, context, observed["goal_state"])
                     return {**observed, "goal_witness": effects.goal_witness(current["record"], operation),
                             "task": _reference(current), "task_operation_replayed": False}

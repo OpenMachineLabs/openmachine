@@ -16,6 +16,36 @@ from test.support.github_cases import ACTOR, REPO
 
 
 class GoalRecoveryResilienceTests(GoalRecoveryFixture, unittest.TestCase):
+    def test_restart_before_original_result_publication_retains_unknown_before_goal(self):
+        identity = "c" * 32
+        arguments = dict(action="resolve", repository=REPO, number=2, thread_id="PRRT_goal",
+                         expected_head_sha=self.provider.pr["head"]["sha"],
+                         expected_base_sha=self.provider.pr["base"]["sha"],
+                         task_context=self.context_for(identity))
+        with patch("openmachine.app.task_admission.TaskAdmission._publish", side_effect=SystemExit(91)):
+            with self.assertRaises(SystemExit):
+                self.app.github_review_thread(**arguments)
+        admitted = tasks.operation(self.state, "structured-one", identity)
+        self.assertEqual(admitted["state"], "admitted")
+        self.assertIsNone(admitted["result"])
+        self.assertTrue(self.provider.threads[0]["isResolved"])
+        self.connect()
+        recovered = self.recover(arguments)
+        self.assertEqual(recovered["status"], "write_outcome_unknown")
+        self.assertEqual(recovered["goal_witness"]["operation_id"], identity)
+        original = tasks.operation(self.state, "structured-one", identity)
+        self.assertEqual(original["state"], "unknown")
+        self.assertEqual(original["result"]["status"], "unknown")
+        for field in ("id", "locator", "request_sha256", "source_sha256", "admitted_at_ms"):
+            self.assertEqual(original[field], admitted[field])
+        self.assertEqual(self.recover(arguments)["goal_witness"], recovered["goal_witness"])
+        self.accept_goal(original)
+        self.control("finish", outcome="completed", acceptance=[
+            {"stage_id": "verify", "operation_id": identity}], limitations="Original write attribution remains unknown.")
+        self.assertEqual(tasks.operation(self.state, "structured-one", identity), original)
+        self.assertEqual(self.thread_writes, 1)
+        tasks.check_state(self.state)
+
     def crash_recovery(self, point):
         arguments, original = self.lose_ack()
         code = '''import json,os,sys
