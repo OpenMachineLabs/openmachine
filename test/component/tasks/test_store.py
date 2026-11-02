@@ -123,6 +123,75 @@ class GoalRecoveryStoreTests(GoalRecoveryFixture, unittest.TestCase):
 
 
 class StructuredTaskTests(TaskFixture, unittest.TestCase):
+    def _retained_v1_sqlite(self, *, remote_identity=None):
+        """Create a real 19-column local v1 Task store in disposable state."""
+        self.create()
+        tasks.update(self.state, "structured-one", lambda record, now:
+                     record["operations"].append(self.operation_fixture(record, now, 1)))
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("DROP INDEX task_original_targets")
+            connection.execute("DROP INDEX operation_target")
+            connection.execute("ALTER TABLE operations ADD COLUMN target_identity TEXT")
+            connection.execute("CREATE INDEX operation_target ON operations(machine,target_identity)")
+            connection.execute("CREATE INDEX task_original_targets ON operations(task_id,kind,machine,target_identity)")
+            row = connection.execute("SELECT task_id,id,payload FROM operations").fetchone()
+            value = json.loads(row[2])
+            value["locator"]["target_identity"] = remote_identity
+            payload, sha = database.encoded(value)
+            connection.execute("UPDATE operations SET payload=?,sha256=?,target_identity=? WHERE task_id=? AND id=?",
+                               (payload, sha, remote_identity, row[0], row[1]))
+            connection.execute("UPDATE store SET schema=1")
+        with sqlite3.connect(self.path) as connection:
+            return tuple(connection.execute("SELECT payload,sha256 FROM operations").fetchone())
+
+    def test_native_schema_migrates_old_local_database_without_rewriting_original_receipts(self):
+        original = self._retained_v1_sqlite()
+        with sqlite3.connect(self.path) as conn:
+            row = conn.execute("SELECT identity,generation FROM store").fetchone()
+        self.fault("unsupported_task_format", tasks.read, self.state, "structured-one")
+        preflight = tasks.check_state(self.state)
+        self.assertEqual((preflight["task_storage"]["schema"], preflight["task_records"],
+                          preflight["structured_task_records"]), (1, 1, 1))
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
+            self.assertEqual(conn.execute("SELECT schema FROM store").fetchone()[0], 1)
+        migrated = tasks.migrate(self.state)
+        self.assertEqual((migrated["schema"], migrated["identity"], migrated["generation"]),
+                         (database.SCHEMA_VERSION, *row))
+        with database.connect(self.state) as conn:
+            columns = [info["name"] for info in conn.execute("PRAGMA table_info(operations)")]
+            self.assertNotIn("target_identity", columns)
+            self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
+            self.assertTrue(database.target_indexes_ready(conn))
+        restored = tasks.read(self.state, "structured-one", section="operations", operation_id=f"{1:032x}")
+        self.assertEqual(restored["items"][0]["locator"]["machine"], "desktop")
+        self.assertNotIn("target_identity", restored["items"][0]["locator"])
+        self.assertEqual(tasks.migrate(self.state)["schema"], database.SCHEMA_VERSION)
+
+    def test_retired_schema_restore_fence_never_mutates_old_database(self):
+        self._retained_v1_sqlite()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("UPDATE store SET restore_required=1")
+            original = tuple(connection.execute(
+                "SELECT payload,sha256,target_identity FROM operations").fetchone())
+        self.fault("task_restore_unreconciled", tasks.migrate, self.state)
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(connection.execute("SELECT schema FROM store").fetchone()[0], 1)
+            self.assertEqual(tuple(connection.execute(
+                "SELECT payload,sha256,target_identity FROM operations").fetchone()), original)
+
+    def test_retired_remote_pin_cannot_migrate_into_native_task_authority(self):
+        self._retained_v1_sqlite(remote_identity="b" * 64)
+        with sqlite3.connect(self.path) as conn:
+            original = tuple(conn.execute("SELECT payload,sha256,target_identity FROM operations").fetchone())
+        self.fault("corrupt_tasks", tasks.check_state, self.state)
+        self.fault("task_migration_incompatible", tasks.migrate, self.state)
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute("SELECT schema FROM store").fetchone()[0], 1)
+            self.assertIn("target_identity", [item[1] for item in conn.execute("PRAGMA table_info(operations)")])
+            self.assertEqual(tuple(conn.execute("SELECT payload,sha256,target_identity FROM operations").fetchone()), original)
+        self.fault("unsupported_task_format", tasks.read, self.state, "structured-one")
+
     def test_indexed_membership_rows_and_generation_paging(self):
         self.assertEqual(tasks.find(self.state, machine="desktop")["status"], "uninitialized")
         self.app.save_task("checkpoint", 0, "Legacy note", "No workspace.", [])

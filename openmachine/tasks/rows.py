@@ -16,7 +16,7 @@ def operation_key(locator: dict) -> tuple:
             object_type = "pull_request" if locator["object_type"] == "merge" else locator["object_type"]
             return "github_destination", locator["repository"].casefold(), object_type, locator["number"]
         return kind, locator["repository"].casefold(), locator["anchor"]
-    return kind, locator["machine"], locator["execution_id" if kind == "execution" else "change_id"]
+    return kind, "local", locator["execution_id" if kind == "execution" else "change_id"]
 
 
 def _key(locator: dict) -> str:

@@ -168,6 +168,6 @@ def conflicts(first_record: dict, first: dict, second_record: dict, second: dict
                 return False
         return a["kind"] == b["kind"] and github_conflict(
             operation_scope(first_record, first), operation_scope(second_record, second))
-    # Uncertain local execution or partial file effects retain the target-wide
-    # exclusion. Different configured targets have independent worker owners.
-    return a["machine"] == b["machine"]
+    # Every native operation here shares the Core's local OS process authority.
+    # Keep the original conservative exclusion even across local machine aliases.
+    return True

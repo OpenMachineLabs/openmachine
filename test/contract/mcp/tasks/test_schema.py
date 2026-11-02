@@ -20,6 +20,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("target_identity", find["inputSchema"]["properties"])
                 for arguments, reason in (({"workspace": "example"}, "invalid_task_filter"),
                                           ({"machine": "bad/name"}, "invalid_tool_call"),
+                                          ({"machine": "desktop", "target_identity": "bad"}, "invalid_tool_call"),
                                           ({"machine": "desktop", "workspace": "example", "workspace_identity": "bad"}, "invalid_tool_call")):
                     invalid = (await self.wire_call(client, "tools/call", {"name": "find_tasks",
                         "arguments": arguments})).json()["result"]

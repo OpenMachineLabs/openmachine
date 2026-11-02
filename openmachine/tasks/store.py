@@ -795,7 +795,7 @@ def check_state(state: Path) -> dict:
                 count += 1
     elif storage["kind"] == "sqlite":
         with db.connect(state, maintenance=True) as connection:
-            storage["generation"] = db.metadata(connection)["generation"]
+            storage["generation"] = db.metadata(connection, preflight_native_cutover=True)["generation"]
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok" or connection.execute("PRAGMA foreign_key_check").fetchone():
                 raise Fault("corrupt_tasks", "The authoritative Task database failed its integrity check.")
             for row in connection.execute("SELECT * FROM tasks ORDER BY task_id"):

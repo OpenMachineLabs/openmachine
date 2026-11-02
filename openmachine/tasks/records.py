@@ -229,7 +229,22 @@ class Control(Model):
     pending_decision: Text512 | None
 
 
+def _native_locator(value):
+    # One-way canonicalization of previously retained *local* Task evidence.
+    # Non-null SSH target pins are never accepted as native execution authority.
+    if isinstance(value, dict) and "target_identity" in value:
+        if value["target_identity"] is not None:
+            raise ValueError("retired non-native target locator")
+        return {key: item for key, item in value.items() if key != "target_identity"}
+    return value
+
+
 class ExecutionLocator(Model):
+    @model_validator(mode="before")
+    @classmethod
+    def native_only(cls, value):
+        return _native_locator(value)
+
     kind: Literal["execution"]
     machine: Name
     execution_id: ID
@@ -237,6 +252,11 @@ class ExecutionLocator(Model):
 
 
 class ChangeLocator(Model):
+    @model_validator(mode="before")
+    @classmethod
+    def native_only(cls, value):
+        return _native_locator(value)
+
     kind: Literal["change"]
     machine: Name
     change_id: ID
