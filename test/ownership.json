@@ -680,6 +680,15 @@
         "test/component/projects/test_catalog.py",
         "test/contract/mcp/projects/test_catalog.py"
       ]
+    },
+    "ssh": {
+      "sources": [],
+      "tests": [],
+      "boundary_tests": [
+        "test/component/config/test_configuration.py",
+        "test/component/projects/test_catalog.py",
+        "test/contract/mcp/server/test_catalog.py"
+      ]
     }
   },
   "support": {
