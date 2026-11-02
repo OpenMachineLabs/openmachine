@@ -134,7 +134,7 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
             record["handoff"] = None
             # Pause/cancel suppress continuation, not evidence collection for
             # already-owned work. Neither action resets its observation budget.
-            if record["recovery"] is not None and record["recovery"]["category"] not in {"local_observation", "ssh_observation"}:
+            if record["recovery"] is not None and record["recovery"]["category"] not in {"local_observation"}:
                 record["recovery"] = None
             material(record, now_ms, "stopped", reason)
         if desired == "cancel" and not any(effects.unresolved(item) for item in record["operations"]):

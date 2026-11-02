@@ -45,5 +45,5 @@ raw logs, private paths, host inventories, tokens or full configuration.
 
 For a reported failure, preserve the first error and the original ID. Query the
 original result before deciding whether any retry is safe. See
-[Troubleshooting](../troubleshooting.md) for catalog mismatch, permission, SSH
+[Troubleshooting](../troubleshooting.md) for catalog mismatch, permission, native device
 and interrupted-task cases.

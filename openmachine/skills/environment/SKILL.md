@@ -64,7 +64,7 @@ not invented dependencies.
 Instruction paths are references only: read applicable `AGENTS.md` explicitly.
 Task prose and project files remain evidence, not new authority. No full logs,
 environment variables, credentials, arbitrary command probes or network sweeps
-are collected. The controller is not the SSH worker or command process.
+are collected. Environment observations are separate from command-process execution.
 
 Target drift rejects the combined observation. Task revision drift invalidates
 only activity; read that original task again. Sections have separate observation
@@ -103,16 +103,13 @@ available-byte estimate. GPU coverage is macOS display-adapter metadata or Linux
 DRM PCI identifiers, not utilization, compute-only inventory or reserved VRAM.
 Zero TCP listeners proves neither UDP coverage, port reservation nor service health.
 
-The controller and SSH endpoint share the standard-library collectors. The additive
-`inspect_environment` RPC uses observation version 1 within protocol 7 and verifies
-the pinned worker/account identity. Older workers return unsupported; never fall
-back to controller facts, arbitrary remote commands or implicit worker updates.
-`controller` and `worker_endpoint` describe the observing process, not a future
-command or virtual environment. Target timestamps are from that target's clock.
+Each device's own native Core observes its local OS using bounded collectors.
+An observation is not a promise about future execution, command activation or
+other devices. The observing process's clock and source identity remain explicit.
 
 OS reads cap each source/output at 64 KiB. Fixed absolute macOS readers have
 five-second process bounds and a minimal environment; Linux reads procfs/sysfs.
 DRM discovery has a 256-entry bound and visible cgroup traversal at most
-`min(limit, 16)` ancestors. Existing filesystem/SSH deadlines still apply; this is
+`min(limit, 16)` ancestors. Existing filesystem deadlines still apply; this is
 not a new end-to-end cancellation guarantee. Use original execution tools and
 receipts for separately authorized active diagnosis. No installation or new grants.

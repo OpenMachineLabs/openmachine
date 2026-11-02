@@ -171,12 +171,12 @@ class EffectScopeTests(unittest.TestCase):
         self.assertEqual(original, before)
 
     def test_local_unknown_and_partial_exclude_only_same_target(self):
-        local = {"id": "b" * 32, "locator": {"kind": "execution", "target_identity": None}}
-        change = {"id": "c" * 32, "locator": {"kind": "change", "target_identity": None}}
+        local = {"id": "b" * 32, "locator": {"kind": "execution", "machine": "desktop"}}
+        change = {"id": "c" * 32, "locator": {"kind": "change", "machine": "desktop"}}
         self.assertTrue(self.conflict(local, change))
         self.assertFalse(self.conflict(local, self.operation("github_pull_request", body="new")))
         remote = deepcopy(local)
-        remote["locator"]["target_identity"] = "d" * 64
+        remote["locator"]["machine"] = "another"
         self.assertFalse(self.conflict(local, remote))
         for status in ("unknown", "running", "partial"):
             self.assertTrue(effects.unresolved({"state": "observed", "result": {"status": status}}))

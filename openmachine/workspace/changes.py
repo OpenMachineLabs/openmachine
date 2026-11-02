@@ -30,26 +30,11 @@ def _scope(config, state: Path, machine: str, record: dict) -> str:
     config.machine(machine)
     if records._owner(state) != record["owner_sha256"]:
         raise Fault("scope_unavailable", "This receipt belongs to its original target state owner.")
-    if not getattr(config, "is_ssh_worker", False):
-        root = root_for(config, machine, record["context"]["root"])
-        info = root.stat()
-        if [info.st_dev, info.st_ino] == record["context"]["root_id"]:
-            return str(root)
-        raise Fault("scope_unavailable", "The original directory identity changed.")
-    # SSH keeps separate verified remote-root authorization for retained receipts.
-    for name, item in config.workspaces.items():
-        if item.machine != machine:
-            continue
-        try:
-            root = root_for(config, machine, name)
-            if str(root) != record["context"]["root"]:
-                root = resolve_root(config, machine, name, record["context"]["root"])
-            info = root.stat()
-            if str(root) == record["context"]["root"] and [info.st_dev, info.st_ino] == record["context"]["root_id"]:
-                return name
-        except (OSError, Fault):
-            continue
-    raise Fault("scope_unavailable", "Current configuration no longer grants the original canonical workspace.")
+    root = root_for(config, machine, record["context"]["root"])
+    info = root.stat()
+    if [info.st_dev, info.st_ino] == record["context"]["root_id"]:
+        return str(root)
+    raise Fault("scope_unavailable", "The original directory identity changed.")
 
 
 def preserve_change_routes(state: Path, current, candidate, changed: set[tuple[str, str]]) -> None:

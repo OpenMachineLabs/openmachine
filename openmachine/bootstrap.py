@@ -10,13 +10,6 @@ from openmachine.config import Settings
 
 
 def create_application(config: Settings, state: Path) -> Application:
-    ssh_call = None
-    ssh_recovery = None
-    if any(machine.transport == "ssh" for machine in config.machines.values()):
-        from integrations.ssh.client import call
-        from integrations.ssh import recovery
-        ssh_call = call
-        ssh_recovery = recovery
     provider = None
     native = None
     if config.github is not None:
@@ -25,5 +18,5 @@ def create_application(config: Settings, state: Path) -> Application:
         native = auth
         provider = github
     connections = Connections(config, state, native)
-    return Application(config, state, Machines(config, state, ssh_call, ssh_recovery), provider,
+    return Application(config, state, Machines(config, state), provider,
                        connections=connections, codex=codex)

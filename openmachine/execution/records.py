@@ -94,8 +94,6 @@ def effective_request(record: dict) -> dict:
             **record["request"]}
 
 
-def is_remote(record: dict) -> bool:
-    return "scope_unit" in record
 
 
 def _validate_facts(record: dict) -> None:
@@ -123,20 +121,20 @@ def _validate_facts(record: dict) -> None:
         raise ValueError("invalid stop reason")
     if not (_number(stop["requested_at"]) if stop["reason"] else stop["requested_at"] is None):
         raise ValueError("invalid stop observation")
-    containment = "systemd_scope" if is_remote(record) else "posix_session"
+    containment = "posix_session"
     if cleanup["containment"] != containment or cleanup["status"] not in {"pending", "verified", "unverified"}:
         raise ValueError("invalid cleanup")
     if cleanup["error"] is not None and (not isinstance(cleanup["error"], str) or len(cleanup["error"]) > 128):
         raise ValueError("invalid cleanup error")
     if "session_id" in cleanup or "boot_id" in cleanup:
-        if (is_remote(record) or type(cleanup.get("session_id")) is not int or cleanup["session_id"] <= 1
+        if (type(cleanup.get("session_id")) is not int or cleanup["session_id"] <= 1
                 or not isinstance(cleanup.get("boot_id"), str)
                 or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", cleanup["boot_id"])):
             raise ValueError("invalid native cleanup identity")
     if record["status"] == "succeeded":
         if not command["spawned"] or not command["exited"] or stop["reason"] or record.get("error"):
             raise ValueError("inconsistent success")
-        if cleanup["status"] != "verified" and not (is_remote(record) and cleanup["status"] == "pending"):
+        if cleanup["status"] != "verified":
             raise ValueError("unverified success")
     if record["status"] in STOP_STATUS.values() and STOP_STATUS.get(stop["reason"]) != record["status"]:
         raise ValueError("inconsistent stop result")
@@ -229,7 +227,7 @@ def require_cleanup_only_unknown(record: dict) -> None:
     cleanup = record.get("cleanup", {})
     command = record.get("command", {})
     last = (record.get("control") or {}).get("last")
-    if (is_remote(record) or record["status"] != "outcome_unknown" or cleanup.get("status") != "unverified"
+    if (record["status"] != "outcome_unknown" or cleanup.get("status") != "unverified"
             or not command.get("spawned") or not command.get("exited") or type(record["exit_code"]) is not int
             or record.get("error") or last and last["status"] in {"pending", "partial", "outcome_unknown"}):
         raise Fault("cleanup_recovery_unavailable", "Recovery requires an original terminal result with only cleanup unresolved.")
@@ -268,7 +266,7 @@ def validate_record(record: dict, execution_id: str) -> None:
     """Validate retained format and identity without IO or live process observation."""
     try:
         version = record.get("format_version", 1)
-        if type(version) is not int or version not in (1, 2, 3, 4, FORMAT, CREATION_FORMAT):
+        if type(version) is not int or version not in (1, 2, 4, FORMAT, CREATION_FORMAT):
             raise Fault("unsupported_state_version", "This runtime cannot read the execution receipt version.")
         states = TERMINAL | {"accepted", "preparing", "running", "stopping", "finishing"} if version >= 4 else (
             TERMINAL - {"outcome_unknown"}) | {"accepted", "preparing", "running"}
@@ -299,12 +297,6 @@ def validate_record(record: dict, execution_id: str) -> None:
             raise ValueError("invalid receipt metadata")
         if record["status"] in TERMINAL and not _number(record["finished_at"]):
             raise ValueError("missing terminal receipt")
-        if version == 3 or is_remote(record):
-            if (version not in (3, 4, FORMAT, CREATION_FORMAT) or record.get("scope_unit") != f"openmachine-{execution_id}.scope"
-                    or not re.fullmatch(r"[0-9a-f]{64}", request["machine"])
-                    or record["context"].get("target_identity") != request["machine"]
-                    or not re.fullmatch(r"[0-9a-f]{64}", record["context"].get("worker_sha256", ""))):
-                raise ValueError("invalid remote ownership")
         if version >= 4:
             _validate_facts(record)
         if version >= FORMAT:

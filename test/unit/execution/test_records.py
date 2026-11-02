@@ -8,27 +8,21 @@ from openmachine.foundation.sanitize import Fault
 
 
 class RecordTests(unittest.TestCase):
-    def test_remote_format_validation_binds_original_id_without_changing_facts(self):
+    def test_retired_remote_receipt_format_is_rejected_without_modification(self):
         identity = "a" * 32
-        record = {"format_version": 3, "version": "0.1.0", "status": "succeeded", "exit_code": 0,
-                  "created_at": 1, "finished_at": 2, "log_truncated": False, "output_incomplete": False,
-                  "scope_unit": f"openmachine-{identity}.scope",
-                  "context": {"target_identity": "b" * 64, "worker_sha256": "c" * 64},
-                  "request": {"machine": "b" * 64, "cwd": "/unavailable/original", "expected_head_sha": "",
-                              "argv": ["original-command"], "timeout_seconds": 10, "task_id": "original-task"}}
+        record = {"format_version": 3, "status": "succeeded", "exit_code": 0,
+                  "scope_unit": f"openmachine-{identity}.scope"}
         original = deepcopy(record)
-        validate_record(record, identity)
+        with self.assertRaises(Fault) as caught:
+            validate_record(record, identity)
+        self.assertEqual(caught.exception.code, "unsupported_state_version")
         self.assertEqual(record, original)
-        for candidate, execution_id, code in (
-            (record, "d" * 32, "corrupt_state"),
-            (record | {"exit_code": None}, identity, "corrupt_state"),
-            (record | {"format_version": 99}, identity, "unsupported_state_version"),
-        ):
-            before = deepcopy(candidate)
-            with self.subTest(code=code, execution_id=execution_id), self.assertRaises(Fault) as caught:
-                validate_record(candidate, execution_id)
-            self.assertEqual(caught.exception.code, code)
-            self.assertEqual(candidate, before)
+
+    def test_unknown_receipt_format_is_rejected(self):
+        record = {"format_version": 99}
+        with self.assertRaises(Fault) as caught:
+            validate_record(record, "a" * 32)
+        self.assertEqual(caught.exception.code, "unsupported_state_version")
 
 
 if __name__ == "__main__":

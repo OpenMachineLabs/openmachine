@@ -296,13 +296,13 @@ class TaskAdmission:
                     "anchor": anchor, **({"tag_name": arguments["tag_name"]} if kind == "release" else {}),
                     **({"thread_id": arguments["thread_id"],
                     "expected_head_sha": arguments["expected_head_sha"]} if kind == "review_thread" else {})}
-        target = self.app.config.machine(arguments["machine"])
+        self.app.config.machine(arguments["machine"])
         if method in FILE_METHODS:
             if not arguments.get("change_id"):
                 return None
-            return {"kind": "change", "machine": arguments["machine"], "target_identity": target.ssh_identity or None,
+            return {"kind": "change", "machine": arguments["machine"],
                     "change_id": arguments["change_id"]}
-        return {"kind": "execution", "machine": arguments["machine"], "target_identity": target.ssh_identity or None,
+        return {"kind": "execution", "machine": arguments["machine"],
                 "execution_id": arguments["execution_id"],
                 "control_seq": arguments["expected_control_seq"] + 1 if method == "control_execution" else None}
 
@@ -513,7 +513,7 @@ class TaskAdmission:
                     raise
                 code = error.code if isinstance(error, Fault) else "domain_io_unknown"
                 owner_effect = getattr(error, "effect", None)
-                # Creation errors may arrive after dispatch or without an SSH
+                # Creation errors may arrive after dispatch or without a remote
                 # phase marker; their code alone cannot prove a pre-effect failure.
                 no_effect = owner_effect == "known_no_effect" or (owner_effect is None
                     and method not in GITHUB_METHODS | {"create_worktree"}
@@ -580,8 +580,6 @@ class TaskAdmission:
         machine = arguments["machine"]
         target = self.app.config.machine(machine, write=method in EXECUTION_METHODS or
                                          method == "control_execution" and arguments["action"] in {"write_stdin", "resize"})
-        if (target.ssh_identity or None) != locator["target_identity"]:
-            raise Fault("task_scope_denied", "The original target identity changed.")
         if method in {"control_execution", "cancel_execution"}:
             original = next((item for item in record["operations"] if item["id"] == locator["execution_id"]
                 and tasks.operation_key(item["locator"]) == tasks.operation_key(locator)), None)

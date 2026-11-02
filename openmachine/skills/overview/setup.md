@@ -65,7 +65,7 @@ execution grant; an explicit false overrides that inheritance. Restart this
 service after an authorized configuration change.
 
 Machine/workspace names are operator-owned; see [examples/config.toml](../../../examples/config.toml).
-Local and explicitly configured SSH transports are supported. Optional `[github]`
+Native Core operations run on the selected local machine. Optional `[github]`
 configuration enables [scoped GitHub collaboration](../github/SKILL.md). Omit it to
 keep GitHub disabled. New accounts use the official Open Machine GitHub App Device
 Flow and automatically pinned local credential storage; historical gh task bindings
@@ -122,15 +122,7 @@ never confer grants, install tools or execute embedded resources automatically.
 
 ## Platform and acceptance
 
-Managed services support logged-in macOS controllers. Linux supports manual `serve`
-and explicitly prepared SSH workers; managed Linux services and Windows are not
-included. Read [management](../service/management.md) before lifecycle changes and
-[SSH](../service/ssh.md) before target preparation. Version `0.2.24` is an initial
-development release, not a stable 1.x promise. State contract 21, SSH protocol 7
-and worktree receipt format 6 are compatibility contracts, not release versions;
-ordinary format-5 and historical receipts remain readable. Inspect installed
-capabilities and actual readers separately. Source merge does not update a live
-installation, and tests do not prove real ChatGPT acceptance.
+Managed services support logged-in macOS controllers. Linux supports manual `serve`; managed Linux services and Windows are not included. Read [management](../service/management.md) before lifecycle changes. Version `0.2.24` is an initial development release, not a stable 1.x promise. Inspect installed capabilities and actual readers separately. Source merge does not update a live installation.
 
 ## Diagnose client calls and interrupted work
 

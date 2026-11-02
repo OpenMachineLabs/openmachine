@@ -18,7 +18,7 @@ Workspaces but forbids mutations and commands. `full_access` permits native
 reads, typed writes, Tasks, commands and worktrees within the current OS account,
 subject to independent native execution and write grants. Configured
 Workspaces remain names and contexts, not whole-device directory allowlists. OS permissions, credential protections,
-original receipts, and SSH machine grants remain separate boundaries. An allowed
+and original receipts remain separate boundaries. An allowed
 command's `cwd` is not process confinement.
 
 **Core is not an OS sandbox or a multi-tenant isolation system.** A permitted
@@ -40,7 +40,6 @@ credentials directory or unrelated organization by convenience.
 | Task contracts, history and derived lookup | Controller `tasks.db` and its SQLite sidecars under that state directory. |
 | Local command receipts and bounded output | Original local execution records under `executions/` in controller state. |
 | Typed file-change evidence | Original target's private change records; read through `read_workspace_change`. |
-| Remote command results | Original SSH account's target-owned state, not a substitute local execution. |
 | Managed service versions, selection and log | Controller `service/` state; native user registration is separate. |
 | Native GitHub credentials | Pinned macOS Keychain backend, otherwise Core's private file backend; not public task results. |
 
@@ -65,7 +64,7 @@ Core's MCP listener uses the private state-directory Unix socket, not a public
 TCP endpoint. A separately managed tunnel carries client traffic; it has its own
 credentials and trust boundary. Keep Core's Host/Origin protections enabled.
 
-SSH sends requests to the explicitly configured authenticated target. GitHub
+GitHub
 requests send the selected operation to GitHub. Browser delegation sends the
 bounded goal to the authorized native Codex environment and visits the selected
 sites. Those services' account, network and data policies remain separate from Core.

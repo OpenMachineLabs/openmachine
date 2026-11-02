@@ -21,9 +21,7 @@ if TYPE_CHECKING:
 
 def root_for(config: "Settings", machine: str, workspace: str) -> Path:
     target = config.machine(machine)
-    if target.transport != "local":
-        raise Fault("remote_path", "Resolve this workspace through its SSH adapter, not the controller filesystem.")
-    if not getattr(config, "is_ssh_worker", False) and target.local_access is None:
+    if target.local_access is None:
         raise Fault("local_approval_required", "Retired Workspace approvals do not permit local directory reads.")
     item = config.workspaces.get(workspace)
     if item is not None and item.machine == machine:

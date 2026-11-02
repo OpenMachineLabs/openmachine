@@ -138,7 +138,7 @@ def _target_section(app, selection: dict, context: dict, section: str, executabl
     result = _section(reference, "current_read", status=page["status"], complete=page["complete"], data=page["data"],
                       limitations=("Target observer facts do not establish a future command environment, reservation or application health.",))
     result.update(scope=page["scope"], started_at_ms=page["started_at_ms"], observed_at_ms=page["finished_at_ms"])
-    for key in ("target_identity", "worker_sha256", "observation_version"):
+    for key in ("observation_version",):
         if key in page:
             result[key] = page[key]
     if section == "project":
@@ -171,7 +171,7 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
         raise Fault("unknown_workspace", "Select a bounded workspace name or absolute local directory.")
     selection = {"machine": machine, "workspace_name": workspace_name, **({"worktree": worktree} if worktree else {})}
     started = time.time_ns() // 1000000
-    # The existing reader owns scope and canonical identity, including SSH routing.
+    # The existing reader owns scope and canonical identity, including native permission.
     initial = app.read_workspace_file(**selection, path="AGENTS.md", start_line=1, line_count=1)
     context = initial["context"]
     result = {"schema_version": 1, "atomic": False, "started_at_ms": started,
@@ -194,7 +194,7 @@ def inspect_context(app, machine: str, workspace_name: str, worktree: str = "", 
         except (Fault, OSError) as error:
             # A mixed workspace is invalid as a whole; task-page drift is local to activity.
             if isinstance(error, Fault) and section != "activity" and error.code in {
-                    "source_changed", "context_mismatch", "path_denied", "unknown_worktree", "identity_mismatch", "ssh_protocol_error"}:
+                    "source_changed", "context_mismatch", "path_denied", "unknown_worktree", "identity_mismatch"}:
                 raise
             code = error.code if isinstance(error, Fault) else "source_unavailable"
             source = (_ref("read_task", task_id=task_id) if section == "activity" else

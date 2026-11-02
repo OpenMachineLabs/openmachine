@@ -85,7 +85,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
 
     def test_matching_execution_id_on_another_target_is_not_a_verified_binding(self):
         self.accept_plan()
-        identity = self.seed_running(target_identity="f" * 64)["operations"][0]["id"]
+        identity = self.seed_running(machine="other")["operations"][0]["id"]
         receipt = {"execution_id": identity, "task_id": "structured-one", "status": "succeeded"}
         with patch.object(self.app.machines, "read_execution", return_value=receipt):
             result = self.app.read_execution("desktop", identity)
@@ -112,14 +112,14 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.assertFalse((self.work / "result.txt").exists())
         self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
 
-    def seed_running(self, target_identity=None) -> dict:
+    def seed_running(self, machine="desktop") -> dict:
         identity = uuid.uuid4().hex
 
         def retain(record, now):
             record["operations"].append({"id": identity, "stage_id": "verify",
                 "plan_revision": record["plan"]["revision"], "epoch": record["control"]["epoch"],
                 "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                "locator": {"kind": "execution", "machine": "desktop", "target_identity": target_identity,
+                "locator": {"kind": "execution", "machine": machine,
                             "execution_id": identity, "control_seq": None},
                 "admitted_at_ms": now, "state": "observed", "observed_at_ms": now,
                 "result": {"status": "running", "receipt_sha256": "c" * 64,

@@ -170,4 +170,4 @@ def conflicts(first_record: dict, first: dict, second_record: dict, second: dict
             operation_scope(first_record, first), operation_scope(second_record, second))
     # Uncertain local execution or partial file effects retain the target-wide
     # exclusion. Different configured targets have independent worker owners.
-    return (a["target_identity"] or "local") == (b["target_identity"] or "local")
+    return a["machine"] == b["machine"]

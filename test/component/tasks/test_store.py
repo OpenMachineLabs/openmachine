@@ -161,52 +161,47 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         self.fault("task_index_changed", self.app.find_tasks, machine="desktop",
                    expected_generation=current)
 
-    def test_pinned_operations_and_multiple_declared_targets_remain_distinct(self):
+    def test_native_operation_machine_and_declared_targets_remain_distinct(self):
         request = deepcopy(self.request)
-        request["task_id"], request["update_id"] = "remote-task", "2" * 32
-        request["contract"]["targets"].append({"machine": "remote", "workspace": "backend",
+        request["task_id"], request["update_id"] = "secondary-task", "2" * 32
+        request["contract"]["targets"].append({"machine": "secondary", "workspace": "backend",
             "workspace_identity": "a" * 64, "head_sha": None})
         tasks.create(self.state, request["task_id"], request["update_id"], request["title"],
                      request["anchors"], request["origin"], request["contract"], request["stages"])
         def admit(record, now):
             op = self.operation_fixture(record, now, 1)
-            op["locator"].update(machine="remote", target_identity="b" * 64)
+            op["locator"]["machine"] = "secondary"
             record["operations"].append(op)
-        tasks.update(self.state, "remote-task", admit)
-        workspace = self.app.find_tasks(machine="remote", workspace="backend",
+        tasks.update(self.state, "secondary-task", admit)
+        workspace = self.app.find_tasks(machine="secondary", workspace="backend",
                                         workspace_identity="a" * 64)
-        self.assertEqual([item["task_id"] for item in workspace["tasks"]], ["remote-task"])
-        self.assertEqual(self.app.find_tasks(machine="remote", workspace="backend",
+        self.assertEqual([item["task_id"] for item in workspace["tasks"]], ["secondary-task"])
+        self.assertEqual(self.app.find_tasks(machine="secondary", workspace="backend",
                                              workspace_identity="c" * 64)["total"], 0)
-        exact = self.app.find_tasks(machine="remote", target_identity="b" * 64)
+        exact = self.app.find_tasks(machine="secondary")
         self.assertEqual(exact["tasks"][0]["operation_targets"], [
-            {"kind": "execution", "machine": "remote", "target_identity": "b" * 64}])
-        self.assertEqual(self.app.find_tasks(machine="remote", target_identity="c" * 64)["total"], 0)
-        self.assertEqual(self.app.find_tasks(machine="remote")["total"], 1)
-        self.assertEqual(self.app.find_tasks(machine="remote", workspace="other")["total"], 0)
+            {"kind": "execution", "machine": "secondary"}])
+        self.assertEqual(self.app.find_tasks(machine="absent")["total"], 0)
+        self.assertEqual(self.app.find_tasks(machine="secondary", workspace="other")["total"], 0)
 
-    def test_scoped_discovery_checks_original_operation_index_bindings(self):
+
+    def test_scoped_discovery_checks_original_native_machine_index_bindings(self):
         self.create()
         def admit(record, now):
             operation = self.operation_fixture(record, now, 1)
-            operation["locator"]["target_identity"] = "b" * 64
             record["operations"].append(operation)
         tasks.update(self.state, "structured-one", admit)
-        for column, forged, selected in (
-                ("machine", "forged", {"machine": "forged", "target_identity": "b" * 64}),
-                ("target_identity", "c" * 64, {"machine": "desktop", "target_identity": "c" * 64})):
-            with self.subTest(column=column):
-                with sqlite3.connect(self.path) as connection:
-                    connection.execute(f"UPDATE operations SET {column}=?", (forged,))
-                self.fault("corrupt_tasks", self.app.find_tasks, **selected)
-                self.fault("corrupt_tasks", self.app.find_tasks)
-                with sqlite3.connect(self.path) as connection:
-                    connection.execute(f"UPDATE operations SET {column}=?",
-                                       ("desktop" if column == "machine" else "b" * 64,))
-        valid = self.app.find_tasks(machine="desktop", target_identity="b" * 64)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("UPDATE operations SET machine=?", ("forged",))
+        self.fault("corrupt_tasks", self.app.find_tasks, machine="forged")
+        self.fault("corrupt_tasks", self.app.find_tasks)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("UPDATE operations SET machine=?", ("desktop",))
+        valid = self.app.find_tasks(machine="desktop")
         self.assertEqual(valid["total"], 1)
         self.assertEqual(valid["tasks"][0]["operation_targets"], [
-            {"kind": "execution", "machine": "desktop", "target_identity": "b" * 64}])
+            {"kind": "execution", "machine": "desktop"}])
+
 
     def test_derived_target_index_upgrades_old_sqlite_without_rewriting_tasks(self):
         original = self.create()["record"]
@@ -224,7 +219,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
             self.assertTrue(database.target_indexes_ready(connection))
             self.assertEqual(database.metadata(connection)["generation"], generation)
             self.assertEqual(tuple(connection.execute("SELECT current,sha256 FROM tasks").fetchone()), tuple(stored))
-            clause, args = task_store._target_filter("desktop", "project", "", "")
+            clause, args = task_store._target_filter("desktop", "project", "")
             plan = [item[3] for item in connection.execute(
                 "EXPLAIN QUERY PLAN SELECT task_id FROM tasks WHERE " + clause, args)]
             self.assertTrue(any("task_target_" in step for step in plan), plan)
@@ -595,7 +590,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         identity = f"{number:032x}"
         return {"id": identity, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
             "request_sha256": "a" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-            "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+            "locator": {"kind": "execution", "machine": "desktop",
                         "execution_id": identity, "control_seq": None},
             "admitted_at_ms": now, "state": "observed", "observed_at_ms": now,
             "result": {"status": "succeeded", "receipt_sha256": "b" * 64, "summary": "Synthetic retained result.", "log_offset": 0}}

@@ -95,17 +95,13 @@ class Application:
             raise
         return getattr(provider, operation)(self.config, **arguments, transport=transport)
 
-    def probe_machine(self, machine: str) -> dict:
-        return self.machines.probe(machine)
-
     def get_capabilities(self) -> dict:
-        has_ssh = any(item.transport == "ssh" for item in self.config.machines.values())
         return {
             "environment_observation": environment.capabilities(),
             "project_catalog": projects.capabilities(),
             "device_access": {"protocol": 1, "directory_selector": "workspace_name", "absolute_local_directories": True},
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
-            "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": (item.transport == "ssh" or item.local_access == "full_access") and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
+            "machines": {name: {**item.model_dump(), "workspace_write_effective": (item.local_access == "full_access") and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
@@ -119,9 +115,8 @@ class Application:
                       "foreground_wait": {"max_seconds": task_attention.MAX_WAIT_SECONDS,
                           "handoff_grace_seconds": task_attention.HANDOFF_GRACE_MS // 1000,
                           "attention_reasons": list(task_attention.ATTENTION_REASONS)},
-                      "local_result_observation": True,
-                      "ssh_result_observation": self.machines.ssh_recovery is not None},
-            "integrations": (["github"] if self.config.github is not None else []) + (["ssh"] if has_ssh else []),
+                      "local_result_observation": True},
+            "integrations": (["github"] if self.config.github is not None else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(),
                                                            "backend": "native", "legacy_gh": "retired",
                                                            "probe_status": "not_probed", "read_and_merge": True},
@@ -139,7 +134,7 @@ class Application:
                           "wait_seconds": {"default": 0, "min": 0, "max": execution.MAX_WAIT},
                           "max_waiting_readers": execution.MAX_WAITERS,
                           "termination_grace_seconds": {"default": execution.DEFAULT_GRACE, "min": 0, "max": 30},
-                          "containment": {"native": "posix_session", "ssh": "systemd_scope"}},
+                          "containment": {"native": "posix_session"}},
             "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
                           "worktrees": {"discovery": True, "selection": True, "creation": True,
                                         "automatic_allocation": False, "automatic_cleanup": False,
@@ -252,10 +247,10 @@ class Application:
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
                    limit: int = 20, expected_generation: int = -1, *, machine: str = "",
-                   workspace: str = "", workspace_identity: str = "", target_identity: str = "") -> dict:
+                   workspace: str = "", workspace_identity: str = "") -> dict:
         return tasks.find(self.state, query, anchors or [], task_id, offset, limit, expected_generation,
                           machine=machine, workspace=workspace, workspace_identity=workspace_identity,
-                          target_identity=target_identity)
+                          )
 
     def _task_view(self, task_id: str, *, wait_expired: bool = False, operation_ids: tuple[str, ...] = ()) -> dict:
         view = self.task_observer.project(tasks.read(self.state, task_id, operation_ids=operation_ids))
@@ -429,10 +424,9 @@ class Application:
             try:
                 view = self._task_view(identity, operation_ids=(result["execution_id"],))
                 if "record" in view:
-                    target = self.config.machine(machine).ssh_identity or None
                     if not any(item["id"] == result["execution_id"] and item["locator"]["kind"] == "execution"
                                and item["locator"]["execution_id"] == result["execution_id"]
-                               and item["locator"]["target_identity"] == target
+                               and item["locator"]["machine"] == machine
                                for item in view["record"]["operations"]):
                         raise Fault("task_operation_conflict", "The receipt is not an admitted execution of this task.")
                     feedback = {"status": "supervised", "task_id": identity,

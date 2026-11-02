@@ -68,7 +68,7 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
         result, _ = task_receipts.observation(operation, receipt)
         self.assertEqual(result["status"], "unknown")
         task_operation = {"state": "unknown", "locator": {
-            "kind": "execution", "machine": "my-laptop", "target_identity": None,
+            "kind": "execution", "machine": "my-laptop",
             "execution_id": original_id, "control_seq": None}, "result": result}
         return directory, original, task_operation
 
@@ -117,11 +117,6 @@ class RebootlessUpgradeTests(RuntimeCaseFixture, unittest.TestCase):
         candidates = {
             "removed": Settings.model_validate({
                 "schema_version": 1, "machines": {"replacement": {"transport": "local"}}}),
-            "rebound_to_ssh": Settings.model_validate({
-                "schema_version": 1,
-                "machines": {"my-laptop": {"transport": "ssh", "ssh_alias": "replacement",
-                             "ssh_worker": "/workers/" + "a" * 64 + ".pyz",
-                             "ssh_identity": "b" * 64}}}),
         }
         for name, candidate in candidates.items():
             with self.subTest(name=name), self.assertRaises(Fault) as error:

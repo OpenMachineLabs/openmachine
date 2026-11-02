@@ -26,7 +26,7 @@ Write grants include reads; empty scope grants none. Owner/repository matching
 is case-insensitive and exact, not wildcard/substring. Legacy `repositories`
 cannot mix with explicit read/write scope fields. Account pinning checks API
 identity, not Git author metadata; no automatic login, account switch, credentials
-copy or Git-config repair occurs. Missing GitHub must not block local/SSH work.
+copy or Git-config repair occurs. Missing GitHub must not block independent native Core work.
 
 `doctor --github [--repository owner/project]` explicitly probes authentication
 and access; capabilities remain unprobed metadata. Read PR head/base before paged

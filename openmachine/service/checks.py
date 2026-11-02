@@ -28,8 +28,7 @@ def check_state(config_path: Path, state: Path) -> dict:
     task_state = tasks.check_state(state)
     execution.check_workspace_leases(config, state)
     changes = workspace.check_change_state(state)
-    from integrations.ssh.setup import check_state as ssh_setup_state
-    return {**executions, **changes, **task_state, **ssh_setup_state(state), **_ssh_recovery_state(state), **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
+    return {**executions, **changes, **task_state, **service_state._recovery_state(state), **service_state._policy_state(state), **_events_state(state), **_connections_state(state), "version": __version__, "protocol": PROTOCOL, "state_contract": STATE_CONTRACT,
             "management_contract": service_state.MANAGEMENT_CONTRACT, "sqlite_runtime": tasks.sqlite_runtime(),
             "prefix": str(Path(sys.prefix).resolve()), "configuration_sha256": config.configuration_sha256()}
 
@@ -115,41 +114,8 @@ def _events_state(state: Path) -> dict:
         raise Fault("events_corrupt", "Retired Events history is missing, unsafe or corrupt; preserve it without activation.") from error
 
 
-def _ssh_recovery_state(state: Path) -> dict:
-    # Import only for retained integration state, including when SSH was disabled
-    # later. The connection owner validates its own history; service never edits it.
-    if os.path.lexists(state / "ssh-recovery.json") or os.path.lexists(state / "locks/ssh-recovery.lock"):
-        from integrations.ssh.recovery import check_state
-        return check_state(state)
-    return {"ssh_recovery_present": False, "ssh_recovery_format": 1,
-            "ssh_recovery_targets": 0, "ssh_recovery_sha256": None}
 
 
-def machine_unused(config, state: Path, name: str, *, check_remote: bool = True) -> None:
-    """Never strand a configured workspace, task reference or remote receipt."""
-    from openmachine import tasks
-    from integrations.ssh import client, recovery
-
-    target = config.machine(name)
-    if any(item.machine == name for item in config.workspaces.values()):
-        raise Fault("machine_in_use", "A configured workspace still references this machine.")
-    history = tasks.check_state(state)
-    if history["task_records"] != history["structured_task_records"]:
-        raise Fault("machine_in_use", "Legacy task history cannot prove that this target is unused; preserve the connection.")
-    if tasks.references_target(state, name, target.ssh_identity):
-        raise Fault("machine_in_use", "A retained task still references this machine.")
-    if target.ssh_identity in recovery.read(state)["targets"]:
-        raise Fault("machine_in_use", "Retained SSH observation history still references this identity.")
-    if not target.ssh_identity:
-        raise Fault("machine_in_use", "An unpinned target cannot prove that remote history is absent; preserve its connection.")
-    if check_remote:
-        # Turning grants off does not erase earlier work outside controller tasks.
-        probe = client.call(config, name, "probe")
-        records = client.call(config, name, "list_executions", limit=1)
-        if (type(probe.get("workspace_change_records")) is not int or probe["workspace_change_records"] != 0
-                or records.get("executions") != [] or records.get("unreadable") != []
-                or records.get("next_cursor", "unknown") is not None):
-            raise Fault("machine_in_use", "The remote target retains original work; preserve its connection.")
 
 
 _HISTORICAL_CHANGE_NO_EFFECT = frozenset(
@@ -161,7 +127,7 @@ def _cleanup_task_machine(operation: dict, historical: dict | None) -> str | Non
     machine = locator.get("machine")
     if (operation.get("state") == "unknown" and result.get("status") == "unknown"
             and locator.get("kind") == "execution" and locator.get("control_seq") is None
-            and locator.get("target_identity") is None and result.get("receipt_sha256")
+            and result.get("receipt_sha256")
             and (historical or {}).get(locator.get("execution_id")) ==
                 (machine, result["receipt_sha256"])):
         return machine
@@ -195,7 +161,7 @@ def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: st
     def target_rebound(machine: str) -> bool:
         old, new = current.machines[machine], candidate.machines.get(machine)
         return (new is None or new.transport != old.transport
-                or old.transport == "ssh" and new.ssh_identity != old.ssh_identity)
+                )
 
     changed = {(item.machine, name) for name, item in current.workspaces.items()
                if candidate.workspaces.get(name) != item or target_rebound(item.machine)}
@@ -207,8 +173,6 @@ def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: st
             raise Fault("workspace_reference_unavailable", "Changing an existing workspace's machine identity is unsupported.")
         if name == probe_workspace:
             raise Fault("workspace_in_use", "The service readiness workspace is pinned; retain it during updates.")
-        if current.machine(machine).transport != "local":
-            raise Fault("workspace_reference_unavailable", "Remote workspace changes need an owner-verified history policy.")
         if tasks.references_workspace(state, machine, name):
             raise Fault("workspace_in_use", "A retained Task still names this workspace; preserve its original contract.")
         # A registered sibling Git worktree is still an original selected project,
@@ -332,15 +296,6 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
         if events["events_present"] and (value["state_contract"] < 9 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in events.items())):
             raise ValueError("candidate cannot preserve retired Events history without reactivating delivery")
-        recovery = _ssh_recovery_state(state)
-        from integrations.ssh.setup import check_state as ssh_setup_state
-        setup = ssh_setup_state(state)
-        if setup["ssh_setup_records"] and (value["state_contract"] < 22 or any(
-                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in setup.items())):
-            raise ValueError("candidate ignores original SSH preparation records")
-        if recovery["ssh_recovery_present"] and (value["state_contract"] < 7 or any(
-                type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in recovery.items())):
-            raise ValueError("candidate ignores or changes retained SSH observation budgets")
         runtime_recovery = service_state._recovery_state(state)
         if runtime_recovery["runtime_recovery_present"] and (value["state_contract"] < 8 or any(
                 type(value.get(key)) is not type(expected) or value[key] != expected for key, expected in runtime_recovery.items())):
@@ -399,7 +354,7 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
 
 async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_version: str,
                  expected_pid: int | None = None, *, expected_contract: int = STATE_CONTRACT,
-                 check_remote: bool = False, timeout_seconds: float | None = None) -> dict:
+                 timeout_seconds: float | None = None) -> dict:
     import httpx2 as httpx
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
@@ -408,10 +363,9 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
     selected = config.workspaces.get(probe["workspace"])
     if selected is None or config.machine(selected.machine).transport != "local":
         raise Fault("invalid_service_probe", "Select one configured local workspace and a permitted existing text file.")
-    remote_targets = [name for name, item in config.machines.items() if item.transport == "ssh"] if check_remote else []
     try:
-        async with asyncio.timeout(timeout_seconds if timeout_seconds is not None else 8 + 30 * len(remote_targets)):
-            async with httpx.AsyncClient(trust_env=False, timeout=30 if remote_targets else 5,
+        async with asyncio.timeout(timeout_seconds if timeout_seconds is not None else 8):
+            async with httpx.AsyncClient(trust_env=False, timeout=5,
                     transport=httpx.AsyncHTTPTransport(uds=str(socket_path))) as client:
                 async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer):
                     async with ClientSession(reader, writer) as session:
@@ -429,27 +383,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                         read = result.structured_content
                         if result.is_error or not read["exists"]:
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
-                        remote_records = {}
-                        for name in remote_targets:
-                            cursor, count = "", 0
-                            while True:
-                                response = await session.call_tool("list_executions", {
-                                    "machine": name, "cursor": cursor, "limit": 100})
-                                page = response.structured_content
-                                if response.is_error or not isinstance(page, dict) or page.get("unreadable"):
-                                    raise Fault("incompatible_remote_state", "The candidate cannot validate retained target receipts.")
-                                if page.get("target_identity") != config.machines[name].ssh_identity:
-                                    raise Fault("incompatible_remote_state", "The candidate did not verify the configured target identity.")
-                                count += len(page["executions"])
-                                following = page["next_cursor"]
-                                if following is None:
-                                    break
-                                if not isinstance(following, str) or following <= cursor:
-                                    raise Fault("incompatible_remote_state", "Target receipt pagination made no progress.")
-                                cursor = following
-                            remote_records[name] = count
                         return {"status": "ready", "version": expected_version, "configuration_sha256": fingerprint,
-                                "ssh_records_checked": remote_records,
                                 "pid": caps["lifecycle"]["pid"], "file_sha256": read["sha256"],
                                 "tunnel": "not_probed", "chatgpt": "not_probed"}
     except Exception as error:
@@ -469,10 +403,10 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
 
 
 def probe_service(state: Path, config_path: Path, probe: dict, version: str, pid: int | None = None,
-                  *, expected_contract: int = STATE_CONTRACT, check_remote: bool = False,
+                  *, expected_contract: int = STATE_CONTRACT,
                   timeout_seconds: float | None = None) -> dict:
     return asyncio.run(_probe(state / "mcp.sock", config_path, probe, version, pid,
-                              expected_contract=expected_contract, check_remote=check_remote, timeout_seconds=timeout_seconds))
+                              expected_contract=expected_contract, timeout_seconds=timeout_seconds))
 
 
 def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None = None,
@@ -492,27 +426,3 @@ def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None 
     if relationship.returncode or relationship.stdout.strip() != str(parent):
         raise Fault("service_identity_mismatch", "The MCP process is not a child of the selected managed service.")
     return {**ready, "supervisor_pid": parent}
-
-
-def _remote_workspace_state(python: Path, config_path: Path, name: str) -> dict:
-    """Ask that exact installed controller and pinned endpoint to validate target history."""
-    from openmachine import workspace
-
-    target = load(config_path).machines[name]
-    result = processes.run([str(python), "-I", "-m", "openmachine.cli", "--config", str(config_path),
-                   "doctor", "--machine", name], timeout=35)
-    try:
-        value = json.loads(result.stdout)
-        if (result.returncode not in (0, 1) or value.get("identity_verified") is not True or
-            result.returncode == 1 and not value.get("unavailable_workspaces") or
-            value.get("target_identity") != target.ssh_identity or
-            value.get("worker_sha256") != Path(target.ssh_worker).stem or
-            not _change_support(value) or
-            type(value.get("workspace_change_records")) is not int or not 0 <= value["workspace_change_records"] <= workspace.MAX_CHANGES or
-            type(value.get("workspace_change_store_present")) is not bool or
-            type(value.get("legacy_workspace_compatible")) is not bool or
-            not value["workspace_change_store_present"] and value["workspace_change_records"] != 0):
-            raise ValueError
-        return value
-    except (ValueError, TypeError, KeyError, AttributeError) as error:
-        raise Fault("incompatible_remote_state", "The original target workspace history or lease compatibility was not verified.") from error

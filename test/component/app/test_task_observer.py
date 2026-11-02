@@ -191,7 +191,7 @@ class TaskObserverTests(TaskObserverCaseFixture, unittest.TestCase):
     def test_no_remote_or_provider_observation_and_changed_local_route_is_blocked(self):
         def configure(record, index):
             if index == 0:
-                record["operations"][0]["locator"]["target_identity"] = "a" * 64
+                record["operations"][0]["locator"]["machine"] = "unknown"
             elif index == 1:
                 binding = {"connection_id": "c" * 32, "account_id": 1, "authorization_revision": 1}
                 record["contract"]["repositories"] = ["Example/repo"]

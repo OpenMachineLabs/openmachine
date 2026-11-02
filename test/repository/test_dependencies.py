@@ -75,9 +75,9 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
             "openmachine.foundation.files": ("import os\nfrom typing import TYPE_CHECKING\n"
                                             "if TYPE_CHECKING:\n    import openmachine.config\n"
                                             "import typing\nif typing.TYPE_CHECKING:\n    import mcp", False),
-            "openmachine.cli": ("def main():\n    from integrations.ssh.bundle import build_bundle\n"
+             "openmachine.cli": ("def main():\n    from openmachine.bootstrap import create_application\n"
                                 "    from openmachine.server import serve", False),
-            "integrations.ssh.endpoint": ("from openmachine.execution.worker import worker", False),
+            "openmachine.execution.worker": ("from openmachine.execution.records import FORMAT", False),
         })
 
 

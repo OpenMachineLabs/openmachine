@@ -99,17 +99,6 @@ The current resolved state alone cannot prove who performed a historical write.
 The existing Task receipt format is unchanged; older readers preserve uncertainty
 but cannot use the new acknowledgement proof to recover it.
 
-## SSH connection or remote command fails
-
-Test the existing SSH alias with batch mode and strict host-key verification.
-Check the exact worker archive digest, Python/Git versions and systemd user-manager
-prerequisites. `doctor --machine NAME` is an explicit probe, never provisioning.
-Verify the returned target identity independently before pinning it.
-
-An unexpected identity, unavailable remote workspace or old worker is not fixed
-by substituting local results. Preserve target state and old archives used by
-original jobs. Follow [Remote SSH](features/ssh.md) for the complete sequence.
-
 ## GitHub login works, but repository access fails
 
 Check the native selected account, Core repository scope and official App resource

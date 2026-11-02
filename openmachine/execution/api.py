@@ -21,7 +21,7 @@ from openmachine.workspace import worktrees
 from . import control as controls, observation
 from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
-                      effective_request, is_remote, read_record, reconciled_record, record_directory,
+                      effective_request, read_record, reconciled_record, record_directory,
                       require_cleanup_only_unknown, require_reconcilable,
                       resolve_terminal_size, termination_grace)
 
@@ -60,20 +60,15 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
           workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
           termination_grace_seconds: float | None = None, tty: bool = False, terminal_size: dict | None = None,
-          *, remote_worker: Path | None = None, validate_new: Callable[[], object] | None = None) -> dict:
+          *, validate_new: Callable[[], object] | None = None) -> dict:
     target = config.machine(machine, write=True)
     keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id,
                           termination_grace_seconds, tty, terminal_size)
-    if target.transport != "local":
-        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     try:
         working = Path(cwd).resolve(strict=True)
     except OSError as error:
         raise Fault("context_unavailable", "The original cwd is unavailable; read the original execution directly.") from error
-    if not working.is_dir() or getattr(config, "is_ssh_worker", False) and not any(
-        working.is_relative_to(Path(item.root).resolve())
-        for item in config.workspaces.values() if item.machine == machine
-    ):
+    if not working.is_dir():
         raise Fault("invalid_cwd", "The working directory must belong to a configured workspace on this machine.")
     state = private_directory(state)
     private_directory(state / "executions")
@@ -93,7 +88,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return observation.read(config, state, machine, execution_id)
         _admit(config, state, machine, execution_id, working, request,
-               remote_worker=remote_worker, validate_new=validate_new)
+               validate_new=validate_new)
     return observation.read(config, state, machine, execution_id)
 
 
@@ -150,7 +145,7 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
                        "tty": False, "terminal_size": None, "worktree_creation": intent}
             before_admission = False
             _admit(config, state, machine, execution_id, Path(plan["source_root"]), request,
-                   remote_worker=remote_worker, creation_plan=plan)
+                   creation_plan=plan)
         return observation.read(config, state, machine, execution_id)
     except (Fault, OSError) as error:
         if before_admission:
@@ -187,7 +182,7 @@ def _creation_parent_roots(config: "Settings", machine: str, destination: Path) 
 
 
 def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
-           working: Path, request: dict, *, remote_worker: Path | None,
+           working: Path, request: dict, *,
            validate_new: Callable[[], object] | None = None,
            creation_plan: dict | None = None) -> None:
     """Admit once under the original ID lease; creation plans are internal only."""
@@ -266,22 +261,12 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                               "exited_at": None, "exit_signal": None},
                   "stop": {"reason": None, "requested_at": None,
                            "grace_seconds": request["termination_grace_seconds"], "force_used": False},
-                  "cleanup": {"containment": "systemd_scope" if remote_worker else "posix_session",
+                  "cleanup": {"containment": "posix_session",
                               "status": "pending", "error": None}}
-        if remote_worker is not None:
-            record.update(scope_unit=f"openmachine-{execution_id}.scope")
-            observed.update(target_identity=machine, worker_archive=str(remote_worker),
-                            worker_sha256=remote_worker.stem)
         with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
             save_json(directory / "record.json", record)
             fds = [lease.fileno() for lease in owned]
             launcher = [sys.executable, "-I", "-m", "openmachine.execution"]
-            if remote_worker is not None:
-                launcher = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--no-ask-password",
-                            "--expand-environment=no", "--unit=" + record["scope_unit"],
-                            f"--property=TimeoutStopSec={request['termination_grace_seconds'] + 7}s",
-                            f"--property=RuntimeMaxSec={timeout_seconds + request['termination_grace_seconds'] + 30}s",
-                            sys.executable, "-I", str(remote_worker), "worker"]
             try:
                 process = subprocess.Popen(
                     [*launcher, str(directory), str(worker_lease.fileno()), *(str(fd) for fd in fds)],
@@ -349,8 +334,6 @@ def check_workspace_leases(config, state: Path, *, legacy_candidate: bool = Fals
 def _activation_resources(config: "Settings", state: Path, record: dict) -> dict[Path, bool]:
     """Recover only existing, originally named local workspace/resource leases."""
     machine = record["request"]["machine"]
-    if config.machine(machine).transport != "local":
-        raise Fault("unsupported_operation", "Historical local cleanup is not an SSH scope.")
     request = effective_request(record)
     validate_start(request["cwd"], request["argv"], request["timeout_seconds"], request["expected_head_sha"],
                    request["workspace_access"], request["resource_keys"], request["task_id"],
@@ -361,9 +344,6 @@ def _activation_resources(config: "Settings", state: Path, record: dict) -> dict
     targets = [Path(root)]
     if record["format_version"] == CREATION_FORMAT:
         targets.append(Path(record["context"]["creation_plan"]["source_root"]))
-    if getattr(config, "is_ssh_worker", False) and any(not any(target.is_absolute() and target.is_relative_to(Path(item.root).resolve())
-                   for item in config.workspaces.values() if item.machine == machine) for target in targets):
-        raise Fault("invalid_cwd", "Original execution workspaces no longer match the configured local grants.")
     resources = {state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock"): False}
     if record["format_version"] == CREATION_FORMAT:
         for parent in _creation_parent_roots(config, machine, Path(root)):
@@ -404,8 +384,6 @@ def activation_guard(config: "Settings", state: Path, execution_ids: list[str]):
 
 def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
     """Append original-ID cleanup evidence; never launch, signal or rewrite history."""
-    if config.machine(machine).transport != "local":
-        raise Fault("unsupported_operation", "Native cleanup reconciliation is local-only; retain the original SSH scope route.")
     directory = record_directory(state, execution_id)
     if not directory.exists():
         raise Fault("execution_not_found", "No receipt exists for this execution ID on this store.")
@@ -428,9 +406,6 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
             targets = [Path(root)]
             if record["format_version"] == CREATION_FORMAT:
                 targets.append(Path(record["context"]["creation_plan"]["source_root"]))
-            if getattr(config, "is_ssh_worker", False) and any(not any(target.is_relative_to(Path(item.root).resolve())
-                           for item in config.workspaces.values() if item.machine == machine) for target in targets):
-                raise Fault("invalid_cwd", "The original cleanup target is no longer in a configured workspace.")
             path = state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")
             locks.enter_context(lease(path, create=False))
             if record["format_version"] == CREATION_FORMAT:
@@ -468,19 +443,8 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
 
 
 def cancel(config: "Settings", state: Path, machine: str, execution_id: str) -> dict:
-    if config.machine(machine).transport != "local":
-        raise Fault("remote_path", "Use application routing for an execution on a remote machine.")
     directory = record_directory(state, execution_id)
     record, status = observation.receipt(directory, machine)
-    if status == "finishing" and is_remote(record) and record["status"] in TERMINAL:
-        # Only a mutation tool may request cleanup again; reads never stop a scope.
-        try:
-            subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=5, check=True)
-        except (OSError, subprocess.SubprocessError) as error:
-            raise Fault("outcome_unknown", "Scope cleanup is unverified; read the original execution.") from error
-        return observation.read(config, state, machine, execution_id)
     if status == "outcome_unknown":
         raise Fault("outcome_unknown", "Worker ownership is unverified; cancellation cannot claim termination.")
     if status in TERMINAL:

@@ -232,7 +232,6 @@ class Control(Model):
 class ExecutionLocator(Model):
     kind: Literal["execution"]
     machine: Name
-    target_identity: SHA | None
     execution_id: ID
     control_seq: Integer | None
 
@@ -240,7 +239,6 @@ class ExecutionLocator(Model):
 class ChangeLocator(Model):
     kind: Literal["change"]
     machine: Name
-    target_identity: SHA | None
     change_id: ID
 
 
@@ -472,7 +470,7 @@ class Handoff(Model):
 
 class Recovery(Model):
     episode_id: ID
-    category: Literal["local_observation", "ssh_observation", "runtime_readiness", "delivery", "claim"]
+    category: Literal["local_observation", "runtime_readiness", "delivery", "claim"]
     started_at_ms: Integer
     deadline_ms: Integer
     attempts: Integer

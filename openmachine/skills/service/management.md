@@ -52,7 +52,7 @@ live below `<state-dir>/service/`. Preserve the selected base Python too: never
 move a venv or delete an old worker's installation. Tasks, executions, changes,
 Skills and their stable locks retain their existing owners and paths.
 
-The captured installation `PATH`, not shell startup files, supplies Git/SSH and
+The captured installation `PATH`, not shell startup files, supplies Git and
 explicitly requested command-line tools.
 Packaged runtime installations derive their native `PATH` from the selected retained
 payload, so activation/restoration selects that candidate's Git without changing
@@ -135,7 +135,7 @@ original cleanup reconciliation tool remains stricter because changing an
 execution result requires actual native cleanup proof. The selected Core's
 service process may restart; macOS itself need not reboot for this case.
 
-For explicitly changed configuration or SSH routes, leave the active file unchanged
+For explicitly changed configuration, leave the active file unchanged
 and pass `update --candidate-config /absolute/new.toml`. The owner snapshots exact
 bytes and includes them in the prepared installation identity, so the same wheel
 or payload can activate a different configuration with a distinct rollback target.
@@ -145,7 +145,7 @@ edit is preserved with uncertainty, not overwritten. Cooperative locks do not
 fence external editors or another runtime/state root.
 
 Protocol or state-contract numbers alone do not prove compatibility. Actual readers must
-cover every retained execution, task, workspace format, SSH budget, managed
+cover every retained execution, task, workspace format, managed
 recovery, retired Events archive and connection record, even terminal-only history or disabled
 integrations. Native connection format 2 needs the contract-11 reader; old-only
 format-1 connection state retains its exact hash for supported prior readers.
@@ -394,7 +394,7 @@ fabricate the missing original operation outcome or unblock uncertain history.
 
 Product activation conservatively defers active/unresolved execution, task,
 workspace-write, native-login or busy lifecycle admission. Original
-workers, target archives, receipts and local/SSH observation budgets are never
+workers, receipts and native observation budgets are never
 cancelled or reset to pass a gate. A deferred operation does not auto-activate when
 work becomes idle. Configuration or policy drift rejects continuation rather than
 rebasing the accepted request. Incomplete preparation is retained; no immutable

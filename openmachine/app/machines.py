@@ -1,6 +1,5 @@
-"""Configured machine routing and controller-owned execution task references."""
+"""Native machine operations; Cloud device routing is owned by the Connector."""
 
-from collections.abc import Callable
 from pathlib import Path
 import threading
 
@@ -10,54 +9,34 @@ from openmachine.foundation.sanitize import Fault
 
 
 class Machines:
-    def __init__(self, config: Settings, state: Path, ssh_call: Callable[..., dict] | None, ssh_recovery=None):
+    def __init__(self, config: Settings, state: Path):
         self.config = config
         self.state = state
-        self.ssh_call = ssh_call
-        self.ssh_recovery = ssh_recovery
-
-    def _ssh(self, machine: str, operation: str, **arguments) -> dict:
-        if self.ssh_call is None:
-            raise Fault("not_ssh", "Select a configured SSH target, or omit the explicit doctor target.")
-        return self.ssh_call(self.config, machine, operation, **arguments)
 
     def _native_read(self, machine: str):
         selected = self.config.machine(machine)
-        if selected.transport == "local" and selected.local_access is None:
-            raise Fault("local_approval_required", "Explicit Read Only or Full Access is required for local native reads.")
+        if selected.local_access is None:
+            raise Fault("local_approval_required", "Explicit Read Only or Full Access is required for native reads.")
         return selected
-
-    def probe(self, machine: str) -> dict:
-        self.config.machine(machine)
-        return self._ssh(machine, "probe")
 
     def inspect_environment(self, machine: str, workspace_name: str, section: str, worktree: str = "",
                             executables=None, ports=None, limit: int = 10) -> dict:
-        arguments = dict(workspace_name=workspace_name, section=section, worktree=worktree,
-                         executables=executables, ports=ports, limit=limit)
-        if self._native_read(machine).transport == "ssh":
-            return self._ssh(machine, "inspect_environment", observation_version=execution.OBSERVATION_VERSION, **arguments)
-        return execution.inspect_environment(self.config, machine, **arguments)
+        self._native_read(machine)
+        return execution.inspect_environment(self.config, machine, workspace_name=workspace_name,
+            section=section, worktree=worktree, executables=executables, ports=ports, limit=limit)
 
     def inspect_workspace(self, machine: str, workspace_name: str, action: str, path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
                           expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
-        selection = {"worktree": worktree} if worktree else {}
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "inspect_workspace", workspace=workspace_name, action=action,
-                             path=path, offset=offset, limit=limit, query=query, staged=staged,
-                             expected_snapshot=expected_snapshot, path_glob=path_glob, **selection)
+        self._native_read(machine)
         return workspace.inspect(self.config, machine, workspace_name, action, path, offset, limit,
-                                 query=query, staged=staged, expected_snapshot=expected_snapshot, path_glob=path_glob,
-                                 **selection)
+            query=query, staged=staged, expected_snapshot=expected_snapshot, path_glob=path_glob,
+            **({"worktree": worktree} if worktree else {}))
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str,
                             offset: int = 0, expected_sha256: str = "", start_line: int | None = None,
                             line_count: int = 200, worktree: str = "") -> dict:
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "read_workspace_file", workspace=workspace_name, path=path,
-                             offset=offset, expected_sha256=expected_sha256, start_line=start_line, line_count=line_count,
-                             **({"worktree": worktree} if worktree else {}))
+        self._native_read(machine)
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.read_text_file(config, machine, workspace_name, path, offset, expected_sha256,
                                         start_line, line_count)
@@ -65,15 +44,10 @@ class Machines:
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
                              expected_workspace_identity: str = "", worktree: str = "") -> dict:
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "write_workspace_file", workspace=workspace_name, path=path,
-                             content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256,
-                             change_id=change_id, expected_workspace_identity=expected_workspace_identity,
-                             **({"worktree": worktree} if worktree else {}))
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.write_text_file(config, self.state, machine, workspace_name, path, content,
-                                         expected_head_sha, expected_sha256, change_id, expected_workspace_identity,
-                                         validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+            expected_head_sha, expected_sha256, change_id, expected_workspace_identity,
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
 
     def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
                             expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
@@ -83,11 +57,9 @@ class Machines:
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run,
                          expected_plan_sha256=expected_plan_sha256)
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "edit_workspace_file", **arguments, **({"worktree": worktree} if worktree else {}))
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.edit_text_file(config, self.state, machine, **arguments,
-                                       validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
 
     def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
                               expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
@@ -97,8 +69,6 @@ class Machines:
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          preconditions=preconditions, create_parents=create_parents, change_id=change_id,
                          dry_run=dry_run, expected_plan_sha256=expected_plan_sha256)
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "apply_workspace_patch", **arguments, **({"worktree": worktree} if worktree else {}))
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.apply_patch(config, self.state, machine, **arguments,
             validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
@@ -106,25 +76,15 @@ class Machines:
     def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
                         new_branch: str, execution_id: str, expected_workspace_identity: str,
                         worktree: str = "", task_id: str = "", *, task_admitted: bool = False) -> dict:
-        arguments = dict(workspace_name=workspace_name, destination=destination, base_ref=base_ref,
-                         new_branch=new_branch, execution_id=execution_id,
-                         expected_workspace_identity=expected_workspace_identity, worktree=worktree, task_id=task_id)
-        if self.config.machine(machine).transport == "ssh":
-            if task_id and not task_admitted:
-                try:
-                    self._ssh(machine, "read_execution", execution_id=execution_id)
-                except Fault as error:
-                    if error.code != "execution_not_found":
-                        raise
-                    tasks.require_legacy(self.state, task_id)
-            return self._ssh(machine, "create_worktree", **arguments)
-        return execution.create_worktree(self.config, self.state, machine, **arguments,
+        return execution.create_worktree(self.config, self.state, machine,
+            workspace_name=workspace_name, destination=destination, base_ref=base_ref,
+            new_branch=new_branch, execution_id=execution_id, expected_workspace_identity=expected_workspace_identity,
+            worktree=worktree, task_id=task_id,
             validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False,
                               *, cancelled: threading.Event | None = None) -> dict:
-        if self._native_read(machine).transport == "ssh":
-            return self._ssh(machine, "read_workspace_change", change_id=change_id, observe_current=observe_current, cancelled=cancelled)
+        self._native_read(machine)
         return workspace.read_change(self.config, self.state, machine, change_id, observe_current)
 
     def start_execution(self, machine: str, execution_id: str, cwd: str, argv: list[str],
@@ -132,50 +92,28 @@ class Machines:
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
                         task_id: str = "", termination_grace_seconds: float | None = None,
                         tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False) -> dict:
-        target = self.config.machine(machine, write=True)
-        if target.transport == "ssh":
-            keys = execution.validate_start(cwd, argv, timeout_seconds, expected_head_sha,
-                                            workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size)
-            if task_id and not task_admitted:
-                # A pre-read only decides whether a new controller reference is needed.
-                # The target start must still compare the original normalized request.
-                try:
-                    self._ssh(machine, "read_execution", execution_id=execution_id)
-                except Fault as error:
-                    if error.code != "execution_not_found":
-                        raise
-                    tasks.require_legacy(self.state, task_id)
-            return self._ssh(machine, "start_execution", execution_id=execution_id, cwd=cwd, argv=argv,
-                             timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
-                             workspace_access=workspace_access, resource_keys=keys, task_id=task_id,
-                             termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size)
+        self.config.machine(machine, write=True)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
-                               expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
-                               validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
+            expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
+            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
                        max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,
                        *, cancelled: threading.Event | None = None) -> dict:
+        self._native_read(machine)
         execution.validate_read(offset, max_bytes, wait_seconds)
-        if self._native_read(machine).transport == "ssh":
-            return self._ssh(machine, "read_execution", execution_id=execution_id, offset=offset,
-                             max_bytes=max_bytes, wait_seconds=wait_seconds, cancelled=cancelled)
         return execution.read(self.config, self.state, machine, execution_id, offset, max_bytes,
                               wait_seconds, cancelled=cancelled)
 
     def list_executions(self, machine: str, cursor: str = "", limit: int = 20) -> dict:
-        if self._native_read(machine).transport == "ssh":
-            return self._ssh(machine, "list_executions", cursor=cursor, limit=limit)
+        self._native_read(machine)
         return execution.list_records(self.config, self.state, machine, cursor, limit)
 
     def cancel_execution(self, machine: str, execution_id: str) -> dict:
-        if self.config.machine(machine).transport == "ssh":
-            return self._ssh(machine, "cancel_execution", execution_id=execution_id)
         return execution.cancel(self.config, self.state, machine, execution_id)
 
     def control_execution(self, machine: str, execution_id: str, expected_control_seq: int,
                           action: str, text: str | None = None, terminal_size: dict | None = None) -> dict:
         arguments = execution.control_request(expected_control_seq, action, text, terminal_size)
-        if self.config.machine(machine, write=action in {"write_stdin", "resize"}).transport == "ssh":
-            return self._ssh(machine, "control_execution", execution_id=execution_id, **arguments)
+        self.config.machine(machine, write=action in {"write_stdin", "resize"})
         return execution.control_execution(self.config, self.state, machine, execution_id, **arguments)

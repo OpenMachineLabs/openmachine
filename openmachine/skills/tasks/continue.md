@@ -21,15 +21,12 @@ Changed inputs invalidate affected results without erasing valid evidence.
 
 For target-scoped listing, `find_tasks(machine=..., workspace=...,
 workspace_identity=...)` matches **current declared** Task targets (including
-multi-target Tasks). `machine` alone also includes original operations on that
-machine; `machine + target_identity` matches only operations pinned to that exact
-target identity, never a guessed workspace. An operation does not prove which
-workspace it used. Unpinned historical identities remain unknown; do not attribute
-them to a newly paired SSH machine by name. Rows provide state, declared targets,
-bounded original operation target identities, owner Task-store identity, and
-available timestamps; null means unavailable. Follow `next_offset` only with
-`expected_generation`; `task_index_changed` requires restarting at zero.
-The derived SQLite indexes are installed on new stores or explicit managed Task
+multi-target Tasks). A machine-only query also includes original operations on
+that machine; an operation alone does not prove Workspace membership. Results
+include state, declared targets, bounded native operation-machine references,
+owning Task-store identity and available timestamps. Follow `next_offset` only
+with `expected_generation`; `task_index_changed` requires restarting at zero.
+Derived SQLite indexes are installed on new stores or explicit managed Task
 migration; `task_index_upgrade_required` never triggers a reader-side repair.
 
 `read_task` schema 2 defaults to the complete current authority summary, with
@@ -43,7 +40,7 @@ Migration-era legacy summaries remain complete original bounded records.
 
 ## Original-result observation
 
-The service observer collects previously admitted local and SSH command, control,
+The service observer collects previously admitted native command, control,
 cancel and change receipts without a connected Chat client. Bounded observation
 faults and retry budgets appear in read_task. Results and handoffs are observed,
 never replayed, automatically accepted or used to authorize new effects.

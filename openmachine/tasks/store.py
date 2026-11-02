@@ -431,28 +431,19 @@ def require_legacy(state: Path, identity: str) -> None:
         raise Fault("supervised_admission_unavailable", "Supply current task_context for structured work; a bare task_id is not authority.")
 
 
-def _target_filter(machine: str, workspace: str, workspace_identity: str,
-                   target_identity: str) -> tuple[str, list[str]]:
-    if (any(not isinstance(value, str) for value in
-            (machine, workspace, workspace_identity, target_identity))
-            or any(value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value)
-                   for value in (machine,))
+def _target_filter(machine: str, workspace: str, workspace_identity: str) -> tuple[str, list[str]]:
+    if (any(not isinstance(value, str) for value in (machine, workspace, workspace_identity))
+            or machine and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", machine)
             or workspace and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", workspace) and (
                 not Path(workspace).is_absolute() or len(workspace.encode()) > 1024 or ".." in Path(workspace).parts
                 or any(ord(c) < 32 or ord(c) == 127 for c in workspace))
-            or any(value and not re.fullmatch(r"[0-9a-f]{64}", value)
-                   for value in (workspace_identity, target_identity))
-            or workspace and not machine or workspace_identity and not workspace
-            or target_identity and (not machine or workspace or workspace_identity)):
-        raise Fault("invalid_task_filter", "Select a machine and optional workspace/identity, or a pinned operation target identity.")
+            or workspace_identity and not re.fullmatch(r"[0-9a-f]{64}", workspace_identity)
+            or workspace and not machine or workspace_identity and not workspace):
+        raise Fault("invalid_task_filter", "Select a machine and optional workspace/identity.")
     if not machine:
         return "", []
-    if target_identity:
-        return ("task_id IN (SELECT task_id FROM operations INDEXED BY operation_target "
-                "WHERE machine=? AND target_identity=?)", [machine, target_identity])
     keys = ("machine", "workspace", "workspace_identity")[:1 + bool(workspace) + bool(workspace_identity)]
-    sources = []
-    values = []
+    sources, values = [], []
     for slot in range(4):
         sources.append(f"SELECT task_id FROM tasks INDEXED BY task_target_{slot} WHERE "
                        + " AND ".join(f"{db.target_field(slot, key)}=?" for key in keys))
@@ -463,8 +454,7 @@ def _target_filter(machine: str, workspace: str, workspace_identity: str,
     return "task_id IN (" + " UNION ".join(sources) + ")", values
 
 
-def _list_row(connection, row, store_identity: str, machine: str, workspace: str,
-              target_identity: str) -> dict:
+def _list_row(connection, row, store_identity: str, machine: str, workspace: str) -> dict:
     value = db.decode(row["current"], row["sha256"])
     if value.get("task_id", row["task_id"]) != row["task_id"] or value["revision"] != row["revision"]:
         raise Fault("corrupt_tasks", "Task list metadata differs from its current authority.")
@@ -472,27 +462,18 @@ def _list_row(connection, row, store_identity: str, machine: str, workspace: str
     terminal = value.get("terminal") if structured else None
     operations = []
     if structured:
-        # An indexed match is a candidate, not evidence: verify the original
-        # operation before treating its denormalized target as Task membership.
-        if machine and (target_identity or not workspace):
-            if target_identity:
-                sql = ("SELECT * FROM operations INDEXED BY operation_target "
-                       "WHERE machine=? AND target_identity=? AND task_id=? LIMIT 1")
-                arguments = (machine, target_identity, row["task_id"])
-            else:
-                sql = ("SELECT * FROM operations INDEXED BY operation_locator "
-                       "WHERE task_id=? AND machine=? LIMIT 1")
-                arguments = (row["task_id"], machine)
-            match = connection.execute(sql, arguments).fetchone()
+        if machine and not workspace:
+            match = connection.execute("SELECT * FROM operations INDEXED BY operation_locator "
+                "WHERE task_id=? AND machine=? LIMIT 1", (row["task_id"], machine)).fetchone()
             if match is not None:
                 decode_operation(match)
-        observed = connection.execute("""SELECT * FROM operations
+        observed = connection.execute('''SELECT * FROM operations
             WHERE task_id=? AND kind IN ('execution','change') AND machine IS NOT NULL
-            GROUP BY kind,machine,target_identity ORDER BY kind,machine,target_identity LIMIT 9""",
+            GROUP BY kind,machine ORDER BY kind,machine LIMIT 9''',
             (row["task_id"],)).fetchall()
         for item in observed[:8]:
             decode_operation(item)
-            operations.append({key: item[key] for key in ("kind", "machine", "target_identity")})
+            operations.append({key: item[key] for key in ("kind", "machine")})
     return {"task_id": row["task_id"], "title": value["title"], "revision": row["revision"],
             "kind": row["kind"], "state": value["control"]["state"] if structured else None,
             "owner_store_identity": store_identity,
@@ -505,8 +486,8 @@ def _list_row(connection, row, store_identity: str, machine: str, workspace: str
 
 def find(state: Path, query: str = "", anchors: list[str] | None = None, identity: str = "", offset: int = 0,
          limit: int = 20, expected_generation: int = -1, *, machine: str = "",
-         workspace: str = "", workspace_identity: str = "", target_identity: str = "") -> dict:
-    scoped, scope_args = _target_filter(machine, workspace, workspace_identity, target_identity)
+         workspace: str = "", workspace_identity: str = "") -> dict:
+    scoped, scope_args = _target_filter(machine, workspace, workspace_identity)
     if identity:
         task_id(identity)
     wanted = validate_metadata("lookup", anchors or [])["anchors"]
@@ -558,7 +539,7 @@ def find(state: Path, query: str = "", anchors: list[str] | None = None, identit
             total = connection.execute("SELECT count(*) FROM tasks" + where, arguments).fetchone()[0]
             rows = connection.execute("SELECT task_id,kind,current,sha256,revision FROM tasks" + where
                                       + " ORDER BY task_id LIMIT ? OFFSET ?", [*arguments, limit, offset])
-            page = [_list_row(connection, row, owner["identity"], machine, workspace, target_identity)
+            page = [_list_row(connection, row, owner["identity"], machine, workspace)
                     for row in rows]
         if expected_generation != -1 and generation != expected_generation:
             raise Fault("task_index_changed", "Task lookup changed between pages; use its current generation.")
@@ -614,23 +595,7 @@ def locator_matches(state: Path, identity: str, locator: dict) -> bool:
         return any(all(db.decode(row["payload"], row["sha256"])["locator"].get(key) == value for key, value in locator.items()) for row in rows)
 
 
-def references_target(state: Path, machine: str, target_identity: str) -> bool:
-    with db.connect(state) as connection:
-        if connection is None:
-            if not os.path.lexists(state / "tasks"):
-                return False
-            with _legacy_read(state) as root:
-                for identity, item in read_index(root)["tasks"].items():
-                    if item.get("owner") == "structured":
-                        record, _ = read_structured(root, identity)
-                        if any(target["machine"] == machine for target in record["contract"]["targets"]) or any(
-                                op["locator"].get("machine") == machine or target_identity and op["locator"].get("target_identity") == target_identity for op in record["operations"]):
-                            return True
-                return False
-        if connection.execute("SELECT 1 FROM operations WHERE machine=? OR target_identity=? LIMIT 1", (machine, target_identity or "")).fetchone():
-            return True
-        rows = connection.execute("SELECT current,sha256 FROM tasks WHERE kind='structured'")
-        return any(any(item["machine"] == machine for item in db.decode(row["current"], row["sha256"])["contract"]["targets"]) for row in rows)
+
 
 
 def references_workspace(state: Path, machine: str, workspace: str) -> bool:

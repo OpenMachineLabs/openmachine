@@ -16,7 +16,7 @@ def operation_key(locator: dict) -> tuple:
             object_type = "pull_request" if locator["object_type"] == "merge" else locator["object_type"]
             return "github_destination", locator["repository"].casefold(), object_type, locator["number"]
         return kind, locator["repository"].casefold(), locator["anchor"]
-    return kind, locator["target_identity"] or "local", locator["execution_id" if kind == "execution" else "change_id"]
+    return kind, locator["machine"], locator["execution_id" if kind == "execution" else "change_id"]
 
 
 def _key(locator: dict) -> str:
@@ -94,7 +94,7 @@ def decode_operation(row) -> dict:
         value = records.Operation.model_validate(value).model_dump()
         locator = value["locator"]
         indexes = {key: value[key] for key in ("id", "stage_id", "plan_revision", "epoch", "admitted_at_ms", "observed_at_ms")}
-        indexes.update(kind=locator["kind"], machine=locator.get("machine"), target_identity=locator.get("target_identity"),
+        indexes.update(kind=locator["kind"], machine=locator.get("machine"),
                        repository=locator.get("repository", "").casefold() or None, effect_key=_key(locator),
                        pending=int(records.pending(value)), unresolved=int(effects.unresolved(value)),
                        outcome=(value["result"] or {}).get("status"),
@@ -176,12 +176,12 @@ def validate_operation(operation: dict, current: dict) -> dict:
 def put_operation(connection, identity: str, operation: dict, ordinal: int) -> None:
     locator = operation["locator"]
     payload, sha = db.encoded(operation)
-    connection.execute("""INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    connection.execute("""INSERT INTO operations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(task_id,id) DO UPDATE SET observed_at_ms=excluded.observed_at_ms,pending=excluded.pending,
       unresolved=excluded.unresolved,outcome=excluded.outcome,payload=excluded.payload,sha256=excluded.sha256,
       effect_key=excluded.effect_key""", (identity, operation["id"], ordinal, operation["stage_id"],
         operation["plan_revision"], operation["epoch"], locator["kind"], locator.get("machine"),
-        locator.get("target_identity"), locator.get("repository", "").casefold() or None, _key(locator),
+        locator.get("repository", "").casefold() or None, _key(locator),
         operation["admitted_at_ms"], operation["observed_at_ms"], int(records.pending(operation)),
         int(effects.unresolved(operation)), (operation["result"] or {}).get("status"), payload, sha,
         locator.get("execution_id", locator.get("change_id", locator.get("anchor")))))

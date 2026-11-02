@@ -153,9 +153,8 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
     private_directory(state)
     private_directory(state / "locks")
 
-    has_ssh = any(item.transport == "ssh" for item in config.machines.values())
-    machine_read = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=has_ssh)
-    file_write = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=has_ssh)
+    machine_read = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+    file_write = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 
     @guided_tool(annotations=READ)
     async def get_capabilities() -> CallToolResult:
@@ -174,7 +173,7 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
 
     register_task_tools(application, guided_tool, waiting)
 
-    register_execution_tools(application, guided_tool, waiting, machine_read, has_ssh)
+    register_execution_tools(application, guided_tool, waiting, machine_read)
 
     register_github_tools(application, config, guided_tool)
 

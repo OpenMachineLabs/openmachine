@@ -19,16 +19,14 @@ not permission to mutate an existing installation.
 | --- | --- |
 | `init` | `--workspace` selects an existing local directory; optional `--enable-commands` and `--enable-workspace-writes` independently grant first-run capabilities. Never overwrites. |
 | `doctor` | Read configuration and local directory availability; live integrations remain unprobed. |
-| `doctor --machine NAME` | Explicit SSH probe and identity/workspace result. |
 | `doctor --github --repository OWNER/REPO` | Probe selected native account and an optional configured repository; does not start login. |
 | `doctor --service` | Verify the selected managed service and its readiness-file read. |
-| `worker-bundle --directory PATH` | Build the selected version's content-addressed worker archive; does not transfer it. |
 | `serve` | Serve MCP on the private state-directory Unix socket only. |
 | `rebuild-task-index` | Explicitly rebuild a bounded page of derived metadata, not task history; continuation needs the observed `--expected-generation`. |
 
-The three `doctor` target options are mutually exclusive. `--repository` requires
+The `doctor` target options are mutually exclusive. `--repository` requires
 `--github`. Read [installation](../getting-started/installation.md),
-[configuration](../configuration/reference.md) and [SSH](../features/ssh.md)
+[configuration](../configuration/reference.md)
 before using the corresponding commands.
 
 ## Managed macOS service
@@ -64,11 +62,6 @@ After the explicit global paths, use `manage --contract 1 COMMAND`:
 | `retire` | `--operation-id`; reject only an eligible deferred update proven not activated. |
 | `rollback` | Explicit compatible restoration, not workload rollback. |
 | `machines` | Read configured machine information. |
-| `machine-probe` | `--name`; probe an existing configured SSH machine. |
-| `machine-test` | `--name`, `--ssh-alias`, `--ssh-worker`; test a prepared route without adding it. |
-| `machine-add` | `--name`, `--ssh-alias`, `--ssh-worker`, verified `--ssh-identity`, original `--operation-id`, observed `--config-sha256`. |
-| `machine-remove` | `--name`, original `--operation-id`, observed `--config-sha256`; guarded configuration removal, not remote data deletion. |
-
 For configuration consent, require the `update:configuration_consent` capability
 and supply both file digests. `--config-sha256` is the active file digest returned
 by `manage machines`; `--candidate-sha256` is the reviewed candidate file digest

@@ -8,7 +8,7 @@ its actual outcome instead of treating a lost chat response as permission to rer
 
 Enable `execution_enabled` only on the intended machine. Select its configured
 workspace and actual `cwd`, inspect applicable instructions, and resolve the
-needed executable. SSH additionally needs the [prepared target](ssh.md).
+needed executable.
 For structured task work, the current claim and task contract must admit the
 operation. Client approval remains separate from Core's grant.
 

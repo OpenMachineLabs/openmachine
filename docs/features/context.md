@@ -6,7 +6,7 @@ not an agent memory database, a monitoring daemon or an authorization grant.
 
 ## Configure and select
 
-Use an existing configured local workspace or a prepared, identity-pinned SSH
+Use an existing configured local workspace or a approved local Core
 workspace. No additional configuration flag is needed. Choose only the sections
 relevant to your question:
 
@@ -57,7 +57,7 @@ opt-in environment data describes the selected target observer.
 
 Sections are not an atomic snapshot. Resource totals are not reserved capacity;
 GPU metadata is not a utilization or complete compute-device inventory. Older
-SSH workers may not support environment observation. Preserve that error instead
+Unsupported devices may not support environment observation. Preserve that error instead
 of substituting local facts or silently installing a new worker.
 
 The [environment Skill](https://github.com/OpenMachineLabs/openmachine/blob/main/openmachine/skills/environment/SKILL.md)

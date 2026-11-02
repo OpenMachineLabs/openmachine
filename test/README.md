@@ -149,13 +149,13 @@ explicit retained-coverage map in the PR.
 All tests remain under root `test/`; no additional test framework, network
 account or GPU is required. Private disposable directories, short owned processes
 and local Unix sockets are fixtures, not production projects or live
-SSH/ChatGPT acceptance.
+ChatGPT acceptance.
 
 ## Compatibility and packaging
 
 The import check owns every installed production module and checks absolute,
 relative, function-local and re-export edges plus cycles. Type-only imports do not
-pull controller dependencies onto SSH targets. Explicit checks do not model all
+pull unexpected runtime dependencies into unrelated owners. Explicit checks do not model all
 implicit initialization/dynamic imports; isolated assembly/archive startup and
 full-source review cover those limits. Do not add a dynamic import to evade them.
 
@@ -164,14 +164,12 @@ temporary environment and compares every canonical Skill `.py`, `.yaml` and `.md
 file with source bytes. Missing, extra, changed, duplicate and retired `_skills`
 resources fail the gate. Installed resource coverage compares the installed copy
 with the same source. Behavioral tests execute once after this payload parity
-check. Preserve the console and execution/service module entrypoints. The curated
-SSH archive runs with `-I -S` without controller app/tasks/service/GitHub/MCP/Pydantic.
-Its actual worker fixture verifies inherited leases and an original counter=1.
+check. Preserve the console and execution/service module entrypoints..
 New source members change artifact hashes, not protocol/state semantics by assertion.
 
 Use independently installed old/new readers against disposable original records:
 legacy and structured tasks including terminal-only data, workspace formats 1/2,
-execution/control receipts, SSH/managed recovery and retired Events archives. Check exact bytes,
+execution/control receipts, managed recovery and retired Events archives. Check exact bytes,
 identity and outcome before/after; missing/unsupported history must not become an
 empty store, replay or permissive rollback. A matching version string alone is not
 an artifact identity. State/lock paths, inode ownership and acquisition order are
@@ -181,10 +179,9 @@ compatibility contracts, not cosmetic implementation details.
 
 [contract/mcp/mcp_contract.json](contract/mcp/mcp_contract.json) retains the released baseline
 and explicitly approved schema deltas. It is an independent expected catalog, not
-regenerated from a candidate to hide drift. Compare all four GitHub/SSH enablement
-configurations and both supported protocols without normalizing actual results.
+regenerated from a candidate to hide drift. Compare GitHub enabled/disabled configurations and both supported protocols without normalizing actual results.
 Duplicate tools, pagination, changed annotations or missing fields are failures.
-Discovery contacts no GitHub/SSH host. Existing behavior checks own results/errors,
+Discovery contacts no GitHub host. Existing behavior checks own results/errors,
 limits, source integrity and lifecycle semantics not captured by schema snapshots.
 
 An authorized contract change requires exact baseline/candidate provenance and
@@ -200,7 +197,7 @@ records, explicit retirement errors and rejection of native account substitution
 ## Evidence boundaries
 
 Mocked launchctl is not native service acceptance; private-socket SDK sessions are
-not real ChatGPT conversations; synthetic SSH transport is not live target evidence.
+not real ChatGPT conversations; simulated native transport is not live-device evidence.
 A true transition uses distinct immutable candidates, preserved original workers/
 records/configuration and verified restoration or explicit uncertainty. Run such
 checks only on authorized disposable resources, never production services or NAS/GPU

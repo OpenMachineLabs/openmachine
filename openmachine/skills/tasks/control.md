@@ -64,7 +64,7 @@ A live foreign owner must release first. Cancellation and terminal history canno
 be reopened; an expired paused task stays paused, with no new owner or handoff,
 until a separate explicit resume.
 
-Outstanding local and SSH effects, including partial results, block plan replacement. Unresolved
+Outstanding native effects, including partial results, block plan replacement. Unresolved
 GitHub effects may survive a revision only with unchanged repositories and original
 native account bindings. Their operation IDs, request/source hashes, original plan
 revisions, receipts and uncertainty remain intact. Revision does not reconcile an

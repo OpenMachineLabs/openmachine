@@ -4,7 +4,6 @@
     "app": {
       "boundary_tests": [
         "test/component/app/test_github_admission.py",
-        "test/component/app/test_ssh_routes.py",
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_observer.py",
         "test/component/app/test_worktree_admission.py",
@@ -15,11 +14,15 @@
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/resilience/tasks/test_mcp_restart.py",
         "test/component/projects/test_catalog.py",
-        "test/contract/mcp/projects/test_catalog.py"
+        "test/contract/mcp/projects/test_catalog.py",
+        "test/component/workspace/test_reads.py",
+        "test/contract/mcp/execution/test_schema.py",
+        "test/contract/mcp/workspace/test_reads.py"
       ],
       "sources": [
         "openmachine/app/__init__.py",
-        "openmachine/app/environment.py"
+        "openmachine/app/environment.py",
+        "openmachine/app/machines.py"
       ],
       "tests": [
         "test/component/app/test_environment.py",
@@ -65,7 +68,6 @@
       "tests": [
         "test/component/cli/test_commands.py",
         "test/component/cli/test_management.py",
-        "test/component/cli/test_ssh_doctor.py",
         "test/component/cli/test_startup.py"
       ]
     },
@@ -86,11 +88,8 @@
         "test/component/bootstrap/test_composition.py",
         "test/component/cli/test_commands.py",
         "test/component/cli/test_management.py",
-        "test/component/cli/test_ssh_doctor.py",
-        "test/component/service/test_machines.py",
         "test/contract/mcp/server/test_catalog.py",
         "test/contract/mcp/server/test_transport.py",
-        "test/contract/mcp/ssh/test_discovery.py",
         "test/contract/mcp/server/test_updates.py",
         "test/component/projects/test_catalog.py"
       ],
@@ -145,7 +144,6 @@
         "test/resilience/app/test_mcp_admission.py",
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/app/test_task_execution.py",
-        "test/resilience/ssh/test_archive.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/component/app/test_target_environment.py"
       ],
@@ -235,27 +233,6 @@
         "test/component/github/test_web_broker.py"
       ]
     },
-    "machine_routes": {
-      "boundary_tests": [
-        "test/component/app/test_environment.py",
-        "test/component/app/test_execution_dispatch.py",
-        "test/component/app/test_workspace_dispatch.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/component/ssh/test_workspace_changes.py",
-        "test/component/ssh/test_workspace_patch.py",
-        "test/component/ssh/test_workspace_reads.py",
-        "test/component/workspace/test_reads.py",
-        "test/contract/mcp/execution/test_schema.py",
-        "test/contract/mcp/workspace/test_reads.py",
-        "test/component/app/test_target_environment.py"
-      ],
-      "sources": [
-        "openmachine/app/machines.py"
-      ],
-      "tests": [
-        "test/component/app/test_ssh_routes.py"
-      ]
-    },
     "repository": {
       "boundary_tests": [],
       "sources": [
@@ -306,7 +283,6 @@
       "boundary_tests": [
         "test/contract/mcp/execution/test_schema.py",
         "test/contract/mcp/github/test_scope.py",
-        "test/contract/mcp/ssh/test_discovery.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/contract/mcp/tasks/test_schema.py",
         "test/contract/mcp/workspace/test_edits.py",
@@ -341,7 +317,6 @@
     },
     "service_checks": {
       "boundary_tests": [
-        "test/component/service/test_machines.py",
         "test/component/service/test_maintenance.py",
         "test/component/service/test_transition.py",
         "test/resilience/execution/test_process.py",
@@ -382,7 +357,6 @@
         "openmachine/service/maintenance.py"
       ],
       "tests": [
-        "test/component/service/test_machines.py",
         "test/component/service/test_maintenance.py",
         "test/component/service/test_management_cli.py",
         "test/resilience/service/test_maintenance_process.py"
@@ -451,7 +425,6 @@
     },
     "service_transition": {
       "boundary_tests": [
-        "test/component/service/test_machines.py",
         "test/component/service/test_maintenance.py",
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/service_checks/test_mcp_readiness.py"
@@ -489,7 +462,6 @@
         "openmachine/skills/service/SKILL.md",
         "openmachine/skills/service/management.md",
         "openmachine/skills/service/runtime-payload.md",
-        "openmachine/skills/service/ssh.md",
         "openmachine/skills/tasks/SKILL.md",
         "openmachine/skills/tasks/continue.md",
         "openmachine/skills/tasks/control.md",
@@ -503,34 +475,6 @@
       "tests": [
         "test/component/skills/test_packaging.py",
         "test/component/skills/test_resources.py"
-      ]
-    },
-    "ssh": {
-      "boundary_tests": [
-        "test/component/app/test_ssh_observation.py",
-        "test/component/app/test_ssh_routes.py",
-        "test/component/cli/test_ssh_doctor.py",
-        "test/component/service/test_machines.py"
-      ],
-      "sources": [
-        "integrations/ssh/__init__.py",
-        "integrations/ssh/bundle.py",
-        "integrations/ssh/client.py",
-        "integrations/ssh/endpoint.py",
-        "integrations/ssh/recovery.py",
-        "integrations/ssh/setup.py",
-        "integrations/ssh/provision.py"
-      ],
-      "tests": [
-        "test/component/ssh/test_recovery.py",
-        "test/component/ssh/test_transport.py",
-        "test/component/ssh/test_workspace_changes.py",
-        "test/component/ssh/test_workspace_patch.py",
-        "test/component/ssh/test_workspace_reads.py",
-        "test/contract/mcp/ssh/test_discovery.py",
-        "test/resilience/ssh/test_archive.py",
-        "test/resilience/ssh/test_transport.py",
-        "test/component/ssh/test_setup.py"
       ]
     },
     "task_admission": {
@@ -583,7 +527,6 @@
         "openmachine/app/task_observer.py"
       ],
       "tests": [
-        "test/component/app/test_ssh_observation.py",
         "test/component/app/test_task_observer.py",
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/app/test_observer_process.py"
@@ -593,7 +536,6 @@
       "boundary_tests": [
         "test/component/app/test_github_admission.py",
         "test/component/app/test_scoped_supervision.py",
-        "test/component/app/test_ssh_observation.py",
         "test/component/app/test_task_admission.py",
         "test/component/app/test_task_observer.py",
         "test/component/app/test_worktree_admission.py",
@@ -653,9 +595,6 @@
         "test/component/app/test_worktree_admission.py",
         "test/component/server/test_mcp_workspace.py",
         "test/component/service/test_workspace_compatibility.py",
-        "test/component/ssh/test_workspace_changes.py",
-        "test/component/ssh/test_workspace_patch.py",
-        "test/component/ssh/test_workspace_reads.py",
         "test/contract/mcp/tasks/test_admission.py",
         "test/resilience/app/test_mcp_admission.py",
         "test/resilience/execution/test_worktrees.py",
@@ -745,8 +684,7 @@
   },
   "support": {
     "test/contract/mcp/mcp_contract.json": [
-      "test/contract/mcp/server/test_catalog.py",
-      "test/contract/mcp/ssh/test_discovery.py"
+      "test/contract/mcp/server/test_catalog.py"
     ],
     "test/support/application_admission.py": [
       "test/component/app/test_execution_dispatch.py",
@@ -810,7 +748,6 @@
       "test/contract/mcp/github/test_scope.py",
       "test/contract/mcp/server/test_catalog.py",
       "test/contract/mcp/server/test_transport.py",
-      "test/contract/mcp/ssh/test_discovery.py",
       "test/contract/mcp/tasks/test_admission.py",
       "test/contract/mcp/tasks/test_attention.py",
       "test/contract/mcp/tasks/test_schema.py",
@@ -858,22 +795,13 @@
       "test/component/cli/test_management.py",
       "test/component/service/test_checks.py",
       "test/component/service/test_install.py",
-      "test/component/service/test_machines.py",
       "test/component/service/test_maintenance.py",
       "test/component/service/test_management_cli.py",
       "test/component/service/test_runtime.py",
       "test/component/service/test_state.py",
       "test/component/service/test_transition.py",
       "test/resilience/service/test_maintenance_process.py",
-      "test/resilience/service/test_subprocess.py",
-      "test/component/ssh/test_setup.py"
-    ],
-    "test/support/ssh_cases.py": [
-      "test/component/app/test_ssh_routes.py",
-      "test/component/cli/test_ssh_doctor.py",
-      "test/component/ssh/test_recovery.py",
-      "test/component/ssh/test_transport.py",
-      "test/resilience/ssh/test_archive.py"
+      "test/resilience/service/test_subprocess.py"
     ],
     "test/support/task_observer_cases.py": [
       "test/component/app/test_task_observer.py",
@@ -885,8 +813,6 @@
       "test/component/app/test_initialization.py",
       "test/component/app/test_lifecycle.py",
       "test/component/app/test_scoped_supervision.py",
-      "test/component/app/test_ssh_observation.py",
-      "test/component/app/test_ssh_routes.py",
       "test/component/app/test_task_admission.py",
       "test/component/app/test_task_attention.py",
       "test/component/app/test_task_observer.py",
@@ -912,9 +838,6 @@
     ],
     "test/support/workspace.py": [
       "test/component/service/test_workspace_compatibility.py",
-      "test/component/ssh/test_workspace_changes.py",
-      "test/component/ssh/test_workspace_patch.py",
-      "test/component/ssh/test_workspace_reads.py",
       "test/component/workspace/test_changes.py",
       "test/component/workspace/test_patch.py",
       "test/component/workspace/test_reads.py",

@@ -66,7 +66,7 @@ class TaskTransitionTests(unittest.TestCase):
         return record
 
     def operation(self, record, identity, *, status="succeeded", number=7, fields=None, local=False):
-        locator = {"kind": "execution", "machine": "fixture", "target_identity": None,
+        locator = {"kind": "execution", "machine": "fixture",
                    "execution_id": identity, "control_seq": None} if local else {
             "kind": "github", "repository": "Owner/repo", "object_type": "pull_request",
             "number": number, "parent_number": None, "anchor": "fixture:original-request",

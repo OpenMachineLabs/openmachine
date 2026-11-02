@@ -12,7 +12,7 @@ import openmachine
 
 LIGHTWEIGHT = ("pydantic", "openmachine.config", "openmachine.execution", "openmachine.tasks",
                "openmachine.workspace", "openmachine.service.checks", "openmachine.service.install",
-               "openmachine.service.transition", "integrations.ssh", "mcp", "httpx2")
+               "openmachine.service.transition", "mcp", "httpx2")
 CLI = '''
 import contextlib
 import io
@@ -168,5 +168,5 @@ else:
 assert "mcp" in sys.modules and "httpx2" in sys.modules
 print(json.dumps({"validated": True}))
 ''', arguments=[str(self.config), str(self.state)], blocked=("openmachine.tasks", "openmachine.execution",
-                "openmachine.workspace", "openmachine.service.install", "openmachine.service.transition", "integrations.ssh"))
+                "openmachine.workspace", "openmachine.service.install", "openmachine.service.transition"))
         self.assertTrue(result["validated"])

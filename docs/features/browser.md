@@ -53,7 +53,7 @@ message or configuration change from a successful controller exit.
 Timeouts are bounded to 1-1,800 seconds. Cancel through the original execution,
 then inspect the receipt; cancellation is not rollback of browser effects. The
 runtime's browser resource lease does not coordinate manual browsing or unrelated
-Codex sessions. Remote SSH browsers and desktop computer mode are not supplied.
+Codex sessions. Remote browser automation and desktop computer mode require separately authorized native support.
 
 The [browser operating guide](https://github.com/OpenMachineLabs/openmachine/blob/main/openmachine/skills/browser/reference.md)
 owns precise bridge, login, tab-evidence and delegation boundaries.

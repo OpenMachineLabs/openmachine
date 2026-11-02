@@ -89,7 +89,7 @@ def context(cwd: Path) -> dict:
 
 def whole_device_writes(config) -> bool:
     """One local Full grant makes every non-Git local alias share the global lease."""
-    return not getattr(config, "is_ssh_worker", False) and any(
+    return any(
         m.transport == "local" and m.local_access == "full_access" for m in config.machines.values())
 
 

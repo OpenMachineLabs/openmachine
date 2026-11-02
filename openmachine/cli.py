@@ -25,14 +25,11 @@ def main() -> int:
     prepare.add_argument("--sha256", required=True, help="Manifest digest from the trusted product artifact")
     doctor = commands.add_parser("doctor", help="Inspect configuration or explicitly probe one integration or managed service")
     target = doctor.add_mutually_exclusive_group()
-    target.add_argument("--machine", help="Explicit SSH probe; never installs or enables a target")
     target.add_argument("--github", action="store_true", help="Probe the selected native GitHub identity without initiating login")
     target.add_argument("--service", action="store_true", help="Verify managed service identity and its configured file read")
     doctor.add_argument("--repository", default="", help="With --github, probe one configured repository")
     rebuild = commands.add_parser("rebuild-task-index", help="Explicitly rebuild one bounded page of derived task metadata, never task history")
     rebuild.add_argument("--expected-generation", type=int, default=-1, help="Required observed generation when continuing an incomplete rebuild")
-    bundle = commands.add_parser("worker-bundle", help="Build a content-addressed standard-library SSH worker")
-    bundle.add_argument("--directory", type=Path, required=True)
     serve = commands.add_parser("serve", help="Serve only on the private state-directory Unix socket")
     serving = serve.add_mutually_exclusive_group()
     serving.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
@@ -85,20 +82,6 @@ def main() -> int:
     for action in ("operation", "continue", "retire"):
         operation = management.add_parser(action)
         operation.add_argument("--operation-id", required=True)
-    for action in ("machine-probe", "machine-test", "machine-add", "machine-remove"):
-        operation = management.add_parser(action)
-        operation.add_argument("--name", required=True)
-        if action in {"machine-test", "machine-add"}:
-            operation.add_argument("--ssh-alias", required=True)
-            operation.add_argument("--ssh-worker", required=True)
-        if action == "machine-add":
-            operation.add_argument("--ssh-identity", required=True)
-        if action in {"machine-add", "machine-remove"}:
-            operation.add_argument("--operation-id", required=True)
-            operation.add_argument("--config-sha256", required=True)
-    ssh_setup = management.add_parser("ssh-setup", help="Verify, prepare and register an SSH machine with original-result recovery")
-    ssh_setup.add_argument("--action", choices=("inspect", "trust", "prepare", "status", "save", "continue", "cancel"), required=True)
-    ssh_setup.add_argument("--operation-id", required=True)
     args = parser.parse_args()
     if args.command == "update" and ((args.wheel is not None and args.requirements is None)
                                      or (args.commit is not None and args.requirements is not None)):
@@ -133,23 +116,6 @@ def main() -> int:
                                       expected_candidate_sha256=args.candidate_sha256)
                     if args.expected_selection_sha256 is not None:
                         inputs["expected_selection_sha256"] = args.expected_selection_sha256
-            if action == "ssh-setup":
-                raw = sys.stdin.buffer.read(32769)
-                if len(raw) > 32768:
-                    raise Fault("request_limit", "Use the bounded SSH setup request.")
-                try:
-                    value = json.loads(raw or b"{}")
-                except (ValueError, UnicodeError):
-                    raise Fault("invalid_request", "Use a typed SSH setup object.") from None
-                inputs.update(setup_action=args.action, identity=args.operation_id, value=value)
-            if action.startswith("machine-"):
-                inputs["name"] = args.name
-                if action in {"machine-test", "machine-add"}:
-                    inputs.update(alias=args.ssh_alias, worker=args.ssh_worker)
-                if action == "machine-add":
-                    inputs["pinned"] = args.ssh_identity
-                if action in {"machine-add", "machine-remove"}:
-                    inputs.update(identity=args.operation_id, expected_config_sha256=args.config_sha256)
             if action == "bind":
                 inputs["identity"] = args.identity
             if action == "startup":
@@ -169,10 +135,6 @@ def main() -> int:
             from openmachine.config import initialize
             print(json.dumps(initialize(args.config, args.workspace, commands=args.enable_commands,
                                         workspace_writes=args.enable_workspace_writes)))
-            return 0
-        if args.command == "worker-bundle":
-            from integrations.ssh.bundle import build_bundle
-            print(json.dumps(build_bundle(args.directory)))
             return 0
         if args.command in ("service", "update", "rollback"):
             from openmachine.service import operate
@@ -206,18 +168,13 @@ def main() -> int:
                 from openmachine.bootstrap import create_application
                 print(json.dumps(create_application(config, args.state_dir).github_read("status", args.repository)))
                 return 0
-            if args.machine:
-                from openmachine.bootstrap import create_application
-                result = create_application(config, args.state_dir).probe_machine(args.machine)
-                print(json.dumps(result))
-                return int(not result["identity_verified"] or bool(result["unavailable_workspaces"]))
             unavailable = [name for name, item in config.workspaces.items()
                            if config.machine(item.machine).transport == "local" and not Path(item.root).is_dir()]
             print(json.dumps({"version": __version__, "commit": running_commit(__version__), "configuration": "valid", "unavailable_workspaces": unavailable,
                               "state_directory_exists": args.state_dir.is_dir(),
                               "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed",
                               "github": "not_probed" if config.github is not None else "disabled",
-                              "ssh_targets": {name: "not_probed" for name, item in config.machines.items() if item.transport == "ssh"}}))
+                              "machine_runtime": "native"}))
             return int(bool(unavailable))
         from openmachine.server import serve
         serve(config, args.state_dir, managed=args.managed_child)

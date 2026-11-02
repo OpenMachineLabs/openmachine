@@ -7,7 +7,7 @@ description: Delegate a bounded explicitly authorized browser or UI goal to inst
 # Browser subtasks
 
 Keep Chat in control. Delegate only an explicitly authorized browser/UI subtask;
-use existing API, workspace, GitHub and SSH tools for their own operations.
+use existing API, workspace, GitHub tools for their own operations.
 
 Read [browser delegation](reference.md) before starting. Supply a self-contained
 goal, permitted actions, visible acceptance, selected browser/tab context and exact

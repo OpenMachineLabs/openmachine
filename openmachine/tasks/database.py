@@ -35,7 +35,7 @@ CREATE INDEX task_changes ON tasks(change_seq);
 CREATE INDEX task_titles ON tasks(title_key);
 CREATE TABLE operations (task_id TEXT NOT NULL REFERENCES tasks(task_id), id TEXT NOT NULL,
  ordinal INTEGER NOT NULL, stage_id TEXT NOT NULL, plan_revision INTEGER NOT NULL, epoch INTEGER NOT NULL,
- kind TEXT NOT NULL, machine TEXT, target_identity TEXT, repository TEXT, effect_key TEXT NOT NULL,
+ kind TEXT NOT NULL, machine TEXT, repository TEXT, effect_key TEXT NOT NULL,
  admitted_at_ms INTEGER NOT NULL, observed_at_ms INTEGER, pending INTEGER NOT NULL,
  unresolved INTEGER NOT NULL, outcome TEXT, payload TEXT NOT NULL, sha256 TEXT NOT NULL, locator_id TEXT,
  PRIMARY KEY(task_id,id), UNIQUE(task_id,ordinal)) STRICT;
@@ -43,7 +43,7 @@ CREATE INDEX operation_ids ON operations(id);
 CREATE INDEX operation_keys ON operations(effect_key);
 CREATE INDEX operation_pending ON operations(task_id,unresolved,ordinal);
 CREATE INDEX operation_repository ON operations(repository,unresolved);
-CREATE INDEX operation_target ON operations(machine,target_identity);
+CREATE INDEX operation_target ON operations(machine);
 CREATE INDEX operation_locator ON operations(task_id,machine,locator_id);
 CREATE INDEX operation_stage ON operations(task_id,stage_id,ordinal DESC);
 CREATE INDEX operation_admission ON operations(task_id,epoch,admitted_at_ms);
@@ -76,7 +76,7 @@ TARGET_INDEXES = tuple(
     + ", ".join(target_field(slot, field) for field in
                 ("machine", "workspace", "workspace_identity")) + ")"
     for slot in range(4)
-) + ("CREATE INDEX task_original_targets ON operations(task_id,kind,machine,target_identity)",)
+) + ("CREATE INDEX task_original_targets ON operations(task_id,kind,machine)",)
 
 
 def target_indexes_ready(connection: sqlite3.Connection) -> bool:

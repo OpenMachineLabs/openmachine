@@ -86,7 +86,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             record["operations"].append({"id": identity, "stage_id": "verify",
                 "plan_revision": record["plan"]["revision"], "epoch": record["control"]["epoch"],
                 "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                "locator": {"kind": "execution", "machine": "desktop",
                             "execution_id": identity, "control_seq": None},
                 "admitted_at_ms": now, "state": "unknown" if status == "unknown" else "observed",
                 "observed_at_ms": now, "result": {"status": status, "receipt_sha256": "c" * 64,
@@ -814,7 +814,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         database = self.state / "tasks.db"
         database.write_bytes(b"x" * (records.MAX_RECORD + 1))
         before = database.stat()
-        locator = {"kind": "change", "target_identity": None, "change_id": "a" * 32}
+        locator = {"kind": "change", "change_id": "a" * 32}
         self.fault("corrupt_tasks", tasks.operation_binding, self.state, tasks.operation_key(locator))
         self.assertEqual(database.stat().st_mtime_ns, before.st_mtime_ns)
         self.assertEqual(database.stat().st_size, records.MAX_RECORD + 1)

@@ -175,17 +175,18 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
         self.fault("catalog_limit", lambda: self.target("/".join(["d"] * 33)))
         self.fault("catalog_limit", lambda: self.target("d" * 1025))
 
-    def test_input_contract_and_ssh_do_not_fall_back_to_local_paths(self):
+    def test_input_contract_rejects_non_native_target_without_local_fallback(self):
+        from pydantic import ValidationError
         for arguments in ({"limit": True}, {"limit": 0}, {"limit": 51}, {"offset": -1}, {"offset": True}):
             self.fault("invalid_range", lambda: self.listing(**arguments))
         for arguments in ({"action": "register"}, {"expected_snapshot": "bad"}, {"expected_target_id": "f" * 64}):
             self.fault("invalid_project_request", lambda: self.listing(**arguments))
         self.fault("invalid_project_request", lambda: self.app.inspect_projects("local", action="inspect"))
         self.fault("unknown_workspace", lambda: self.app.inspect_projects("local", "absent"))
-        self.config.machines["remote"] = Machine(transport="ssh", ssh_alias="remote", ssh_worker="/tmp/" + "a" * 64 + ".pyz")
-        self.config.workspaces["remote"] = Workspace(machine="remote", root=str(self.work))
+        with self.assertRaises(ValidationError):
+            Machine(transport="ssh", ssh_alias="legacy-target")
         with patch.object(catalog, "root_for", side_effect=AssertionError("controller fallback")):
-            self.fault("unsupported_operation", lambda: self.app.inspect_projects("remote", "remote"))
+            self.fault("unknown_machine", lambda: self.app.inspect_projects("retired-remote", "retired-remote"))
 
     def test_replacement_during_observation_returns_no_binding(self):
         (self.work / "selected").mkdir()

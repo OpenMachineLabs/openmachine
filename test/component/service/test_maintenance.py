@@ -302,17 +302,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 self.assertEqual(result["implementation_commit"], "e" * 40)
                 self.assertEqual(result["selection_sha256"], maintenance._selection(self.state))
 
-    def test_existing_remote_workspace_cannot_silently_rebind_ssh_identity(self):
-        from openmachine.config import Settings
-        original = Settings.model_validate({"schema_version": 1,
-            "machines": {"remote": {"transport": "ssh", "ssh_alias": "owned-ssh",
-                                    "ssh_worker": "/home/fixture/" + "c" * 64 + ".pyz",
-                                    "ssh_identity": "a" * 64}},
-            "workspaces": {"remote-project": {"machine": "remote", "root": "/home/fixture/project"}}})
-        candidate = original.model_copy(deep=True)
-        candidate.machines["remote"].ssh_identity = "b" * 64
-        self.assert_fault("workspace_reference_unavailable", lambda: service_checks.workspace_bindings_safe(
-            self.state, original, candidate, "local-probe"))
 
     def test_activation_refuses_protected_workspace_before_stopping_core(self):
         self.policy_fixture()

@@ -14,7 +14,7 @@
 | `tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
 | `service/` | Installation, compatibility/readiness, supervision and activation/restoration. |
 | `foundation/` | Shared IO, private state, locks and safe errors; no domain ownership. |
-| `integrations/` | Complete GitHub and SSH implementations; no second engine. |
+| `integrations/` | Complete native GitHub implementation; no second engine. |
 
 Workspace preparation and record ownership are separate from application.
 Task models remain in `records.py`; pure decisions live in `transitions.py`.
@@ -25,7 +25,7 @@ Service remains independent of consuming applications. Existing
 entries remain intact.
 
 Dependencies point inward. Execution uses `workspace.git` only for identity;
-workspace and tasks do not import each other. SSH uses the same local capability
+workspace and tasks do not import each other. Each device uses its own native capability
 code in a curated standard-library-only archive, excluding controller app/tasks,
 service and providers. Application admission spans dispatch, not worker lifetime.
 Source moves never move persistent state, replace stable locks or authorize replay.

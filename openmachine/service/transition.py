@@ -36,24 +36,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
         checks._candidate_state(service_state._runtime(state, target) / "bin/python", candidate_path, state, installed["state_contract"])
         pending_origin = record["pending"]
         restoring = pending_origin is not None and target == pending_origin["from"]
-        if installed["state_contract"] < 4 and not restoring:
-            origin = pending_origin["from"] if pending_origin is not None else record["current"]
-            current = service_state._installed(state, origin)
-            if current["state_contract"] >= 4:
-                original_config = service_state._configuration_for(state, record, origin) if pending_origin else Path(record["config"])
-                for name, machine in load(original_config).machines.items():
-                    if machine.transport == "ssh":
-                        retained = checks._remote_workspace_state(service_state._runtime(state, origin) / "bin/python", original_config, name)
-                        if retained["workspace_change_store_present"] or not retained["legacy_workspace_compatible"]:
-                            raise Fault("incompatible_remote_state", "Retained target changes or live root leases require a W1-compatible controller; no service was stopped.")
-        # The actual candidate MCP/SSH readers must also accept all retained remote
-        # records under the admission lock, including completed newer-format records.
-        if any(item.transport == "ssh" for item in load(candidate_path).machines.values()):
-            install._verify_candidate(state, candidate_record, target, check_remote=True)
         original_settings, candidate_settings = load(Path(record["config"])), load(candidate_path)
-        for name, machine in original_settings.machines.items():
-            if machine.transport == "ssh" and name not in candidate_settings.machines:
-                checks.machine_unused(original_settings, state, name)
         if require_safe:
             checks.workspace_bindings_safe(state, original_settings, candidate_settings, record["probe"]["workspace"])
             checks.activation_safe(state, config=original_settings, candidate_config=candidate_settings,
@@ -104,7 +87,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             save_json(state / "service/service.json", restored)
             try:
                 service_state._select_configuration(state, config_path, prior_digest, allowed)
-                install._verify_candidate(state, restored, previous, check_remote=True)
+                install._verify_candidate(state, restored, previous)
                 runtime._stop(state)
                 _start_selected(state, restored)
             except (Fault, OSError):
@@ -149,7 +132,7 @@ def _resume_activation(state: Path, record: dict) -> dict:
         if record["pending"] is None:
             # Readiness committed but the maintenance acknowledgement was lost.
             # A live controller may have admitted new work: observation only.
-            install._verify_candidate(state, record, target, check_remote=True)
+            install._verify_candidate(state, record, target)
             ready = runtime.status(Path(record["config"]), state)
             if (ready.get("current") != target or ready.get("status") != "ready"
                     and not (ready.get("status") == "stopped" and service_state.stopped(record))):
@@ -162,7 +145,7 @@ def _resume_activation(state: Path, record: dict) -> dict:
                                candidate_config=candidate_settings, guards=activation_guards)
         runtime._stop(state)
         tasks.migrate(state)
-        install._verify_candidate(state, record, target, check_remote=True)
+        install._verify_candidate(state, record, target)
         ready = _start_selected(state, record)
         return _finish_activation(state, record, ready, bind_management=True)
 
@@ -245,7 +228,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             candidate_config: Path | None = None, reset_recovery: bool = False,
             require_safe: bool = False, commit: str | None = None) -> dict:
     if sys.platform != "darwin" or os.getuid() == 0:
-        raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serve and SSH workers remain separate.")
+        raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serving remains separate.")
     if not config_path.is_absolute() or not state.is_absolute():
         raise Fault("invalid_service_path", "Use absolute configuration and state paths for a managed service.")
     if reset_recovery and action != "restart":

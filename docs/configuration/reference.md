@@ -40,12 +40,9 @@ inside TOML.
 
 | Setting | Type and default | Meaning |
 | --- | --- | --- |
-| `transport` | `"local"` or `"ssh"` | Which native target owns the operation. |
+| `transport` | `"local"` | The local Core owns operations. |
 | `execution_enabled` | Boolean, `false` | Permit native commands after the remaining authorization checks. |
 | `workspace_write_enabled` | Optional Boolean | Typed file-write permission; when omitted it inherits the legacy execution grant. |
-| `ssh_alias` | SSH machines only | Existing noninteractive OpenSSH alias. |
-| `ssh_worker` | SSH machines only | Absolute path to the checksum-named worker archive. |
-| `ssh_identity` | SSH machines only | Verified target/account identity hash; required before enabling mutations. |
 
 Set both grant booleans explicitly in new configurations. The following combinations
 are intentional; none overrides native permissions, client approval or a task contract:
@@ -59,24 +56,14 @@ are intentional; none overrides native permissions, client approval or a task co
 
 An execution grant is not an OS sandbox. See [Security](security.md).
 
-## Workspaces and SSH machines
+## Native workspaces
 
 Each `[workspaces.NAME]` binds `machine` to one configured machine and `root` to
 an existing absolute directory on that machine. Typed paths are relative to the
 selected workspace. Registered Git worktrees can be selected explicitly; creating
 one does not change the configured default root or grant ownership of other trees.
 
-[Remote SSH](../features/ssh.md) covers worker preparation, first read-only probe,
-identity verification, independent grants and remote result retrieval. Do not set
-an archive checksum as the target identity. Local machines reject SSH-only fields.
-
-Management-capable macOS installations provide `manage machines`,
-`machine-probe`, `machine-test`, `machine-add`, `machine-remove` and
-`ssh-setup`. The latter can verify and prepare a worker and register a read-only
-SSH machine without a workspace. Add workspaces and change machine-wide grants
-separately through the confirmed candidate-configuration `manage update` contract.
-Writes retain original operation IDs and observed configuration digests; they
-never authorize deletion of remote files.
+Management-capable macOS installations provide `manage machines` for local machine metadata. Configuration changes use the confirmed candidate-configuration `manage update` contract.
 
 ## GitHub and Skills
 
