@@ -64,6 +64,17 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
 
         return patch.object(api.subprocess, "Popen", side_effect=launch)
 
+    def test_whole_device_worktree_receipt_and_new_checkout_without_registration(self):
+        self.config.workspaces.clear()
+        self.config.machines["local"].local_access = "full_access"
+        result = self.finish(self.create(workspace_name=str(self.work)))
+        self.assertEqual(result["status"], "succeeded")
+        again = self.create(execution_id=result["execution_id"], workspace_name=str(self.work))
+        self.assertEqual(again["execution_id"], result["execution_id"])
+        new = self.finish(self.start('print("new checkout")', cwd=self.destinations / "feature"))
+        self.assertEqual(new["status"], "succeeded")
+        self.assertEqual(self.config.workspaces, {})
+
     def test_busy_dirty_source_can_create_without_changing_ordinary_exclusion(self):
         (self.work / "source.txt").write_text("current uncommitted work\n")
         (self.work / "untracked.txt").write_text("keep me")

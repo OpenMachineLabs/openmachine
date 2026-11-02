@@ -22,6 +22,31 @@ from test.support.workspace import WorkspaceFixture
 
 
 class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
+    def test_whole_device_nonconfigured_typed_edit_patch_and_original_receipt(self):
+        self.config.workspaces.clear()
+        self.config.machines["local"].local_access = "full_access"
+        read = self.app.read_workspace_file("local", str(self.work), "source.py")
+        args = dict(machine="local", workspace_name=str(self.work), path="source.py",
+                    edits=[{"old_text": "41", "new_text": "42"}],
+                    expected_workspace_identity=read["context"]["workspace_identity"],
+                    expected_head_sha="", expected_sha256=read["sha256"], change_id=uuid.uuid4().hex)
+        first = self.app.edit_workspace_file(**args)
+        self.assertEqual(first["status"], "applied")
+        repeated = self.app.edit_workspace_file(**args)
+        self.assertEqual(repeated["change_id"], first["change_id"])
+        self.assertEqual(self.file.read_bytes(), b"answer = 42\r\nuntouched = 7")
+        original = self.app.read_workspace_change("local", args["change_id"])
+        self.assertEqual(original["change_id"], first["change_id"])
+        read = self.app.read_workspace_file("local", str(self.work), "source.py")
+        patched = self.app.apply_workspace_patch("local", str(self.work),
+            "*** Begin Patch\n*** Add File: new.txt\n+new\n*** End Patch", read["context"]["workspace_identity"], "",
+            [{"path": "new.txt", "expected_sha256": ""}], change_id=uuid.uuid4().hex)
+        self.assertEqual(patched["status"], "applied")
+        self.assertEqual((self.work / "new.txt").read_text(), "new\n")
+        self.assertEqual(self.config.workspaces, {})
+        self.config.machines["local"].local_access = "workspace"
+        self.fault("scope_unavailable", lambda: self.app.read_workspace_change("local", args["change_id"]))
+
     def test_exact_bytes_staged_work_and_modes_survive(self):
         self.initialize_git()
         (self.work / "unrelated").write_bytes(b"keep")
@@ -482,6 +507,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         self.assertTrue(value.pop("check_for_updates"))
         for target in value["machines"].values():
             target.pop("workspace_write_enabled")
+            self.assertEqual(target.pop("local_access"), "workspace")
             self.assertIsNone(target.pop("ssh_connection"))
         expected = hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(self.config.configuration_sha256(), expected)

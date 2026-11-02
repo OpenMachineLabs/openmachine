@@ -22,6 +22,7 @@ class _RemoteConfig:
     """One controller-selected target view for the existing dependency-free owners."""
 
     transport = "local"
+    local_access = "workspace"  # Local whole-device approval never extends an SSH grant.
 
     def __init__(self, identity: str, roots: dict, enabled: bool, workspace_write_enabled: bool):
         if type(enabled) is not bool or type(workspace_write_enabled) is not bool or not isinstance(roots, dict):

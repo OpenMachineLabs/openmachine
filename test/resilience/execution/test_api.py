@@ -14,6 +14,20 @@ from test.support.runtime_cases import RuntimeCaseFixture
 
 
 class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
+    def test_whole_device_nonconfigured_command_retains_original_id_without_replay(self):
+        self.config.workspaces.clear()
+        self.config.machines["my-laptop"].local_access = "full_access"
+        code = 'from pathlib import Path; p=Path("counter"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1")'
+        first = self.wait(self.start(code))
+        self.assertEqual(first["status"], "succeeded")
+        again = self.start(code, execution_id=first["execution_id"])
+        self.assertEqual(again["execution_id"], first["execution_id"])
+        self.assertEqual((self.work / "counter").read_text(), "1")
+        self.config.machines["my-laptop"].local_access = "read_only"
+        with self.assertRaises(Fault) as caught:
+            self.start('print("denied")')
+        self.assertEqual(caught.exception.code, "execution_disabled")
+
     def test_native_write_readback_and_identical_id_deduplication(self):
         code = 'from pathlib import Path; p=Path("counter"); p.write_text(str(int(p.read_text())+1) if p.exists() else "1"); print("written")'
         first = self.wait(self.start(code))

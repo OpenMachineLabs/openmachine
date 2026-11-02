@@ -12,6 +12,22 @@ from test.support.workspace import WorkspaceFixture
 
 
 class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
+    def test_whole_device_read_requires_explicit_native_authority_not_workspace_selection(self):
+        self.config.workspaces.clear()
+        self.fault("unknown_workspace", lambda: self.app.read_workspace_file("local", str(self.work), "source.py"))
+        self.config.machines["local"].local_access = "read_only"
+        read = self.app.read_workspace_file("local", str(self.work), "source.py")
+        self.assertEqual(read["sha256"], hashlib.sha256(self.file.read_bytes()).hexdigest())
+        self.assertEqual(self.app.inspect_context("local", str(self.work), sections=["workspace"])["target"]["cwd"], str(self.work))
+        self.assertEqual(self.config.workspaces, {})
+        secret = self.work / ".ssh"
+        secret.mkdir(); (secret / "config").write_text("private")
+        self.fault("path_denied", lambda: self.app.read_workspace_file("local", str(secret), "config"))
+        alias = self.root / "alias"; alias.symlink_to(self.work)
+        self.fault("path_denied", lambda: self.app.read_workspace_file("local", str(alias), "source.py"))
+        self.fault("workspace_write_disabled", lambda: self.app.write_workspace_file("local", str(self.work), "source.py", "changed", "", read["sha256"], expected_workspace_identity=read["context"]["workspace_identity"]))
+        self.fault("execution_disabled", lambda: self.app.start_execution("local", "a"*32, str(self.work), ["true"]))
+
     def test_line_windows_keep_original_bytes_and_eof_metadata(self):
         raw = b"\xef\xbb\xbffirst\r\n" + "\u754c second\n".encode() + b"last"
         self.file.write_bytes(raw)

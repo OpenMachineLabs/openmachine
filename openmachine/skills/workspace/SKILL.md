@@ -1,10 +1,21 @@
 ---
 id: om.workspace
 name: openmachine-workspace
-description: Read, search, edit or patch configured workspace files and Git state; choose, create or recover optional worktrees safely.
+description: Read, search, edit or patch local files and Git state; choose, create or recover optional worktrees safely.
 ---
 
 # Workspace operations
+
+A local machine can explicitly set `local_access = "read_only"` or
+`local_access = "full_access"` in native configuration. With either approval,
+`workspace_name` accepts a canonical absolute directory as well as a configured
+name. Configured Workspaces remain names and context; they do not restrict this
+whole-device reach. Full retains the existing command and typed-write grants.
+Read Only denies both even if their historical flags were enabled. Omission
+keeps historical workspace authority; it never silently grants whole-device access.
+Credential paths, links, hashes, native receipts and Task checks still apply.
+Non-Git whole-device mutations use one conservative shared lease domain; existing
+busy historical leases must be clear before changing the lock domain.
 
 Read current source, applicable instructions, raw whole-file SHA256, workspace
 identity and HEAD before proposing an edit. Identity includes root and branch.

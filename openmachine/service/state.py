@@ -15,8 +15,8 @@ from openmachine.foundation.state import private_directory, save_json
 
 PROTOCOL = 1
 # Bump for a change to configuration, task or execution formats/writer semantics.
-# Contract 23 retains private GitHub web authority and source-specific rotation.
-STATE_CONTRACT = 23
+# Contract 24 fences persisted Task targets that can use unconfigured absolute directories.
+STATE_CONTRACT = 24
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

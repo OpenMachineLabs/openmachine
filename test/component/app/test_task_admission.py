@@ -20,6 +20,22 @@ from test.support.tasks import TaskFixture, task_contract
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_task_contract_accepts_explicit_nonconfigured_directory_and_keeps_native_guards(self):
+        self.config.workspaces.clear()
+        self.config.machines["desktop"].local_access = "full_access"
+        self.request["contract"]["targets"][0]["workspace"] = str(self.work)
+        self.request["contract"]["tools"] = ["read_task", "write_workspace_file"]
+        created = self.create()
+        self.assertEqual(created["record"]["contract"]["targets"][0]["workspace"], str(self.work))
+        self.assertEqual(self.app.read_task("structured-one")["record"]["revision"], created["record"]["revision"])
+        listed = self.app.find_tasks(machine="desktop", workspace=str(self.work))
+        self.assertEqual([t["task_id"] for t in listed["tasks"]], ["structured-one"])
+        self.config.machines["desktop"].local_access = "read_only"
+        self.fault("workspace_write_disabled", self.app._validate_task_scope, self.request)
+        self.config.machines["desktop"].local_access = "full_access"
+        self.request["contract"]["targets"][0]["workspace_identity"] = "f"*64
+        self.fault("context_mismatch", self.app._validate_task_scope, self.request)
+
     def test_expired_renewal_and_handoff_claim_have_one_winner(self):
         record = self.accept_plan()["record"]
         tasks.update(self.state, "structured-one", lambda value, now:

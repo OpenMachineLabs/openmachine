@@ -70,7 +70,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
         working = Path(cwd).resolve(strict=True)
     except OSError as error:
         raise Fault("context_unavailable", "The original cwd is unavailable; read the original execution directly.") from error
-    if not working.is_dir() or not any(
+    if not working.is_dir() or target.local_access == "workspace" and not any(
         working.is_relative_to(Path(item.root).resolve())
         for item in config.workspaces.values() if item.machine == machine
     ):
@@ -106,7 +106,7 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
     before_admission = True
     try:
         directory = record_directory(state, execution_id)
-        if any(not isinstance(value, str) or not 1 <= len(value) <= 128 or "\0" in value
+        if any(not isinstance(value, str) or not 1 <= len(value) <= 1024 or "\0" in value
                for value in (machine, workspace_name)):
             raise Fault("invalid_workspace", "Supply the configured machine and workspace names.")
         if not isinstance(task_id, str) or (task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", task_id)):
@@ -179,6 +179,8 @@ def _creation_parent_roots(config: "Settings", machine: str, destination: Path) 
             continue
         if destination.is_relative_to(root):
             roots.add(str(root))
+    if config.machine(machine).local_access != "workspace":
+        roots.add("/")
     if not roots:
         raise Fault("path_denied", "The destination must stay inside an existing configured root.")
     return sorted(roots)
@@ -351,7 +353,7 @@ def _activation_resources(config: "Settings", state: Path, record: dict) -> dict
     targets = [Path(root)]
     if record["format_version"] == CREATION_FORMAT:
         targets.append(Path(record["context"]["creation_plan"]["source_root"]))
-    if any(not any(target.is_absolute() and target.is_relative_to(Path(item.root).resolve())
+    if config.machine(machine).local_access == "workspace" and any(not any(target.is_absolute() and target.is_relative_to(Path(item.root).resolve())
                    for item in config.workspaces.values() if item.machine == machine) for target in targets):
         raise Fault("invalid_cwd", "Original execution workspaces no longer match the configured local grants.")
     resources = {state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock"): False}
@@ -418,7 +420,7 @@ def reconcile(config: "Settings", state: Path, machine: str, execution_id: str) 
             targets = [Path(root)]
             if record["format_version"] == CREATION_FORMAT:
                 targets.append(Path(record["context"]["creation_plan"]["source_root"]))
-            if any(not any(target.is_relative_to(Path(item.root).resolve())
+            if config.machine(machine).local_access == "workspace" and any(not any(target.is_relative_to(Path(item.root).resolve())
                            for item in config.workspaces.values() if item.machine == machine) for target in targets):
                 raise Fault("invalid_cwd", "The original cleanup target is no longer in a configured workspace.")
             path = state / "locks" / ("workspace-" + hashlib.sha256(root.encode()).hexdigest() + ".lock")

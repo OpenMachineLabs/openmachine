@@ -12,6 +12,18 @@ from test.support.workspace import WorkspaceFixture
 
 
 class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
+    def test_nonconfigured_repository_and_folder_have_native_stable_identities(self):
+        self.config.workspaces.clear()
+        self.config.machines["local"].local_access = "read_only"
+        first = self.app.inspect_projects("local", str(self.work), "inspect")["project"]
+        self.assertEqual(first["kind"], "folder")
+        self.initialize_git()
+        repo = self.app.inspect_projects("local", str(self.work), "inspect")["project"]
+        self.assertEqual(repo["kind"], "git_repo")
+        self.assertNotEqual(repo["target_id"], first["target_id"])
+        self.fault("project_changed", lambda: self.app.inspect_projects("local", str(self.work), "inspect", expected_target_id=first["target_id"]))
+        self.assertEqual(self.config.workspaces, {})
+
     def target(self, path=".", **kwargs):
         return self.app.inspect_projects("local", "project", "inspect", path, **kwargs)["project"]
 

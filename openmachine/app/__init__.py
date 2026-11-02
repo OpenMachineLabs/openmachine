@@ -103,8 +103,9 @@ class Application:
         return {
             "environment_observation": environment.capabilities(),
             "project_catalog": projects.capabilities(),
+            "device_access": {"protocol": 1, "directory_selector": "workspace_name", "absolute_local_directories": True},
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
-            "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled,
+            "machines": {name: {**item.model_dump(exclude={"ssh_connection"}), "workspace_write_effective": item.local_access != "read_only" and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
             "workspaces": {name: item.model_dump() for name, item in self.config.workspaces.items()},
             "skills": ["openmachine"], "skill_roots": self.config.skills.roots, "task_continuity": True,
@@ -142,7 +143,7 @@ class Application:
             "workspace": {"change_format": workspace.CHANGE_FORMAT, "exact_edits": True, "preview": True,
                           "worktrees": {"discovery": True, "selection": True, "creation": True,
                                         "automatic_allocation": False, "automatic_cleanup": False,
-                                        "destination_scope": "configured_roots", "copies_uncommitted_changes": False},
+                                        "destination_scope": "native_machine_authority", "copies_uncommitted_changes": False},
                           "patch": True, "patch_language": workspace.PATCH_LANGUAGE,
                           "change_read_formats": list(workspace.READ_CHANGE_FORMATS),
                           "max_patch_paths": workspace.MAX_PATHS, "max_patch_hunks": workspace.MAX_HUNKS,
@@ -347,9 +348,8 @@ class Application:
         for target in contract["targets"]:
             machine, name = target["machine"], target["workspace"]
             self.config.machine(machine)
-            configured = self.config.workspaces.get(name)
-            if configured is None or configured.machine != machine:
-                raise Fault("invalid_task_contract", "Task target must bind an existing workspace to its configured machine.")
+            # The native reader below resolves names or absolute local directories.
+            # Task identity, HEAD, permissions and effect admission remain mandatory.
             if tools & {"start_execution", "create_worktree", "control_execution"}:
                 self.config.machine(machine, write=True)
             if tools & {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}:

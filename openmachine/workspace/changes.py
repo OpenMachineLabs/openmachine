@@ -30,6 +30,12 @@ def _scope(config, state: Path, machine: str, record: dict) -> str:
     config.machine(machine)
     if records._owner(state) != record["owner_sha256"]:
         raise Fault("scope_unavailable", "This receipt belongs to its original target state owner.")
+    if config.machine(machine).local_access != "workspace":
+        root = root_for(config, machine, record["context"]["root"])
+        info = root.stat()
+        if [info.st_dev, info.st_ino] == record["context"]["root_id"]:
+            return str(root)
+        raise Fault("scope_unavailable", "The original directory identity changed.")
     for name, item in config.workspaces.items():
         if item.machine != machine:
             continue

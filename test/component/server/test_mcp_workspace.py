@@ -15,6 +15,29 @@ import tempfile
 
 
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_native_mcp_absolute_directory_contract_without_configured_workspace(self):
+        from mcp.types import ListToolsResult
+        root = self.work.resolve()
+        (root / "source.txt").write_text("original")
+        config = Settings.model_validate({"schema_version": 1, "machines": {"local": {
+            "transport": "local", "local_access": "full_access", "execution_enabled": True}}})
+        mcp = server.create_server(config, self.root.resolve() / "absolute-state")
+        self.assert_tool_contract(ListToolsResult(tools=await mcp.list_tools()), github=False, ssh=False)
+        args = {"machine": "local", "workspace_name": str(root), "path": "source.txt"}
+        original = await mcp.call_tool("read_workspace_file", args)
+        self.assertFalse(original.is_error)
+        source = original.structured_content
+        result = await mcp.call_tool("write_workspace_file", {**args, "content": "updated",
+            "change_id": uuid.uuid4().hex, "expected_sha256": source["sha256"], "expected_head_sha": "",
+            "expected_workspace_identity": source["context"]["workspace_identity"]})
+        self.assertFalse(result.is_error)
+        self.assertEqual((root / "source.txt").read_text(), "updated")
+        config.machines["local"].local_access = "read_only"
+        denied = await mcp.call_tool("start_execution", {"machine": "local", "execution_id": "f"*32,
+            "cwd": str(root), "argv": ["true"]})
+        self.assertTrue(denied.is_error)
+        self.assertEqual(denied.structured_content["error"]["code"], "execution_disabled")
+
     async def test_patch_disconnect_and_partial_receipt_keep_original_effects(self):
         from openmachine.bootstrap import create_application
         from openmachine.workspace import changes

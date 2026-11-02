@@ -67,6 +67,7 @@ class SshConnection(BaseModel):
 class Machine(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     transport: Literal["local", "ssh"]
+    local_access: Literal["workspace", "read_only", "full_access"] = "workspace"
     execution_enabled: bool = False
     workspace_write_enabled: bool | None = None
     ssh_alias: Name | None = None
@@ -79,6 +80,8 @@ class Machine(BaseModel):
         if self.transport == "local":
             if self.ssh_alias is not None or self.ssh_connection is not None or self.ssh_worker is not None or self.ssh_identity:
                 raise ValueError("local machines do not accept SSH settings")
+        elif self.local_access != "workspace":
+            raise ValueError("whole-device authority applies only to the local OS user")
         elif ((self.ssh_alias is None) == (self.ssh_connection is None) or self.ssh_worker is None
               or not self.ssh_worker.startswith("/") or "\0" in self.ssh_worker
               or len(self.ssh_worker) > 4096
@@ -155,7 +158,7 @@ class Settings(BaseModel):
         if name not in self.machines:
             raise Fault("unknown_machine", "Select a machine returned by get_capabilities.")
         machine = self.machines[name]
-        if write and not machine.execution_enabled:
+        if write and (not machine.execution_enabled or machine.local_access == "read_only"):
             raise Fault("execution_disabled", "The operator must explicitly enable this machine in configuration.")
         return machine
 
@@ -166,6 +169,8 @@ class Settings(BaseModel):
         if value["check_for_updates"]:
             del value["check_for_updates"]
         for machine in value["machines"].values():
+            if machine["local_access"] == "workspace":
+                del machine["local_access"]
             if machine["ssh_connection"] is None:
                 del machine["ssh_connection"]
             if machine["workspace_write_enabled"] is None:
@@ -174,6 +179,8 @@ class Settings(BaseModel):
 
     def workspace_machine(self, name: str) -> Machine:
         machine = self.machine(name)
+        if machine.local_access == "read_only":
+            raise Fault("workspace_write_disabled", "Whole-device Read Only does not authorize mutations.")
         if machine.workspace_write_enabled is None:
             return self.machine(name, write=True)
         if not machine.workspace_write_enabled:

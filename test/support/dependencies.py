@@ -50,7 +50,7 @@ class DependencyFixture(object):
             "openmachine.workspace.inspect": ("openmachine.workspace.files", "openmachine.workspace.git",
                                               "openmachine.workspace.worktrees", "openmachine.foundation.*"),
             "openmachine.workspace.patch": ("openmachine.foundation.files", "openmachine.foundation.sanitize"),
-            "openmachine.workspace.worktrees": ("openmachine.workspace.git", "openmachine.foundation.*"),
+            "openmachine.workspace.worktrees": ("openmachine.workspace.files", "openmachine.workspace.git", "openmachine.foundation.*"),
             "openmachine.tasks": ("openmachine.tasks.store", "openmachine.tasks.index", "openmachine.tasks.records",
                                   "openmachine.tasks.database", "openmachine.tasks.migration", "openmachine.tasks.rows"),
             "openmachine.tasks.store": ("openmachine.tasks.index", "openmachine.tasks.records", "openmachine.tasks.effects",

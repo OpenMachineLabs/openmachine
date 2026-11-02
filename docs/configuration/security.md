@@ -6,10 +6,20 @@ capabilities, not as entering a sandbox.
 
 ## Boundaries that matter
 
-Core checks configured machines/workspaces, typed file paths, source hashes,
+Core checks machine authority, typed file paths, source hashes,
 execution identity, task authority and scoped GitHub destinations. The client
 and external service can impose additional approval and access requirements.
 No one of these checks replaces the others.
+
+For local machines, `local_access` defaults to `workspace`, retaining historical
+configured-Workspace scope. An explicit `read_only` approval permits typed reads
+from canonical absolute local directories without registering Workspaces; it
+forbids native mutations and commands. Explicit `full_access` permits typed
+operations and commands in those directories under the existing independent
+write and execution grants. Configured Workspaces remain names and contexts,
+not whole-device directory allowlists. OS permissions, credential protections,
+original receipts, and SSH machine grants remain separate boundaries. An allowed
+command's `cwd` is not process confinement.
 
 **Core is not an OS sandbox or a multi-tenant isolation system.** A permitted
 command can act beyond the workspace using its native account permissions.

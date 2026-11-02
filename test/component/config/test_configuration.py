@@ -45,6 +45,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         legacy = config.model_dump(exclude={"check_for_updates"})
         del legacy["machines"]["local"]["workspace_write_enabled"]
         del legacy["machines"]["local"]["ssh_connection"]
+        del legacy["machines"]["local"]["local_access"]
         expected = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(config.configuration_sha256(), expected)
         explicit = Settings.model_validate(original | {"check_for_updates": True})
@@ -52,6 +53,10 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         disabled = Settings.model_validate(original | {"check_for_updates": False})
         self.assertIs(disabled.check_for_updates, False)
         self.assertNotEqual(disabled.configuration_sha256(), expected)
+        for mode in ("read_only", "full_access"):
+            native = Settings.model_validate({"schema_version": 1,
+                "machines": {"local": {"transport": "local", "local_access": mode}}})
+            self.assertNotEqual(native.configuration_sha256(), expected)
         for value in (0, 1, "false", None, {}):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 Settings.model_validate(original | {"check_for_updates": value})

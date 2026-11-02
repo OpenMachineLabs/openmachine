@@ -93,6 +93,10 @@ def lock_root(config, machine: str, cwd: Path, observed: dict) -> str:
         raise Fault("context_unavailable", "Git/workspace identity could not be verified.")
     if observed["git_status"] == "observed":
         return observed["worktree"]
+    if config.machine(machine).local_access != "workspace":
+        # One conservative non-Git lease domain prevents parent/child aliases
+        # from creating independent writers without introducing a root registry.
+        return "/"
     roots = set()
     for item in config.workspaces.values():
         if config.machine(item.machine).transport == "local":
