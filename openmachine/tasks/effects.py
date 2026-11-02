@@ -60,6 +60,9 @@ def operation_scope(record: dict, operation: dict) -> dict | None:
         witness = next((item for item in record.get("effect_scopes", [])
                         if item["operation_id"] == operation["id"]), None)
         declared = witness["scope"] if witness is not None else None
+        goal = goal_witness(record, operation)
+        if declared is None and goal is not None:
+            declared = github_scope("github_review_thread", goal["arguments"])
     if declared is not None:
         repository = locator["repository"].casefold()
         if declared["resource"] == "project":
@@ -68,6 +71,9 @@ def operation_scope(record: dict, operation: dict) -> dict | None:
         # A later verified destination can narrow an unknown creation's target.
         if value["number"] is None and locator.get("number") is not None:
             value["number"] = locator["number"]
+        if (locator["object_type"] == "review_thread" and value["resource"] == "object"
+                and value["number"] == locator["number"] and value["fields"] == ["threads"]):
+            value["thread_id"] = locator.get("thread_id")
         return value
     kind = locator["object_type"]
     repository = locator["repository"].casefold()
@@ -99,6 +105,9 @@ def github_conflict(first: dict, second: dict) -> bool:
     if left == right == "object":
         if first["number"] != second["number"]:
             return False
+        if (first["fields"] == second["fields"] == ["threads"]
+                and first.get("thread_id") and second.get("thread_id")):
+            return first["thread_id"] == second["thread_id"]
         a, b = set(first["fields"]), set(second["fields"])
         lifecycle = {"state", "draft", "merge", "threads"}
         return "*" in a or "*" in b or "create" in a or "create" in b or bool(a & b) or bool(a & lifecycle and b & lifecycle)
@@ -119,9 +128,44 @@ def unresolved(operation: dict) -> bool:
     return records.pending(operation) or (operation.get("result") or {}).get("status") == "partial"
 
 
+def goal_witness(record: dict, operation: dict) -> dict | None:
+    return next((item for item in record.get("goal_witnesses", []) if item["operation_id"] == operation["id"]), None)
+
+
+def goal_usable(record: dict, operation: dict) -> bool:
+    witness = goal_witness(record, operation)
+    if witness is None:
+        return False
+    stage = next((item for item in record["plan"]["stages"] if item["id"] == operation["stage_id"]), None)
+    locator, contract = operation["locator"], record["contract"]
+    binding = next((value for repo, value in contract.get("github_connections", {}).items()
+                    if repo.casefold() == locator["repository"].casefold()), None)
+    return (stage is not None and witness["source_sha256"] == stage["source_sha256"]
+            and binding == locator.get("connection") and "github_review_thread" in contract["tools"]
+            and locator["repository"].casefold() in {repo.casefold() for repo in contract["repositories"]})
+
+
+def blocks_completion(record: dict, operation: dict) -> bool:
+    # Historical uncertainty remains indexed and visible. Only its proven,
+    # monotonic business goal can be accepted under the current source/authority.
+    return unresolved(operation) and not goal_usable(record, operation)
+
+
 def conflicts(first_record: dict, first: dict, second_record: dict, second: dict) -> bool:
     a, b = first["locator"], second["locator"]
     if a["kind"] == "github" or b["kind"] == "github":
+        for record, original, following in ((first_record, first, second), (second_record, second, first)):
+            witness = goal_witness(record, original)
+            target = following["locator"]
+            if (witness is not None and target.get("object_type") == "merge"
+                    and target.get("repository", "").casefold() == witness["goal"]["repository"]
+                    and target.get("number") == witness["goal"]["number"]
+                    and target.get("connection") == original["locator"].get("connection")
+                    and (target.get("merge") or {}).get("base_ref") == witness["goal"]["base_ref"]
+                    and (target.get("merge") or {}).get("head_sha") == witness["goal"]["head_sha"]):
+                # A delayed resolve cannot reverse this goal. This does not
+                # permit another thread write or replace the fresh merge gate.
+                return False
         return a["kind"] == b["kind"] and github_conflict(
             operation_scope(first_record, first), operation_scope(second_record, second))
     # Uncertain local execution or partial file effects retain the target-wide

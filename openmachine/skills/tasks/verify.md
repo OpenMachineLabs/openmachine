@@ -13,7 +13,12 @@ deployment, client refresh and live integration acceptance as separate outcomes.
 
 Use `record_decision` only with verified operations for the current stage, source
 hash and plan revision. A retained original receipt from an older plan cannot be
-resubmitted as current evidence. After applicable decisions, explicitly finish:
+resubmitted as current evidence. The narrowly scoped exception is an independently
+audited review-thread resolve goal: its original operation remains unknown, while
+Core revalidates current target state, unchanged source and native authority before
+a new decision and again before completion. This proves business completion, not
+historical write success. Read the [goal recovery rules](../github/reference.md#audited-review-thread-goal-recovery).
+After applicable decisions, explicitly finish:
 
 ```json
 {"action":"finish","outcome":"completed","acceptance":[{"stage_id":"stage-id","operation_id":"original-operation-id"}],"limitations":""}
@@ -40,7 +45,9 @@ A verified historical GitHub result establishes its original effect and remains
 frozen; later comments or timestamps do not replace its digest. Current merge
 acceptance still reads current HEAD/base, protections, checks and discussions.
 An independent stage may accept verified evidence disjoint from unresolved scopes,
-but `finish` still blocks every original unresolved effect. The separate
+but `finish` still blocks every unresolved effect without an eligible, freshly
+revalidated goal witness. Original unknown outcomes remain in terminal audit
+evidence even when their business goals are accepted. The separate
 explicit `abandon` transition records terminal abandonment while keeping those
 original outcomes and their conflicting resource exclusions unresolved. Read the
 [scope rules](../github/reference.md#scoped-uncertainty-and-historical-evidence)

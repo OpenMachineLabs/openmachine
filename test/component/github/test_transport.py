@@ -6,6 +6,52 @@ import httpx2 as httpx
 from integrations.github import auth, operations
 from openmachine.foundation.sanitize import Fault
 from test.support.github_cases import REPO
+from test.support.goal_recovery import GoalRecoveryFixture
+
+
+class GoalRecoveryTransportTests(GoalRecoveryFixture, unittest.TestCase):
+    def test_observer_identity_change_cannot_certify_a_current_goal(self):
+        arguments, original = self.lose_ack()
+        reads = 0
+        def changed(method, endpoint, payload=None):
+            nonlocal reads
+            value = self.response(method, endpoint, payload)
+            if method == "GET" and endpoint == "user":
+                reads += 1
+                if reads > 1:
+                    value["id"] = 2
+            return value
+        self.transport.side_effect = changed
+        self.fault("github_identity_changed", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_retarget_to_same_commit_during_read_does_not_certify_old_destination(self):
+        arguments, original = self.lose_ack()
+        reads = 0
+        def retargeted(method, endpoint, payload=None):
+            nonlocal reads
+            if method == "GET" and endpoint.endswith("/pulls/2"):
+                reads += 1
+                if reads == 2:
+                    self.provider.pr["base"]["ref"] = "other"
+            return self.response(method, endpoint, payload)
+        self.transport.side_effect = retargeted
+        self.fault("github_candidate_changed", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_incomplete_thread_membership_is_not_goal_proof(self):
+        arguments, original = self.lose_ack()
+        def incomplete(method, endpoint, payload=None):
+            value = self.response(method, endpoint, payload)
+            if method == "POST" and endpoint == "graphql":
+                value["data"]["repository"]["pullRequest"]["reviewThreads"]["pageInfo"] = {}
+            return value
+        self.transport.side_effect = incomplete
+        self.fault("github_evidence_unavailable", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(self.thread_writes, 1)
 
 
 class GitHubTests(unittest.TestCase):

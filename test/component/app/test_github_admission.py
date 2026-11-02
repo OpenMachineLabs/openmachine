@@ -11,6 +11,7 @@ from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import records
 from test.support.tasks import TaskFixture
+from test.support.goal_recovery import GoalRecoveryFixture
 from test.support.github_cases import BASE, HEAD, MERGE, REPO, ROOT, TREE, GitHubCaseFixture, settings
 
 
@@ -256,6 +257,185 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                 self.fault("task_conflict", method, **arguments, task_context=context)
             provider.assert_not_called()
         self.assertEqual(self.view()["record"]["operations"], [])
+
+
+class GoalRecoveryTests(GoalRecoveryFixture, unittest.TestCase):
+    def test_recovered_goal_allows_one_verified_merge_and_terminal_acceptance(self):
+        arguments, original = self.lose_ack()
+        self.recover(arguments)
+        self.provider.runs = [{"id": 31, "name": "ci", "head_sha": HEAD, "app": {"id": 3},
+                               "status": "completed", "conclusion": "success"}]
+        def merged(method, endpoint, payload=None):
+            if method == "PUT":
+                self.assertEqual(endpoint, f"{ROOT}/pulls/2/merge")
+                self.assertEqual(payload["sha"], HEAD)
+                self.provider.pr.update(state="closed", merged=True, merge_commit_sha=MERGE)
+                self.provider.pr["base"]["sha"] = MERGE
+                return {"merged": True, "sha": MERGE}
+            values = {f"{ROOT}/commits/{MERGE}": {"sha": MERGE, "commit": {"message": "Merged fixture"}},
+                      f"{ROOT}/branches/main": {"commit": {"sha": MERGE}},
+                      f"{ROOT}/compare/{MERGE}...{MERGE}": {"status": "identical", "merge_base_commit": {"sha": MERGE}}}
+            return copy.deepcopy(values[endpoint]) if endpoint in values else self.response(method, endpoint, payload)
+        self.transport.side_effect = merged
+        identity = uuid.uuid4().hex
+        self.assertEqual(self.merge(task_context=self.context_for(identity))["status"], "merged_verified")
+        self.control("record_decision", stage_id="verify", outcome="accepted", evidence=[original["id"], identity],
+                     reason="Current resolved goal and verified merge; original resolve attribution remains unknown.")
+        terminal = self.control("finish", outcome="completed", acceptance=[
+            {"stage_id": "verify", "operation_id": original["id"]},
+            {"stage_id": "verify", "operation_id": identity}], limitations="Original resolve write is unproven.")
+        self.assertEqual(terminal["record"]["terminal"]["outcome"], "completed")
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+        self.assertEqual(sum(call.args[0] == "PUT" for call in self.transport.call_args_list), 1)
+
+    def test_expired_task_authority_cannot_publish_a_goal_witness(self):
+        arguments, original = self.lose_ack()
+        expiry = self.view()["record"]["contract"]["expires_at_ms"]
+        with patch("openmachine.app.task_attention.now_ms", return_value=expiry):
+            self.fault("task_authority_expired", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_changed_source_does_not_reuse_a_goal_for_new_acceptance(self):
+        arguments, original = self.lose_ack()
+        self.recover(arguments)
+        record = self.view()["record"]
+        contract = copy.deepcopy(record["contract"])
+        contract["sources"] = [{"locator": "request:changed-goal", "sha256": "f" * 64}]
+        stage = {key: value for key, value in record["plan"]["stages"][0].items()
+                 if key not in {"state", "evidence"}}
+        stage["source_refs"] = ["request:changed-goal"]
+        stage["source_sha256"] = records.digest(contract["sources"])
+        revised = self.control("revise_plan", reason="A changed source requires fresh acceptance.",
+                               contract=contract, stages=[stage], invalidated_stage_ids=["verify"])
+        self.control("claim", handoff_id=revised["record"]["handoff"]["id"])
+        self.fault("task_evidence_invalid", self.accept_goal, original)
+        self.assertIsNone(self.view()["record"]["terminal"])
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_passive_reads_and_changed_arguments_cannot_invent_original_intent(self):
+        arguments, original = self.lose_ack()
+        self.app.read_task("structured-one")
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        for changed in ({"action": "unresolve"}, {"thread_id": "PRRT_other"},
+                        {"number": 3}, {"expected_head_sha": "f" * 40}, {"expected_base_sha": ""}):
+            with self.subTest(changed=changed):
+                self.fault("task_operation_conflict", self.recover, arguments | changed)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_unresolve_unknown_never_becomes_a_monotonic_resolve_goal(self):
+        self.provider.threads[0]["isResolved"] = True
+        arguments, original = self.lose_ack(action="unresolve")
+        self.provider.threads[0]["isResolved"] = True
+        observed = self.recover(arguments)
+        self.assertEqual(observed["status"], "write_outcome_unknown")
+        self.assertNotIn("goal_witness", observed)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.fault("task_effect_unresolved", self.merge)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_independent_thread_and_local_work_proceed_but_same_thread_stays_excluded(self):
+        arguments, original = self.lose_ack()
+        self.provider.threads.append({"id": "PRRT_independent", "isResolved": False,
+                                      "isOutdated": False, "path": "b.py", "line": 2})
+        self.assertEqual(self.app.write_workspace_file(**self.write_arguments())["status"], "applied")
+        self.lose_ack(thread_id="PRRT_independent")
+        self.recover(arguments)
+        identity = uuid.uuid4().hex
+        self.fault("task_effect_unresolved", self.app.github_review_thread,
+                   **(arguments | {"action": "unresolve", "task_context": self.context_for(identity)}))
+        self.fault("task_effect_unresolved", self.merge)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 2)
+
+    def test_current_target_membership_and_head_are_not_inferred_from_old_locator(self):
+        arguments, original = self.lose_ack()
+        self.provider.threads[0]["id"] = "PRRT_other"
+        self.fault("github_not_found", self.recover, arguments)
+        self.provider.threads[0]["id"] = "PRRT_goal"
+        self.provider.pr["head"]["sha"] = "f" * 40
+        self.fault("github_candidate_changed", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_witness_never_replaces_current_threads_native_policy_head_or_base_gate(self):
+        arguments, original = self.lose_ack()
+        self.recover(arguments)
+        self.provider.threads[0]["isResolved"] = False
+        self.assertEqual(self.merge()["status"], "merge_blocked")
+        self.provider.threads[0]["isResolved"] = True
+        self.provider.policy["reviewDecision"] = "REVIEW_REQUIRED"
+        self.assertEqual(self.merge()["status"], "merge_blocked")
+        self.provider.policy["reviewDecision"] = None
+        self.provider.pr["head"]["sha"] = "f" * 40
+        self.fault("github_candidate_changed", self.merge)
+        self.provider.pr["head"]["sha"] = HEAD
+        self.provider.pr["base"]["sha"] = "e" * 40
+        self.fault("github_candidate_changed", self.merge)
+        self.provider.runs = [{"id": 31, "name": "ci", "head_sha": HEAD, "app": {"id": 3},
+                               "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(self.merge(expected_base_sha="e" * 40)["status"], "merge_blocked")
+        self.provider.pr["base"]["sha"] = BASE
+        self.provider.pr["base"]["ref"] = "another-destination"
+        self.fault("task_effect_unresolved", self.merge)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
+
+    def test_reopened_goal_is_rejected_at_both_decision_and_terminal_acceptance(self):
+        arguments, original = self.lose_ack()
+        self.recover(arguments)
+        self.provider.threads[0]["isResolved"] = False
+        self.fault("task_evidence_changed", self.accept_goal, original)
+        self.provider.threads[0]["isResolved"] = True
+        self.accept_goal(original)
+        self.provider.threads[0]["isResolved"] = False
+        self.fault("task_evidence_changed", self.control, "finish", outcome="completed",
+                   acceptance=[{"stage_id": "verify", "operation_id": original["id"]}], limitations="")
+        self.assertIsNone(self.view()["record"]["terminal"])
+
+    def test_same_claim_renewal_can_recover_but_stop_cannot(self):
+        arguments, original = self.lose_ack()
+        owner = self.view()["record"]["control"]["owner"]
+        tasks.update(self.state, "structured-one", lambda value, now:
+                     value["control"]["owner"].update(expires_at_ms=now - 1))
+        self.fault("task_renewal_required", self.recover, arguments)
+        self.control("renew", claim_id=owner["claim_id"])
+        self.assertIn("goal_witness", self.recover(arguments))
+        self.assertEqual(self.thread_writes, 1)
+        self.control("pause", reason="Explicit stop before acceptance.")
+        self.fault("task_stopped", self.accept_goal, original)
+
+    def test_pause_between_read_and_witness_commit_wins_without_replay(self):
+        arguments, original = self.lose_ack()
+        read = self.app.task_receipts.read
+        def paused(*args, **kwargs):
+            observed = read(*args, **kwargs)
+            self.control("pause", reason="Concurrent explicit stop.")
+            return observed
+        with patch.object(self.app.task_receipts, "read", side_effect=paused):
+            self.fault("task_conflict", self.recover, arguments)
+        self.assertNotIn("goal_witnesses", self.view()["record"])
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+
+    def test_lost_thread_acknowledgement_reaches_fresh_merge_gate_without_replay(self):
+        arguments, original = self.lose_ack()
+        self.assertTrue(self.provider.threads[0]["isResolved"])
+        self.fault("task_effect_unresolved", self.merge)
+        self.assertEqual(self.recover(arguments)["status"], "write_outcome_unknown")
+        self.provider.runs = [{"id": 31, "name": "ci", "head_sha": HEAD, "app": {"id": 3},
+                               "status": "completed", "conclusion": "failure"}]
+        # Recovery removes only the proven resolve dependency, not the current gate.
+        self.assertEqual(self.merge()["status"], "merge_blocked")
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+        self.assertFalse(any(call.args[0] == "PUT" for call in self.transport.call_args_list))
 
 
 if __name__ == "__main__":

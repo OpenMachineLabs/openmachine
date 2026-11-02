@@ -48,6 +48,13 @@ cancel and change receipts without a connected Chat client. Bounded observation
 faults and retry budgets appear in read_task. Results and handoffs are observed,
 never replayed, automatically accepted or used to authorize new effects.
 
+For a lost GitHub thread-resolve acknowledgement, follow the bounded
+[audited goal recovery](../github/reference.md#audited-review-thread-goal-recovery)
+path with the original ID and exact intent. Historical outcome and current goal
+are distinct. A validated goal may permit authorized independent or dependent
+work in this turn; it does not bypass any claim, Stop, authority or waiting rule
+below. No caller or observer automatically drives the next AI decision.
+
 ## Claim, renew and release
 
 Read the current record, claim its eligible handoff, and carry this context on

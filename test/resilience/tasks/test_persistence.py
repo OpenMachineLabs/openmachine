@@ -1,6 +1,9 @@
 """Tests for tasks behavior at the resilience layer."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from unittest.mock import patch
 import subprocess
 import sys
 import unittest
@@ -8,6 +11,91 @@ from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import database
 from test.support.tasks import ContinuityFixture, task_contract, write_legacy_checkpoint
+from test.support.goal_recovery import GoalRecoveryFixture
+from test.support.github_cases import ACTOR, REPO
+
+
+class GoalRecoveryResilienceTests(GoalRecoveryFixture, unittest.TestCase):
+    def crash_recovery(self, point):
+        arguments, original = self.lose_ack()
+        code = '''import json,os,sys
+from pathlib import Path
+from unittest.mock import Mock
+from openmachine import tasks
+from openmachine.bootstrap import create_application
+from openmachine.config import Settings
+from openmachine.tasks import database
+data=json.load(sys.stdin); state=Path(sys.argv[1]); point=sys.argv[2]
+app=create_application(Settings.model_validate(data["config"]),state)
+root="repos/"+data["repository"]
+def transport(method,endpoint,payload=None):
+    if method=="GET":
+        values={"user":data["actor"],root:data["metadata"],root+"/pulls/2":data["pr"]}
+        if endpoint in values: return values[endpoint]
+    if method=="POST" and endpoint=="graphql" and payload["query"].startswith("query"):
+        return {"data":{"repository":{"pullRequest":{"headRefOid":data["pr"]["head"]["sha"],
+            "baseRefOid":data["pr"]["base"]["sha"],"reviewThreads":{"nodes":data["threads"],
+            "pageInfo":{"hasNextPage":False,"endCursor":None}}}}}}
+    raise AssertionError("Recovery repeated a mutation or unexpected request: "+method+" "+endpoint)
+app.connections.request=Mock(return_value=transport)
+record=tasks.read(state,"structured-one")["record"]
+arguments=data["arguments"]
+arguments["task_context"].update(task_revision=record["revision"],plan_revision=record["plan"]["revision"],
+                               continuation_epoch=record["control"]["epoch"])
+commit=database.commit
+def interrupted(connection):
+    if point=="before": os._exit(91)
+    commit(connection)
+    if point=="after": os._exit(91)
+database.commit=interrupted
+print(json.dumps(app.github_review_thread(**arguments)))
+'''
+        data = {"config": self.config.model_dump(mode="json"), "repository": REPO, "actor": ACTOR,
+                "metadata": self.provider.metadata, "pr": self.provider.pr,
+                "threads": self.provider.threads, "arguments": arguments}
+        result = subprocess.run([sys.executable, "-I", "-c", code, str(self.state), point],
+                                input=json.dumps(data), capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 91, result.stderr)
+        record = tasks.read(self.state, "structured-one")["record"]
+        self.assertEqual(len(record.get("goal_witnesses", [])), int(point == "after"))
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        restarted = subprocess.run([sys.executable, "-I", "-c", code, str(self.state), "retry"],
+                                   input=json.dumps(data), capture_output=True, text=True, timeout=15)
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertEqual(json.loads(restarted.stdout)["status"], "write_outcome_unknown")
+        self.assertEqual(len(tasks.read(self.state, "structured-one")["record"]["goal_witnesses"]), 1)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
+        tasks.check_state(self.state)
+
+    def test_process_loss_before_goal_commit_recovers_without_repeating_write(self):
+        self.crash_recovery("before")
+
+    def test_process_loss_after_goal_commit_reuses_exact_witness_without_repeating_write(self):
+        self.crash_recovery("after")
+
+    def test_simultaneous_recovery_excludes_competitor_and_publishes_one_witness(self):
+        arguments, original = self.lose_ack()
+        arguments["task_context"] = self.context_for(original["id"])
+        entered, release = Event(), Event()
+        read = self.app.task_receipts.read
+        def held(*args, **kwargs):
+            observed = read(*args, **kwargs)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return observed
+        with patch.object(self.app.task_receipts, "read", side_effect=held), ThreadPoolExecutor(max_workers=1) as pool:
+            recovery = pool.submit(self.app.github_review_thread, **arguments)
+            try:
+                self.assertTrue(entered.wait(5))
+                self.fault("resource_busy", self.app.github_review_thread, **arguments)
+            finally:
+                release.set()
+            witness = recovery.result(timeout=5)["goal_witness"]
+        self.assertEqual(self.recover(arguments)["goal_witness"], witness)
+        self.assertEqual(len(self.view()["record"]["goal_witnesses"]), 1)
+        self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)
+        self.assertEqual(self.thread_writes, 1)
 
 
 class StructuredTaskTests(ContinuityFixture, unittest.TestCase):
