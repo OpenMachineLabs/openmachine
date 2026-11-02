@@ -230,7 +230,7 @@ class WorktreeAdmissionTests(TaskFixture, unittest.TestCase):
     def test_creation_error_code_without_owner_phase_cannot_prove_no_effect(self):
         self.accept_plan(tools=["read_task", "control_task", "create_worktree"])
         with self.creation_owner() as (dispatch, receipts):
-            # A post-dispatch read fault or SSH response may retain this code
+            # A post-dispatch read fault or remote response may retain this code
             # without a phase marker, while the original receipt is unavailable.
             dispatch.side_effect = Fault("context_mismatch", "The original creation receipt could not be verified.")
             arguments = self.create_arguments()

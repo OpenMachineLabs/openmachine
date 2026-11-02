@@ -15,7 +15,7 @@ from openmachine.workspace import worktrees
 from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process, boot_identity
-from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, is_remote, read_record
+from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, read_record
 
 PREPARE_SECONDS = 15
 FORCE_SECONDS = 2
@@ -148,7 +148,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                 del os.environ[name]
     original_worktree = record["context"]["worktree"]
     process = None
-    interrupted = scope_owned = False
+    interrupted = False
     preparation_deadline = time.monotonic() + PREPARE_SECONDS
 
     def interrupt(*_):
@@ -159,11 +159,6 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     signal.signal(signal.SIGINT, interrupt)
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     try:
-        if is_remote(record):
-            groups = Path("/proc/self/cgroup").read_text().splitlines()
-            if not any(line.endswith("/" + record["scope_unit"]) for line in groups):
-                raise Fault("scope_mismatch", "The remote worker did not enter its owned user scope.")
-            scope_owned = True
         if creation_plan is not None:
             worktrees.ensure_local_objects(Path(request["cwd"]))
         record.update(status="preparing", context=record["context"] | context(Path(request["cwd"])))
@@ -193,7 +188,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                             controls = control.Server(control.socket_path(directory.parent.parent, directory.name),
                                                       directory, record, process, selector, _publish)
                         try:
-                            native_boot = boot_identity() if not is_remote(record) else None
+                            native_boot = boot_identity()
                             process.launch(request["argv"], request["cwd"], owned_fds, tty=request["tty"],
                                            terminal_size=request["terminal_size"], deadline=preparation_deadline)
                         except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
@@ -236,27 +231,11 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
         record["control_ready"] = False
         if process is not None:
             process.close()
-    if is_remote(record) and scope_owned:
-        record["cleanup"]["status"] = "pending"
     # Readers cannot observe the lease-release/publication gap as a lost worker.
     with lease(directory / "control.lock", wait=True, create=False):
-        if not scope_owned:
-            for fd in (*owned_fds, worker_fd):
-                os.close(fd)
+        for fd in (*owned_fds, worker_fd):
+            os.close(fd)
         record["finished_at"] = time.time()
         if not _publish(directory, record):
             record["status"] = "failed" if record["cleanup"]["status"] == "verified" else "outcome_unknown"
             _publish(directory, record)
-    if scope_owned:
-        # Retain inherited leases until systemd removes the original scope.
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        try:
-            subprocess.run(["systemctl", "--user", "--no-ask-password", "--no-block", "stop", record["scope_unit"]],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=5, check=True)
-        except (OSError, subprocess.SubprocessError):
-            with lease(directory / "control.lock", wait=True, create=False):
-                record.update(status="outcome_unknown", error="scope_cleanup_unverified")
-                _publish(directory, record)
-        while True:
-            signal.pause()

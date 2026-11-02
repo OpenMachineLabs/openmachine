@@ -27,7 +27,7 @@ ignore it. Empty expected SHA means observed absence, not an empty file.
 | Explicit parent creation | 16 directories, eight missing levels per path |
 | Read page / diff text | 32 KiB, further bounded by encoded response |
 | Change receipt / retained identities | 64 KiB / 10,000; no automatic eviction |
-| Workspace result / MCP body or SSH envelope | 512 KiB / 1 MiB, including escaping and duplicated MCP representations |
+| Workspace result / MCP body | 512 KiB / 1 MiB, including escaping and duplicated MCP representations |
 
 ### Source windows and discovery
 
@@ -94,7 +94,7 @@ An abandoned attempted effect stays unknown. Missing/corrupt history does not
 prove non-admission. Receipts retain hashes, context and effects, not source backups,
 raw edit payloads or reconstructable historical diffs. Deletion loses deduplication.
 
-Local/SSH writes share one target publisher and canonical workspace lease.
+Native writes use one target publisher and canonical workspace lease.
 Non-Git commands and edits use one unambiguous configured root; aliases and idle
 PTYs cannot bypass exclusion. Descendant links, hardlinks, special files, unsafe
 paths, nested repositories and credential/Git metadata are refused. Ordinary POSIX
@@ -153,8 +153,7 @@ hashes before/after; a file receipt or old test PASS is not current acceptance.
 
 Require `get_capabilities.project_catalog.protocol == 1` before using
 `inspect_projects`. This optional local-only reader changes no existing workspace
-operation, grant, configuration or persistent state. SSH targets return
-`unsupported_operation`; never fall back to the controller.
+operation, grant, configuration or persistent state.
 
 Omit `workspace_name` to page configured roots for the named machine. Supply it
 to list direct child directories under that approved root; `path` defaults to

@@ -40,7 +40,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_sqlite_candidate_requires_same_authority_and_supported_actual_engine(self):
         tasks.migrate(self.state)
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (24, "sqlite"))
+        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (25, "sqlite"))
         storage = proof["task_storage"]
         for delta in ({"state_contract": 17}, {"task_storage": None},
                       {"task_storage": storage | {"identity": "f" * 32}},
@@ -140,7 +140,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         write_legacy_task(self.state, terminal_task_fixture(created["record"]))
         raw = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (24, 1, 1))
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (25, 1, 1))
         actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT)
         self.assertEqual(actual, proof)
         for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
@@ -232,7 +232,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         paths = [path, self.state / "tasks/index.json"]
         before = [item.read_bytes() for item in paths]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (24, [4]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (25, [4]))
         self.assertIn(4, proof["structured_task_read_formats"])
         self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
@@ -253,7 +253,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         path = self.state / "tasks/structured-one/task.json"
         before = path.read_bytes()
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (24, [5]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (25, [5]))
         self.assertIn(5, proof["structured_task_read_formats"])
         for delta in ({"state_contract": 23}, {"structured_task_read_formats": [1, 2, 3, 4]},
                       {"structured_task_formats_present": [4]}):
@@ -298,24 +298,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_state._record(self.state), self.record)
         self.assertEqual((self.state / "tasks/structured-one/task.json").read_bytes(), original)
 
-    def test_retained_ssh_budget_requires_actual_reader_before_service_stop(self):
-        from integrations.ssh import recovery
-        recovery.replace(self.state, "c" * 64, None, {"episode_id": "d" * 32,
-            "started_at_ms": 1, "deadline_ms": 3600001, "attempts": 60,
-            "next_attempt_ms": 3600001, "reason_code": "ssh_transport_unavailable"})
-        before = (self.state / "ssh-recovery.json").read_bytes()
-        proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["ssh_recovery_targets"]), (24, 1))
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
-        for delta in ({"state_contract": 6}, {"ssh_recovery_present": False},
-                      {"ssh_recovery_targets": 0}, {"ssh_recovery_targets": True},
-                      {"ssh_recovery_sha256": "e" * 64}, {"ssh_recovery_format": 2}):
-            with self.subTest(delta=delta), patch.object(service_install, "_verify_candidate"), patch.object(service_processes, "run",
-                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")), \
-                    patch.object(service_runtime, "_stop") as stop:
-                self.assert_fault("incompatible_state", lambda: service_transition._activate(self.state, self.record, self.b))
-                stop.assert_not_called()
-        self.assertEqual((self.state / "ssh-recovery.json").read_bytes(), before)
 
     def test_incompatible_receipt_never_becomes_empty_history(self):
         directory = private_directory(self.state / "executions" / ("c" * 32))
@@ -346,28 +328,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             save_json(path, original | {"state_contract": contract})
             self.assert_fault("incompatible_runtime", lambda: service_state._installed(self.state, self.b))
 
-    def test_remote_workspace_reader_uses_exact_candidate_and_validates_complete_proof(self):
-        pin, archive = "d" * 64, "e" * 64
-        with self.config.open("a") as file:
-            file.write('\n[machines.remote]\ntransport="ssh"\nssh_alias="fixture"\nssh_identity="' + pin +
-                       '"\nssh_worker="/target/' + archive + '.pyz"\n')
-        proof = {"identity_verified": True, "target_identity": pin, "worker_sha256": archive,
-                 "workspace_change_format": 1, "workspace_change_records": 1,
-                 "workspace_change_store_present": True, "legacy_workspace_compatible": True,
-                 "unavailable_workspaces": []}
-        python = self.root / "candidate/bin/python"
-        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof), "")) as call:
-            self.assertEqual(service_checks._remote_workspace_state(python, self.config, "remote"), proof)
-            self.assertEqual(call.call_args.args[0], [str(python), "-I", "-m", "openmachine.cli", "--config", str(self.config),
-                                                       "doctor", "--machine", "remote"])
-        for delta in ({"workspace_change_format": True}, {"workspace_change_store_present": False},
-                      {"target_identity": "f" * 64}, {"legacy_workspace_compatible": None}):
-            with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
-                self.assert_fault("incompatible_remote_state", lambda: service_checks._remote_workspace_state(python, self.config, "remote"))
-        # Missing unrelated source is not unreadable target history or a reason to disrupt a healthy service.
-        missing = proof | {"unavailable_workspaces": ["unrelated"]}
-        with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 1, json.dumps(missing), "")):
-            self.assertEqual(service_checks._remote_workspace_state(python, self.config, "remote"), missing)
 
     def test_actual_local_change_reader_blocks_old_candidate_that_ignores_store(self):
         from openmachine import workspace
@@ -429,7 +389,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         now = time.time_ns() // 1000000
         operation = {"id": "a" * 32, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
             "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-            "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+            "locator": {"kind": "execution", "machine": "desktop",
                 "execution_id": "a" * 32, "control_seq": None},
             "admitted_at_ms": now, "state": "unknown", "observed_at_ms": now,
             "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original unresolved work.", "log_offset": None}}

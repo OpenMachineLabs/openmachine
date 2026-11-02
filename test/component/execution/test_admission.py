@@ -12,7 +12,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
     def test_retired_local_approval_cannot_read_originals_or_environment(self):
         from openmachine.app.machines import Machines
         result = self.wait(self.start('print("original receipt")'))
-        machine = Machines(self.config, self.state, None)
+        machine = Machines(self.config, self.state)
         self.config.machines["my-laptop"].local_access = None
         reads = [
             lambda: machine.read_execution("my-laptop", result["execution_id"]),

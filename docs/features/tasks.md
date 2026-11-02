@@ -60,9 +60,8 @@ before new effects. `read_task` is lookup, not a fresh grant of execution author
 For a device or Workspace list, `find_tasks` accepts `machine`, `workspace`
 and an optional exact `workspace_identity` from the original target. Workspace
 matches use current declared Task targets, including multi-target Tasks. A
-machine-only query additionally finds original operations on that machine; use
-`machine + target_identity` to match original SSH operations pinned to that
-identity without assuming a Workspace. Rows contain Task state, declared targets,
+machine-only query additionally finds original operations on that machine,
+without assuming Workspace membership from an operation alone. Rows contain Task state, declared targets,
 up to eight distinct original operation targets, the owning Task-store identity,
 and available timestamps. Absent metadata is null, never inferred. Pages are
 ordered by Task ID; pass the returned `generation` on later pages, restarting

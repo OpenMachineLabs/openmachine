@@ -30,8 +30,7 @@ PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activat
           "deferred", "completed", "rejected", "restored", "recovery_required"}
 TERMINAL = {"completed", "rejected", "restored"}
 CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
-CAPABILITIES = ["status", "bind", "start", "resume", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback",
-                "machines", "machine-probe", "machine-test", "machine-add", "machine-remove", "ssh-setup"]
+CAPABILITIES = ["status", "bind", "start", "resume", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback", "machines"]
 
 
 def _selection_digest(record: dict) -> str:
@@ -570,267 +569,28 @@ def observe(config_path: Path, state: Path) -> dict:
     return result
 
 
+
+
+
+
+
+
+
+
+
+
 def machines(config_path: Path, state: Path) -> dict:
-    """Read configuration through its owner, independently of service readiness."""
+    """Read only native machine metadata; this is not remote-device discovery."""
     from openmachine.config import load
 
     digest = _digest(config_path)
     config = load(config_path)
     if _digest(config_path) != digest:
         raise Fault("configuration_changed", "Configuration changed during observation; refresh again.")
-    return {"status": "observed", "config_sha256": digest, "machines": [
-        {"name": name, "transport": target.transport, "ssh_alias": target.ssh_alias,
-         **({"ssh_destination": f"{target.ssh_connection.user}@{target.ssh_connection.host}:{target.ssh_connection.port}"} if target.ssh_connection else {}),
-         "ssh_worker": target.ssh_worker, "ssh_identity": target.ssh_identity,
-         "os": platform.system() if target.transport == "local" else None,
-         "architecture": platform.machine() if target.transport == "local" else None}
-        for name, target in config.machines.items()]}
-
-
-def _machine_candidate(config, name: str, alias: str | None, worker: str, pinned: str = "", *, connection=None, project=None):
-    from pydantic import ValidationError
-    from openmachine.config import Settings
-
-    if name in config.machines or any(alias and target.ssh_alias == alias or pinned and target.ssh_identity == pinned
-                                       for target in config.machines.values()):
-        raise Fault("duplicate_machine", "That machine name or SSH alias is already configured.")
-    if project and project["name"] in config.workspaces:
-        raise Fault("duplicate_workspace", "That project name is already configured.")
-    try:
-        fields = {"machines": {
-            **{key: value.model_dump() for key, value in config.machines.items()},
-            name: {"transport": "ssh", "ssh_alias": alias, "ssh_worker": worker,
-                   "ssh_connection": connection, "ssh_identity": pinned,
-                   "execution_enabled": project["commands"] if project else False,
-                   "workspace_write_enabled": project["writes"] if project else False}}}
-        if project:
-            fields["workspaces"] = {**{key: value.model_dump() for key, value in config.workspaces.items()},
-                                    project["name"]: {"machine": name, "root": project["root"]}}
-        return Settings.model_validate(config.model_dump() | fields)
-    except ValidationError as error:
-        raise Fault("invalid_machine", "Use a machine name, existing SSH alias and absolute content-addressed worker path.") from error
-
-
-def probe_machine(config_path: Path, name: str, *, alias: str | None = None, worker: str = "", pinned: str = "") -> dict:
-    from integrations.ssh import client as ssh_client
-    from openmachine.config import load
-
-    digest = _digest(config_path)
-    config = load(config_path)
-    if alias is not None:
-        config = _machine_candidate(config, name, alias, worker, pinned)
-    target = config.machine(name)
-    result = ssh_client.call(config, name, "probe")
-    if _digest(config_path) != digest:
-        raise Fault("configuration_changed", "Configuration changed during the probe; refresh and test again.")
-    if alias is not None and any(item.ssh_identity == result["target_identity"] for item in load(config_path).machines.values()):
-        raise Fault("duplicate_machine", "That machine identity is already configured under another name.")
-    # The transport verifies protocol, controller version, archive digest and the
-    # pinned account/host identity. Older compatible workers may omit OS fields.
-    return {"status": "observed", "name": name, "config_sha256": digest,
-            "identity": result["target_identity"], "identity_verified": bool(target.ssh_identity),
-            "worker_sha256": result["worker_sha256"], "version": result.get("version"),
-            "os": result.get("os"), "architecture": result.get("architecture")}
-
-
-def change_machine(config_path: Path, state: Path, action: str, identity: str, name: str,
-                   expected_config_sha256: str, *, alias: str | None = "", worker: str = "", pinned: str = "",
-                   connection=None, project=None) -> dict:
-    from openmachine.config import load
-    from . import checks
-
-    # Repeating an original operation is readback, never another probe or mutation.
-    if os.path.lexists(_operation_path(state, identity)):
-        return read_operation(config_path, state, identity)
-    digest = _digest(config_path)
-    if digest != expected_config_sha256:
-        raise Fault("configuration_changed", "Configuration changed; refresh and test again.")
-    selected = service_state._record(state)
-    _bound(config_path, state, selected)
-    installed = service_state._installed(state, selected["current"])
-    payload_hash = installed.get("payload_sha256")
-    if not payload_hash or installed["version"] != __version__:
-        raise Fault("incompatible_management", "Connection changes require the selected compatible packaged Core.")
-    config = load(config_path)
-    raw = tomllib.loads(config_path.read_text())
-    if action == "machine-add":
-        if not re.fullmatch(r"[0-9a-f]{64}", pinned):
-            raise Fault("identity_required", "Test the connection and explicitly confirm its reported identity first.")
-        candidate = _machine_candidate(config, name, alias, worker, pinned, connection=connection, project=project)
-        # The retained candidate verifies SSH before activation. Admit its original
-        # operation first so a slow/failed exchange has durable readback.
-        raw["machines"][name] = candidate.machines[name].model_dump(exclude_none=True)
-        if project:
-            raw.setdefault("workspaces", {})[project["name"]] = candidate.workspaces[project["name"]].model_dump()
-    else:
-        target = config.machine(name)
-        if target.transport != "ssh":
-            raise Fault("local_machine_required", "This Mac cannot be removed.")
-        checks.machine_unused(config, state, name, check_remote=False)
-        del raw["machines"][name]
-    # Serialize only validated TOML values, preserving all unrelated semantics.
-    def literal(value):
-        if isinstance(value, dict):
-            return "{ " + ", ".join(json.dumps(key) + " = " + literal(item) for key, item in value.items()) + " }"
-        if isinstance(value, list):
-            return "[" + ", ".join(map(literal, value)) + "]"
-        return json.dumps(value, ensure_ascii=False)
-    text = "\n".join(json.dumps(key) + " = " + literal(value) for key, value in raw.items()) + "\n"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml") as candidate_file:
-        candidate_file.write(text)
-        candidate_file.flush()
-        candidate_path = Path(candidate_file.name)
-        load(candidate_path)
-        return submit(config_path, state, "update", identity, state / "service/payloads" / payload_hash,
-                      payload_hash, candidate_config=candidate_path, expected_config_sha256=digest)
-
-
-def setup_ssh(config_path, state, action, identity, value):
-    from pydantic import ValidationError
-    from integrations.ssh import bundle, client as ssh_client, setup as ssh_setup
-    from openmachine.config import SshConnection, load
-
-    path = ssh_setup._path(state, identity)
-    root = private_directory(path.parent)
-    if root != path.parent or not isinstance(value, dict):
-        ssh_setup._fault("ssh_setup_invalid")
-    with lease(root / "operation.lock"):
-        if action == "inspect" and not path.exists():
-            if len(list(root.glob("*.json"))) >= 128:
-                ssh_setup._fault("ssh_setup_limit")
-            if set(value) - {"name", "alias", "host", "user", "port", "identity_file"}:
-                ssh_setup._fault("invalid_request")
-            name = value.get("name")
-            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name):
-                ssh_setup._fault("invalid_machine")
-            config = load(config_path)
-            if name in config.machines:
-                ssh_setup._fault("duplicate_machine")
-            alias = value.get("alias")
-            if alias:
-                if not isinstance(alias, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", alias) or set(value) - {"name", "alias"}:
-                    ssh_setup._fault("invalid_machine")
-                destination, connection = alias, None
-            else:
-                # Validate the single destination before passing it to keyscan.
-                placeholder = "ssh-ed25519 " + base64.b64encode(b"\0\0\0\x0bssh-ed25519" + b"\0\0\0\x20" + bytes(32)).decode()
-                try:
-                    connection = SshConnection(host=value.get("host"), user=value.get("user"), port=value.get("port", 22),
-                                               identity_file=value.get("identity_file"), host_key=placeholder).model_dump()
-                except ValidationError:
-                    ssh_setup._fault("invalid_machine")
-                destination = f'{connection["user"]}@{connection["host"]}:{connection["port"]}'
-            artifact = bundle.build_bundle(state / "service/setup-workers")
-            record = {"format": 1, "operation_id": identity, "config": str(config_path),
-                      "config_sha256": _digest(config_path), "artifact": artifact,
-                      "candidate": {"name": name, "alias": alias or None, "connection": connection},
-                      "destination": destination, "host_key_known": False, "facts": None,
-                      "phase": "discovering", "reason": None}
-            save_json(path, record)
-        else:
-            record = ssh_setup._read(state, identity)
-        if record["config"] != str(config_path):
-            ssh_setup._fault("configuration_changed")
-        if record["phase"] == "saving":
-            # The setup lease excludes a still-running submitter. Inspect the
-            # original under the admission lock before permitting a fresh save.
-            with lease(state / "service/operation.lock"):
-                if not os.path.lexists(_operation_path(state, identity)):
-                    # Earlier setups may contain an atomic project candidate.
-                    record["phase"] = "project_ready" if record.get("project") else "prepared"
-                    save_json(path, record)
-        if action == "cancel":
-            if record["phase"] == "completed":
-                ssh_setup._fault("setup_completed")
-            if record["phase"] in {"preparing", "saving"}:
-                ssh_setup._fault("original_operation_required")
-            record["phase"] = "cancelled"
-        elif action == "trust":
-            route = record["candidate"].get("connection")
-            if record["phase"] != "host_key_review" or value != {"fingerprint": ssh_setup._fingerprint(route["host_key"]), "confirmed": True}:
-                ssh_setup._fault("ssh_host_key_review_required")
-            record["phase"] = "inspecting"
-            save_json(path, record)
-        elif action not in {"inspect", "status", "prepare", "save", "continue"}:
-            ssh_setup._fault("invalid_request")
-        try:
-            if record["phase"] == "discovering":
-                candidate = record["candidate"]
-                if candidate["alias"]:
-                    code, raw = ssh_client._exchange(["ssh", "-G", "--", candidate["alias"]], b"")
-                    resolved = dict(line.split(" ", 1) for line in raw.decode().splitlines() if " " in line)
-                    if code or not all(resolved.get(k) for k in ("hostname", "user", "port")):
-                        ssh_setup._fault("ssh_unavailable")
-                    destination = f'{resolved["user"]}@{resolved["hostname"]}:{resolved["port"]}'
-                    if len(destination) > 512 or any(ord(c) < 32 for c in destination):
-                        ssh_setup._fault("invalid_machine")
-                    record["destination"], known = destination, True
-                else:
-                    host_key, known = ssh_setup._discover(candidate["connection"])
-                    candidate["connection"]["host_key"] = host_key
-                record["host_key_known"] = known
-                record["phase"] = "inspecting" if known else "host_key_review"
-                save_json(path, record)
-            if record["phase"] == "inspecting":
-                record["facts"] = ssh_setup._remote(record, "inspect")
-                if record["facts"]["worker_status"] == "available":
-                    ssh_setup._probe(record, config_path)
-                    record["phase"] = "prepared"
-                else:
-                    record["phase"] = "ready_to_prepare"
-            if action == "prepare" and record["phase"] == "ready_to_prepare":
-                if value != {"sha256": record["artifact"]["sha256"], "confirmed": True}:
-                    ssh_setup._fault("preparation_consent_required")
-                if record["artifact"]["version"] != __version__:
-                    ssh_setup._fault("protocol_mismatch")
-                raw = bundle._archive_bytes(Path(record["artifact"]["path"]))
-                record["phase"] = "preparing"
-                save_json(path, record)
-                try:
-                    record["facts"] = ssh_setup._remote(record, "prepare", archive=base64.b64encode(raw).decode())
-                except Fault as error:
-                    if (error.evidence or {}).get("ssh_setup_completed") is True:
-                        # A completed error may follow publication; inspect before retrying.
-                        record["phase"] = "inspecting"
-                    raise
-            if record["phase"] == "preparing":
-                record["facts"] = ssh_setup._remote(record, "inspect")
-                if record["facts"]["worker_status"] == "available":
-                    ssh_setup._probe(record, config_path)
-                    record["phase"] = "prepared"
-            if action == "save" and record["phase"] in {"prepared", "project_ready"}:
-                if value != {"confirmed": True}:
-                    ssh_setup._fault("configuration_consent_required")
-                if _digest(config_path) != record["config_sha256"]:
-                    ssh_setup._fault("configuration_changed")
-                # Retain the legacy atomic save for already-prepared projects.
-                project = record.get("project")
-                if project and ssh_setup._remote(record, "project", root=project["root"])["root"] != project["root"]:
-                    ssh_setup._fault("remote_project_changed")
-                ssh_setup._probe(record, config_path)
-                record["phase"] = "saving"
-                save_json(path, record)
-                target = ssh_setup._target(record)
-                change_machine(config_path, state, "machine-add", identity, record["candidate"]["name"],
-                    record["config_sha256"], alias=target.ssh_alias, connection=target.ssh_connection,
-                    worker=target.ssh_worker, pinned=target.ssh_identity, project=project)
-            if record["phase"] == "saving" and _operation_path(state, identity).exists():
-                operation = read_operation(config_path, state, identity)
-                if action == "continue" and operation["status"] == "continuation_required":
-                    operation = continue_operation(config_path, state, identity)
-                record["operation"] = {"status": operation["status"], "reason": operation.get("reason"),
-                                       "can_continue": operation["status"] == "continuation_required"}
-                if operation["status"] == "completed":
-                    record["phase"] = "completed"
-                elif operation["status"] in {"rejected", "restored"}:
-                    record["phase"] = "save_failed"
-            if record["phase"] not in {"ready_to_prepare", "preparing"}:
-                record["reason"] = None
-        except (Fault, OSError, TimeoutError, UnicodeError) as error:
-            record["reason"] = error.code if isinstance(error, Fault) else (
-                "management_unavailable" if record["phase"] == "saving" else "ssh_unavailable")
-        save_json(path, record)
-        return {"status": "observed", "setup": ssh_setup.view(record)}
+    return {"status": "observed", "config_sha256": digest,
+            "machines": [{"name": name, "transport": "local",
+                          "os": platform.system(), "architecture": platform.machine()}
+                         for name in config.machines]}
 
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
@@ -853,13 +613,6 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
             result = observe(config_path, state)
         elif action == "machines":
             result = machines(config_path, state)
-        elif action == "ssh-setup":
-            inputs["action"] = inputs.pop("setup_action")
-            result = setup_ssh(config_path, state, **inputs)
-        elif action in {"machine-probe", "machine-test"}:
-            result = probe_machine(config_path, **inputs)
-        elif action in {"machine-add", "machine-remove"}:
-            result = change_machine(config_path, state, action, **inputs)
         elif action == "configure":
             from openmachine.config import initialize
             _uninstalled(state)
@@ -885,18 +638,6 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
                   "incompatible" if code.startswith("incompatible") else "activation_pending" if code == "activation_pending" else
                   "blocked" if code == "runtime_recovery_blocked" else "unready" if code == "service_unready" else "unknown",
                   "reason": code}
-        if (action == "ssh-setup" and inputs.get("action", inputs.get("setup_action")) == "inspect"
-                and isinstance(inputs.get("identity"), str) and re.fullmatch(r"[0-9a-f]{32}", inputs["identity"])):
-            from integrations.ssh import setup as ssh_setup
-            if not os.path.lexists(ssh_setup._path(state, inputs["identity"])):
-                result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
-        if (action in {"machine-add", "machine-remove"} and code in {
-                "configuration_changed", "duplicate_machine", "invalid_machine", "identity_required", "identity_mismatch",
-                "ssh_host_key_mismatch", "ssh_authentication_required", "ssh_unavailable", "remote_runtime_unavailable",
-                "ssh_protocol_error", "protocol_mismatch", "local_machine_required", "machine_in_use",
-                "resource_busy", "maintenance_busy", "activation_pending", "incompatible_management"}
-                and not os.path.lexists(_operation_path(state, inputs["identity"]))):
-            result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
         if (action == "update" and code in {"configuration_changed", "candidate_configuration_changed",
                                             "invalid_configuration_consent", "invalid_selection_consent", "selection_changed"}
                 and not os.path.lexists(_operation_path(state, inputs["identity"]))):

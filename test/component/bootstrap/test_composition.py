@@ -14,7 +14,7 @@ import sys
 from openmachine.config import Settings
 original_import = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name == "integrations" or name.startswith(("integrations.github", "integrations.ssh")):
+    if name == "integrations" or name.startswith(("integrations.github",)):
         raise AssertionError("Disabled integration imported: " + name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded
@@ -25,7 +25,7 @@ app = create_application(config, state)
 assert app.get_capabilities()["integrations"] == []
 assert app.find_tasks()["status"] == "uninitialized"
 assert not state.exists()
-assert not any(name in sys.modules for name in ("integrations.github", "integrations.github.connection", "integrations.ssh.client", "mcp"))
+assert not any(name in sys.modules for name in ("integrations.github", "integrations.github.connection", "mcp"))
 '''
         result = subprocess.run([sys.executable, "-I", "-c", code, str(self.state)],
                                 capture_output=True, text=True, timeout=15)

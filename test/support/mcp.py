@@ -105,14 +105,10 @@ class MCPFixture(object):
             self.assertLess(time.monotonic(), deadline, payload)
             await asyncio.sleep(0.02)
 
-    def assert_tool_contract(self, result: ListToolsResult, *, github: bool, ssh: bool):
+    def assert_tool_contract(self, result: ListToolsResult, *, github: bool):
         expected = json.loads((Path(__file__).resolve().parents[1] / "contract/mcp/mcp_contract.json").read_text())["tools"]
         if not github:
             expected = {name: tool for name, tool in expected.items() if not name.startswith("github_")}
-        # Only these ten annotations vary with configured SSH; never normalize actual results.
-        for name in ("inspect_context", "inspect_workspace", "read_workspace_file", "write_workspace_file",
-                     "read_execution", "list_executions", "control_execution", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch"):
-            expected[name]["annotations"]["openWorldHint"] = ssh
         self.assertIsNone(result.next_cursor, "The baseline tool catalog is a single complete page")
         actual = {tool.name: tool for tool in result.tools}
         self.assertEqual(len(result.tools), len(actual), "Duplicate tool names in discovery")

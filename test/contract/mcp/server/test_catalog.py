@@ -24,28 +24,21 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         return matching[0]
 
     async def test_tool_contract_without_github(self):
-        local = self.config.read_text().split("[github]")[0]
-        for ssh in (False, True):
-            with self.subTest(ssh=ssh):
-                config = local
-                if ssh:
-                    config += ('\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\n'
-                               'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n'
-                               '[workspaces.remote]\nmachine="build"\nroot="/remote/not-on-controller"\n')
-                self.config.write_text(config)
-                process = self.launch()
-                try:
-                    async with self.client() as (reader, writer):
-                        async with ClientSession(reader, writer) as session:
-                            await session.initialize()
-                            discovered = await session.list_tools()
-                            self.assert_tool_contract(discovered, github=False, ssh=ssh)
-                            for tool in discovered.tools:
-                                self.guide_selector(tool)
-                            caps = (await session.call_tool("get_capabilities", {})).structured_content
-                            self.assertEqual(caps["integrations"], ["ssh"] if ssh else [])
-                finally:
-                    self.stop(process)
+        self.config.write_text(self.config.read_text().split("[github]")[0])
+        process = self.launch()
+        try:
+            async with self.client() as (reader, writer):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    discovered = await session.list_tools()
+                    self.assert_tool_contract(discovered, github=False)
+                    for tool in discovered.tools:
+                        self.guide_selector(tool)
+                    caps = (await session.call_tool("get_capabilities", {})).structured_content
+                    self.assertEqual(caps["integrations"], [])
+                    self.assertTrue(all(m["transport"] == "local" for m in caps["machines"].values()))
+        finally:
+            self.stop(process)
 
     async def test_installed_package_discovery_and_socket_permissions(self):
         self.launch()
@@ -57,7 +50,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 init = await session.initialize()
                 self.assertEqual(init.server_info.version, openmachine.__version__)
                 discovered = await session.list_tools()
-                self.assert_tool_contract(discovered, github=True, ssh=False)
+                self.assert_tool_contract(discovered, github=True)
                 tools = {t.name: t for t in discovered.tools}
                 self.assertEqual(set(tools), {"get_capabilities", "inspect_context", "inspect_projects", "inspect_workspace", "inspect_skills", "start_execution", "create_worktree", "read_execution", "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_read", "github_merge", "github_project", "github_release", "read_workspace_file", "write_workspace_file", "edit_workspace_file", "read_workspace_change", "apply_workspace_patch", "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login", "disconnect_integration", "start_codex_task", "read_codex_task"})
                 self.assertFalse(tools["create_task"].annotations.read_only_hint)
@@ -109,54 +102,45 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(reference.is_error)
                 self.assertIn("Choose and reuse a worktree", reference.structured_content["text"])
 
-    async def test_migration_protocols_preserve_all_four_catalogs(self):
+    async def test_migration_protocols_preserve_native_catalogs(self):
         from importlib.metadata import version
         self.assertEqual(version("mcp"), "2.2.0")
         original = self.config.read_text()
         for github in (False, True):
-            for ssh in (False, True):
-                config = original if github else original.split("[github]")[0]
-                if ssh:
-                    config += '\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\nssh_worker="/remote/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pyz"\n'
-                self.config.write_text(config)
-                process = self.launch()
-                try:
-                    for mode in ("legacy", "2026-07-28", "auto"):
-                        with self.subTest(github=github, ssh=ssh, mode=mode):
-                            async with Client(self.client(), mode=mode, cache=None) as client:
-                                expected = "2025-11-25" if mode == "legacy" else "2026-07-28"
-                                self.assertEqual(client.protocol_version, expected)
-                                self.assert_tool_contract(await client.list_tools(), github=github, ssh=ssh)
-                                result = await client.call_tool("read_workspace_file", {
-                                    "machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"})
-                                self.assertFalse(result.is_error, result)
-                                self.assertEqual(json.loads(result.content[0].text), result.structured_content)
-                                self.assertIn("disposable", result.structured_content["text"])
-                finally:
-                    self.stop(process)
+            self.config.write_text(original if github else original.split("[github]")[0])
+            process = self.launch()
+            try:
+                for mode in ("legacy", "2026-07-28", "auto"):
+                    with self.subTest(github=github, mode=mode):
+                        async with Client(self.client(), mode=mode, cache=None) as client:
+                            expected = "2025-11-25" if mode == "legacy" else "2026-07-28"
+                            self.assertEqual(client.protocol_version, expected)
+                            self.assert_tool_contract(await client.list_tools(), github=github)
+                            result = await client.call_tool("read_workspace_file", {
+                                "machine": "desktop", "workspace_name": "example", "path": "AGENTS.md"})
+                            self.assertFalse(result.is_error, result)
+                            self.assertEqual(json.loads(result.content[0].text), result.structured_content)
+                            self.assertIn("disposable", result.structured_content["text"])
+            finally:
+                self.stop(process)
 
-    async def test_catalog_fingerprint_matches_advertised_tools_without_probing_targets(self):
+    async def test_catalog_fingerprint_matches_advertised_native_tools(self):
         original = self.config.read_text()
         for github in (False, True):
-            for ssh in (False, True):
-                config = original if github else original.split("[github]")[0]
-                if ssh:
-                    config += ('\n[machines.build]\ntransport="ssh"\nssh_alias="uncontacted-host"\n'
-                               'ssh_worker="/remote/' + 'a' * 64 + '.pyz"\n')
-                self.config.write_text(config)
-                process = self.launch()
-                try:
-                    for mode in ("legacy", "2026-07-28"):
-                        async with Client(self.client(), mode=mode, cache=None) as client:
-                            tools = (await client.list_tools()).tools
-                            descriptors = [tool.model_dump(mode="json", by_alias=True, exclude_none=True)
-                                           for tool in sorted(tools, key=lambda item: item.name)]
-                            raw = (json.dumps(descriptors, sort_keys=True, ensure_ascii=False,
-                                              separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
-                            result = await client.call_tool("get_capabilities", {})
-                            self.assertFalse(result.is_error, result)
-                            self.assertEqual(result.structured_content["mcp_catalog"], {
-                                "sha256": hashlib.sha256(raw).hexdigest(), "tool_count": len(tools),
-                                "source": "server_tools_list", "client_match": "not_observed"})
-                finally:
-                    self.stop(process)
+            self.config.write_text(original if github else original.split("[github]")[0])
+            process = self.launch()
+            try:
+                for mode in ("legacy", "2026-07-28"):
+                    async with Client(self.client(), mode=mode, cache=None) as client:
+                        tools = (await client.list_tools()).tools
+                        descriptors = [tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+                                       for tool in sorted(tools, key=lambda item: item.name)]
+                        raw = (json.dumps(descriptors, sort_keys=True, ensure_ascii=False,
+                                          separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+                        result = await client.call_tool("get_capabilities", {})
+                        self.assertFalse(result.is_error, result)
+                        self.assertEqual(result.structured_content["mcp_catalog"], {
+                            "sha256": hashlib.sha256(raw).hexdigest(), "tool_count": len(tools),
+                            "source": "server_tools_list", "client_match": "not_observed"})
+            finally:
+                self.stop(process)

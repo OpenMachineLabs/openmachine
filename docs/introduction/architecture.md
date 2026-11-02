@@ -14,15 +14,12 @@ Supported connection / separately managed tunnel
      v
 OpenMachine Core on your controller
      |-- configured local workspaces and native commands
-     |-- prepared Linux workers over authenticated SSH
      |-- scoped native GitHub connection
      |-- authorized native Codex browser adapter
      `-- local task ledger and original operation receipts
 ```
 
-The controller is the computer running Core. An SSH target is a different
-machine with its own account, workspace, worker and operation results. Core does
-not substitute controller facts when the target is unavailable.
+Every participating device operates through its own authorized native runtime; Cloud and Connector own account-device routing. A remote device does not become a filesystem path on the local Core.
 
 ## From request to verified result
 

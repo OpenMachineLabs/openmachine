@@ -35,7 +35,7 @@ def _prepare_commit(state: Path, commit: str, config_path: Path) -> str:
         # Only fetching may use the user's existing noninteractive Git credentials.
         fetch_env = {key: value for key, value in env.items() if not key.startswith("GIT_CONFIG_")}
         fetch_env["HOME"] = str(Path.home())
-        fetch_env.update({key: os.environ[key] for key in ("SSH_AUTH_SOCK", "XDG_CONFIG_HOME", "GH_CONFIG_DIR") if key in os.environ})
+        fetch_env.update({key: os.environ[key] for key in ("XDG_CONFIG_HOME", "GH_CONFIG_DIR") if key in os.environ})
         git = ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false", "-C", str(source)]
         for command in (["init", "--quiet", "--template="],
                         ["fetch", "--quiet", "--depth=1", "--no-tags", "--no-recurse-submodules",
@@ -168,16 +168,12 @@ def _prepare_payload(config_path: Path, state: Path, source: Path, expected_sha2
 
 
 
-def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote: bool = False) -> None:
+def _verify_candidate(state: Path, record: dict, identity: str) -> None:
     installed = service_state._installed(state, identity)
     python = service_state._runtime(state, identity) / "bin/python"
     observed = checks._candidate_state(python, Path(record["config"]), state, installed["state_contract"])
     if observed["version"] != installed["version"] or observed["prefix"] != str(python.parent.parent):
         raise Fault("installation_identity_mismatch", "The retained runtime changed identity; it will not be activated.")
-    if check_remote and installed["state_contract"] >= 4:
-        for name, target in load(Path(record["config"])).machines.items():
-            if target.transport == "ssh":
-                checks._remote_workspace_state(python, Path(record["config"]), name)
     with tempfile.TemporaryDirectory(prefix="om-ready-", dir="/tmp") as temporary:
         test_state = Path(temporary) / "state"
         process = subprocess.Popen([str(python), "-I", "-m", "openmachine.cli", "--config", record["config"],
@@ -190,7 +186,7 @@ def _verify_candidate(state: Path, record: dict, identity: str, *, check_remote:
                     raise Fault("candidate_unready", "The candidate did not create its private MCP listener; readiness remains unverified.")
                 time.sleep(0.05)
             checks.probe_service(test_state, Path(record["config"]), record["probe"], installed["version"], process.pid,
-                          expected_contract=installed["state_contract"], check_remote=check_remote)
+                          expected_contract=installed["state_contract"])
         finally:
             if process.poll() is None:
                 process.terminate()

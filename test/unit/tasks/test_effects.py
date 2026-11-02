@@ -7,6 +7,22 @@ from openmachine.tasks import effects, records
 
 
 class EffectScopeTests(unittest.TestCase):
+    def test_retained_local_locator_null_pin_normalizes_but_nonlocal_pin_is_rejected(self):
+        from pydantic import ValidationError
+        for kind, identity_key in (("execution", "execution_id"), ("change", "change_id")):
+            locator = {"kind": kind, "machine": "desktop", identity_key: "a" * 32,
+                       "target_identity": None}
+            if kind == "execution":
+                locator["control_seq"] = None
+                model = records.ExecutionLocator
+            else:
+                model = records.ChangeLocator
+            normalized = model.model_validate(locator).model_dump()
+            self.assertNotIn("target_identity", normalized)
+            self.assertEqual(normalized["machine"], "desktop")
+            with self.assertRaises(ValidationError):
+                model.model_validate({**locator, "target_identity": "b" * 64})
+
     def operation(self, method, **arguments):
         args = dict(repository="Owner/repo", action="update", number=7, **arguments)
         kind = method.removeprefix("github_")
@@ -171,13 +187,13 @@ class EffectScopeTests(unittest.TestCase):
         self.assertEqual(original, before)
 
     def test_local_unknown_and_partial_exclude_only_same_target(self):
-        local = {"id": "b" * 32, "locator": {"kind": "execution", "target_identity": None}}
-        change = {"id": "c" * 32, "locator": {"kind": "change", "target_identity": None}}
+        local = {"id": "b" * 32, "locator": {"kind": "execution", "machine": "desktop"}}
+        change = {"id": "c" * 32, "locator": {"kind": "change", "machine": "desktop"}}
         self.assertTrue(self.conflict(local, change))
         self.assertFalse(self.conflict(local, self.operation("github_pull_request", body="new")))
         remote = deepcopy(local)
-        remote["locator"]["target_identity"] = "d" * 64
-        self.assertFalse(self.conflict(local, remote))
+        remote["locator"]["machine"] = "another"
+        self.assertTrue(self.conflict(local, remote))
         for status in ("unknown", "running", "partial"):
             self.assertTrue(effects.unresolved({"state": "observed", "result": {"status": status}}))
 

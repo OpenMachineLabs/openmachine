@@ -229,18 +229,36 @@ class Control(Model):
     pending_decision: Text512 | None
 
 
+def _native_locator(value):
+    # One-way canonicalization of previously retained *local* Task evidence.
+    # Non-null SSH target pins are never accepted as native execution authority.
+    if isinstance(value, dict) and "target_identity" in value:
+        if value["target_identity"] is not None:
+            raise ValueError("retired non-native target locator")
+        return {key: item for key, item in value.items() if key != "target_identity"}
+    return value
+
+
 class ExecutionLocator(Model):
+    @model_validator(mode="before")
+    @classmethod
+    def native_only(cls, value):
+        return _native_locator(value)
+
     kind: Literal["execution"]
     machine: Name
-    target_identity: SHA | None
     execution_id: ID
     control_seq: Integer | None
 
 
 class ChangeLocator(Model):
+    @model_validator(mode="before")
+    @classmethod
+    def native_only(cls, value):
+        return _native_locator(value)
+
     kind: Literal["change"]
     machine: Name
-    target_identity: SHA | None
     change_id: ID
 
 
@@ -472,7 +490,7 @@ class Handoff(Model):
 
 class Recovery(Model):
     episode_id: ID
-    category: Literal["local_observation", "ssh_observation", "runtime_readiness", "delivery", "claim"]
+    category: Literal["local_observation", "runtime_readiness", "delivery", "claim"]
     started_at_ms: Integer
     deadline_ms: Integer
     attempts: Integer

@@ -16,8 +16,7 @@ This roadmap outlines planned features and longer-term directions. Scope and pri
 
 ## 3. Multi-Machine Connectivity & Security
 
-- [ ] Integrate Tailscale for managed multi-device connectivity alongside existing SSH support.
-- [ ] Add SSH access management and machine-level allowlists and denylists.
+- [ ] Expand native account-device connectivity across supported operating systems.
 - [ ] Enforce operation-level permissions and block prohibited or high-risk AI actions.
 
 ## 4. Provider Backends

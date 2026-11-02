@@ -11,7 +11,7 @@ from openmachine.mcp.protocol import (READ, WRITE, DEFAULT_TIMEOUT, MAX_TIMEOUT,
                                       MAX_CONTROL_SEQ, MAX_INPUT, TerminalSize,
                                       _reply, _result, _submit_owned, _task_context)
 
-def register_execution_tools(application, guided_tool, waiting, machine_read, has_ssh):
+def register_execution_tools(application, guided_tool, waiting, machine_read):
     @guided_tool(annotations=WRITE)
     async def start_codex_task(machine: str, execution_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")],
                                cwd: str, goal: Annotated[str, Field(min_length=1, max_length=6000)],
@@ -101,7 +101,7 @@ def register_execution_tools(application, guided_tool, waiting, machine_read, ha
         operation = partial(_reply, lambda: application.reconcile_execution(machine, execution_id), execution_output=True)
         return await asyncio.wrap_future(_submit_owned(operation))
 
-    @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=has_ssh))
+    @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
     async def control_execution(machine: str, execution_id: str,
                                 expected_control_seq: Annotated[int, Field(strict=True, ge=0, le=MAX_CONTROL_SEQ - 1)],
                                 action: Literal["write_stdin", "interrupt", "resize"],

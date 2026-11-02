@@ -448,22 +448,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertIsNotNone(service_state._record(self.state)["pending"])
         self.assertEqual(stop.call_count, 1)
 
-    def test_remote_candidate_must_validate_retained_receipts_before_stop(self):
-        verify, stop, start = self.activation_mocks()
-        candidate = self.root / "candidate.toml"
-        candidate.write_text(self.config.read_text() + '\n[machines.remote]\ntransport="ssh"\n'
-                             'ssh_alias="uncontacted-target"\nssh_worker="/remote/' + 'a' * 64 + '.pyz"\n')
-        def reject_remote(*args, **kwargs):
-            if kwargs.get("check_remote"):
-                raise Fault("incompatible_remote_state", "Old candidate cannot read v4 receipts")
-        verify.side_effect = reject_remote
-        original = self.config.read_bytes()
-        self.assert_fault("incompatible_remote_state", lambda: service_transition._activate(
-            self.state, self.record, self.b, candidate))
-        stop.assert_not_called()
-        start.assert_not_called()
-        self.assertEqual(self.config.read_bytes(), original)
-        self.assertEqual(service_state._record(self.state), self.record)
 
     def test_failed_update_restores_current_bytes_not_a_stale_snapshot(self):
         _, _, start = self.activation_mocks()
@@ -510,22 +494,6 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assert_fault("configuration_unavailable", lambda: service_transition._activate(self.state, selected, self.a))
         self.assertEqual(service_state._record(self.state), selected)
 
-    def test_retained_remote_workspace_state_blocks_old_selection_before_stop(self):
-        pin, archive = "d" * 64, "e" * 64
-        with self.config.open("a") as file:
-            file.write('\n[machines.remote]\ntransport="ssh"\nssh_alias="fixture"\nssh_identity="' + pin +
-                       '"\nssh_worker="/target/' + archive + '.pyz"\n')
-        installation = self.state / "service/versions" / self.a / "installation.json"
-        save_json(installation, service_state._json(installation) | {"state_contract": 4})
-        _, stop, start = self.activation_mocks()
-        for present, compatible in ((True, True), (False, False)):
-            proof = {"workspace_change_store_present": present, "legacy_workspace_compatible": compatible}
-            with patch.object(service_checks, "_remote_workspace_state", return_value=proof) as read:
-                self.assert_fault("incompatible_remote_state", lambda: service_transition._activate(self.state, self.record, self.b))
-                self.assertEqual(read.call_args.args, (service_state._runtime(self.state, self.a) / "bin/python", self.config, "remote"))
-            self.assertEqual(service_state._record(self.state), self.record)
-            stop.assert_not_called()
-            start.assert_not_called()
 
     def test_stopped_update_and_restoration_preserve_recovery_without_starting(self):
         record = self.policy_fixture()

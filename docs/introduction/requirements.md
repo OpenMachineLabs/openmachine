@@ -31,8 +31,7 @@ under [Service and runtime](../features/service.md).
 | macOS Apple Silicon (npm) | npm installer and managed user service | macOS 13+, Node.js 24 LTS recommended or 22 LTS; first-run setup required. |
 | macOS (source) | Manual Core serving and managed user service | Managed lifecycle requires the owning logged-in GUI user. |
 | Linux controller | Manual `openmachine serve` | No managed Linux service is provided by these commands. |
-| Linux SSH target | Explicitly prepared worker | Python 3.12+, Git, OpenSSH access and systemd 255+ user manager for command execution. |
-| Windows | Not supported by this release | Do not assume a Windows service or Windows SSH worker exists. |
+| Windows | Not supported by this release | Do not assume Windows Core support exists. |
 | Offline runtime payload | Apple Silicon, macOS 13+ artifact format | An advanced producer interface, not a downloadable signed installer promise. |
 
 Manual Core support is not a claim that every optional integration works on
@@ -51,5 +50,5 @@ credentials and correct organization/workspace association. Check these in
 [Connect to ChatGPT](../getting-started/connect-chatgpt.md) before treating local
 installation as end-to-end readiness.
 
-GitHub collaboration, SSH access and browser control each have separate
+GitHub collaboration and browser control each have separate
 prerequisites. Start with read-only configuration and enable only what you need.

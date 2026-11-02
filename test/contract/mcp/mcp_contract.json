@@ -2009,13 +2009,6 @@
             "title": "Task Id",
             "type": "string"
           },
-          "target_identity": {
-            "default": "",
-            "maxLength": 64,
-            "pattern": "^(?:[0-9a-f]{64})?$",
-            "title": "Target Identity",
-            "type": "string"
-          },
           "workspace": {
             "default": "",
             "maxLength": 1024,

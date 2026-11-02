@@ -48,7 +48,6 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 | Local machines and context | [Inspect the intended project and environment](docs/features/local-machine.md) before acting. |
 | Workspace files and worktrees | [Read, search and apply guarded edits](docs/features/workspace.md) in the intended tree. |
 | Native commands and terminals | [Run commands, retrieve original results and verify cleanup](docs/features/execution.md). |
-| Remote Linux over SSH | [Prepare workers, pin identity and operate remote projects](docs/features/ssh.md). |
 | Persistent tasks | [Keep goals, stages and evidence; continue original work explicitly](docs/features/tasks.md). |
 | GitHub | [Use scoped repositories, Issues, PRs, reviews, Projects and Releases](docs/features/github.md). |
 | Browser subtasks | [Delegate a bounded web task](docs/features/browser.md) through a compatible, authorized native Codex installation. |

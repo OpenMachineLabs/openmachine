@@ -214,7 +214,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         record = records.new_record(records.normalize_create(task_contract()), now)
         operation = {"id": "a" * 32, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
             "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-            "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+            "locator": {"kind": "execution", "machine": "desktop",
                 "execution_id": "a" * 32, "control_seq": None},
             "admitted_at_ms": now, "state": "unknown", "observed_at_ms": now,
             "result": {"status": "unknown", "receipt_sha256": None, "summary": "Retained unknown.", "log_offset": None}}
@@ -321,7 +321,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
                     record["operations"].append({"id": identity, "stage_id": "prepare" if index < 3 else "verify",
                         "plan_revision": 1, "epoch": 0, "request_sha256": "b" * 64,
                         "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                        "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                        "locator": {"kind": "execution", "machine": "desktop",
                             "execution_id": identity, "control_seq": None},
                         "admitted_at_ms": now, "state": "unknown" if unknown else "observed", "observed_at_ms": now,
                         "result": {"status": "unknown" if unknown else "succeeded", "receipt_sha256": None if unknown else "d" * 64,

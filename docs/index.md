@@ -4,7 +4,7 @@
 
 OpenMachine Core is a local-first MCP runtime that lets an authorized ChatGPT
 conversation inspect files, run commands and coordinate work on your computer
-and explicitly configured SSH machines. You choose the machines, workspaces and
+and native device access through the authorized Core. You choose the machines, workspaces and
 permissions. Core carries out tool calls and retains their results; ChatGPT
 remains the controller of the conversation.
 
@@ -29,7 +29,6 @@ For source installations, follow [initial configuration](getting-started/configu
 | [Context and environment](features/context.md) | Inspect project, runtime and opt-in resource information without running project code. |
 | [Workspace](features/workspace.md) | Read and search files, preview guarded edits, apply patches and choose worktrees. |
 | [Command execution](features/execution.md) | Run a command, read its original result, use PTY controls and verify completion. |
-| [Remote SSH](features/ssh.md) | Prepare a Linux worker, pin its identity and use the same tools remotely. |
 | [Persistent tasks](features/tasks.md) | Retain progress, find original operations and continue explicitly after interruption. |
 | [GitHub](features/github.md) | Connect an account and work with repositories, Issues, PRs, reviews, Projects and Releases. |
 | [Browser](features/browser.md) | Delegate a bounded browser subtask to a compatible, authorized native Codex installation. |

@@ -86,9 +86,7 @@ class TaskReceipts:
             observed = self.github_call("reconcile", dict(locator=locator, request=arguments, **proof),
                                         binding=locator.get("connection"), historical_unbound="connection" not in locator)
             return observed
-        target = self.config.machine(locator["machine"])
-        if (target.ssh_identity or None) != locator["target_identity"]:
-            raise Fault("task_target_changed", "The original target identity no longer matches; do not follow another host.")
+        self.config.machine(locator["machine"])
         if locator["kind"] == "change":
             observed = self.machines.read_workspace_change(locator["machine"], locator["change_id"], observe_current=verify, cancelled=cancelled)
             if verify:
@@ -130,7 +128,7 @@ class TaskReceipts:
         # local start rejection and its original free launch lock can do so.
         locator = operation["locator"]
         if (locator["kind"] != "execution" or locator["control_seq"] is not None
-                or locator["target_identity"] is not None or operation["id"] != locator["execution_id"]
+                or operation["id"] != locator["execution_id"]
                 or self.config.machine(locator["machine"]).transport != "local"):
             return False
         identity = locator["execution_id"]

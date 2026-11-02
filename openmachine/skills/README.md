@@ -11,7 +11,7 @@ then load the domain and direct topic needed for the next operation.
 | Create, continue, control and verify tasks | [Tasks](tasks/SKILL.md) |
 | Account connections and collaboration | [GitHub](github/SKILL.md) |
 | Authorized browser subtasks | [Browser](browser/SKILL.md) |
-| Runtime lifecycle, SSH and payload preparation | [Service](service/SKILL.md) |
+| Runtime lifecycle and payload preparation | [Service](service/SKILL.md) |
 
 Each `SKILL.md` owns its short metadata and entry instructions. Topic files beside
 it own detailed procedures; do not duplicate their contents in README or tool

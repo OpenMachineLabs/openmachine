@@ -218,7 +218,7 @@ def start(config, state: Path, launch, machine: str, execution_id: str, cwd: str
           goal: str, start_url: str, allowed_origins: list[str], mode="browser", browser="auto",
           timeout_seconds=600, expected_head_sha="", task_context=None) -> dict:
     if config.machine(machine, write=True).transport != "local":
-        raise Fault("codex_local_only", "Browser delegation uses a configured local machine, never an SSH fallback.")
+        raise Fault("codex_local_only", "Browser delegation uses a configured local machine, never a controller-side remote fallback.")
     try:
         packet = request(dict(execution_id=execution_id, goal=goal, mode=mode, start_url=start_url,
                               allowed_origins=allowed_origins, browser=browser))

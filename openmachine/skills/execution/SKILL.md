@@ -24,4 +24,4 @@ Read the original execution after uncertainty; do not allocate a replacement ID.
 Cancellation requests termination and does not undo prior effects. Require
 `status=succeeded`, verified exit/output and domain readback for command success;
 cancelled or timed-out commands can also exit zero. A completed command is not a
-completed task. For remote setup, use the [SSH guide](../service/ssh.md).
+completed task.

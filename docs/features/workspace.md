@@ -10,7 +10,7 @@ Register an existing absolute root as shown in
 [configuration](../configuration/reference.md). Reads need no command grant.
 For typed edits, set `workspace_write_enabled = true` on the selected machine,
 then apply the configuration through the appropriate manual or managed workflow.
-SSH writes additionally require a prepared worker and verified identity.
+All typed writes require explicit native machine authorization.
 
 ## Read and search first
 

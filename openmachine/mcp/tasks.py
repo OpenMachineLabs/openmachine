@@ -41,12 +41,10 @@ def register_task_tools(application, guided_tool, waiting):
                    expected_generation: Annotated[int, Field(ge=-1)] = -1,
                    machine: Annotated[str, Field(max_length=64, pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$")] = "",
                    workspace: Annotated[str, Field(max_length=1024)] = "",
-                   workspace_identity: Annotated[str, Field(max_length=64, pattern=r"^(?:[0-9a-f]{64})?$")] = "",
-                   target_identity: Annotated[str, Field(max_length=64, pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
-        """List original Tasks with bounded state/target/timestamps. Machine-only matches declared or admitted history; machine+workspace matches current declared targets, optionally pinned by workspace_identity. machine+target_identity matches original pinned operations only; an operation cannot prove a workspace. Page with the returned generation; target discovery never dispatches work or grants authority."""
+                   workspace_identity: Annotated[str, Field(max_length=64, pattern=r"^(?:[0-9a-f]{64})?$")] = "") -> CallToolResult:
+        """List original Tasks with bounded state/target/timestamps. Machine-only matches declared or admitted history; machine+workspace matches current declared targets, optionally pinned by workspace_identity. An original operation cannot by itself prove workspace membership. Page with the returned generation; target discovery never dispatches work or grants authority."""
         return _reply(lambda: application.find_tasks(query, anchors, task_id, offset, limit, expected_generation,
-                      machine=machine, workspace=workspace, workspace_identity=workspace_identity,
-                      target_identity=target_identity), task_output=True)
+                      machine=machine, workspace=workspace, workspace_identity=workspace_identity), task_output=True)
 
     @guided_tool(annotations=READ)
     def read_task(task_id: str,

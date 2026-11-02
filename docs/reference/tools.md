@@ -33,7 +33,7 @@ with `inspect_skills(action="read", tool="TOOL_NAME")` before using it.
 | `start_codex_task` | Delegate one authorized local native-browser goal. | [Browser](../features/browser.md) |
 | `read_codex_task` | Read semantic result and native final-page evidence. | [Browser](../features/browser.md) |
 
-The [SSH guide](../features/ssh.md) explains which operations use a prepared remote
+OM native device routing is owned by Cloud and each device’s local Core
 worker. Browser delegation remains local. A generic command exit does not certify
 a browser business action.
 

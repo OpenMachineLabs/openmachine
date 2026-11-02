@@ -22,7 +22,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         config = Settings.model_validate({"schema_version": 1, "machines": {"local": {
             "transport": "local", "local_access": "full_access", "execution_enabled": True}}})
         mcp = server.create_server(config, self.root.resolve() / "absolute-state")
-        self.assert_tool_contract(ListToolsResult(tools=await mcp.list_tools()), github=False, ssh=False)
+        self.assert_tool_contract(ListToolsResult(tools=await mcp.list_tools()), github=False)
         args = {"machine": "local", "workspace_name": str(root), "path": "source.txt"}
         original = await mcp.call_tool("read_workspace_file", args)
         self.assertFalse(original.is_error)

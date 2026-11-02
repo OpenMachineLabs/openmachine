@@ -119,7 +119,7 @@ class ContextTests(TaskFixture, unittest.TestCase):
         def seed(record, now):
             record["operations"] = [{"id": f"{index:032x}", "stage_id": "verify", "plan_revision": 1, "epoch": 0,
                 "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                "locator": {"kind": "execution", "machine": "desktop",
                     "execution_id": f"{index:032x}", "control_seq": None},
                 "admitted_at_ms": now, "state": "observed", "observed_at_ms": now,
                 "result": {"status": "unknown", "receipt_sha256": None,
@@ -225,22 +225,6 @@ class ContextTests(TaskFixture, unittest.TestCase):
         with patch.object(self.app, "get_capabilities", return_value=caps):
             self.fault("context_response_limit", self.observe, sections=["runtime"])
 
-    def test_ssh_target_uses_existing_routing_and_never_local_measurements(self):
-        context = deepcopy(self.context)
-        context.update(cwd="/remote/project", worktree="/remote/project")
-        config = Settings.model_validate({"schema_version": 1,
-            "machines": {"remote": {"transport": "ssh", "ssh_alias": "fixture",
-                "ssh_worker": "/worker/" + "a" * 64 + ".pyz", "ssh_identity": "b" * 64}},
-            "workspaces": {"project": {"machine": "remote", "root": "/remote/project"}}})
-        app = create_application(config, self.state)
-        with patch.object(app.machines, "ssh_call", return_value={"context": context}) as routed:
-            result = app.inspect_context("remote", "project", sections=["runtime"])
-        self.assertEqual(routed.call_count, 2)
-        self.assertTrue(all(call.args[1:3] == ("remote", "read_workspace_file") for call in routed.call_args_list))
-        self.assertEqual(result["target"]["cwd"], "/remote/project")
-        self.assertEqual(result["target"]["transport"], "ssh")
-        self.assertNotIn("os", result["sections"]["runtime"]["data"])
-        self.assertFalse(self.state.exists())
 
 
 if __name__ == "__main__":

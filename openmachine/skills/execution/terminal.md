@@ -39,7 +39,7 @@ command-exited-but-cleanup-pending `finishing`. A TERM handler returning zero ca
 still be cancelled/timed out; launch failure differs from program exit 127.
 Output drains during grace and bounded final cleanup. Native containment is the
 verified POSIX session (Linux waitid/WNOWAIT, macOS kqueue), not deliberately
-detached sessions or an OS sandbox. SSH uses a separate systemd scope boundary.
+detached sessions or an OS sandbox.
 Unknown ownership/cleanup never becomes success or arbitrary PID adoption.
 
 Native cleanup queries may retry within the original cleanup deadline while the
@@ -63,8 +63,7 @@ repeating the same ID after a missing reply returns the original recovery.
 Historical receipts without the native identity, a changed boot, unknown exit,
 live members, lost ownership or failed result verification remain unresolved.
 Do not infer cleanup from an empty output, exit zero, a clean checkout, or a free
-lock alone. Reads never perform or persist this recovery. SSH retains its
-original systemd-scope observation and cancellation routes. Service contract 20
+lock alone. Reads never perform or persist this recovery.  Service contract 20
 protects the new writer and retained recovery evidence across managed updates.
 
 Output rotates through four 1 MiB segments without killing commands. Absolute raw
@@ -107,14 +106,13 @@ A preparing worker without logs is not automatically lost. Quiet `wait_expired`
 is not command timeout. At most 16 waiting readers are admitted without a queue;
 immediate reads and cancellation retain independent capacity. Cancelling/disconnecting
 a waiter ends only its observation, never the command, lease or another cursor.
-Lock contention uses the same finite read budget. SSH carries the wait in one
-bounded exchange, not per-poll reconnects or a five-second network guarantee.
+Lock contention uses the same finite read budget.
 
 Read `output_decode_replaced`, `output_redacted`, `output_controls_escaped` and
 `output_presentation_truncated` separately from retention/IO loss. Visible escaping
 and replacement mean concatenated display pages need not reconstruct source.
 Follow raw `next_offset`; read a smaller page at the same source offset when
-presentation omitted consumed bytes. Results/SSH envelopes are bounded to 1 MiB,
+presentation omitted consumed bytes. Result envelopes are bounded to 1 MiB,
 including JSON escaping and MCP text/structured duplication. Mandatory metadata
 overflow is an error, not a silently incomplete success.
 

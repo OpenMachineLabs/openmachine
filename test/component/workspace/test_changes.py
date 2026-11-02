@@ -511,7 +511,6 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         for target in value["machines"].values():
             target.pop("workspace_write_enabled")
             self.assertEqual(target["local_access"], "full_access")
-            self.assertIsNone(target.pop("ssh_connection"))
         expected = hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(self.config.configuration_sha256(), expected)
         self.config.machines["local"].workspace_write_enabled = False

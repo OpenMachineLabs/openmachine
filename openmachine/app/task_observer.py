@@ -23,13 +23,10 @@ class _Read:
     thread: threading.Thread | None = None
     timed_out: bool = False
     expected_revision: int = 0
-    target: str | None = None
-    connection: dict | None = None
-    contacted: bool = False
 
 
 class TaskObserver:
-    """One coordinator, four local and two SSH readers, one per pinned target."""
+    """One coordinator with bounded native receipt readers."""
 
     def __init__(self, application):
         self.app = application
@@ -47,7 +44,6 @@ class TaskObserver:
         self._last: dict[str, dict[str, int]] = {}
         self._errors: dict[str, str] = {}
         self._reads: dict[str, _Read] = {}
-        self._connections: dict[str, dict | None] = {}
         self._discover_at = 0
         self._discovery_error = None
         self._admission_at = 0
@@ -71,7 +67,6 @@ class TaskObserver:
             self._active.clear()
             self._last.clear()
             self._errors.clear()
-            self._connections.clear()
             self._discovery_error = None
             self._admission_at = 0
             self._admission_error = None
@@ -115,9 +110,9 @@ class TaskObserver:
         with self._condition:
             value = {"state": state, "observed_at_ms": observation.now_ms(), "blocker": blocker or self._admission_error,
                 "active": dict(self._active), "last": dict(self._last), "errors": dict(self._errors),
-                "connections": dict(self._connections)}
+}
             changed = any(value.get(key) != self._snapshot.get(key)
-                          for key in ("state", "blocker", "active", "last", "errors", "connections"))
+                          for key in ("state", "blocker", "active", "last", "errors"))
             self._snapshot = value
             if changed:
                 self._sequence += 1
@@ -223,43 +218,14 @@ class TaskObserver:
                     self._active.pop(identity, None)
                     self._last.pop(identity, None)
                     continue
-                target = observation.active_target(record)
-                ssh = target is not None
-                interval = observation.SSH_INTERVAL_MS if ssh else observation.INTERVAL_MS
-                if sum((item.target is not None) == ssh for item in self._reads.values()) >= (observation.SSH_MAX_READERS if ssh else observation.MAX_READERS):
+                if len(self._reads) >= observation.MAX_READERS:
                     continue
-                if ssh and any(item.target == target for item in self._reads.values()):
-                    continue
-                if ssh and now >= record["contract"]["expires_at_ms"]:
-                    raise Fault("task_authority_expired", "Automatic SSH observation authority expired; original work is retained.")
-                connection = None
-                if ssh:
-                    owner = self.app.machines.ssh_recovery
-                    if owner is None:
-                        raise Fault("ssh_recovery_unavailable", "The configured SSH connection has no recovery owner.")
-                    self._connections = owner.read(self.app.state)["targets"]
-                    if (record["recovery"] is not None and record["recovery"]["connection_ref"] is not None
-                            and target not in self._connections):
-                        raise Fault("ssh_recovery_corrupt", "The referenced connection history is missing; preserve original work.")
-                    connection = self._connections.get(target)
-                    if connection is not None:
-                        if observation.blocked(dict(connection, category="ssh_observation"), now):
-                            self._errors[identity] = connection["reason_code"] if connection["reason_code"].startswith("blocked_") else "observation_budget_exhausted"
-                            self._active.pop(identity, None)
-                            continue
-                        if now < connection["next_attempt_ms"]:
-                            self._active[identity] = connection["next_attempt_ms"]
-                            continue
                 recovery = record["recovery"]
                 if recovery is not None:
-                    if recovery["category"] != ("ssh_observation" if ssh else "local_observation"):
+                    if recovery["category"] != "local_observation":
                         self._errors[identity] = "task_recovery_owner"
                         self._active.pop(identity, None)
                         continue
-                    if recovery["connection_ref"] is not None:
-                        # The task retains an observation, never a second owner
-                        # of the shared connection's current retry allowance.
-                        recovery = None
                 if recovery is not None:
                     if observation.blocked(recovery, now):
                         self._errors[identity] = recovery["reason_code"] if recovery["reason_code"].startswith("blocked_") else "observation_budget_exhausted"
@@ -274,26 +240,15 @@ class TaskObserver:
                             raise Fault("task_conflict", "The original observation episode advanced.")
                         current["attempts"] += 1
                         # Durable crash fallback before this retry actually reads.
-                        current["next_attempt_ms"] = min(timestamp + int((observation.SSH_READ_SECONDS if ssh else observation.READ_SECONDS) * 1000)
-                            + observation.delay(current["attempts"], ssh), current["deadline_ms"])
+                        current["next_attempt_ms"] = min(timestamp + int(observation.READ_SECONDS * 1000)
+                            + observation.delay(current["attempts"]), current["deadline_ms"])
                     with self.app._admit():
                         view = tasks.update(self.app.state, identity, reserve, expected_revision=record["revision"], observation=True)
                     record = view["record"]
-                if ssh:
-                    if connection is not None:
-                        reserved = dict(connection, attempts=connection["attempts"] + 1)
-                        reserved["next_attempt_ms"] = min(now + int(observation.SSH_READ_SECONDS * 1000)
-                            + observation.delay(reserved["attempts"], True), reserved["deadline_ms"])
-                    else:
-                        reserved = None
-                    with self.app._admit():
-                        owner.replace(self.app.state, target, connection, reserved)
-                    connection = reserved
-                    self._connections[target] = connection
-                read = _Read(record, now, expected_revision=record["revision"], target=target, connection=connection)
+                read = _Read(record, now, expected_revision=record["revision"])
                 read.thread = threading.Thread(target=self._read, args=(read,), name="om-task-read", daemon=True)
                 self._reads[identity] = read
-                self._active[identity] = now + interval
+                self._active[identity] = now + observation.INTERVAL_MS
                 read.thread.start()
             except (Fault, OSError) as error:
                 code = observation.error_code(error)
@@ -306,16 +261,11 @@ class TaskObserver:
     def _read(self, read: _Read) -> None:
         try:
             for operation in observation.pending(read.record):
-                if operation["locator"]["target_identity"] != read.target:
-                    continue
                 if read.stop.is_set():
-                    read.error = "ssh_observation_timeout" if read.target else "observation_timeout"
+                    read.error = "observation_timeout"
                     break
-                target = self.app.config.machine(operation["locator"]["machine"])
-                if (target.ssh_identity or None) != read.target or target.transport != ("ssh" if read.target else "local"):
-                    raise Fault("task_target_changed", "Original evidence must not follow another route.")
-                read.contacted = True
-                observed = self.app.task_receipts.read(operation, cancelled=read.stop) if read.target else self.app.task_receipts.read(operation)
+                self.app.config.machine(operation["locator"]["machine"])
+                observed = self.app.task_receipts.read(operation)
                 result, locator = task_receipts.observation(operation, observed)
                 read.observations.append((operation["id"], result, locator))
                 read.observed_at_ms[operation["id"]] = observation.now_ms()
@@ -323,40 +273,18 @@ class TaskObserver:
                     read.error = "operation_outcome_unknown"
         except Exception as error:
             read.error = observation.error_code(error)
-            if isinstance(error, Fault) and error.code == "ssh_unavailable" and (error.evidence or {}).get("ssh_retryable") is True:
-                read.error = "ssh_transport_unavailable"
-            if read.target and read.error == "observation_cancelled":
-                read.error = "ssh_observation_timeout"
         finally:
             self._wake.set()
 
     def _commit(self, identity: str, read: _Read, *, timeout: bool = False) -> None:
-        connection = None
-        code = ("ssh_observation_timeout" if read.target else "observation_timeout") if timeout else read.error
-        if read.target and (read.contacted or timeout):
-            now = observation.now_ms()
-            if code in observation.SSH_CONNECTION_ERRORS:
-                connection = dict(read.connection) if read.connection else {
-                    "episode_id": records.digest([read.target, read.started_at_ms])[:32],
-                    "started_at_ms": read.started_at_ms, "deadline_ms": read.started_at_ms + observation.EPISODE_MS,
-                    "attempts": 1}
-                connection["reason_code"] = code if code in observation.SSH_TRANSIENT else "blocked_" + code
-                connection["next_attempt_ms"] = min(now + observation.delay(connection["attempts"], True), connection["deadline_ms"]) if code in observation.SSH_TRANSIENT else connection["deadline_ms"]
-            with self.app._admit():
-                if self._stop.is_set():
-                    return
-                self.app.machines.ssh_recovery.replace(self.app.state, read.target, read.connection, connection)
-            read.connection = connection
-            self._connections[read.target] = connection
+        code = "observation_timeout" if timeout else read.error
         def apply(record, timestamp):
             if record["terminal"] is not None:
                 return
             if not timeout:
                 observation.apply_observations(record, timestamp, read.observations)
             if code:
-                shared = dict(connection, connection_ref=read.target) if connection is not None else None
-                observation.fail_observation(record, read.started_at_ms, timestamp, code, shared,
-                                             ssh=read.target is not None)
+                observation.fail_observation(record, read.started_at_ms, timestamp, code)
             else:
                 observation.clear_observation(record)
         with self.app._admit():
@@ -368,7 +296,7 @@ class TaskObserver:
         # pause/decision/foreground result produces a conflict instead of overwrite.
         read.expected_revision = view["record"]["revision"]
         recovery = view["record"]["recovery"]
-        self._active[identity] = recovery["next_attempt_ms"] if recovery is not None else observation.now_ms() + (observation.SSH_INTERVAL_MS if read.target else observation.INTERVAL_MS)
+        self._active[identity] = recovery["next_attempt_ms"] if recovery is not None else observation.now_ms() + observation.INTERVAL_MS
         if not timeout and read.observed_at_ms:
             self._last[identity] = dict(read.observed_at_ms)
         self._errors.pop(identity, None)
@@ -379,7 +307,7 @@ class TaskObserver:
     def _harvest(self) -> None:
         for identity, read in list(self._reads.items()):
             finished = not read.thread.is_alive()
-            timeout = not finished and not read.timed_out and time.monotonic() - read.started >= (observation.SSH_READ_SECONDS if read.target else observation.READ_SECONDS)
+            timeout = not finished and not read.timed_out and time.monotonic() - read.started >= observation.READ_SECONDS
             if not finished and not timeout:
                 continue
             if timeout:
@@ -391,7 +319,7 @@ class TaskObserver:
             except (Fault, OSError) as error:
                 code = observation.error_code(error)
                 self._errors[identity] = code
-                if code in {"resource_busy", "task_store_busy", "activation_pending", "task_conflict", "ssh_recovery_conflict"}:
+                if code in {"resource_busy", "task_store_busy", "activation_pending", "task_conflict"}:
                     self._active[identity] = observation.now_ms() + observation.INTERVAL_MS
                 else:
                     # Unacknowledged/permanent publication cannot durably account
@@ -411,4 +339,4 @@ class TaskObserver:
         if (identity not in snapshot["active"] and len(snapshot["active"]) >= observation.MAX_ACTIVE
                 and observation.pending(view["record"])):
             snapshot = {**snapshot, "errors": {identity: "task_observer_capacity", **snapshot["errors"]}}
-        return observation.project(view, snapshot, self.app.machines.ssh_recovery is not None)
+        return observation.project(view, snapshot)

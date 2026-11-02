@@ -85,7 +85,6 @@ nav:
       - Persistent tasks: features/tasks.md
       - Service and runtime: features/service.md
   - Integrations:
-      - Remote SSH: features/ssh.md
       - GitHub: features/github.md
       - Browser: features/browser.md
       - Skills: features/skills.md

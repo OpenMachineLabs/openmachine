@@ -175,7 +175,7 @@ identity=request.pop("task_id")
 def admit(record,now):
     record["operations"].append({"id":"7"*32,"stage_id":"verify","plan_revision":1,"epoch":0,
         "request_sha256":"b"*64,"source_sha256":record["plan"]["stages"][0]["source_sha256"],
-        "locator":{"kind":"execution","machine":"desktop","target_identity":None,
+        "locator":{"kind":"execution","machine":"desktop",
             "execution_id":"7"*32,"control_seq":None},
         "admitted_at_ms":now,"state":"admitted","observed_at_ms":None,"result":None})
     record["plan"]["stages"][0]["state"]="running"

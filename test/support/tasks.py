@@ -180,7 +180,7 @@ class ObserverFixture(TaskFixture):
                 operation_id = f"{index + 1:032x}"
                 record["operations"] = [{"id": operation_id, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
                     "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
-                    "locator": {"kind": "execution", "machine": "desktop", "target_identity": None,
+                    "locator": {"kind": "execution", "machine": "desktop",
                         "execution_id": operation_id, "control_seq": None},
                     "admitted_at_ms": now, "state": "admitted", "observed_at_ms": None, "result": None}]
                 if configure is not None:

@@ -15,7 +15,7 @@ from openmachine.foundation.state import lease
 
 from . import control as controls, logs
 from .logs import MAX_READ
-from .records import TERMINAL, effective_request, is_remote, read_record, record_directory
+from .records import TERMINAL, effective_request, read_record, record_directory
 
 if TYPE_CHECKING:
     from openmachine.config import Settings
@@ -46,62 +46,13 @@ def receipt(directory: Path, machine: str, *, wait: bool = True, deadline: float
                     raise
             except OSError:
                 status = "outcome_unknown"
-    # The immutable terminal record no longer needs the publication lock while
-    # a potentially slow user-manager query observes its separate cleanup boundary.
-    if status in TERMINAL and is_remote(record):
-        try:
-            cleaned = _scope_state(record["scope_unit"], deadline=deadline, cancelled=cancelled) in {"inactive", "not-found"}
-            if not cleaned and status != "outcome_unknown":
-                status = "finishing"
-            if record.get("format_version", 1) >= 4:
-                record = record | {"cleanup": record["cleanup"] | {
-                    "status": "verified" if cleaned else "pending", "source": "systemd_scope"}}
-        except Fault as error:
-            if error.code == "observation_cancelled":
-                raise
-            status = "outcome_unknown"
-            if record.get("format_version", 1) >= 4:
-                record = record | {"cleanup": record["cleanup"] | {
-                    "status": "unverified", "source": "systemd_scope", "error": "scope_unavailable"}}
     return record, status
 
 
-def _scope_state(unit: str, *, deadline: float | None = None,
-                 cancelled: threading.Event | None = None) -> str:
-    deadline = min(deadline if deadline is not None else float("inf"), time.monotonic() + MAX_WAIT)
-    try:
-        with subprocess.Popen(["systemctl", "--user", "--no-ask-password", "show", unit,
-                               "--property=LoadState", "--property=ActiveState"],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              text=True) as process:
-            try:
-                while True:
-                    if cancelled is not None and cancelled.is_set():
-                        raise Fault("observation_cancelled", "Only this observation was cancelled; the command is unchanged.")
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError
-                    try:
-                        output, _ = process.communicate(timeout=min(0.05, remaining))
-                        break
-                    except subprocess.TimeoutExpired:
-                        pass
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                process.wait()
-    except (OSError, TimeoutError) as error:
-        raise Fault("scope_unavailable", "The original user scope cannot be verified.") from error
-    fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
-    if fields.get("LoadState") == "not-found":
-        return "not-found"
-    if process.returncode or fields.get("ActiveState") not in {"active", "activating", "deactivating", "inactive", "failed"}:
-        raise Fault("scope_unavailable", "The original user scope cannot be verified.")
-    return fields["ActiveState"]
 
 
 def validate_read(offset: int, max_bytes: int, wait_seconds: float) -> None:
-    """Validate observation inputs before local IO or an SSH exchange."""
+    """Validate observation inputs before native receipt IO."""
     if type(offset) is not int or offset < 0 or type(max_bytes) is not int or not 1 <= max_bytes <= MAX_READ:
         raise Fault("invalid_range", "Use a nonnegative byte offset and at most 65536 bytes.")
     if type(wait_seconds) not in (int, float) or not 0 <= wait_seconds <= MAX_WAIT:

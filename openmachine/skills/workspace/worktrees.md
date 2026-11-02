@@ -52,7 +52,7 @@ source or ref has since changed. A lost reply, cancellation, partial directory o
 failed verification never authorizes a replacement creation. Read the original
 execution and inspect the destination. Creation uses receipt format 6; ordinary
 commands remain format 5 and previous records remain readable. Task targets with
-a selector and typed creation require state contract 17; matching SSH endpoints
+a selector and typed creation require state contract 17; native targets
 use protocol 7. No separate worktree registry, task allocation service or cleanup
 daemon is introduced. Explicit safe Git removal remains a native command after
 checking task references, uncommitted/unpushed work and current users; there is no

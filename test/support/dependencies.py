@@ -72,16 +72,14 @@ class DependencyFixture(object):
             "openmachine.service.state": ("openmachine.config", "openmachine.foundation.*"),
             "openmachine.service.checks": ("openmachine", "openmachine.config", "openmachine.execution",
                                            "openmachine.tasks", "openmachine.workspace", "openmachine.service.processes", "openmachine.service.state",
-                                           "openmachine.foundation.*", "httpx2", "mcp.*",
-                                           "integrations.ssh.recovery", "integrations.ssh.client", "integrations.ssh.setup", "integrations.connection_state"),
+                                           "openmachine.foundation.*", "httpx2", "mcp.*", "integrations.connection_state"),
             "openmachine.service.processes": ("openmachine.foundation.*",),
             "openmachine.service.install": ("openmachine.config", "openmachine.service.checks",
                                             "openmachine.service.state", "openmachine.service.payload", "openmachine.service.processes", "openmachine.foundation.*"),
             "openmachine.service.maintenance": ("openmachine", "openmachine.config", "openmachine.foundation.*",
                                                 "openmachine.service.checks", "openmachine.service.install",
                                                 "openmachine.service.payload", "openmachine.service.processes", "openmachine.service.runtime",
-                                                "openmachine.service.state", "openmachine.service.transition", "integrations.ssh.client",
-                                                "integrations.ssh.setup", "integrations.ssh.bundle", "pydantic"),
+                                                "openmachine.service.state", "openmachine.service.transition", "pydantic"),
             "openmachine.service.updates": ("openmachine", "openmachine.foundation.*", "httpx2"),
             "openmachine.service.payload": ("openmachine.foundation.*",),
             "openmachine.service.runtime": ("openmachine.config", "openmachine.service.checks",
@@ -103,7 +101,7 @@ class DependencyFixture(object):
             "openmachine.app.task_observation": ("openmachine.tasks", "openmachine.tasks.effects", "openmachine.tasks.records", "openmachine.tasks.transitions", "openmachine.foundation.*"),
             "openmachine.app.task_receipts": ("openmachine.tasks.records", "openmachine.foundation.*"),
             "openmachine.bootstrap": ("openmachine.app", "openmachine.app.machines", "openmachine.config",
-                                      "integrations.github", "integrations.github.connection", "integrations.github.auth", "integrations.ssh.client", "integrations.ssh.recovery", "integrations.connections", "integrations.codex"),
+                                      "integrations.github", "integrations.github.connection", "integrations.github.auth", "integrations.connections", "integrations.codex"),
             "openmachine.mcp": (),
             "openmachine.mcp.protocol": ("openmachine.app", "openmachine.tasks", "openmachine.foundation.*",
                                          "mcp.*", "pydantic"),
@@ -119,10 +117,9 @@ class DependencyFixture(object):
                                    "openmachine.mcp.tasks", "openmachine.mcp.execution", "openmachine.github_web_http",
                                    "openmachine.foundation.*", "mcp.*", "jsonschema", "pydantic", "uvicorn"),
             "openmachine.github_web_http": ("openmachine.foundation.sanitize", "uvicorn.protocols.http.h11_impl"),
-            # The CLI owns serve/worker-bundle dispatch, not execution internals.
+            # The CLI owns native serve dispatch, not execution internals.
             "openmachine.cli": ("openmachine", "openmachine.config", "openmachine.foundation.*",
-                                "openmachine.bootstrap", "openmachine.server", "openmachine.service", "openmachine.service.maintenance",
-                                "integrations.ssh.bundle"),
+                                "openmachine.bootstrap", "openmachine.server", "openmachine.service", "openmachine.service.maintenance"),
             "integrations.codex": ("pydantic", "openmachine.execution", "openmachine.foundation.*"),
             "integrations.connection_state": ("pydantic", "openmachine.config", "openmachine.foundation.*"),
             "integrations.connections": ("integrations.connection_state", "integrations.credentials",
@@ -141,17 +138,6 @@ class DependencyFixture(object):
                                              "openmachine.foundation.*"),
             "integrations.github.operations": ("integrations.github.client", "integrations.github.connection",
                                                "integrations.github.evidence", "openmachine.config", "openmachine.foundation.*"),
-            "integrations.ssh": (),
-            "integrations.ssh.client": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
-            "integrations.ssh.provision": (),
-            "integrations.ssh.setup": ("openmachine.config", "openmachine.foundation.*", "openmachine.service.state",
-                                       "integrations.ssh.client", "pydantic"),
-            "integrations.ssh.recovery": ("openmachine.foundation.*",),
-            "integrations.ssh.bundle": ("openmachine", "integrations.ssh", "openmachine.foundation.*"),
-            # The archive's worker process entry is the sole cross-domain worker caller.
-            "integrations.ssh.endpoint": ("openmachine", "openmachine.execution", "openmachine.execution.worker",
-                                          "openmachine.workspace", "openmachine.foundation.*",
-                                          "integrations.ssh", "integrations.ssh.bundle"),
         }
 
         def matches(module, pattern):
@@ -164,7 +150,7 @@ class DependencyFixture(object):
             self.assertEqual(len(owners), 1, f"{module} needs one explicit dependency owner")
             package = module if is_package else module.rpartition(".")[0]
             tree = ast.parse(text)
-            # Type-only annotations do not pull controller dependencies onto SSH targets.
+            # Type-only annotations do not pull runtime dependencies into unrelated owners.
             for node in ast.walk(tree):
                 if isinstance(node, ast.If) and ast.unparse(node.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
                     node.body = []
