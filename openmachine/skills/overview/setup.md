@@ -24,12 +24,12 @@ identity. Task storage requires SQLite 3.51.3 or newer, or the patched 3.50.7+
 (3.50.x) or 3.44.6+ (3.44.x) releases. Build from the exact release tag, not an unpinned default branch:
 
 ```sh
-git clone --branch v0.2.24 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
+git clone --branch v0.2.25 --depth 1 https://github.com/OpenMachineLabs/openmachine.git
 cd openmachine
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.24-py3-none-any.whl
+.venv/bin/python -m pip install --no-deps dist/openmachine-0.2.25-py3-none-any.whl
 .venv/bin/openmachine --version
 ```
 
@@ -122,7 +122,7 @@ never confer grants, install tools or execute embedded resources automatically.
 
 ## Platform and acceptance
 
-Managed services support logged-in macOS controllers. Linux supports manual `serve`; managed Linux services and Windows are not included. Read [management](../service/management.md) before lifecycle changes. Version `0.2.24` is an initial development release, not a stable 1.x promise. Inspect installed capabilities and actual readers separately. Source merge does not update a live installation.
+Managed services support logged-in macOS controllers. Linux supports manual `serve`; managed Linux services and Windows are not included. Read [management](../service/management.md) before lifecycle changes. Version `0.2.25` is an initial development release, not a stable 1.x promise. Inspect installed capabilities and actual readers separately. Source merge does not update a live installation.
 
 ## Diagnose client calls and interrupted work
 
