@@ -131,6 +131,30 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
                 self.assertLess(len(hint), 180)
         self.fault("skill_unavailable", skills.for_tool, "unknown_tool")
 
+    def test_large_operation_guides_link_to_scoped_readable_topics(self):
+        github = skills.inspect(self.config, "read", tool="github_merge")
+        service = skills.inspect(self.config, "read", "om.service", "management.md")
+        for guide in (github, service):
+            self.assertLess(guide["size_bytes"], 16 * 1024)
+            self.assertFalse(guide["has_more"])
+
+        self.assertIn("[attribution](attribution.md)", github["text"])
+        self.assertIn("[scoped uncertainty and historical evidence](uncertainty.md)", github["text"])
+        self.assertIn("[product management](product-management.md)", service["text"])
+        for identity, path, expected in (
+            ("om.github", "attribution.md", "Created via [Open Machine]"),
+            ("om.github", "uncertainty.md", "bind_effect_scope"),
+            ("om.service", "product-management.md", "## Product management"),
+        ):
+            with self.subTest(path=path):
+                topic = skills.inspect(self.config, "read", identity, path)
+                self.assertIn(expected, topic["text"])
+                self.assertFalse(topic["has_more"])
+
+        continuation = skills.inspect(self.config, "read", "om.tasks", "continue.md")
+        self.assertIn('read_task(section="operations"', continuation["text"])
+        self.assertIn("stable-revision guarantee", continuation["text"])
+
     def test_yaml_metadata_supports_multiline_text_and_warns_on_malformed_fields(self):
         collection, selected = self.skill_fixture()
         raw = ("---\nid: om.workspace\nname: 'format: safely'\ndescription: >-\n  Run bounded checks\n  before editing.\n"

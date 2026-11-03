@@ -31,6 +31,14 @@ migration; `task_index_upgrade_required` never triggers a reader-side repair.
 
 `read_task_receipts(task_id, expected_revision, operation_ids)` is a bounded, passive Core-only reader for 1–8 exact local Execution/Change operations on the same Task revision. It returns complete original receipts under the Task's current store identity; callers must still check current permission, directory/provider scope, and fresh Task revision before protected result release. Changed, missing, conflicting or oversized evidence fails closed. No result can be inferred from an absent receipt; never replay an original effect.
 
+This batch reader is optional in some client-approved catalogs even when native
+Core implements it. If it is not exposed, use `read_task(section="operations",
+operation_id=...)` and the exact original `read_execution` or
+`read_workspace_change` where available. Separate reads do not provide the
+batch reader's stable-revision guarantee; preserve their coverage limits and
+recheck Task revision before using them for protected decisions. Do not guess a
+batch result, infer no effect or substitute a new operation.
+
 `read_task` schema 2 defaults to the complete current authority summary, with
 counts and explicit history/operation references. `record_complete: false` means
 history is separate, not absent. Use `section: operations` with the original
