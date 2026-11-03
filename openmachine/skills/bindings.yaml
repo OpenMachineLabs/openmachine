@@ -17,6 +17,7 @@ reconcile_execution: {skill: om.execution, path: terminal.md}
 control_execution: {skill: om.execution, path: terminal.md}
 find_tasks: {skill: om.tasks, path: continue.md}
 read_task: {skill: om.tasks, path: continue.md}
+read_task_receipts: {skill: om.tasks, path: continue.md}
 wait_task: {skill: om.tasks, path: continue.md}
 save_task: {skill: om.tasks, path: continue.md}
 create_task: {skill: om.tasks, path: create.md}

@@ -60,6 +60,16 @@ def register_task_tools(application, guided_tool, waiting):
                       stage_id=stage_id, decision_version=decision_version), task_output=True)
 
     @guided_tool(annotations=READ)
+    def read_task_receipts(
+            task_id: Annotated[str, Field(min_length=1, max_length=64,
+                                         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
+            expected_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
+            operation_ids: Annotated[list[Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]],
+                                     Field(min_length=1, max_length=8)]) -> CallToolResult:
+        """Read 1..8 exact original local Task receipts with complete records, one owner and stable Task revision. No effects, caching, repair or implicit permission. An incomplete/moved receipt fails as a whole, not as a shortened page."""
+        return _reply(lambda: application.read_task_receipts(task_id, expected_revision, operation_ids), task_output=True)
+
+    @guided_tool(annotations=READ)
     async def wait_task(task_id: Annotated[str, Field(min_length=1, max_length=64,
                         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
                         expected_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],

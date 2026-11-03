@@ -111,6 +111,28 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((first["status"], first["change_id"]), ("applied", change_id))
                     self.assertEqual((self.work / path).read_text(), content)
                     original = await call("read_workspace_change", {"machine": "desktop", "change_id": change_id})
+                    task = (await call("read_task", {"task_id": task_id}))["record"]
+                    proof = await call("read_task_receipts", {"task_id": task_id,
+                        "expected_revision": task["revision"], "operation_ids": [change_id]})
+                    self.assertEqual(proof["task_id"], task_id)
+                    self.assertEqual(proof["task_revision"], task["revision"])
+                    self.assertTrue(proof["complete"])
+                    self.assertFalse(proof["has_more"])
+                    self.assertEqual(len(proof["items"]), 1)
+                    item = proof["items"][0]
+                    self.assertEqual(item["operation"]["id"], change_id)
+                    self.assertEqual(item["operation"]["locator"]["change_id"], change_id)
+                    for key in ("change_id", "machine", "context", "owner_sha256", "status", "plan_sha256"):
+                        self.assertEqual(item["receipt"][key], original[key], key)
+                    self.assertEqual(proof["owner_store_identity"],
+                        (await call("find_tasks", {"task_id": task_id}))["tasks"][0]["owner_store_identity"])
+                    for revision, identifiers, code in (
+                            (task["revision"] + 1, [change_id], "task_conflict"),
+                            (task["revision"], [uuid.uuid4().hex], "task_evidence_unavailable")):
+                        rejected = await client.call_tool("read_task_receipts", {"task_id": task_id,
+                            "expected_revision": revision, "operation_ids": identifiers})
+                        self.assertTrue(rejected.is_error)
+                        self.assertEqual(rejected.structured_content["error"]["code"], code)
                     # A later independent edit makes an accidental replay visible.
                     later = content + "Subsequent disposable work.\n"
                     (self.work / path).write_text(later)

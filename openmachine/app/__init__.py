@@ -1,6 +1,7 @@
 """Typed application operations; every mutation shares one lifecycle admission."""
 
 from collections.abc import Iterator
+import json
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -274,6 +275,69 @@ class Application:
             operation_id=operation_id, stage_id=stage_id, decision_version=decision_version,
             expected_revision=view.get("record", {}).get("revision", -1))
         return {**page, **{key: view[key] for key in ("foreground", "observations", "support") if key in view}}
+
+    def read_task_receipts(self, task_id: str, expected_revision: int, operation_ids: list[str]) -> dict:
+        """Bounded, original Core-owned receipt reads; not a permission or delta-proof cache."""
+        if (type(expected_revision) is not int or expected_revision < 1
+                or not isinstance(operation_ids, list) or not 1 <= len(operation_ids) <= 8
+                or any(not isinstance(key, str) or len(key) != 32
+                       or any(char not in "0123456789abcdef" for char in key)
+                       for key in operation_ids)
+                or len(set(operation_ids)) != len(operation_ids)):
+            raise Fault("invalid_task_receipt_read", "Select 1..8 distinct original operation IDs and an exact Task revision.")
+
+        def store_fence() -> str:
+            view = tasks.read(self.state, task_id)
+            if "record" not in view:
+                raise Fault("task_legacy", "A legacy Task has no original operation ledger.")
+            if view["record"]["revision"] != expected_revision:
+                raise Fault("task_conflict", "Task revision changed during original receipt proof.")
+            found = self.find_tasks(task_id=task_id)
+            rows = found.get("tasks", [])
+            if (len(rows) != 1 or rows[0].get("task_id") != task_id
+                    or rows[0].get("revision") != expected_revision
+                    or found.get("unreadable") or found.get("has_more")
+                    or found.get("next_offset") is not None
+                    or not isinstance(rows[0].get("owner_store_identity"), str)):
+                raise Fault("task_evidence_unavailable", "The exact Task owner/store cannot be verified.")
+            return rows[0]["owner_store_identity"]
+
+        owner = store_fence()
+        items = []
+        for operation_id in operation_ids:
+            page = tasks.public_read(self.state, task_id, section="operations",
+                operation_id=operation_id, expected_revision=expected_revision)
+            rows = page.get("items", [])
+            if (page.get("task_revision") != expected_revision or len(rows) != 1
+                    or rows[0].get("id") != operation_id
+                    or type(rows[0].get("sequence")) is not int):
+                raise Fault("task_evidence_unavailable", "The original Task does not retain this exact operation.")
+            original = {key: value for key, value in rows[0].items() if key != "sequence"}
+            locator = original["locator"]
+            kind, machine = locator["kind"], locator.get("machine")
+            if kind not in {"change", "execution"} or not isinstance(machine, str):
+                raise Fault("unsupported_task_receipt", "Only local Change and Execution originals can be batched.")
+            if kind == "execution" and locator.get("control_seq") is not None:
+                raise Fault("unsupported_task_receipt",
+                            "An original execution control sequence needs its dedicated receipt reader.")
+            if kind == "change":
+                receipt = self.machines.read_workspace_change(machine, locator["change_id"])
+            else:
+                receipt = self.machines.read_execution(machine, locator["execution_id"], max_bytes=1)
+            identity = locator[kind + "_id"]
+            if (receipt.get(kind + "_id") != identity or receipt.get("machine") != machine
+                    or not isinstance(receipt.get("context"), dict)
+                    or kind == "execution" and receipt.get("task_id") != task_id):
+                raise Fault("task_evidence_changed", "The original receipt contradicts its Task operation.")
+            items.append({"sequence": rows[0]["sequence"], "operation": original, "receipt": receipt})
+
+        if store_fence() != owner:
+            raise Fault("task_evidence_changed", "Original Task store ownership changed during receipt proof.")
+        result = {"task_id": task_id, "task_revision": expected_revision, "owner_store_identity": owner,
+                  "items": items, "complete": True, "has_more": False}
+        if len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) > 262144:
+            raise Fault("task_receipt_page_too_large", "Reduce the bounded original receipt batch; never truncate evidence.")
+        return result
 
     def wait_task(self, task_id: str, expected_revision: int, wait_seconds: float = MAX_TASK_WAIT,
                   *, cancelled: threading.Event | None = None) -> dict:

@@ -45,6 +45,32 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call")
         self.assertFalse((self.state / "tasks.db").exists())
 
+    async def test_original_receipt_batch_strict_bounds_without_initializing_state(self):
+        self.launch()
+        for version in ("2025-11-25", "2026-07-28"):
+            async with self.wire_client(version) as client:
+                catalog = (await self.wire_call(client, "tools/list", {})).json()["result"]
+                tool = next(item for item in catalog["tools"] if item["name"] == "read_task_receipts")
+                self.assertTrue(tool["annotations"]["readOnlyHint"])
+                valid = {"task_id": "not-created", "expected_revision": 1,
+                         "operation_ids": ["a" * 32]}
+                for extra in ({"expected_revision": 0}, {"expected_revision": True},
+                              {"operation_ids": []}, {"operation_ids": ["a" * 32] * 9},
+                              {"operation_ids": ["bad"]}, {"operation_ids": [True]}):
+                    result = (await self.wire_call(client, "tools/call", {
+                        "name": "read_task_receipts", "arguments": {**valid, **extra}})).json()["result"]
+                    self.assert_wire_tool_result(result, version)
+                    self.assertEqual(result["structuredContent"]["error"]["code"], "invalid_tool_call",
+                                     (version, extra, result))
+                duplicate = (await self.wire_call(client, "tools/call", {
+                    "name": "read_task_receipts",
+                    "arguments": {**valid, "operation_ids": ["a" * 32] * 2}})).json()["result"]
+                self.assertEqual(duplicate["structuredContent"]["error"]["code"], "invalid_task_receipt_read")
+                missing = (await self.wire_call(client, "tools/call", {
+                    "name": "read_task_receipts", "arguments": valid})).json()["result"]
+                self.assertEqual(missing["structuredContent"]["error"]["code"], "tasks_uninitialized")
+        self.assertFalse((self.state / "tasks.db").exists())
+
     async def test_all_mutation_contexts_reject_unknown_and_forged_fields_before_dispatch(self):
         self.launch()
         for version in ("2025-11-25", "2026-07-28"):
