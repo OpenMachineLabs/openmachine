@@ -13,8 +13,11 @@ second connector. Keep branch, commit and push in authorized native execution.
 
 - Read [account connections](connections.md) for Device Flow, pinned credentials,
   renewal, cancellation, disconnect or historical account bindings.
-- Read [GitHub operations](reference.md) before paged review, publication, field
-  replacement, workflow controls, review-thread changes, merge, attribution or uncertain-write recovery.
+- Read [GitHub operations](reference.md) for paged evidence, publication, field
+  replacement, workflow controls, review-thread changes and merge.
+- Read [attribution](attribution.md) before publishing new authored GitHub text.
+- Read [scoped uncertainty and historical evidence](uncertainty.md) before
+  reconciling unresolved writes or narrowing conflicting resource exclusions.
 
 Follow every relevant page and coverage flag. Self-review COMMENT is optional
 and does not represent independent approval. Merge needs explicit authority,

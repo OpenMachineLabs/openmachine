@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -130,6 +131,64 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
                 self.assertIn(f"inspect_skills(action='read', tool='{name}')", hint)
                 self.assertLess(len(hint), 180)
         self.fault("skill_unavailable", skills.for_tool, "unknown_tool")
+
+    def test_large_operation_guides_link_to_scoped_readable_topics(self):
+        github = skills.inspect(self.config, "read", tool="github_merge")
+        service = skills.inspect(self.config, "read", "om.service", "management.md")
+        for guide in (github, service):
+            self.assertLess(guide["size_bytes"], 16 * 1024)
+            self.assertFalse(guide["has_more"])
+
+        self.assertIn("[attribution](attribution.md)", github["text"])
+        self.assertIn("[scoped uncertainty and historical evidence](uncertainty.md)", github["text"])
+        self.assertIn("[product management](product-management.md)", service["text"])
+        for identity, path, expected in (
+            ("om.github", "attribution.md", "Created via [Open Machine]"),
+            ("om.github", "uncertainty.md", "bind_effect_scope"),
+            ("om.service", "product-management.md", "## Product management"),
+        ):
+            with self.subTest(path=path):
+                topic = skills.inspect(self.config, "read", identity, path)
+                self.assertIn(expected, topic["text"])
+                self.assertFalse(topic["has_more"])
+
+        continuation = skills.inspect(self.config, "read", "om.tasks", "continue.md")
+        self.assertIn('read_task(section="operations"', continuation["text"])
+        self.assertIn("stable-revision guarantee", continuation["text"])
+
+    def test_extracted_topic_links_reach_the_moved_sections(self):
+        root = reader.bundled_root()
+        stale = (
+            "reference.md#audited-review-thread-goal-recovery",
+            "reference.md#scoped-uncertainty-and-historical-evidence",
+            "reference.md#attribution",
+            "management.md#product-management",
+            "management.md#confirmed-configuration-changes",
+            "management.md#policy-and-old-core-limits",
+            "management.md#original-maintenance-operations",
+        )
+        for source in root.rglob("*.md"):
+            with self.subTest(source=source.relative_to(root)):
+                body = source.read_text(encoding="utf-8")
+                links = [match.group(1) for match in re.finditer(r"\]\(([^)\s]+)\)", body)]
+                for old_link in stale:
+                    self.assertFalse(any(link == old_link or link.endswith("/" + old_link)
+                                         for link in links), old_link)
+
+        expected = {
+            "tasks/continue.md": ("../github/uncertainty.md#audited-review-thread-goal-recovery",),
+            "tasks/verify.md": (
+                "../github/uncertainty.md#audited-review-thread-goal-recovery",
+                "../github/uncertainty.md#scoped-uncertainty-and-historical-evidence",
+            ),
+            "tasks/control.md": ("../github/uncertainty.md#scoped-uncertainty-and-historical-evidence",),
+            "service/runtime-payload.md": ("product-management.md#product-management",),
+        }
+        for path, links in expected.items():
+            text = reader.resource(root, path, bundled=True).decode("utf-8")
+            with self.subTest(source=path):
+                for link in links:
+                    self.assertIn(f"]({link})", text)
 
     def test_yaml_metadata_supports_multiline_text_and_warns_on_malformed_fields(self):
         collection, selected = self.skill_fixture()

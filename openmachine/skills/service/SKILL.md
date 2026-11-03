@@ -13,7 +13,8 @@ Inspect status and the original maintenance intent before changing anything.
 | Work | Read next |
 | --- | --- |
 | First installation, grants, manual serving or tunnel setup | [Setup](../overview/setup.md) |
-| Managed macOS lifecycle, configuration changes, compatibility or recovery | [Management](management.md) |
+| Wheel-based lifecycle, exact updates, compatibility or bounded recovery | [Management](management.md) |
+| Managed product lifecycle, persistent Stop, configuration and original maintenance | [Product management](product-management.md) |
 | Build or prepare a trusted offline Python/Core/Git payload | [Runtime payload](runtime-payload.md) |
 
 Select exact reviewed artifacts and preserve original environments, target archives,
