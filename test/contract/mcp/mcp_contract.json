@@ -120,6 +120,11 @@
       "approval": "Current maintainer request authorizes an independent Core project catalog, focused tests, self-review and merge.",
       "base_commit": "a4756f11ca3f909d0f9de7cee9f4163e63b538dd",
       "change": "Add only inspect_projects, a local-only read-only metadata catalog with stable target validation. Expectations are independently authored; existing tool inputs and annotations remain unchanged."
+    },
+    {
+      "approval": "Current maintainer request authorizes bounded GitHub Actions reads and one workflow control tool.",
+      "base_commit": "c9c7b1638a859c14f0d9e4ca01754dc6cfe3cb35",
+      "change": "Add eight github_read Actions/deployment actions, one closed optional filters object, and github_workflow with native mutation annotations. Preserve the released baseline and every unrelated schema and annotation."
     }
   ],
   "baseline": {
@@ -2895,7 +2900,15 @@
               "review_comments",
               "threads",
               "checks",
-              "merge_context"
+              "merge_context",
+              "workflows",
+              "workflow",
+              "workflow_runs",
+              "workflow_run",
+              "workflow_jobs",
+              "deployments",
+              "deployment",
+              "deployment_statuses"
             ],
             "title": "Action",
             "type": "string"
@@ -2963,13 +2976,156 @@
             "default": "",
             "title": "Repository",
             "type": "string"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ReadFilters"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
           "action"
         ],
         "title": "github_readArguments",
-        "type": "object"
+        "type": "object",
+        "$defs": {
+          "ReadFilters": {
+            "additionalProperties": false,
+            "properties": {
+              "attempt": {
+                "anyOf": [
+                  {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Attempt"
+              },
+              "branch": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Branch"
+              },
+              "environment": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Environment"
+              },
+              "event": {
+                "anyOf": [
+                  {
+                    "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Event"
+              },
+              "head_sha": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Head Sha"
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "completed",
+                      "action_required",
+                      "cancelled",
+                      "failure",
+                      "neutral",
+                      "skipped",
+                      "stale",
+                      "success",
+                      "timed_out",
+                      "in_progress",
+                      "queued",
+                      "requested",
+                      "waiting",
+                      "pending"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Status"
+              },
+              "task": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Task"
+              },
+              "workflow": {
+                "anyOf": [
+                  {
+                    "pattern": "^(?:[1-9][0-9]{0,15}|[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}\\.ya?ml)$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workflow"
+              }
+            },
+            "title": "ReadFilters",
+            "type": "object"
+          }
+        }
       }
     },
     "github_review": {
@@ -4622,6 +4778,164 @@
           "machine"
         ],
         "title": "inspect_projectsArguments",
+        "type": "object"
+      }
+    },
+    "github_workflow": {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "$defs": {
+          "TaskContext": {
+            "additionalProperties": false,
+            "properties": {
+              "continuation_epoch": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Continuation Epoch",
+                "type": "integer"
+              },
+              "operation_id": {
+                "maxLength": 32,
+                "minLength": 32,
+                "pattern": "^[0-9a-f]{32}$",
+                "title": "Operation Id",
+                "type": "string"
+              },
+              "plan_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Plan Revision",
+                "type": "integer"
+              },
+              "task_id": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "title": "Task Id",
+                "type": "string"
+              },
+              "task_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Task Revision",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "task_id",
+              "task_revision",
+              "plan_revision",
+              "continuation_epoch",
+              "operation_id"
+            ],
+            "title": "TaskContext",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "action": {
+            "enum": [
+              "dispatch",
+              "rerun",
+              "rerun_failed",
+              "cancel"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "connection_id": {
+            "default": "",
+            "pattern": "^(?:[0-9a-f]{32})?$",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "expected_attempt": {
+            "default": 0,
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Expected Attempt",
+            "type": "integer"
+          },
+          "expected_head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Expected Head Sha",
+            "type": "string"
+          },
+          "inputs": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                },
+                "type": "object",
+                "maxProperties": 25
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inputs"
+          },
+          "number": {
+            "default": 0,
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "ref": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Ref",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "task_context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "workflow": {
+            "default": "",
+            "maxLength": 205,
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "repository",
+          "expected_head_sha"
+        ],
+        "title": "github_workflowArguments",
         "type": "object"
       }
     }

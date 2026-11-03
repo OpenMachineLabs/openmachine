@@ -50,9 +50,24 @@ def register_github_tools(application, config, guided_tool):
                         ref: str = "", path: str = "", page: Annotated[int, Field(ge=1, le=1000)] = 1,
                         limit: Annotated[int, Field(ge=1, le=100)] = 30, cursor: Annotated[str, Field(max_length=1024)] = "",
                         expected_head_sha: str = "", expected_base_sha: str = "",
-                        offset: Annotated[int, Field(ge=0, le=1048576)] = 0, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+                        offset: Annotated[int, Field(ge=0, le=1048576)] = 0, connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "",
+                        filters: github.ReadFilters | None = None) -> CallToolResult:
             """Read GitHub evidence, including organization Projects, Releases by tag and document history. Project lists use cursors; REST lists use page. Historical file content is fixed-SHA. No arbitrary endpoint or mutation dispatch."""
-            return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id))
+            return _reply(lambda: application.github_read(action, repository, number, ref, path, page, limit, cursor, expected_head_sha, expected_base_sha, offset, connection_id=connection_id,
+                **({"filters": filters.model_dump(exclude_none=True)} if filters is not None else {})))
+
+        @guided_tool(annotations=GITHUB_WRITE)
+        def github_workflow(action: github.WorkflowAction, repository: str,
+                            expected_head_sha: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")],
+                            workflow: Annotated[str, Field(max_length=205)] = "", ref: Annotated[str, Field(max_length=255)] = "",
+                            inputs: Annotated[dict[str, str | bool | int | float], Field(max_length=25)] | None = None,
+                            number: Annotated[int, Field(strict=True, ge=0, le=2**53 - 1)] = 0,
+                            expected_attempt: Annotated[int, Field(strict=True, ge=0, le=2**53 - 1)] = 0,
+                            task_context: tasks.TaskContext | None = None,
+                            connection_id: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{32})?$")] = "") -> CallToolResult:
+            """Dispatch one workflow or rerun/cancel an observed run. Retain the acknowledged run ID; never replay an uncertain outcome. Acceptance never proves test/deployment completion. SHA/attempt preflight is not atomic: releases need a workflow-owned exact-SHA guard. Inputs are not secrets."""
+            return _reply(lambda: application.github_workflow(action, repository, workflow, ref, inputs,
+                number, expected_attempt, expected_head_sha, _task_context(task_context), connection_id))
 
         @guided_tool(annotations=GITHUB_WRITE)
         def github_release(action: Literal["create", "publish"], repository: str, tag_name: str,

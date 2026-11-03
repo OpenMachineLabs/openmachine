@@ -23,13 +23,22 @@ def observation(operation: dict, observed: dict) -> tuple[dict, dict]:
     if status == "retained_task_evidence":
         return operation["result"], locator
     if locator["kind"] == "github":
-        if operation.get("result") is not None and not records.pending(operation):
+        if operation.get("result") is not None and (not records.pending(operation) or locator["object_type"] == "workflow"):
             return operation["result"], locator
-        if status not in {"verified", "merged_verified"} and operation.get("result") is not None:
+        if status not in {"verified", "merged_verified", "request_accepted"} and operation.get("result") is not None:
             # An unproven mutable destination snapshot cannot rewrite the
             # original uncertainty or discard its retained failure phase.
             return operation["result"], locator
         receipt = observed.get("receipt") or {}
+        if locator["object_type"] == "workflow":
+            number = receipt.get("run_id")
+            if (status == "request_accepted" and type(number) is int and 0 < number <= records.MAX_INTEGER
+                    and locator["number"] in (None, number)):
+                return receipt_result("succeeded", observed,
+                    "Workflow request accepted; test/deployment completion is not verified.", effect="effect_verified"), dict(locator, number=number)
+            # Only the original direct acknowledgement can supply a run ID.
+            # Mutable run observations cannot enrich an unknown dispatch.
+            status, receipt = "write_outcome_unknown", {}
         if locator["object_type"] == "merge":
             receipt = {key: (receipt or observed).get(key) for key in ("number", "head_sha", "merge_commit_sha")}
         number = receipt.get("number" if locator["object_type"] in {"issue", "pull_request", "merge"} else "id")

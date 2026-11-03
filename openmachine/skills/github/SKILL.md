@@ -1,7 +1,7 @@
 ---
 id: om.github
 name: openmachine-github
-description: Connect native GitHub accounts and read or publish scoped Issues, PRs, comments, reviews, Release documents and merges with exact-head verification.
+description: Connect native GitHub accounts; inspect workflows and deployments; request workflow dispatch or controls; publish scoped Issues, PRs, reviews, Releases and merges with exact-head verification.
 ---
 
 # GitHub collaboration
@@ -14,7 +14,7 @@ second connector. Keep branch, commit and push in authorized native execution.
 - Read [account connections](connections.md) for Device Flow, pinned credentials,
   renewal, cancellation, disconnect or historical account bindings.
 - Read [GitHub operations](reference.md) before paged review, publication, field
-  replacement, review-thread changes, merge, attribution or uncertain-write recovery.
+  replacement, workflow controls, review-thread changes, merge, attribution or uncertain-write recovery.
 
 Follow every relevant page and coverage flag. Self-review COMMENT is optional
 and does not represent independent approval. Merge needs explicit authority,

@@ -40,6 +40,56 @@ credentials and binary data. Pages are 16 KiB UTF-8-safe with full hash/cursors,
 sources up to 1 MiB. Provider API/results are bounded to 2 MiB/256 KiB. The PR file
 API's 3,000-file ceiling and partial check/review/thread evidence remain explicit.
 
+Actions reads use `github_read`: `workflows`, `workflow` (number=ID or
+path=filename, e.g. `ci.yml`), `workflow_runs`, `workflow_run` (number=run ID),
+and `workflow_jobs` (number=run ID, filters.attempt=observed run_attempt).
+Jobs include steps for that exact attempt. Run lists accept only the closed
+filters `workflow` (ID string or filename), `branch`, `head_sha`, `event`, and
+`status` (run status or conclusion). Run detail accepts `filters.attempt` for
+historical attempts. Filtered run searches have GitHub's 1,000-result ceiling;
+REST pages are bounded observations, not a stable snapshot. Artifact archives
+and log downloads are not exposed.
+
+Read `deployments` with optional `ref` and filters `head_sha`, `environment`,
+and `task`; read `deployment` or `deployment_statuses` with number=deployment ID.
+Statuses are provider reports, not independent deployment acceptance. These
+routes do not create deployments or write their statuses.
+
+`github_workflow(action="dispatch", repository, workflow="ci.yml", ref="main",
+expected_head_sha=observed_sha, inputs={"runner_mode": "hosted"})` sends one
+request after checking the workflow and ref commit. Inputs are NOT secrets:
+at most 25 named string/boolean/number values, 16 KiB total, finite numbers.
+Use workflow-owned secrets; never send credentials as inputs. Ref preflight is
+sequential, not atomic pinning: a branch/tag can move before GitHub uses it.
+Release workflows must enforce their own exact-SHA guard before effects
+(for example, a declared `expected_sha` input checked against the actual commit).
+The tool does not inject that guard or bypass provider environment approvals.
+
+For `action="rerun"`, `"rerun_failed"`, or `"cancel"`, pass only repository,
+number=run ID, expected_attempt=observed run_attempt, and expected_head_sha.
+Omit workflow/ref/inputs. Controls also have a preflight race; re-read the
+actual run attempt after acknowledgement. `request_accepted` means only that
+GitHub acknowledged the request, never that tests, cancellation, packaging or
+deployment completed. Dispatch always requests `return_run_details=true` on
+API version `2022-11-28`; its 200 JSON acknowledgement must contain a positive
+safe run ID and exact canonical repository/run URLs. The receipt retains that
+causal run ID, and supervised dispatch enriches its existing Task locator.
+It never guesses from the newest run or falls back to another dispatch.
+Read actual runs, jobs and deployment statuses separately. Main merges and CI
+success alone do not establish deployment acceptance.
+
+Native grants need **Actions: read** for observations, **Actions: write** for
+controls, and **Deployments: read** for deployment history. Existing local
+repository/account and Task grants still apply. Existing authentication refresh
+can retry a proven-rejected 401; uncertain outcomes are never replayed. Preserve
+task_context and the original operation after uncertainty. Unknown run controls exclude
+other controls on that run. Unknown dispatches conservatively exclude workflow
+writes across that repository, including filename/ID aliases; PR IDs are a
+separate resource. Current run state cannot prove the original POST occurred.
+Task success for this tool records request acceptance only. Tasks retaining
+workflow operations use format 6 and require state contract 26; older candidates
+must fail closed without rewriting history.
+
 Read organization Projects via github_read actions projects, project, project_fields,
 project_items and project_item. The repository owner identifies the organization;
 number is the Project number, and project_item uses ref=item node ID. Project lists
@@ -243,7 +293,7 @@ Explicit changes to unrelated repositories remain possible under ordinary scope
 validation and stage invalidation.
 
 For a retained 0.2.11 task, first inspect the running server's capabilities and
-the actual `control_task` schema. The scoped reader supports record formats 1..5;
+the actual `control_task` schema. The scoped reader supports record formats 1..6;
 `bind_effect_scope` is a `control_task.transition.action`, not a separate tool.
 The original 0.2.11 runtime lacks this action even when newer source or Skill text
 is present. Update through the managed compatibility checks only under explicit

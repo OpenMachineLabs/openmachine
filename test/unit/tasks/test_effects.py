@@ -7,6 +7,21 @@ from openmachine.tasks import effects, records
 
 
 class EffectScopeTests(unittest.TestCase):
+    def test_workflow_run_scopes_never_alias_pr_ids_and_dispatch_excludes_controls(self):
+        run = self.operation("github_workflow")
+        self.assertTrue(self.conflict(run, self.operation("github_workflow")))
+        self.assertFalse(self.conflict(run, self.operation("github_pull_request")))
+        self.assertFalse(self.conflict(run, self.creation()))
+        other = deepcopy(run)
+        other["locator"]["number"] = other["effect_scope"]["number"] = 8
+        self.assertFalse(self.conflict(run, other))
+        dispatch = deepcopy(run)
+        dispatch["locator"]["number"] = dispatch["effect_scope"]["number"] = None
+        self.assertTrue(self.conflict(dispatch, run))
+        self.assertTrue(self.conflict(dispatch, other))
+        other["locator"]["repository"] = "Other/repo"
+        self.assertFalse(self.conflict(dispatch, other))
+
     def test_retained_local_locator_null_pin_normalizes_but_nonlocal_pin_is_rejected(self):
         from pydantic import ValidationError
         for kind, identity_key in (("execution", "execution_id"), ("change", "change_id")):

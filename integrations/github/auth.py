@@ -69,9 +69,20 @@ def _exchange(method: str, url: str, *, token: str = "", data=None, payload=None
         raise Fault("github_response_unknown", "The GitHub response was lost; do not repeat a possibly executed write.") from None
     if method == "DELETE" and code == 204 and not raw:
         return {"http_status": 204}
+    workflow_dispatch = False
+    if method == "POST" and url.startswith(API):
+        endpoint = url[len(API):]
+        match = re.fullmatch(r"repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/(?:workflows/[1-9][0-9]*/(dispatches)|runs/[1-9][0-9]*/(rerun|rerun-failed-jobs|cancel))", endpoint)
+        if match:
+            workflow_dispatch = bool(match[1])
+            expected = 200 if workflow_dispatch else 202 if match[2] == "cancel" else 201
+            if code != expected or raw and not workflow_dispatch:
+                raise Fault("github_response_unknown", "The workflow acknowledgement has an unexpected status or body; never replay.")
+            if not workflow_dispatch:
+                return {"http_status": code}
     try:
         value = json.loads(raw)
-        if not isinstance(value, (dict, list)):
+        if not isinstance(value, (dict, list)) or workflow_dispatch and not isinstance(value, dict):
             raise ValueError
         return value
     except (UnicodeError, ValueError):

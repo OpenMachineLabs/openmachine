@@ -65,8 +65,12 @@ def reserve(record: dict, *, operation_limit: int = MAX_ACTIVE_OPERATIONS - 2,
     if record["format"] >= 4:
         future["result"].update(failure_code="x" * 64, effect="effect_verified")
     if future["locator"]["kind"] == "github":
-        future["locator"] = dict(future["locator"], number=MAX_INTEGER,
-            parent_number=None if future["locator"]["object_type"] in {"review_thread", "merge"} else MAX_INTEGER)
+        if future["locator"]["object_type"] == "workflow":
+            if future["locator"]["number"] is None:
+                future["locator"] = dict(future["locator"], number=MAX_INTEGER)
+        else:
+            future["locator"] = dict(future["locator"], number=MAX_INTEGER,
+                parent_number=None if future["locator"]["object_type"] in {"review_thread", "merge"} else MAX_INTEGER)
     try:
         Operation.model_validate(future)
     except ValueError as error:

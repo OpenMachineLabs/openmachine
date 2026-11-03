@@ -55,6 +55,37 @@ class GoalRecoveryTransportTests(GoalRecoveryFixture, unittest.TestCase):
 
 
 class GitHubTests(unittest.TestCase):
+    def test_actions_accept_only_exact_empty_acknowledgements_on_owned_routes(self):
+        for suffix, expected in (("runs/42/rerun", 201),
+                                 ("runs/42/rerun-failed-jobs", 201), ("runs/42/cancel", 202)):
+            endpoint = f"repos/{REPO}/actions/{suffix}"
+            def acknowledgement(request):
+                self.assertEqual(request.headers["X-GitHub-Api-Version"], "2022-11-28")
+                return httpx.Response(expected)
+            self.assertEqual(self.transport(acknowledgement)("POST", endpoint, {}), {"http_status": expected})
+            for code, body in ((200, b"{}"), (200, b""), (expected, b"{}"), (expected, b"bad"), (expected, b" ")):
+                with self.subTest(suffix=suffix, code=code, body=body), self.assertRaises(Fault) as caught:
+                    self.transport(lambda _: httpx.Response(code, content=body))("POST", endpoint, {})
+                self.assertEqual(caught.exception.code, "github_response_unknown")
+        for method, endpoint, code in (("GET", f"repos/{REPO}/actions/runs/42", 204),
+                ("POST", f"repos/{REPO}/issues", 201), ("POST", f"repos/{REPO}/actions/runs/42/force-cancel", 202)):
+            with self.assertRaises(Fault):
+                self.transport(lambda _: httpx.Response(code))(method, endpoint)
+        self.assertEqual(self.transport(lambda _: httpx.Response(204))("DELETE", "repos/Owner/repo/issues/comments/9"), {"http_status": 204})
+
+    def test_dispatch_requires_200_json_with_run_details_on_the_pinned_api(self):
+        endpoint = f"repos/{REPO}/actions/workflows/12/dispatches"
+        ack = {"workflow_run_id": 42, "run_url": f"https://api.github.com/repos/{REPO}/actions/runs/42",
+               "html_url": f"https://github.com/{REPO}/actions/runs/42"}
+        def response(request):
+            self.assertEqual(request.headers["X-GitHub-Api-Version"], "2022-11-28")
+            return httpx.Response(200, json=ack)
+        self.assertEqual(self.transport(response)("POST", endpoint, {"ref": "main", "return_run_details": True}), ack)
+        for code, body in ((204, b""), (201, b'{}'), (202, b'{}'), (200, b""), (200, b"bad"), (200, b"[]")):
+            with self.subTest(code=code, body=body), self.assertRaises(Fault) as caught:
+                self.transport(lambda _: httpx.Response(code, content=body))("POST", endpoint, {"return_run_details": True})
+            self.assertEqual(caught.exception.code, "github_response_unknown")
+
     def transport(self, handler):
         def send(method, endpoint, payload=None):
             client = httpx.Client(transport=httpx.MockTransport(handler), trust_env=False)

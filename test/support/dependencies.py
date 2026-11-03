@@ -131,12 +131,14 @@ class DependencyFixture(object):
             "integrations.credentials": ("pydantic", "openmachine.foundation.*"),
             "integrations.github.auth": ("httpx2", "integrations.credentials", "openmachine.foundation.*"),
             "integrations.github.web_broker": ("integrations.github.auth", "openmachine.foundation.*"),
-            "integrations.github": ("integrations.github.operations",),
+            "integrations.github": ("integrations.github.operations", "integrations.github.actions"),
+            "integrations.github.actions": ("integrations.github.client", "integrations.github.connection",
+                                             "integrations.github.evidence", "openmachine.foundation.*", "pydantic"),
             "integrations.github.connection": ("openmachine.config", "openmachine.foundation.*"),
             "integrations.github.client": ("integrations.github.connection", "openmachine.foundation.*"),
             "integrations.github.evidence": ("integrations.github.client", "integrations.github.connection",
                                              "openmachine.foundation.*"),
-            "integrations.github.operations": ("integrations.github.client", "integrations.github.connection",
+            "integrations.github.operations": ("integrations.github.actions", "integrations.github.client", "integrations.github.connection",
                                                "integrations.github.evidence", "openmachine.config", "openmachine.foundation.*"),
         }
 

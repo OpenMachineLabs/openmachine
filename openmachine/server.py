@@ -102,7 +102,7 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
         # The new contract forbids extra fields before SDK argument filtering.
         guarded = {"inspect_projects", "inspect_context", "find_tasks", "read_task", "wait_task", "start_codex_task", "read_codex_task", "create_task", "control_task", "start_execution", "create_worktree", "cancel_execution", "control_execution",
                    "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "github_issue", "github_release",
-                   "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge",
+                   "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_workflow",
                    "list_integrations", "connect_integration", "read_integration_login",
                    "cancel_integration_login", "disconnect_integration"}
         if (params["name"] in guarded or "task_context" in (arguments or {})) and set(arguments or {}) - validator.schema["properties"].keys():
