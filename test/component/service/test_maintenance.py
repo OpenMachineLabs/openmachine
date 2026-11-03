@@ -774,6 +774,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
             self.assertIn(record["operation_id"], args[0])
 
+    @patch("sys.platform", "darwin")
     def test_product_install_registers_bound_stopped_service_before_reporting_completion(self):
         record = self.operation_fixture()
         (self.state / "service/service.json").unlink()

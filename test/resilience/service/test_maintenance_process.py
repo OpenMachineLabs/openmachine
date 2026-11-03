@@ -1,9 +1,11 @@
 """Tests for service behavior at the resilience layer."""
 
 import json
+import asyncio
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -32,13 +34,31 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(maintenance._operation_path(self.state, record["operation_id"]).read_bytes(), original)
 
 
-@unittest.skipUnless(sys.platform == "darwin" and os.environ.get("OM_NATIVE_FIRST_USE") == "1",
-                     "opt-in macOS first-use test with an explicitly trusted payload")
+@unittest.skipUnless(sys.platform in {"darwin", "linux"} and os.environ.get("OM_NATIVE_FIRST_USE") == "1",
+                     "opt-in native first-use test with an explicitly trusted payload")
 class NativeFirstUseTests(unittest.TestCase):
+    def tool(self, state, name, arguments):
+        import httpx2 as httpx
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        async def invoke():
+            async with httpx.AsyncClient(trust_env=False, timeout=10,
+                    transport=httpx.AsyncHTTPTransport(uds=str(state / "mcp.sock"))) as client:
+                async with streamable_http_client("http://localhost/mcp", http_client=client) as (reader, writer):
+                    async with ClientSession(reader, writer) as session:
+                        await session.initialize()
+                        return await session.call_tool(name, arguments)
+        return asyncio.run(invoke())
+
     def test_isolated_install_start_ready_and_stop(self):
         source = Path(os.environ["OM_NATIVE_PAYLOAD"]).resolve(strict=True)
         digest = os.environ["OM_NATIVE_PAYLOAD_SHA256"]
         payload.verify(source, digest)
+        if sys.platform == "linux":
+            self.assertEqual(os.environ.get("OM_NATIVE_DISPOSABLE_USER"), str(os.getuid()),
+                             "Linux acceptance requires an explicitly owned disposable account")
+            self.assertNotEqual(os.getuid(), 0)
         root = Path(tempfile.mkdtemp(prefix="om-first-", dir="/tmp")).resolve()
         config, state, project = root / "config.toml", root / "state", root / "project"
         project.mkdir()
@@ -46,7 +66,9 @@ class NativeFirstUseTests(unittest.TestCase):
         operation = uuid.uuid4().hex
         command = [str(source / "python/bin/python3"), "-I", "-B", "-m", "openmachine.cli",
                    "--config", str(config), "--state-dir", str(state), "manage", "--contract", "1"]
-        evidence = {"fixture": str(root), "operation_id": operation, "steps": []}
+        evidence = {"fixture": str(root), "operation_id": operation, "steps": [],
+                    "host_tools": {name: shutil.which(name) for name in ("python3", "git", "pip", "cc")},
+                    "tool_boundary": "bundled interpreter and Git; host tooling may still be installed"}
         started = time.monotonic()
 
         def call(*arguments):
@@ -68,6 +90,24 @@ class NativeFirstUseTests(unittest.TestCase):
         try:
             self.assertEqual(call("status")["status"], "not_installed")
             self.assertEqual(call("configure", "--workspace", str(project))["status"], "configured")
+            # Disable optional release observation in this offline fixture.
+            config.write_text("check_for_updates = false\n" + config.read_text())
+            from openmachine.config import load
+            settings = load(config)
+            self.assertEqual(settings.machine("local").local_access, "read_only")
+            self.assertFalse(settings.machine("local").execution_enabled)
+            self.assertFalse(settings.machine("local").workspace_write_enabled)
+            original_config = config.read_bytes()
+            rejected = call("install", "--operation-id", uuid.uuid4().hex, "--payload", str(source),
+                            "--sha256", "0" * 64, "--probe-workspace", "project", "--probe-path", "hello.txt")
+            # Admission may run asynchronously; read the original rejected request.
+            reject_id = rejected.get("operation_id")
+            deadline = time.monotonic() + 30
+            while rejected["status"] in {"accepted", "busy"} and time.monotonic() < deadline:
+                time.sleep(0.2)
+                rejected = call("operation", "--operation-id", reject_id)
+            self.assertIn(rejected["status"], {"rejected", "unknown"}, rejected)
+            self.assertEqual(call("status")["status"], "not_installed")
             accepted = call("install", "--operation-id", operation, "--payload", str(source),
                             "--sha256", digest, "--probe-workspace", "project", "--probe-path", "hello.txt")
             deadline = time.monotonic() + 120
@@ -84,13 +124,98 @@ class NativeFirstUseTests(unittest.TestCase):
             observed = call("status")
             self.assertEqual(observed["status"], "ready", observed)
             self.assertEqual(observed["current"], stopped["current"])
+            denied = self.tool(state, "start_execution", {"machine": "local", "execution_id": uuid.uuid4().hex,
+                "cwd": str(project), "argv": [str(source / "python/bin/python3"), "-c", "pass"]})
+            self.assertTrue(denied.is_error, denied)
+            self.assertEqual(denied.structured_content["error"]["code"], "execution_disabled")
+            if sys.platform == "linux":
+                # Explicit Full with commands only: the packaged service must
+                # preserve this native worker through supervisor loss/restart.
+                import hashlib
+                candidate = root / "full.toml"
+                candidate.write_text(original_config.decode().replace('local_access = "read_only"',
+                    'local_access = "full_access"').replace('execution_enabled = false', 'execution_enabled = true'))
+                candidate.chmod(0o600)
+                update_id = uuid.uuid4().hex
+                update = call("update", "--operation-id", update_id, "--payload", str(source), "--sha256", digest,
+                    "--candidate-config", str(candidate), "--config-sha256", hashlib.sha256(config.read_bytes()).hexdigest(),
+                    "--candidate-sha256", hashlib.sha256(candidate.read_bytes()).hexdigest(),
+                    "--expected-selection-sha256", observed["selection_sha256"])
+                deadline = time.monotonic() + 120
+                while update["status"] in {"accepted", "busy"} and time.monotonic() < deadline:
+                    time.sleep(0.5)
+                    update = call("operation", "--operation-id", update_id)
+                self.assertEqual(update["status"], "completed", update)
+                original_config = candidate.read_bytes()
+                observed = call("status")
+                self.assertEqual(observed["status"], "ready", observed)
+                execution_id = uuid.uuid4().hex
+                marker = project / "worker-starts.txt"
+                worker = self.tool(state, "start_execution", {"machine": "local", "execution_id": execution_id,
+                    "cwd": str(project), "argv": [observed["entry"]["python"], "-c",
+                    "from pathlib import Path; import time; "
+                    "p=Path('worker-starts.txt'); p.write_text(p.read_text()+'start\\n' if p.exists() else 'start\\n'); "
+                    "time.sleep(180)"], "timeout_seconds": 240})
+                self.assertFalse(worker.is_error, worker)
+                deadline = time.monotonic() + 10
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertEqual(marker.read_text(), "start\n")
+                # SIGKILL prevents supervisor cleanup: the MCP child must still exit.
+                supervisor, child = observed["supervisor_pid"], observed["pid"]
+                runtime._native(state)  # Verify owned PID before this test-only crash.
+                os.kill(supervisor, signal.SIGKILL)
+                deadline = time.monotonic() + 8
+                while runtime.socket_alive(state / "mcp.sock") and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(runtime.socket_alive(state / "mcp.sock"), child)
+                deadline = time.monotonic() + 35
+                while time.monotonic() < deadline:
+                    observed = call("status")
+                    if observed["status"] == "ready":
+                        break
+                    time.sleep(0.5)
+                self.assertEqual(observed["status"], "ready", observed)
+                self.assertNotEqual(observed["supervisor_pid"], supervisor)
+            restarted = subprocess.run(command[:-3] + ["service", "restart"], cwd="/",
+                                       capture_output=True, text=True, timeout=60)
+            self.assertEqual(restarted.returncode, 0, restarted.stderr)
+            self.assertEqual(call("status")["status"], "ready")
+            if sys.platform == "linux":
+                worker = self.tool(state, "read_execution", {"machine": "local", "execution_id": execution_id})
+                self.assertFalse(worker.is_error, worker)
+                self.assertEqual(worker.structured_content["status"], "running", worker)
+                self.assertEqual(marker.read_text(), "start\n")
             stopped = call("stop")
             self.assertEqual(stopped["status"], "stopped", stopped)
             self.assertFalse(stopped["loaded"])
             self.assertFalse(runtime.socket_alive(state / "mcp.sock"))
+            self.assertEqual(call("resume")["status"], "stopped")
+            self.assertEqual(call("operation", "--operation-id", operation)["operation"], accepted["operation"])
+            self.assertEqual(config.read_bytes(), original_config)
+            self.assertEqual((state / "service/service.json").stat().st_mode & 0o777, 0o600)
+            self.assertEqual(call("start")["status"], "ready")
+            if sys.platform == "linux":
+                worker = self.tool(state, "read_execution", {"machine": "local", "execution_id": execution_id})
+                self.assertFalse(worker.is_error, worker)
+                self.assertEqual(worker.structured_content["status"], "running", worker)
+                self.assertEqual(marker.read_text(), "start\n")
+                cancelled = self.tool(state, "cancel_execution", {"machine": "local", "execution_id": execution_id})
+                self.assertFalse(cancelled.is_error, cancelled)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    worker = self.tool(state, "read_execution", {"machine": "local", "execution_id": execution_id,
+                                                                 "wait_seconds": 0.25})
+                    self.assertFalse(worker.is_error, worker)
+                    if worker.structured_content["status"] == "cancelled":
+                        break
+                self.assertEqual(worker.structured_content["status"], "cancelled", worker)
+            self.assertEqual(call("stop")["status"], "stopped")
             # Remove only this unique test's definition after verified unload.
             evidence["stage"] = "cleanup"
             runtime._plist_path(state).unlink()
+            if sys.platform == "linux":
+                self.assertEqual(runtime.systemd.command("daemon-reload").returncode, 0)
             # Retained payload directories are sealed read-only during install.
             for directory, _, _ in os.walk(root, followlinks=False):
                 path = Path(directory)

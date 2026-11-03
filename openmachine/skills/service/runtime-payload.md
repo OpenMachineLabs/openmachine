@@ -130,3 +130,30 @@ Managed product installation/update now uses [management contract 1](product-man
 which records the original operation before independent preparation and invokes
 the verified incoming implementation from retained paths. `prepare-runtime` remains
 a preparation-only primitive; it neither selects a service nor creates update consent.
+
+## Ubuntu payload
+
+The same producer supports native Ubuntu 24.04 x86_64 builds, using the Linux
+pins in `scripts/runtime-inputs.json`. Its exact target is
+`{"os":"linux","arch":"x86_64","distribution":"ubuntu","version":"24.04"}`.
+Build on that target; cross-building or substituting macOS input archives is not
+supported. The producer checks the downloaded Python/Git archive digests, retains
+the native layouts, and obtains wheels using the bundled native Python. The
+existing macOS target and pins remain unchanged.
+
+The output is an **unsigned local build**. Its manifest SHA256 proves selected
+bytes, not publisher identity. The caller must establish trust in both the build
+and expected digest before invoking any bundled executable. Public distribution,
+signing and trust pinning remain outside this contract. Verification rejects
+wrong hosts, incomplete inventories, foreign owners, unsafe modes and escaping
+links before copying or executing the payload. The retained Python, Git and
+wheelhouse support installation without target-side dependency downloads or a
+separate developer Python/Git installation.
+
+The opt-in `linux_native` quality workflow builds the selected candidate and runs
+`NativeFirstUseTests` with a disposable hosted Ubuntu account and private native
+unit. It does not enable linger. This verifies packaged first use, original
+maintenance readback, MCP/file readiness, stop/resume/restart and supervisor-loss
+cleanup. The harness reports available host tools: bundled-tool use is not proof
+that the host has no developer tools or that all network access was denied.
+Mocked macOS tests do not establish native Linux acceptance.

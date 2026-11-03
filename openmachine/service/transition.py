@@ -4,7 +4,6 @@ from collections.abc import Callable
 from contextlib import ExitStack
 import os
 from pathlib import Path
-import plistlib
 import sys
 
 from openmachine import tasks
@@ -215,15 +214,22 @@ def _register(config_path: Path, state: Path, identity: str, workspace: str, pat
                 before_change()
             record = service_state._bind_management(state, record, identity)
             record.update(format=2, policy={"desired": "stopped", "start_at_login": False})
+        if sys.platform == "linux":
+            runtime.systemd.absent(runtime._plist_path(state))
+            runtime.systemd.check_path(runtime._plist_path(state), allow_missing=True)
         runtime._plist_path(state).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        if sys.platform == "linux":
+            runtime.systemd.check_path(runtime._plist_path(state))
         for destination, content in ((root / "launch.py", LAUNCHER.encode()), (root / "service.log", b""),
-                                     (runtime._plist_path(state), plistlib.dumps(runtime._definition(state, record)))):
+                                     (runtime._plist_path(state), runtime._definition_bytes(runtime._definition(state, record)))):
             fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as output:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
         save_json(root / "service.json", record)
+        if sys.platform == "linux" and runtime.systemd.command("daemon-reload").returncode:
+            raise Fault("service_command_unverified", "The registered unit reload is unverified; retain the original installation.")
     return {"status": "installed", "version": service_state._installed(state, identity)["version"], "current": identity,
             "service": "stopped", "next_action": "service start", "tunnel": "not_managed"}
 
@@ -232,8 +238,7 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             requirements: Path | None = None, workspace: str = "", path: str = "",
             candidate_config: Path | None = None, reset_recovery: bool = False,
             require_safe: bool = False, commit: str | None = None) -> dict:
-    if sys.platform != "darwin" or os.getuid() == 0:
-        raise Fault("unsupported_service_host", "Managed services require a logged-in macOS user. Linux manual serving remains separate.")
+    runtime.require_host()
     if not config_path.is_absolute() or not state.is_absolute():
         raise Fault("invalid_service_path", "Use absolute configuration and state paths for a managed service.")
     if reset_recovery and action != "restart":
@@ -291,6 +296,9 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
             if action == "start" and service_state.stopped(record):
                 record = dict(record, policy=record["policy"] | {"desired": "running"})
                 save_json(root / "service.json", record)
+            if sys.platform == "linux" and action == "stop" and record["format"] == 2:
+                record = dict(record, policy=record["policy"] | {"desired": "stopped"})
+                save_json(root / "service.json", record)
             if action in ("stop", "restart"):
                 runtime._stop(state)
             if reset_recovery:
@@ -299,6 +307,8 @@ def operate(config_path: Path, state: Path, action: str, *, wheel: Path | None =
                     service_state._save_recovery(state, None)
             if action == "stop":
                 return {"status": "stopped", "workers": "preserved", "tunnel": "not_managed"}
+        if sys.platform == "linux" and action == "restart" and service_state.stopped(record):
+            return {"status": "stopped", "workers": "preserved", "tunnel": "not_managed"}
         if action in ("start", "restart"):
             # The parent publishes accounting under shared lifecycle admission.
             # The operation lock still serializes explicit service transitions.

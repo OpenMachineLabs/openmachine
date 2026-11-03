@@ -290,7 +290,8 @@
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/execution/test_mcp_sessions.py",
         "test/resilience/github/test_mcp_connection.py",
-        "test/contract/mcp/projects/test_catalog.py"
+        "test/contract/mcp/projects/test_catalog.py",
+        "test/resilience/service/test_maintenance_process.py"
       ],
       "sources": [
         "openmachine/mcp/__init__.py",
@@ -350,7 +351,8 @@
     "service_maintenance": {
       "boundary_tests": [
         "test/component/cli/test_management.py",
-        "test/component/cli/test_startup.py"
+        "test/component/cli/test_startup.py",
+        "test/component/service/test_linux.py"
       ],
       "sources": [
         "openmachine/service/maintenance.py"
@@ -363,15 +365,18 @@
     },
     "service_payload": {
       "boundary_tests": [
-        "test/component/service/test_install_payload.py"
+        "test/component/service/test_install_payload.py",
+        "test/resilience/service/test_maintenance_process.py"
       ],
       "sources": [
         "openmachine/service/payload.py",
-        "scripts/build_runtime_payload.py"
+        "scripts/build_runtime_payload.py",
+        "scripts/runtime-inputs.json"
       ],
       "tests": [
         "test/component/service/test_payload.py",
-        "test/component/service/test_payload_builder.py"
+        "test/component/service/test_payload_builder.py",
+        "test/component/service/test_linux.py"
       ]
     },
     "service_processes": {
@@ -395,10 +400,13 @@
         "test/component/service/test_maintenance.py",
         "test/component/service/test_transition.py",
         "test/resilience/app/test_mcp_observer.py",
-        "test/component/cli/test_startup.py"
+        "test/component/cli/test_startup.py",
+        "test/component/service/test_linux.py",
+        "test/resilience/service/test_maintenance_process.py"
       ],
       "sources": [
-        "openmachine/service/runtime.py"
+        "openmachine/service/runtime.py",
+        "openmachine/service/systemd.py"
       ],
       "tests": [
         "test/component/service/test_runtime.py",
@@ -426,7 +434,8 @@
       "boundary_tests": [
         "test/component/service/test_maintenance.py",
         "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/service_checks/test_mcp_readiness.py"
+        "test/resilience/service_checks/test_mcp_readiness.py",
+        "test/component/service/test_linux.py"
       ],
       "sources": [
         "openmachine/service/transition.py"
@@ -789,7 +798,8 @@
     "test/support/payload_cases.py": [
       "test/component/service/test_install_payload.py",
       "test/component/service/test_payload.py",
-      "test/component/service/test_payload_builder.py"
+      "test/component/service/test_payload_builder.py",
+      "test/component/service/test_linux.py"
     ],
     "test/support/repository.py": [
       "test/repository/test_premerge.py",
@@ -815,7 +825,8 @@
       "test/component/service/test_state.py",
       "test/component/service/test_transition.py",
       "test/resilience/service/test_maintenance_process.py",
-      "test/resilience/service/test_subprocess.py"
+      "test/resilience/service/test_subprocess.py",
+      "test/component/service/test_linux.py"
     ],
     "test/support/task_observer_cases.py": [
       "test/component/app/test_task_observer.py",

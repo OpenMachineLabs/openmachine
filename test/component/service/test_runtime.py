@@ -239,6 +239,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(definition["ProgramArguments"][0], self.record["launch_python"])
         self.assertNotEqual(service_runtime._label(self.state), service_runtime._label(self.root / "other-state"))
 
+    @patch("sys.platform", "darwin")
     def test_missing_and_unverifiable_native_states_are_distinct(self):
         with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 3, "", "Could not find service fixture")):
             self.assertFalse(service_runtime._native(self.state)["loaded"])
@@ -247,6 +248,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "path = /other/job.plist\npid = 123\n", "")):
             self.assert_fault("service_identity_mismatch", lambda: service_runtime._native(self.state))
 
+    @patch("sys.platform", "darwin")
     def test_submitted_native_job_requires_the_verified_launch_definition(self):
         import plistlib
         legacy = self.record
@@ -296,6 +298,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                 owned.write_bytes(owned.read_bytes() + b"\n")
                 self.assert_fault("service_definition_mismatch", lambda: service_runtime._native(self.state))
 
+    @patch("sys.platform", "darwin")
     def test_product_definition_selects_retained_git_and_accepts_exact_prior_profile(self):
         import plistlib
         original = service_runtime._definition(self.state, self.record)
@@ -320,6 +323,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             service_runtime._sync_definition(self.state, restored)
             self.assertEqual(owned.read_bytes(), plistlib.dumps(original))
 
+    @patch("sys.platform", "darwin")
     def test_policy_native_definition_preserves_exact_legacy_files_and_rejects_changed_bytes(self):
         import plistlib
         old = self.record
@@ -344,6 +348,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         result = subprocess.run([sys.executable, "-I", str(entry), "--launch"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @patch("sys.platform", "darwin")
     def test_native_startup_observes_effective_override_and_denial(self):
         label = service_runtime._label(self.state)
         def reply(disabled):
@@ -356,6 +361,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(service_processes, "run", return_value=subprocess.CompletedProcess([], 0, "unrecognized", "")):
             self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
 
+    @patch("sys.platform", "darwin")
     def test_idle_stopped_login_reports_stopped_and_start_reloads_disabled_job(self):
         record = self.policy_fixture()
         with patch.object(service_runtime, "status", return_value={"status": "unready", "loaded": True,
@@ -376,6 +382,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(startup.call_args_list, [call(self.state, True), call(self.state, False)])
         self.assertFalse(service_state._record(self.state)["policy"]["start_at_login"])
 
+    @patch("sys.platform", "darwin")
     def test_native_startup_spellings_are_observed_without_guessing(self):
         label = service_runtime._label(self.state)
         for spelling, enabled in (("true", False), ("false", True), ("disabled", False), ("enabled", True)):
@@ -389,6 +396,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], 0, output, "")):
                 self.assert_fault("startup_unknown", lambda: service_runtime._startup(self.state))
 
+    @patch("sys.platform", "darwin")
     def test_explicit_start_preserves_disabled_login_for_legacy_format(self):
         self.policy_fixture()
         self.save(self.record)

@@ -139,13 +139,15 @@ def load(path: Path) -> Settings:
 
 
 def initialize(path: Path, workspace: Path | None = None, *, commands: bool = False,
-               workspace_writes: bool = False,
+               workspace_writes: bool = False, local_access: str = "read_only",
                verify_existing: bool = False) -> dict:
     """One first-run writer shared by init and management; never adopt or overwrite."""
     if any(type(value) is not bool for value in (commands, workspace_writes, verify_existing)):
         raise Fault("invalid_config", "First-run grants must be explicit booleans.")
+    if not isinstance(local_access, str) or local_access not in {"read_only", "full_access"}:
+        raise Fault("invalid_config", "Select explicit read_only or full_access local access.")
     text = ('schema_version = 1\n\n[machines.local]\ntransport = "local"\n'
-            'local_access = "read_only"\n'
+            f'local_access = "{local_access}"\n'
             f'execution_enabled = {str(commands).lower()}\n'
             f'workspace_write_enabled = {str(workspace_writes).lower()}\n')
     if workspace is not None:

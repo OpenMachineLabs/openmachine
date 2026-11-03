@@ -199,3 +199,34 @@ pre-admission validation failure that cannot have allocated a change receipt.
 These CLI/reader tests are separate from native GUI startup permission, signed
 product installation/update and real ChatGPT-route acceptance. Management adds
 no daemon, HTTP service, transport or release feed.
+
+## Ubuntu native runtime
+
+Ubuntu 24.04 x86_64 supports management contract 1 for a nonroot local user with
+an available systemd user manager/bus. Other Linux distributions, releases and
+architectures are rejected. The same `manage configure/install/start/stop/resume`,
+`startup`, original-operation readback and update contracts apply. Use the existing
+`service restart` command; a deliberately stopped runtime remains stopped.
+
+The owned unit lives in `~/.config/systemd/user/` and is bound to the private
+state path. Core verifies its bytes, path ownership, loaded definition, overrides
+and actual supervisor identity before control. A missing manager, a changed unit,
+an unknown listener and a failed exit are distinct failures; Core never adopts an
+unrelated job. The existing private MCP/file readiness and bounded recovery owner
+remain authoritative. `KillMode=process` preserves native Execution workers;
+the supervisor terminates its own MCP child, and Linux parent-death signaling
+terminates that child after abnormal supervisor loss. Original operations are
+read back, never replayed by login or recovery.
+
+`manage startup --enabled true` enables the user unit. It does not enable linger.
+Status separately reports the observed `linger`, `logout_continuity` and
+`boot_start`; unavailable loginctl evidence remains unknown. Without linger,
+logout/boot continuity is unsupported. Host logout policy can terminate user
+processes, including workers. Core does not change that policy or grant privileges.
+Persistent Stop is committed before native effects and survives login, resume,
+restart and updates.
+
+First configuration defaults to Read Only. `manage configure --local-access
+full_access` (also available on `init`) requires an explicit choice; command and
+workspace-write grants remain independent. `--verify-existing` accepts only the
+exact requested permissions and workspace, without overwriting existing settings.

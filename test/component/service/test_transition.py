@@ -243,6 +243,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_state._read_recovery(self.state), {"format": 1, "episode": None})
         self.assertFalse(service_runtime._definition(self.state, service_state._record(self.state))["AbandonProcessGroup"])
 
+    @patch("sys.platform", "darwin")
     def test_first_upgrade_commit_crash_leaves_rollback_or_committed_selection(self):
         self.activation_mocks()
         path = self.state / "service/versions" / self.b / "installation.json"

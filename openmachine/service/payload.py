@@ -17,6 +17,21 @@ MANIFEST_LIMIT = 4 * 1024 * 1024
 FILE_LIMIT = 20000
 BYTE_LIMIT = 2 * 1024 * 1024 * 1024
 TARGET = {"os": "macos", "arch": "arm64", "minimum_os": "13.0"}
+LINUX_TARGET = {"os": "linux", "arch": "x86_64", "distribution": "ubuntu", "version": "24.04"}
+
+
+def host_target() -> dict:
+    if sys.platform == "linux" and platform.machine() == "x86_64":
+        try:
+            release = platform.freedesktop_os_release()
+        except OSError:
+            release = {}
+        if release.get("ID") == "ubuntu" and release.get("VERSION_ID") == "24.04":
+            return LINUX_TARGET
+    if (sys.platform == "darwin" and platform.machine() == "arm64"
+            and int(platform.mac_ver()[0].split(".")[0]) >= 13):
+        return TARGET
+    raise Fault("unsupported_payload_host", "Payloads require Apple Silicon macOS 13+ or Ubuntu 24.04 x86_64.")
 
 
 def _relative(value: str) -> PurePosixPath:
@@ -42,6 +57,8 @@ def inventory(root: Path) -> dict:
             if relative == "manifest.json":
                 continue
             info = path.lstat()
+            if sys.platform == "linux" and info.st_uid != os.getuid():
+                raise ValueError("foreign payload member")
             if len(entries) >= FILE_LIMIT:
                 raise ValueError("payload entry limit")
             if stat.S_ISLNK(info.st_mode):
@@ -82,12 +99,14 @@ def verify(root: Path, expected_sha256: str) -> dict:
     try:
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
             raise ValueError("missing trusted manifest digest")
+        if sys.platform == "linux" and root.absolute() != root.resolve(strict=True):
+            raise ValueError("symlink payload root")
         root = root.resolve(strict=True)
-        if not root.is_dir() or root.stat().st_mode & 0o022:
+        if not root.is_dir() or root.stat().st_mode & 0o022 or sys.platform == "linux" and root.stat().st_uid != os.getuid():
             raise ValueError("unsafe payload root")
         path = root / "manifest.json"
         info = path.lstat()
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or sys.platform == "linux" and info.st_uid != os.getuid()
                 or info.st_size > MANIFEST_LIMIT or info.st_mode & 0o022):
             raise ValueError("unsafe manifest")
         raw = path.read_bytes()
@@ -96,11 +115,10 @@ def verify(root: Path, expected_sha256: str) -> dict:
         value = json.loads(raw, object_pairs_hook=_pairs)
         if (set(value) != {"format", "target", "core", "python", "git", "files"}
                 or type(value["format"]) is not int or value["format"] != 1
-                or value["target"] != TARGET):
+                or value["target"] not in (TARGET, LINUX_TARGET)):
             raise ValueError("unsupported manifest")
-        if (sys.platform != "darwin" or platform.machine() != "arm64"
-                or int(platform.mac_ver()[0].split(".")[0]) < 13):
-            raise Fault("unsupported_payload_host", "This runtime payload requires Apple Silicon and macOS 13 or newer.")
+        if value["target"] != host_target():
+            raise Fault("unsupported_payload_host", "The verified payload targets a different native host.")
         core = value["core"]
         if (set(core) != {"version", "commit", "wheel"}
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", core["version"])

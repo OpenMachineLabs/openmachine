@@ -368,7 +368,11 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn("types: [opened, synchronize, reopened, edited, ready_for_review]", quality)
         self.assertIn("  repository:\n    name: repository\n", quality)
         self.assertIn("  runtime:\n    needs: repository\n    name: runtime\n", quality)
-        self.assertNotIn("\n    if:", quality)
+        required, native = quality.split("\n  linux-native:\n", 1)
+        self.assertNotIn("\n    if:", required)
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.linux_native", native)
+        self.assertIn("OM_NATIVE_DISPOSABLE_USER", native)
+        self.assertNotIn("enable-linger", native)
         self.assertNotIn("-metadata-edit", quality)
         self.assertNotIn("    name: ${{", quality)
         self.assertIn("github.event.changes.base && 'metadata' || 'code'", quality)
@@ -385,7 +389,7 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
-        expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
+        expected_jobs = {"quality.yml": 3, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
                          "npm-package.yml": 1, "npm-release.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,

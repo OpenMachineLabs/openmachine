@@ -29,6 +29,10 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
             initialize(path, self.work, commands=commands, workspace_writes=writes)
             machine = load(path).machines["local"]
             self.assertEqual((machine.execution_enabled, machine.workspace_write_enabled), (commands, writes))
+            with self.assertRaises(Fault):
+                load(path).machine("local", write=True)
+            with self.assertRaises(Fault):
+                load(path).workspace_machine("local")
             before = path.read_bytes()
             with self.assertRaises(FileExistsError):
                 initialize(path, self.work, commands=not commands, workspace_writes=not writes)
@@ -66,3 +70,27 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         for value in (0, 1, "false", None, {}):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 Settings.model_validate(original | {"check_for_updates": value})
+
+
+class FirstAccessTests(RuntimeCaseFixture, unittest.TestCase):
+    def test_first_full_access_keeps_grants_independent(self):
+        from openmachine.config import initialize
+        for commands, writes in ((False, False), (True, False), (False, True), (True, True)):
+            path = self.root / f"full-{commands}-{writes}.toml"
+            initialize(path, self.work, local_access="full_access", commands=commands, workspace_writes=writes)
+            machine = load(path).machines["local"]
+            self.assertEqual((machine.local_access, machine.execution_enabled, machine.workspace_write_enabled),
+                             ("full_access", commands, writes))
+            for allowed, check in ((commands, lambda: load(path).machine("local", write=True)),
+                                   (writes, lambda: load(path).workspace_machine("local"))):
+                if allowed:
+                    check()
+                else:
+                    with self.assertRaises(Fault):
+                        check()
+            before = path.read_bytes()
+            initialize(path, self.work, local_access="full_access", commands=commands, workspace_writes=writes, verify_existing=True)
+            self.assertEqual(path.read_bytes(), before)
+            with self.assertRaises(Fault):
+                initialize(path, self.work, local_access="read_only", commands=commands, workspace_writes=writes, verify_existing=True)
+            self.assertEqual(path.read_bytes(), before)

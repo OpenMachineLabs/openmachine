@@ -1,4 +1,4 @@
-"""Owned macOS service startup, status and bounded MCP supervision."""
+"""Owned native service startup, status and bounded MCP supervision."""
 
 import errno
 import hashlib
@@ -20,7 +20,7 @@ import time
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 
-from . import processes, state as service_state
+from . import processes, systemd, state as service_state
 from .state import HEALTH_INTERVAL_SECONDS, LAUNCHER, READINESS_SECONDS, RECOVERY_ATTEMPTS, RECOVERY_MS
 
 
@@ -53,6 +53,8 @@ def _label(state: Path) -> str:
 
 
 def _plist_path(state: Path) -> Path:
+    if sys.platform == "linux":
+        return systemd.unit_path(_label(state))
     return Path.home() / "Library/LaunchAgents" / (_label(state) + ".plist")
 
 
@@ -73,9 +75,22 @@ def _definition(state: Path, record: dict) -> dict:
             "StandardOutPath": "/dev/null", "StandardErrorPath": str(state / "service/service.log")}
 
 
+def _definition_bytes(definition: dict) -> bytes:
+    return systemd.definition_bytes(definition) if sys.platform == "linux" else plistlib.dumps(definition)
+
+
+def require_host() -> None:
+    if os.getuid() == 0 or not (sys.platform == "darwin" or sys.platform == "linux" and systemd.supported()):
+        raise Fault("unsupported_service_host", "Managed services require a nonroot macOS or Ubuntu 24.04 x86_64 user.")
+
+
 def _verify_files(state: Path, record: dict) -> dict:
     try:
         path = _plist_path(state)
+        if sys.platform == "linux":
+            systemd.check_path(path)
+        if sys.platform == "linux" and stat.S_IMODE(path.lstat().st_mode) != 0o600:
+            raise ValueError("unsafe unit mode")
         for owned in (path, state / "service/launch.py", state / "service/service.log"):
             info = owned.lstat()
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
@@ -91,7 +106,7 @@ def _verify_files(state: Path, record: dict) -> dict:
             # rejects format 2 without ever starting the stopped service.
             definitions.extend(_definition(state, dict(record, current=identity, format=1)) for identity in selections)
         contents = path.read_bytes()
-        if (contents not in [plistlib.dumps(item) for item in definitions]
+        if (contents not in [_definition_bytes(item) for item in definitions]
                 or (state / "service/launch.py").read_text() != LAUNCHER):
             raise ValueError("service definition changed")
         if "management" in record:
@@ -103,12 +118,15 @@ def _verify_files(state: Path, record: dict) -> dict:
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
                     or info.st_nlink != 1 or entry.read_bytes() != service_state.management_entry(state, record)):
                 raise ValueError("management entry changed")
-        return plistlib.loads(contents)
+        return next(item for item in definitions if _definition_bytes(item) == contents)
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
         raise Fault("service_definition_mismatch", "The installed launcher or LaunchAgent differs; do not overwrite or control another service.") from error
 
 
 def _startup(state: Path) -> dict:
+    if sys.platform == "linux":
+        _native(state)
+        return systemd.startup(_plist_path(state))
     result = processes.run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"])
     if result.returncode:
         raise Fault("startup_unknown", "The effective user-service startup registration could not be observed.")
@@ -122,6 +140,13 @@ def _startup(state: Path) -> dict:
 
 
 def _set_startup(state: Path, enabled: bool) -> dict:
+    if sys.platform == "linux":
+        _native(state)
+        result = systemd.command("enable" if enabled else "disable", _plist_path(state).name)
+        observed = _startup(state)
+        if result.returncode or observed["enabled"] != enabled:
+            raise Fault("startup_denied", "The requested native startup registration was not verified.")
+        return observed
     result = processes.run(["/bin/launchctl", "enable" if enabled else "disable", f"gui/{os.getuid()}/{_label(state)}"])
     observed = _startup(state)
     if result.returncode or observed["enabled"] != enabled:
@@ -132,9 +157,11 @@ def _set_startup(state: Path, enabled: bool) -> dict:
 def _sync_definition(state: Path, record: dict) -> None:
     _verify_files(state, record)
     path = _plist_path(state)
-    desired = plistlib.dumps(_definition(state, record))
+    desired = _definition_bytes(_definition(state, record))
     if path.read_bytes() == desired:
         return
+    if sys.platform == "linux":
+        _native(state)
     fd, temporary = tempfile.mkstemp(prefix=".openmachine-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -149,9 +176,15 @@ def _sync_definition(state: Path, record: dict) -> None:
             os.close(directory)
     finally:
         Path(temporary).unlink(missing_ok=True)
+    if sys.platform == "linux" and systemd.command("daemon-reload").returncode:
+        raise Fault("service_command_unverified", "The updated unit has not been reloaded; inspect native state.")
 
 
 def _native(state: Path) -> dict:
+    if sys.platform == "linux":
+        require_host()
+        record = service_state._record(state)
+        return systemd.native(state, _plist_path(state), _verify_files(state, record), record)
     result = processes.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{_label(state)}"])
     if result.returncode:
         if "Could not find service" in result.stderr:
@@ -195,8 +228,12 @@ def socket_alive(path: Path) -> bool:
 
 def _stop(state: Path) -> None:
     observed = _native(state)
-    if observed["loaded"]:
-        processes.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{_label(state)}"])
+    if observed["loaded"] or observed["pid"] is not None:
+        if sys.platform == "linux":
+            if systemd.command("stop", _plist_path(state).name).returncode:
+                raise Fault("service_stop_unverified", "Native stop was not acknowledged; inspect the original service.")
+        else:
+            processes.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
     while True:
         if not _native(state)["loaded"] and not socket_alive(state / "mcp.sock"):
@@ -215,12 +252,19 @@ def _start(state: Path, record: dict) -> dict:
         if service_state._read_recovery(state) is None:
             service_state._save_recovery(state, None)
     observed = _native(state)
-    if record["format"] == 2 and observed["loaded"] and observed["pid"] is None:
+    if sys.platform == "linux":
+        if observed["pid"] is None:
+            _sync_definition(state, record)
+            if socket_alive(state / "mcp.sock"):
+                raise Fault("socket_in_use", "An existing listener has unknown ownership; it was not adopted.")
+            if systemd.command("start", _plist_path(state).name).returncode:
+                raise Fault("service_command_unverified", "Native start was not acknowledged; inspect the original service.")
+    elif record["format"] == 2 and observed["loaded"] and observed["pid"] is None:
         # A successful stopped-intent login leaves an idle registered job.
         # Reload its verified definition, including any disabled startup policy.
         _stop(state)
         observed = _native(state)
-    if not observed["loaded"]:
+    if sys.platform != "linux" and not observed["loaded"]:
         # Only verified transition definitions are accepted; write the selected
         # profile after bootout. Interrupted transitions retain both identities.
         _sync_definition(state, record)
@@ -232,7 +276,7 @@ def _start(state: Path, record: dict) -> dict:
         finally:
             if disabled:
                 _set_startup(state, False)
-    elif observed["pid"] is None:
+    elif sys.platform != "linux" and observed["pid"] is None:
         processes.run(["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{_label(state)}"])
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -316,7 +360,7 @@ def _monitor_mcp(state: Path, record: dict, child: subprocess.Popen, stop: threa
 
 
 def supervise(config_path: Path, state: Path) -> None:
-    """Own only the selected MCP child; launchd retains the service lifetime."""
+    """Own only the selected MCP child; the native manager retains service lifetime."""
     from openmachine.config import load
     from . import checks
 
@@ -331,7 +375,7 @@ def supervise(config_path: Path, state: Path) -> None:
         if (str(config_path.resolve()) != record["config"] or _native(state)["pid"] != os.getpid()
                 or Path(sys.prefix).resolve() != service_state._runtime(state, record["current"])
                 or os.getpgrp() != os.getpid()):
-            raise Fault("service_identity_mismatch", "Only the selected launchd job may supervise this MCP runtime.")
+            raise Fault("service_identity_mismatch", "Only the selected native job may supervise this MCP runtime.")
         # Activation owns one candidate start and its readiness proof. Defer
         # recovery state until commit so a failed first upgrade can restore v7.
         if record["pending"] is not None:
@@ -442,6 +486,8 @@ def status(config_path: Path, state: Path) -> dict:
     result = {"status": "unready" if observed["loaded"] else "stopped", **observed, "current": record["current"], "previous": record["previous"],
               "pending": record["pending"], "version": installed["version"], "commit": installed.get("commit"),
               "tunnel": "not_probed", "chatgpt": "not_probed"}
+    if observed.get("process_state") == "failed":
+        result["status"] = "failed"
     recovery = service_state._read_recovery(state)
     result["recovery"] = recovery["episode"] if recovery else None
     managed = service_state._installed(state, record["current"])["state_contract"] >= 8

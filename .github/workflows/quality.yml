@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      linux_native:
+        description: Build an unsigned Ubuntu payload and test an isolated native user service
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,3 +59,49 @@ jobs:
           "$RUNNER_TEMP/om-python/python/bin/python3" -I -c 'import sqlite3, sys; print(sys.version); print("SQLite", sqlite3.sqlite_version); assert sqlite3.sqlite_version_info == (3, 53, 1)'
       - name: Verify the exact candidate with its required test layers
         run: python3 scripts/premerge.py --ci --force
+
+  linux-native:
+    if: github.event_name == 'workflow_dispatch' && inputs.linux_native
+    needs: repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Build the exact unsigned local payload
+        run: |
+          python3 -m venv "$RUNNER_TEMP/build"
+          "$RUNNER_TEMP/build/bin/python" -m pip install -r requirements.lock
+          "$RUNNER_TEMP/build/bin/python" -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/wheels" .
+          "$RUNNER_TEMP/build/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/wheels/*.whl
+          "$RUNNER_TEMP/build/bin/python" scripts/build_runtime_payload.py \
+            --wheel "$RUNNER_TEMP"/wheels/*.whl --requirements "$GITHUB_WORKSPACE/requirements.lock" \
+            --commit "$GITHUB_SHA" --cache "$RUNNER_TEMP/inputs" --output "$RUNNER_TEMP/payload"
+      - name: Exercise only a disposable account and its native unit
+        run: |
+          sudo useradd --create-home --shell /bin/bash om-linux-test
+          touch "$RUNNER_TEMP/om-user-created"
+          test_uid=$(id -u om-linux-test)
+          sudo cp -a "$RUNNER_TEMP/payload" /home/om-linux-test/payload
+          sudo cp -a test /home/om-linux-test/test
+          sudo chown -R om-linux-test:om-linux-test /home/om-linux-test
+          sudo systemctl start "user@$test_uid.service"
+          manifest_sha=$(sha256sum /home/om-linux-test/payload/manifest.json | cut -d ' ' -f 1)
+          sudo -u om-linux-test env HOME=/home/om-linux-test XDG_RUNTIME_DIR="/run/user/$test_uid" \
+            OM_NATIVE_FIRST_USE=1 OM_NATIVE_DISPOSABLE_USER="$test_uid" \
+            OM_NATIVE_PAYLOAD=/home/om-linux-test/payload OM_NATIVE_PAYLOAD_SHA256="$manifest_sha" \
+            /home/om-linux-test/payload/python/bin/python3 -I -B -c \
+            'import os,sys,unittest; os.chdir("/home/om-linux-test"); sys.path.insert(0,os.getcwd()); unittest.main(module=None, argv=["native", "test.resilience.service.test_maintenance_process.NativeFirstUseTests"])'
+      - name: Remove only the disposable account and its remaining processes
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/om-user-created"; then
+            test_uid=$(id -u om-linux-test)
+            sudo systemctl stop "user@$test_uid.service"
+            sudo loginctl terminate-user om-linux-test
+            sudo userdel --remove om-linux-test
+          fi

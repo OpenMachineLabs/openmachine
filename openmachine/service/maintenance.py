@@ -605,8 +605,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
         if not config_path.is_absolute() or not state.is_absolute():
             raise Fault("invalid_service_path", "Management requires explicit absolute configuration and state paths.")
         config_path, state = config_path.resolve(), state.resolve()
-        if sys.platform != "darwin" or os.getuid() == 0:
-            raise Fault("unsupported_service_host", "Management requires the owning logged-in macOS user.")
+        runtime.require_host()
         if len(os.fsencode(state / "mcp.sock")) >= 104:
             raise Fault("invalid_service_path", "Use a shorter state path for the macOS private socket.")
         if action == "status":

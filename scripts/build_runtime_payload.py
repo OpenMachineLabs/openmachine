@@ -1,15 +1,13 @@
-"""Assemble the Apple Silicon runtime from pinned inputs and one explicit Core wheel."""
+"""Assemble a native macOS or Ubuntu runtime from pinned inputs and one explicit Core wheel."""
 
 import argparse
 from email.parser import BytesParser
 import hashlib
 import json
 from pathlib import Path
-import platform
 import re
 import shutil
 import subprocess
-import sys
 import tarfile
 import urllib.request
 import zipfile
@@ -64,8 +62,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True, help="A new payload directory; never overwrite an existing build")
     parser.add_argument("--cache", type=Path, required=True, help="Directory for checksum-verified input archives")
     args = parser.parse_args()
-    if sys.platform != "darwin" or platform.machine() != "arm64" or not re.fullmatch(r"[0-9a-f]{40}", args.commit):
-        parser.error("Build on Apple Silicon and select an exact source commit.")
+    target = payload.host_target()
+    if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
+        parser.error("Select an exact source commit and build on the target OS/architecture.")
     wheel, requirements = args.wheel.resolve(strict=True), args.requirements.resolve(strict=True)
     lines = [line.strip() for line in requirements.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
     if not lines or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*", line) for line in lines):
@@ -81,6 +80,7 @@ def main() -> None:
             parser.error("Install the selected Core wheel in the build environment before running this script.")
         version = package["Version"]
     inputs = json.loads(Path(__file__).with_name("runtime-inputs.json").read_text())
+    inputs = inputs["linux"] if target == payload.LINUX_TARGET else {name: inputs[name] for name in ("python", "git")}
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     cache = args.cache.resolve()
@@ -101,9 +101,11 @@ def main() -> None:
     # Only the producer downloads. Both bootstrap population and user-side
     # preparation use the complete local wheelhouse without source builds.
     download_env = {key: value for key, value in env.items() if key != "PIP_NO_INDEX"}
+    target_options = ([] if target == payload.LINUX_TARGET else
+                      ["--platform", "macosx_13_0_arm64", "--implementation", "cp",
+                       "--python-version", "3.13", "--abi", "cp313"])
     run([python, "-I", "-B", "-m", "pip", "download", "--index-url", "https://pypi.org/simple",
-         "--only-binary=:all:", "--no-deps", "--platform", "macosx_13_0_arm64",
-         "--implementation", "cp", "--python-version", "3.13", "--abi", "cp313",
+         "--only-binary=:all:", "--no-deps", *target_options,
          "--dest", str(wheels), "-r", str(output / "requirements.lock")], download_env)
     original_entries = set((output / "python/bin").iterdir())
     run([python, "-I", "-B", "-m", "pip", "install", "--no-index", "--find-links", str(wheels),
@@ -125,12 +127,12 @@ def main() -> None:
         "Git: dugite-native " + inputs["git"]["build"] +
         "; retain git/libexec/git-core/NOTICE. Git is GPL-2.0.\n\n"
         "Source and build recipes: https://github.com/astral-sh/python-build-standalone/tree/" + inputs["python"]["build"] +
-        " and https://github.com/desktop/dugite-native/tree/v2.53.0-3.\n"
+        " and https://github.com/desktop/dugite-native/tree/" + inputs["git"]["build"].split("/")[0] + ".\n"
         "Git source: https://github.com/git/git/tree/v2.53.0.\n\n"
         "Original input URLs/digests are in manifest.json. Dependency licenses remain in their wheels "
         "and installed distribution metadata. Product publication must fulfill the corresponding-source "
         "and notice obligations for all bundled components; this assembly is not signed product acceptance.\n")
-    manifest = {"format": 1, "target": payload.TARGET,
+    manifest = {"format": 1, "target": target,
                 "core": {"version": version, "commit": args.commit, "wheel": "wheels/" + wheel.name},
                 **inputs, "files": payload.inventory(output)}
     raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()

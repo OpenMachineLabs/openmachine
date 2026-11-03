@@ -1,6 +1,6 @@
 # Tests
 
-## Isolated macOS first-use check
+## Isolated native first-use check
 
 For a native installation/startup change, opt in with an explicitly trusted,
 owner-built payload and its reviewed manifest digest:
@@ -25,6 +25,11 @@ The native case is skipped unless explicitly enabled. It proves fresh local
 configuration, not new macOS privacy permissions, login-session behavior, Cloud
 authorization or signed distribution. Reuse unchanged passing evidence; reserve
 those separate acceptance checks for changes that need them.
+
+On Ubuntu 24.04 x86_64, the opt-in `linux_native` quality workflow runs this case
+with its own disposable user and systemd unit. It additionally checks supervisor
+loss and original Execution survival. It does not enable linger or prove that
+developer tools are absent; available host tools are recorded explicitly.
 
 ## Choose the required scope
 

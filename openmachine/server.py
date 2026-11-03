@@ -181,6 +181,9 @@ def create_server(config: Settings, state: Path, *, application=None) -> MCPServ
 
 
 def serve(config: Settings, state: Path, *, managed: bool = False) -> None:
+    if managed and sys.platform == "linux":
+        from openmachine.service.systemd import parent_death
+        parent_death()
     state = private_directory(state)
     path = state / "mcp.sock"
     locks = private_directory(state / "locks")

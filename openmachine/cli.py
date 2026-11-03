@@ -17,6 +17,7 @@ def main() -> int:
     parser.add_argument("--state-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
+    init.add_argument("--local-access", choices=("read_only", "full_access"), default="read_only")
     init.add_argument("--enable-commands", action="store_true")
     init.add_argument("--enable-workspace-writes", action="store_true")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
@@ -34,7 +35,7 @@ def main() -> int:
     serving = serve.add_mutually_exclusive_group()
     serving.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
     serving.add_argument("--managed-child", action="store_true", help=argparse.SUPPRESS)
-    service = commands.add_parser("service", help="Manage this macOS user service without controlling the tunnel")
+    service = commands.add_parser("service", help="Manage this native user service without controlling the tunnel")
     service_commands = service.add_subparsers(dest="service_action", required=True)
     install = service_commands.add_parser("install", help="Install a verified wheel as a stopped user service")
     install.add_argument("--wheel", type=Path, required=True)
@@ -62,6 +63,7 @@ def main() -> int:
     startup = management.add_parser("startup")
     startup.add_argument("--enabled", choices=("true", "false"), required=True)
     configure = management.add_parser("configure", help="Create first-run config without overwrite; grants are independent")
+    configure.add_argument("--local-access", choices=("read_only", "full_access"), default="read_only")
     configure.add_argument("--workspace", type=Path, required=True)
     configure.add_argument("--enable-commands", action="store_true")
     configure.add_argument("--enable-workspace-writes", action="store_true")
@@ -121,11 +123,11 @@ def main() -> int:
             if action == "startup":
                 inputs["enabled"] = args.enabled == "true"
             if action == "configure":
-                inputs.update(workspace=args.workspace, commands=args.enable_commands,
+                inputs.update(workspace=args.workspace, local_access=args.local_access, commands=args.enable_commands,
                               workspace_writes=args.enable_workspace_writes, verify_existing=args.verify_existing)
             result = dispatch(args.config, args.state_dir, action, contract=args.contract, **inputs)
             print(json.dumps(result))
-            return int(result["status"] in {"unknown", "incompatible", "busy", "unready", "recovering", "blocked",
+            return int(result["status"] in {"unknown", "incompatible", "busy", "unready", "recovering", "blocked", "failed",
                                             "activation_pending", "recovery_required", "rejected", "restored"})
         if args.command == "prepare-runtime":
             from openmachine.service import prepare_payload
@@ -133,7 +135,7 @@ def main() -> int:
             return 0
         if args.command == "init":
             from openmachine.config import initialize
-            print(json.dumps(initialize(args.config, args.workspace, commands=args.enable_commands,
+            print(json.dumps(initialize(args.config, args.workspace, local_access=args.local_access, commands=args.enable_commands,
                                         workspace_writes=args.enable_workspace_writes)))
             return 0
         if args.command in ("service", "update", "rollback"):
@@ -145,7 +147,7 @@ def main() -> int:
                              candidate_config=getattr(args, "candidate_config", None), commit=getattr(args, "commit", None),
                              reset_recovery=getattr(args, "reset_recovery", False))
             print(json.dumps(result))
-            return int(result["status"] in {"unready", "recovering", "blocked", "activation_pending"})
+            return int(result["status"] in {"unready", "recovering", "blocked", "activation_pending", "failed"})
         if args.command == "serve" and args.managed:
             from openmachine.service import supervise
             supervise(args.config, args.state_dir)
