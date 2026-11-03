@@ -85,7 +85,13 @@ exec(body)
                  (host, arguments + ["--contract", "99", "status"], 1, "incompatible", "incompatible_management"),
                  (host, ["--config", "relative.toml", "--state-dir", str(self.state), "manage", "status"],
                   1, "unknown", "invalid_service_path"),
-                 ('sys.platform = "linux"\n', arguments + ["status"], 1, "unknown", "unsupported_service_host")]
+                 ('import os\nimport platform\nsys.platform = "linux"\nos.getuid = lambda: 501\n'
+                  'platform.machine = lambda: "x86_64"\n'
+                  'platform.freedesktop_os_release = lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"}\n',
+                  arguments + ["status"], 0, "not_installed", None),
+                 ('import platform\nsys.platform = "linux"\n'
+                  'platform.freedesktop_os_release = lambda: {"ID": "debian", "VERSION_ID": "12"}\n',
+                  arguments + ["status"], 1, "unknown", "unsupported_service_host")]
         for setup, argv, code, status, reason in cases:
             with self.subTest(status=status, reason=reason):
                 result = self.run_child(setup + CLI, blocked=LIGHTWEIGHT, arguments=argv)
