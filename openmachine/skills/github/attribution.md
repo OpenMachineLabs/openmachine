@@ -32,4 +32,3 @@ or decorate inline review comments. The typed writers share the exact constants 
 `integrations/github/operations.py`. Apply a setting change through the authorized
 [service configuration lifecycle](../service/management.md#exact-updates-and-compatible-rollback),
 not hot reload or a per-client switch.
-
