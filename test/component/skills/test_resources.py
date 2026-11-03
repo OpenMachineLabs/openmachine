@@ -155,6 +155,38 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         self.assertIn('read_task(section="operations"', continuation["text"])
         self.assertIn("stable-revision guarantee", continuation["text"])
 
+    def test_extracted_topic_links_reach_the_moved_sections(self):
+        root = reader.bundled_root()
+        stale = (
+            "reference.md#audited-review-thread-goal-recovery",
+            "reference.md#scoped-uncertainty-and-historical-evidence",
+            "reference.md#attribution",
+            "management.md#product-management",
+            "management.md#confirmed-configuration-changes",
+            "management.md#policy-and-old-core-limits",
+            "management.md#original-maintenance-operations",
+        )
+        for source in root.rglob("*.md"):
+            with self.subTest(source=source.relative_to(root)):
+                body = source.read_text(encoding="utf-8")
+                for old_link in stale:
+                    self.assertNotIn(old_link, body)
+
+        expected = {
+            "tasks/continue.md": ("../github/uncertainty.md#audited-review-thread-goal-recovery",),
+            "tasks/verify.md": (
+                "../github/uncertainty.md#audited-review-thread-goal-recovery",
+                "../github/uncertainty.md#scoped-uncertainty-and-historical-evidence",
+            ),
+            "tasks/control.md": ("../github/uncertainty.md#scoped-uncertainty-and-historical-evidence",),
+            "service/runtime-payload.md": ("product-management.md#product-management",),
+        }
+        for path, links in expected.items():
+            text = reader.resource(root, path, bundled=True).decode("utf-8")
+            with self.subTest(source=path):
+                for link in links:
+                    self.assertIn(f"]({link})", text)
+
     def test_yaml_metadata_supports_multiline_text_and_warns_on_malformed_fields(self):
         collection, selected = self.skill_fixture()
         raw = ("---\nid: om.workspace\nname: 'format: safely'\ndescription: >-\n  Run bounded checks\n  before editing.\n"

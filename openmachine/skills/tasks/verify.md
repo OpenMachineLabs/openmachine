@@ -17,7 +17,7 @@ resubmitted as current evidence. The narrowly scoped exception is an independent
 audited review-thread resolve goal: its original operation remains unknown, while
 Core revalidates current target state, unchanged source and native authority before
 a new decision and again before completion. This proves business completion, not
-historical write success. Read the [goal recovery rules](../github/reference.md#audited-review-thread-goal-recovery).
+historical write success. Read the [goal recovery rules](../github/uncertainty.md#audited-review-thread-goal-recovery).
 After applicable decisions, explicitly finish:
 
 ```json
@@ -50,7 +50,7 @@ revalidated goal witness. Original unknown outcomes remain in terminal audit
 evidence even when their business goals are accepted. The separate
 explicit `abandon` transition records terminal abandonment while keeping those
 original outcomes and their conflicting resource exclusions unresolved. Read the
-[scope rules](../github/reference.md#scoped-uncertainty-and-historical-evidence)
+[scope rules](../github/uncertainty.md#scoped-uncertainty-and-historical-evidence)
 when evaluating such evidence.
 
 Compare every authorized deliverable with actual evidence before the final response.

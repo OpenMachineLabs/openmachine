@@ -126,7 +126,7 @@ configuration/state/workspace, never an active service or production job.
 Preparation evidence does not establish GUI onboarding, persistent-stop behavior,
 signed distribution, automatic updates, or plugin availability.
 
-Managed product installation/update now uses [management contract 1](management.md#product-management),
+Managed product installation/update now uses [management contract 1](product-management.md#product-management),
 which records the original operation before independent preparation and invokes
 the verified incoming implementation from retained paths. `prepare-runtime` remains
 a preparation-only primitive; it neither selects a service nor creates update consent.

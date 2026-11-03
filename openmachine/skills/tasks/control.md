@@ -77,5 +77,5 @@ Supply the original operation ID, method and complete normalized original GitHub
 arguments. It verifies their original plan/source/request fingerprint and appends
 a bounded immutable scope witness; it neither dispatches nor proves non-execution.
 Missing proof leaves conservative uncertainty. Read the full
-[scope and historical-evidence rules](../github/reference.md#scoped-uncertainty-and-historical-evidence)
+[scope and historical-evidence rules](../github/uncertainty.md#scoped-uncertainty-and-historical-evidence)
 before this transition or continuation around an unresolved GitHub effect.
