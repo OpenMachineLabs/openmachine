@@ -317,6 +317,9 @@ class Application:
             kind, machine = locator["kind"], locator.get("machine")
             if kind not in {"change", "execution"} or not isinstance(machine, str):
                 raise Fault("unsupported_task_receipt", "Only local Change and Execution originals can be batched.")
+            if kind == "execution" and locator.get("control_seq") is not None:
+                raise Fault("unsupported_task_receipt",
+                            "An original execution control sequence needs its dedicated receipt reader.")
             if kind == "change":
                 receipt = self.machines.read_workspace_change(machine, locator["change_id"])
             else:
