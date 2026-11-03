@@ -3706,6 +3706,48 @@
         "type": "object"
       }
     },
+    "read_task_receipts": {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "expected_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "operation_ids": {
+            "items": {
+              "pattern": "^[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Operation Ids",
+            "type": "array"
+          },
+          "task_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_revision",
+          "operation_ids"
+        ],
+        "title": "read_task_receiptsArguments",
+        "type": "object"
+      }
+    },
     "read_workspace_change": {
       "annotations": {
         "destructiveHint": false,
