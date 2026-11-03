@@ -1,7 +1,7 @@
 ---
 id: om.github
 name: openmachine-github
-description: Connect native GitHub accounts; inspect workflows and deployments; request workflow dispatch or controls; publish scoped Issues, PRs, reviews, Releases and merges with exact-head verification.
+description: Native GitHub collaboration, workflow controls and deployment evidence with scoped authorization.
 ---
 
 # GitHub collaboration
