@@ -98,6 +98,30 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         "expected_plan_revision": created["plan"]["revision"],
                         "expected_epoch": created["control"]["epoch"], "update_id": uuid.uuid4().hex,
                         "transition": {"action": "claim", "handoff_id": created["handoff"]["id"]}}))["record"]
+                    renewal = {"task_id": task_id, "expected_revision": claimed["revision"],
+                        "expected_plan_revision": claimed["plan"]["revision"],
+                        "expected_epoch": claimed["control"]["epoch"], "update_id": uuid.uuid4().hex,
+                        "transition": {"action": "renew", "claim_id": claimed["control"]["owner"]["claim_id"]}}
+                    renewed = (await call("control_task", renewal))["record"]
+                    self.assertEqual(renewed["control"]["epoch"], claimed["control"]["epoch"])
+                    self.assertEqual(renewed["control"]["owner"]["claim_id"], claimed["control"]["owner"]["claim_id"])
+                    rejected = await client.call_tool("control_task", dict(renewal, update_id=uuid.uuid4().hex))
+                    self.assertTrue(rejected.is_error)
+                    diagnostic = rejected.structured_content
+                    self.assertEqual(diagnostic["error"]["code"], "task_conflict")
+                    self.assertEqual(diagnostic["reason"], "snapshot_changed")
+                    self.assertEqual(diagnostic["changed_fields"], ["task_revision"])
+                    self.assertEqual(diagnostic["expected"]["task_revision"], claimed["revision"])
+                    self.assertEqual(diagnostic["task_revision"], renewed["revision"])
+                    self.assertNotIn("ownership changed", diagnostic["error"]["message"])
+                    rejected = await client.call_tool("control_task", dict(renewal,
+                        expected_revision=renewed["revision"], update_id=uuid.uuid4().hex,
+                        transition={"action": "renew", "claim_id": "f" * 32}))
+                    self.assertTrue(rejected.is_error)
+                    self.assertEqual(rejected.structured_content["error"]["code"], "task_owner_conflict")
+                    self.assertEqual(rejected.structured_content["reason"], "claim_mismatch")
+                    self.assertEqual((await call("read_task", {"task_id": task_id}))["record"], renewed)
+                    claimed = renewed
                     change_id = uuid.uuid4().hex
                     path = "accepted-" + mode + ".txt"
                     content = "One accepted effect on " + mode + "\n"

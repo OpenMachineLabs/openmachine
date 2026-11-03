@@ -221,9 +221,14 @@ def create(state: Path, identity: str, update_id: str, title: str, anchors: list
 
 def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
            expected_revision: int | None = None, last_update: dict | None = None,
+           expected_plan_revision: int | None = None, expected_epoch: int | None = None,
            allow_observations: bool = False,
            observation: bool = False, upgrade: bool = False, operation_ids=(), reserve_disk: bool = True) -> dict:
-    """Commit bounded current state, touched rows and audit together; callbacks do no IO."""
+    """Commit bounded current state, touched rows and audit together; callbacks do no IO.
+
+    Expected plan/epoch describe a revision rejection; transforms retain their
+    existing plan/epoch guards and the store retains its original CAS ordering.
+    """
     task_id(identity)
     with db.connect(state, write=True) as connection:
         if connection is None:
@@ -241,9 +246,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
         compatible = (expected_revision is not None and allow_observations and original["format"] >= 4
                       and original["control_revision"] <= expected_revision <= original["revision"])
         if expected_revision is not None and expected_revision != original["revision"] and not compatible:
-            raise Fault("task_conflict", "Task authority advanced; read the current revision before another transition.",
-                        {"task_id": identity, "task_revision": original["revision"], "plan_revision": original["plan"]["revision"],
-                         "continuation_epoch": original["control"]["epoch"]})
+            raise records.version_conflict(original, expected_revision, expected_plan_revision, expected_epoch)
         value = deepcopy(original)
         if upgrade and value["format"] == 3:
             value.update(format=4, control_revision=original["revision"], effect_scopes=[])

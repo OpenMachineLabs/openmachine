@@ -143,6 +143,7 @@ class TaskAdmission:
         view = tasks.update(self.app.state, request["task_id"],
             commit,
             expected_revision=request["expected_revision"], last_update=update,
+            expected_plan_revision=request["expected_plan_revision"], expected_epoch=request["expected_epoch"],
             upgrade=True, operation_ids=operation_ids)
         if action == "cancel" and view["record"]["terminal"] is None:
             view = self._cancel_owned(view, request["update_id"])
@@ -189,6 +190,7 @@ class TaskAdmission:
             transitions.handoff(value, witness_id, now, "result_ready")
 
         return tasks.update(self.app.state, record["task_id"], commit, expected_revision=context["task_revision"],
+                            expected_plan_revision=context["plan_revision"], expected_epoch=context["continuation_epoch"],
                             allow_observations=True, upgrade=True, operation_ids=[operation["id"]])
 
     def _check_abandon(self, record: dict) -> None:
@@ -486,6 +488,7 @@ class TaskAdmission:
             admitted = tasks.update(self.app.state, record["task_id"],
                 lambda value, now: self._admit(value, operation, context, method, now),
                 expected_revision=context["task_revision"],
+                expected_plan_revision=context["plan_revision"], expected_epoch=context["continuation_epoch"],
                 allow_observations=True, upgrade=True, operation_ids=operation_ids, reserve_disk=method != "cancel_execution")
             operation = next(item for item in admitted["record"]["operations"] if item["id"] == context["operation_id"])
             expected = {operation["id"]: records.digest(operation)}

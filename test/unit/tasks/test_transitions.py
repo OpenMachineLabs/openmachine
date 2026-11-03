@@ -125,6 +125,86 @@ class TaskTransitionTests(unittest.TestCase):
                     for stage in record["plan"]["stages"]], invalidated_stage_ids=[],
             reason="Explicitly reauthorize this bounded synthetic contract.")
 
+    def test_version_conflicts_identify_fields_without_inventing_an_owner_change(self):
+        for version in (1, 2, 3, 4, 5, 6):
+            record = self.record()
+            record.update(format=version, revision=25, control_revision=20)
+            for revision, plan, epoch in ((24, 1, 1), (19, 1, 1), (26, 1, 1),
+                                          (25, 2, 1), (25, 1, 2), (24, 2, 2)):
+                with self.subTest(format=version, revision=revision, plan=plan, epoch=epoch):
+                    before = deepcopy(record)
+                    with self.assertRaises(Fault) as caught:
+                        transitions.guards(record, revision, plan, epoch)
+                    error = caught.exception
+                    current = {"task_revision": 25, "plan_revision": 1, "continuation_epoch": 1}
+                    expected = dict(zip(current, (revision, plan, epoch)))
+                    self.assertEqual(error.code, "task_conflict")
+                    self.assertEqual(error.evidence["expected"], expected)
+                    self.assertEqual(error.evidence["changed_fields"],
+                                     [key for key in current if current[key] != expected[key]])
+                    self.assertEqual({key: error.evidence[key] for key in current}, current)
+                    self.assertEqual(error.evidence["reason"],
+                                     "snapshot_changed" if (plan, epoch) == (1, 1) else "context_changed")
+                    proven_observation = version >= 4 and 20 <= revision < 25 and (plan, epoch) == (1, 1)
+                    self.assertEqual(error.evidence.get("observation_only", False), proven_observation)
+                    self.assertNotIn("ownership changed", str(error))
+                    self.assertNotIn("claim_id", error.evidence)
+                    self.assertEqual(record, before)
+
+    def test_claim_diagnostics_keep_missing_principal_expiry_and_id_distinct(self):
+        cases = (("claim_missing", None, "2" * 32),
+                 ("principal_mismatch", {"principal_ref": "fixture:other", "expires_at_ms": 1000}, "2" * 32),
+                 ("claim_expired", {"expires_at_ms": 1000}, "2" * 32),
+                 ("claim_mismatch", {}, "f" * 32))
+        for reason, delta, claim in cases:
+            with self.subTest(reason=reason):
+                record = self.record()
+                if delta is None:
+                    record["control"]["owner"] = None
+                else:
+                    record["control"]["owner"].update(delta)
+                before = deepcopy(record)
+                with self.assertRaises(Fault) as caught:
+                    if reason in {"claim_expired", "claim_missing", "principal_mismatch"}:
+                        transitions.require_owner(record, "fixture:principal", 1000)
+                    else:
+                        self.control(record, "renew", claim_id=claim)
+                self.assertEqual(caught.exception.code, "task_owner_conflict")
+                self.assertEqual(caught.exception.evidence["reason"], reason)
+                self.assertEqual(record, before)
+                if reason in {"claim_missing", "principal_mismatch"}:
+                    with self.assertRaises(Fault) as renewal:
+                        self.control(record, "renew", claim_id=claim)
+                    self.assertEqual(renewal.exception.evidence["reason"], reason)
+                    self.assertEqual(record, before)
+                elif reason == "claim_expired":
+                    self.control(record, "renew", claim_id=claim)
+                    self.assertEqual(record["control"]["owner"]["claim_id"], claim)
+                    self.assertEqual(record["control"]["epoch"], before["control"]["epoch"])
+                    self.assertEqual(record["contract"], before["contract"])
+                    self.assertEqual(record["operations"], before["operations"])
+        record = self.record()
+        before = deepcopy(record)
+        with self.assertRaises(Fault) as active:
+            self.control(record, "claim", handoff_id=record["handoff"]["id"])
+        self.assertEqual(active.exception.code, "task_owner_conflict")
+        self.assertEqual(active.exception.evidence["reason"], "claim_active")
+        self.assertNotIn("explicitly release it", str(active.exception))
+        self.assertEqual(record, before)
+
+    def test_claim_diagnostics_do_not_override_stop_or_authority_guards(self):
+        for stop, expiry, code in (("pause", 1000000, "task_stopped"),
+                                   ("cancel", 1000000, "task_stopped"),
+                                   ("none", 1000, "task_authority_expired")):
+            with self.subTest(stop=stop, expiry=expiry):
+                record = self.record()
+                record["control"].update(stop_intent=stop, owner=None)
+                record["contract"]["expires_at_ms"] = expiry
+                before = deepcopy(record)
+                self.fault(code, transitions.require_owner, record, "fixture:principal", 1000)
+                self.fault(code, self.control, record, "renew", claim_id="2" * 32)
+                self.assertEqual(record, before)
+
     def test_observation_revision_interval_does_not_relax_controls_plan_or_epoch(self):
         for version in (1, 2, 3, 4):
             record = self.record()
