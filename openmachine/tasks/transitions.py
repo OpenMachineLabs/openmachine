@@ -2,7 +2,7 @@
 
 from openmachine.foundation.sanitize import Fault
 from . import effects
-from .records import MAX_ACTIVE_OPERATIONS, MAX_INTEGER, Operation, _unique, digest, pending
+from .records import MAX_ACTIVE_OPERATIONS, MAX_INTEGER, Operation, _unique, digest, pending, version_conflict
 
 
 def stage_for(record: dict, identity: str | None = None) -> dict:
@@ -18,9 +18,7 @@ def guards(record: dict, revision: int, plan_revision: int, epoch: int, *, allow
     if allow_observations and record["format"] >= 4:
         current = record["control_revision"] <= revision <= record["revision"]
     if not current or (plan_revision, epoch) != (record["plan"]["revision"], record["control"]["epoch"]):
-        raise Fault("task_conflict", "Task, plan or continuation ownership changed; read the original task before a new action.",
-                    {"task_id": record["task_id"], "task_revision": record["revision"],
-                     "plan_revision": record["plan"]["revision"], "continuation_epoch": record["control"]["epoch"]})
+        raise version_conflict(record, revision, plan_revision, epoch)
 
 
 def require_owner(record: dict, principal: str, now_ms: int) -> None:
@@ -29,9 +27,22 @@ def require_owner(record: dict, principal: str, now_ms: int) -> None:
         raise Fault("task_stopped", "The original task is paused, cancelling or terminal; no new continuation is allowed.")
     if now_ms >= record["contract"]["expires_at_ms"]:
         raise Fault("task_authority_expired", "Task authority expired; read and explicitly revise its accepted scope.")
-    owner = control["owner"]
-    if owner is None or owner["principal_ref"] != principal or owner["expires_at_ms"] <= now_ms:
-        raise Fault("task_owner_conflict", "A current explicit continuation claim is required; expiry does not prove original work stopped.")
+    owner = _retained_owner(record, principal)
+    if owner["expires_at_ms"] <= now_ms:
+        raise Fault("task_owner_conflict", "The retained continuation claim expired; original work may still be running. "
+                    "Renew only your same retained claim under current guards before new effects.",
+                    {"task_id": record["task_id"], "reason": "claim_expired", "claim_expires_at_ms": owner["expires_at_ms"]})
+
+
+def _retained_owner(record: dict, principal: str) -> dict:
+    owner = record["control"]["owner"]
+    if owner is None:
+        raise Fault("task_owner_conflict", "No continuation claim is retained; read the current eligible handoff before claiming.",
+                    {"task_id": record["task_id"], "reason": "claim_missing"})
+    if owner["principal_ref"] != principal:
+        raise Fault("task_owner_conflict", "The retained claim belongs to a different native principal; no continuation was admitted.",
+                    {"task_id": record["task_id"], "reason": "principal_mismatch"})
+    return owner
 
 
 def material(record: dict, now_ms: int, kind: str, summary: str, stage_id: str | None = None,
@@ -169,18 +180,21 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                 or pending_handoff["id"] != change["handoff_id"] or pending_handoff["expires_at_ms"] <= now_ms):
             raise Fault("task_handoff_conflict", "Read the current eligible handoff before claiming continuation.")
         if control["owner"] is not None and control["owner"]["expires_at_ms"] > now_ms:
-            raise Fault("task_owner_conflict", "Another unexpired claim owns continuation; read or explicitly release it.")
+            raise Fault("task_owner_conflict", "An unexpired claim already holds continuation; do not claim over it. "
+                        "Only its holder may renew or release it.",
+                        {"task_id": record["task_id"], "reason": "claim_active"})
         control.update(epoch=control["epoch"] + 1, owner={"principal_ref": principal, "claim_id": identity,
             "expires_at_ms": min(now_ms + 300000, pending_handoff["expires_at_ms"], record["contract"]["expires_at_ms"])})
         control["state"] = "running" if any((item["result"] or {}).get("status") == "running" for item in record["operations"]) else "planned"
         # Reading and claiming do not resolve the handoff; a later admitted intent does.
     elif action == "renew":
-        owner = control["owner"]
         if control["stop_intent"] != "none":
             raise Fault("task_stopped", "Paused or cancelling work cannot renew continuation ownership.")
-        if (owner is None or owner["principal_ref"] != principal
-                or owner["claim_id"] != change["claim_id"]):
-            raise Fault("task_owner_conflict", "Renew only the same retained claim; release or replacement ends its ownership.")
+        owner = _retained_owner(record, principal)
+        if owner["claim_id"] != change["claim_id"]:
+            raise Fault("task_owner_conflict", "The supplied claim ID differs from the retained claim; "
+                        "do not adopt an ID just read from the task.",
+                        {"task_id": record["task_id"], "reason": "claim_mismatch"})
         # Explicit renewal may reattach the same expired claim while task authority
         # remains valid. It never changes the claim identity, epoch or original work.
         owner["expires_at_ms"] = min(now_ms + 300000, record["contract"]["expires_at_ms"])
@@ -190,7 +204,8 @@ def apply_control(record: dict, request: dict, principal: str, now_ms: int) -> N
                 raise Fault("task_stopped", "Explicit reauthorization cannot undo cancellation.")
             owner = control["owner"]
             if owner is not None and owner["principal_ref"] != principal and owner["expires_at_ms"] > now_ms:
-                raise Fault("task_owner_conflict", "Another live owner must release before explicit reauthorization.")
+                raise Fault("task_owner_conflict", "A live claim under a different native principal prevents reauthorization.",
+                            {"task_id": record["task_id"], "reason": "principal_mismatch"})
             contract = change["contract"]
             if (contract["expires_at_ms"] <= now_ms
                     or not set(contract["authority_refs"]) - set(record["contract"]["authority_refs"])):

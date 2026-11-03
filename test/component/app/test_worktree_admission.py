@@ -68,6 +68,32 @@ class WorktreeAdmissionTests(TaskFixture, unittest.TestCase):
                 patch.object(self.app.machines, "create_worktree", side_effect=create) as dispatch:
             yield dispatch, receipts
 
+    def test_independent_tree_task_keeps_its_snapshot_across_another_claim_renewal(self):
+        first = self.accept_plan()["record"]
+        request = task_contract(self.linked_context, "structured-two")
+        request["contract"]["tools"] = self.request["contract"]["tools"]
+        request["contract"]["targets"][0]["worktree"] = str(self.linked)
+        created = self.app.create_task(**request)["record"]
+        second = self.app.control_task(task_id="structured-two", expected_revision=created["revision"],
+            expected_plan_revision=1, expected_epoch=0, update_id=uuid.uuid4().hex,
+            transition={"action": "claim", "handoff_id": created["handoff"]["id"]})["record"]
+        identity = uuid.uuid4().hex
+        arguments = dict(self.write_arguments(identity), worktree=str(self.linked),
+            expected_head_sha=self.linked_context["head_sha"],
+            expected_workspace_identity=self.linked_context["workspace_identity"],
+            task_context={"task_id": "structured-two", "task_revision": second["revision"],
+                "plan_revision": second["plan"]["revision"], "continuation_epoch": second["control"]["epoch"],
+                "operation_id": identity})
+        renewed = self.control("renew", claim_id=first["control"]["owner"]["claim_id"])["record"]
+        self.assertGreater(renewed["revision"], first["revision"])
+        self.assertEqual(renewed["control"]["epoch"], first["control"]["epoch"])
+        self.assertEqual(self.app.read_task("structured-two")["record"], second)
+        before = self.task_bytes()
+        self.assertEqual(self.app.write_workspace_file(**arguments)["status"], "applied")
+        self.assertEqual((self.linked / "result.txt").read_text(), "original\n")
+        self.assertFalse((self.work / "result.txt").exists())
+        self.assertEqual(self.task_bytes(), before)
+
     def test_selected_file_target_does_not_validate_another_tree_first(self):
         self.accept_both()
         self.git("checkout", "-q", "-b", "unrelated-source-branch")

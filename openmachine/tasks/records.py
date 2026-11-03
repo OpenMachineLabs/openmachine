@@ -65,6 +65,26 @@ def execution_receipt_digest(observed: dict) -> str:
         "execution_id", "created_at", "status", "exit_code", "command", "stop", "cleanup", "error")})
 
 
+def version_conflict(record: dict, revision: int, plan_revision: int | None = None,
+                     epoch: int | None = None) -> Fault:
+    """Describe known version differences without inferring who changed them."""
+    current = {"task_revision": record["revision"], "plan_revision": record["plan"]["revision"],
+               "continuation_epoch": record["control"]["epoch"]}
+    expected = {key: value for key, value in zip(current, (revision, plan_revision, epoch)) if value is not None}
+    changed = [key for key in expected if expected[key] != current[key]]
+    context_changed = any(key != "task_revision" for key in changed)
+    evidence = {"task_id": record["task_id"], **current, "expected": expected, "changed_fields": changed,
+                "reason": "context_changed" if context_changed else "snapshot_changed"}
+    if record["format"] >= 4:
+        evidence["control_revision"] = record["control_revision"]
+        if (record["control_revision"] <= revision < record["revision"]
+                and (plan_revision, epoch) == (current["plan_revision"], current["continuation_epoch"])):
+            evidence["observation_only"] = True
+    summary = "Task continuation context changed" if context_changed else "Task snapshot changed"
+    return Fault("task_conflict", f"{summary} ({', '.join(changed)}); read the current task and original results before another action.",
+                 evidence)
+
+
 def _unique(values: list) -> None:
     if len(values) != len(set(values)):
         raise ValueError("duplicate reference")

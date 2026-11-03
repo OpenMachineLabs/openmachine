@@ -91,8 +91,10 @@ task/plan revisions, continuation epoch, a new update ID and this transition:
 {"action":"renew","claim_id":"0123456789abcdef0123456789abcdef"}
 ```
 
-Replace the example ID with the retained `control.owner.claim_id`. Renewal
-requires the same native principal and claim ID, no stop intent, a
+Replace the example ID with the claim ID retained from your own successful claim,
+and compare it with the current `control.owner.claim_id`; never copy a newly read
+ID as proof that you hold it. The same native UID does not identify the same Chat.
+Renewal requires the same native principal and claim ID, no stop intent, a
 nonterminal task and unexpired task authority. An expired original claim can be
 renewed while it is still retained and unreplaced, including when an admitted
 operation cleared the handoff. Renewal keeps the claim ID, epoch, plan and original
@@ -162,6 +164,23 @@ checks are unchanged. Inspect the actual intended target and reconcile the
 original task; do not omit `task_context`, choose another task by directory or
 create a replacement task to avoid the rejection. A prompt is guidance, not
 permission to expand scope or repeat an uncertain effect.
+
+`task_conflict` alone does not prove that another caller took the Task. Version
+rejections retain current versions and add `expected`, `changed_fields` and a reason.
+`snapshot_changed` reports revision drift without attributing an
+owner change. `context_changed` identifies changed plan/epoch fields without
+identifying an actor. `observation_only=true` requires a proven format-4-or-later
+control-revision interval with unchanged plan and epoch; absent proof, stay neutral.
+Even proven observation drift does not relax exact control CAS. Read current
+state and original results, then recheck your retained claim and all existing
+guards; do not blindly retry an effect or create another Task to bypass rejection.
+
+`task_owner_conflict` distinguishes `claim_missing`, `principal_mismatch`,
+`claim_expired`, `claim_mismatch` and `claim_active`. Only your own retained claim
+can use the eligible same-claim renewal path; no error grants takeover authority.
+`resource_busy` instead protects a worktree or named resource, not Task ownership.
+Keep the original execution protected: the actual launch cwd determines its
+canonical worktree lock, and a command's internal `cd` or `git -C` does not move it.
 
 ## Bounded foreground waiting
 

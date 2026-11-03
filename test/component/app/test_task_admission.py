@@ -322,6 +322,55 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             self.fault("task_conflict", self.app.control_task, **altered)
         self.assertEqual(self.task_bytes(), raw)
 
+    def test_commit_race_diagnostics_preserve_control_and_effect_rejection(self):
+        self.accept_plan()
+        update = tasks.update
+        for method in ("control", "write"):
+            for action in ("renew", "release", "revise_plan"):
+                with self.subTest(method=method, action=action):
+                    record = self.view()["record"]
+                    if record["control"]["owner"] is None:
+                        record = self.control("claim", handoff_id=record["handoff"]["id"])["record"]
+                    claim = record["control"]["owner"]["claim_id"]
+                    values = ({"claim_id": claim} if action == "renew" else self.revised_plan()
+                              if action == "revise_plan" else {"reason": "An explicit competing release."})
+                    competing = self.control_arguments(action, **values)
+                    request = self.control_arguments("renew", claim_id=claim) if method == "control" else self.write_arguments()
+                    committed = []
+
+                    def race(*args, **kwargs):
+                        # Both preflights already passed. Commit a real guarded
+                        # control before the original store transaction begins.
+                        with patch.object(tasks, "update", update):
+                            self.app.control_task(**competing)
+                            committed.append(self.task_bytes())
+                        return update(*args, **kwargs)
+
+                    with patch.object(tasks, "update", side_effect=race), self.assertRaises(Fault) as caught:
+                        (self.app.control_task if method == "control" else self.app.write_workspace_file)(**request)
+                    error = caught.exception
+                    current = self.view()["record"]
+                    expected = {"task_revision": record["revision"], "plan_revision": record["plan"]["revision"],
+                                "continuation_epoch": record["control"]["epoch"]}
+                    self.assertEqual(error.code, "task_conflict")
+                    self.assertEqual(error.evidence["expected"], expected)
+                    changed = ["task_revision"] + (["plan_revision"] if action == "revise_plan" else [])
+                    if action != "renew":
+                        changed.append("continuation_epoch")
+                    self.assertEqual(error.evidence["changed_fields"], changed)
+                    self.assertEqual(error.evidence["reason"], "snapshot_changed" if action == "renew" else "context_changed")
+                    self.assertFalse(error.evidence.get("observation_only", False))
+                    self.assertEqual(error.evidence["task_revision"], current["revision"])
+                    self.assertNotIn("ownership changed", str(error))
+                    self.assertEqual(committed, [self.task_bytes()])
+                    self.assertFalse((self.work / "result.txt").exists())
+                    self.assertEqual(current["operations"], [])
+                    if method == "control":
+                        self.assertIsNone(tasks.control_update(self.state, "structured-one", request["update_id"]))
+                    if action == "renew":
+                        self.assertEqual(current["control"]["owner"]["claim_id"], claim)
+                        self.assertEqual(current["control"]["epoch"], record["control"]["epoch"])
+
     def test_renew_requires_exact_control_snapshot_and_retained_claim_identity(self):
         record = self.accept_plan()["record"]
         claim = record["control"]["owner"]["claim_id"]
@@ -358,10 +407,32 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(observed["plan"], original["plan"])
         self.assertEqual(observed["control"]["epoch"], original["control"]["epoch"])
         raw = self.task_bytes()
-        self.fault("task_conflict", self.app.control_task, **request)
+        with self.assertRaises(Fault) as stale:
+            self.app.control_task(**request)
+        self.assertEqual(stale.exception.code, "task_conflict")
+        self.assertEqual(stale.exception.evidence["reason"], "snapshot_changed")
+        self.assertTrue(stale.exception.evidence["observation_only"])
+        self.assertNotIn("ownership changed", str(stale.exception))
         self.assertEqual(self.task_bytes(), raw)
+        request = self.control_arguments("renew", claim_id=claim)
+        update = tasks.update
+        def race(*args, **kwargs):
+            nonlocal observed
+            def next_observation(value, now):
+                value["operations"][0]["result"]["log_offset"] += 1
+            observed = update(self.state, "structured-one", next_observation, observation=True)["record"]
+            return update(*args, **kwargs)
+        with patch.object(tasks, "update", side_effect=race), self.assertRaises(Fault) as committed:
+            self.app.control_task(**request)
+        self.assertEqual(committed.exception.code, "task_conflict")
+        self.assertEqual(committed.exception.evidence["reason"], "snapshot_changed")
+        self.assertTrue(committed.exception.evidence["observation_only"])
+        self.assertEqual(committed.exception.evidence["expected"]["task_revision"], request["expected_revision"])
+        self.assertIsNone(tasks.control_update(self.state, "structured-one", request["update_id"]))
         renewed = self.control("renew", claim_id=claim)["record"]
         self.assertEqual(renewed["operations"], observed["operations"])
+        self.assertEqual(renewed["control"]["owner"]["claim_id"], claim)
+        self.assertEqual(renewed["control"]["epoch"], original["control"]["epoch"])
 
     def test_renew_respects_principal_authority_stop_and_current_grants(self):
         record = self.accept_plan()["record"]
