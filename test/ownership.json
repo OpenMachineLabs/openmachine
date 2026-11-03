@@ -193,6 +193,8 @@
         "test/resilience/execution/test_process.py",
         "test/resilience/tasks/test_persistence.py",
         "test/unit/github/test_operations.py",
+        "test/unit/github/test_projects.py",
+        "test/unit/github/test_releases.py",
         "test/component/projects/test_catalog.py"
       ],
       "sources": [
@@ -230,6 +232,8 @@
         "test/resilience/github/test_mcp_connection.py",
         "test/unit/github/test_device_protocol.py",
         "test/unit/github/test_operations.py",
+        "test/unit/github/test_projects.py",
+        "test/unit/github/test_releases.py",
         "test/unit/github/test_actions.py",
         "test/unit/github/test_web_tokens.py",
         "test/component/github/test_web_broker.py"
@@ -741,7 +745,9 @@
       "test/component/github/test_transport.py",
       "test/component/tasks/test_store.py",
       "test/resilience/tasks/test_persistence.py",
-      "test/unit/github/test_operations.py"
+      "test/unit/github/test_operations.py",
+      "test/unit/github/test_projects.py",
+      "test/unit/github/test_releases.py"
     ],
     "test/support/goal_recovery.py": [
       "test/component/app/test_github_admission.py",
