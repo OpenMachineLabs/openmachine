@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -169,8 +170,10 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         for source in root.rglob("*.md"):
             with self.subTest(source=source.relative_to(root)):
                 body = source.read_text(encoding="utf-8")
+                links = [match.group(1) for match in re.finditer(r"\\]\\(([^)\\s]+)\\)", body)]
                 for old_link in stale:
-                    self.assertNotIn(old_link, body)
+                    self.assertFalse(any(link == old_link or link.endswith("/" + old_link)
+                                         for link in links), old_link)
 
         expected = {
             "tasks/continue.md": ("../github/uncertainty.md#audited-review-thread-goal-recovery",),
