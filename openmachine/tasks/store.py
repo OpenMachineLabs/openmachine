@@ -255,7 +255,9 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             return {**view, "status": "unchanged"}
         if value["format"] != original["format"] and not (upgrade and (
                 original["format"] == 3 and value["format"] == 4
-                or original["format"] in {3, 4} and value["format"] == 5 and value.get("goal_witnesses"))):
+                or original["format"] in {3, 4} and value["format"] == 5 and value.get("goal_witnesses")
+                or original["format"] in {3, 4, 5} and value["format"] == 6 and any(
+                    op["locator"].get("object_type") == "workflow" for op in value["operations"]))):
             raise Fault("task_identity_conflict", "Unsupported Task record format transition.")
         for key in ("task_id", "title", "anchors", "created_at_ms", "origin"):
             if value[key] != original[key]:
@@ -294,6 +296,10 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     enrichable = {key for key in ("number", "parent_number") if old["locator"].get(key) is None} if old["locator"]["kind"] == "github" else set()
                     if not changed_locator <= enrichable or operation_key(old["locator"]) != operation_key(item["locator"]):
                         raise Fault("task_identity_conflict", "Original operation locator identity is immutable.")
+                    if old["locator"].get("object_type") == "workflow" and changed_locator and (
+                            old["result"] is not None or (item["result"] or {}).get("status") != "succeeded"
+                            or item["result"].get("effect") != "effect_verified" or not item["result"].get("receipt_sha256")):
+                        raise Fault("task_identity_conflict", "Only an original workflow acknowledgement can enrich its run identity.")
                     if old["locator"]["kind"] == "github" and old["result"] is not None and not records.pending(old):
                         raise Fault("task_identity_conflict", "Verified provider evidence is immutable.")
                     ordinal = connection.execute("SELECT ordinal FROM operations WHERE task_id=? AND id=?", (identity, item["id"])).fetchone()[0]

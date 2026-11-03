@@ -19,7 +19,7 @@ MAX_EVENT_BYTES = 65536
 MAX_PAGE_BYTES = 65536
 MAX_PAGE_ITEMS = 50
 MAX_INTEGER = 2**53 - 1
-READ_FORMATS = (1, 2, 3, 4, 5)
+READ_FORMATS = (1, 2, 3, 4, 5, 6)
 
 
 def _text(value: str, limit: int) -> str:
@@ -272,7 +272,7 @@ class GitHubMergeBinding(Model):
 class GitHubLocator(Model):
     kind: Literal["github"]
     repository: Repository
-    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release"]
+    object_type: Literal["issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release", "workflow"]
     number: Revision | None
     parent_number: Revision | None
     anchor: Annotated[Text128, Field(min_length=1)]
@@ -284,6 +284,8 @@ class GitHubLocator(Model):
 
     @model_validator(mode="after")
     def effect_binding(self):
+        if self.object_type == "workflow" and self.parent_number is not None:
+            raise ValueError("workflow locators have no Issue/PR parent")
         if (self.object_type == "release") != (self.tag_name is not None):
             raise ValueError("Release locators require only their original exact tag")
         if self.merge is not None and (self.object_type != "merge" or self.number is None or self.parent_number is not None):
@@ -305,7 +307,7 @@ class GitHubLocator(Model):
 
 
 class GitHubEffectScope(Model):
-    resource: Literal["object", "comment", "review", "project", "release"]
+    resource: Literal["object", "comment", "review", "project", "release", "workflow"]
     number: Revision | None
     parent_number: Revision | None
     fields: Annotated[list[Literal["*", "title", "body", "state", "labels", "assignees", "draft", "merge", "threads", "create"]], Field(min_length=1, max_length=5)]
@@ -313,6 +315,8 @@ class GitHubEffectScope(Model):
 
     @model_validator(mode="after")
     def canonical_fields(self):
+        if self.resource == "workflow" and (self.parent_number is not None or self.fields != ["*"]):
+            raise ValueError("workflow scopes exclude the entire run or unknown dispatch")
         if self.fields != sorted(set(self.fields)) or "*" in self.fields and len(self.fields) != 1:
             raise ValueError("effect fields need a unique canonical set")
         if self.resource == "object" and self.parent_number is not None:
@@ -377,6 +381,11 @@ class Operation(Model):
             raise ValueError("observation precedes admission")
         if self.effect_scope is not None and not isinstance(self.locator, GitHubLocator):
             raise ValueError("only GitHub operations carry provider field scopes")
+        workflow = isinstance(self.locator, GitHubLocator) and self.locator.object_type == "workflow"
+        if workflow != (self.effect_scope is not None and self.effect_scope.resource == "workflow"):
+            raise ValueError("workflow locators require their own effect scope")
+        if workflow and self.effect_scope.number is not None and self.effect_scope.number != self.locator.number:
+            raise ValueError("workflow scope must retain its original run identity")
         return self
 
 
@@ -518,7 +527,7 @@ class LastUpdate(Model):
 
 
 class Current(Model):
-    format: Annotated[int, Field(strict=True, ge=1, le=5)]
+    format: Annotated[int, Field(strict=True, ge=1, le=6)]
     task_id: TaskID
     revision: Revision
     title: Title
@@ -626,6 +635,9 @@ class Record(Current):
         if len(operations) != len(self.operations) or self.control.current_stage_id is not None and self.control.current_stage_id not in stages:
             raise ValueError("invalid current stage or duplicate operation")
         for operation in self.operations:
+            if (isinstance(operation.locator, GitHubLocator) and operation.locator.object_type == "workflow"
+                    and (self.format < 6 or operation.effect_scope is None or operation.effect_scope.resource != "workflow")):
+                raise ValueError("workflow operations require format 6 and their own effect scope")
             if (operation.stage_id not in stages or operation.plan_revision > self.plan.revision
                     or operation.epoch > self.control.epoch or not self.created_at_ms <= operation.admitted_at_ms <= self.updated_at_ms
                     or operation.observed_at_ms is not None and operation.observed_at_ms > self.updated_at_ms):

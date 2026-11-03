@@ -395,7 +395,7 @@ class Application:
                  "write_workspace_file", "edit_workspace_file", "apply_workspace_patch", "read_workspace_change",
                  "find_tasks", "read_task", "wait_task", "save_task", "create_task", "control_task", "start_execution", "read_execution",
                  "list_executions", "cancel_execution", "reconcile_execution", "control_execution", "github_read", "github_release", "github_issue",
-                 "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project",
+                 "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_workflow",
                  "list_integrations", "connect_integration", "read_integration_login", "cancel_integration_login",
                  "disconnect_integration", "start_codex_task", "read_codex_task"}
         if "start_codex_task" in tools and "start_execution" not in tools:
@@ -419,7 +419,7 @@ class Application:
             if (check_identity and observed.get("workspace_identity") != target["workspace_identity"]
                     or check_head and (observed.get("head_sha") or None) != target["head_sha"]):
                 raise Fault("context_mismatch", "The task target identity or HEAD changed; inspect it before accepting a new contract.")
-        github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release"})
+        github_write = bool(tools & {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release", "github_workflow"})
         if any(name.startswith("github_") for name in tools):
             self._provider()
         if github_write and not contract["repositories"]:
@@ -521,10 +521,22 @@ class Application:
 
     def github_read(self, action: str, repository: str = "", number: int = 0, ref: str = "", path: str = "",
                     page: int = 1, limit: int = 30, cursor: str = "", expected_head_sha: str = "",
-                    expected_base_sha: str = "", offset: int = 0, connection_id: str = "") -> dict:
+                    expected_base_sha: str = "", offset: int = 0, connection_id: str = "", filters: dict | None = None) -> dict:
         return self._github_call("read", dict(action=action, repository=repository, number=number, ref=ref,
             path=path, page=page, limit=limit, cursor=cursor, expected_head_sha=expected_head_sha,
-            expected_base_sha=expected_base_sha, offset=offset, connection_id=connection_id))
+            expected_base_sha=expected_base_sha, offset=offset, connection_id=connection_id,
+            **({"filters": filters} if filters is not None else {})))
+
+    def github_workflow(self, action: str, repository: str, workflow: str = "", ref: str = "",
+                        inputs: dict | None = None, number: int = 0, expected_attempt: int = 0,
+                        expected_head_sha: str = "", task_context: dict | None = None,
+                        connection_id: str = "") -> dict:
+        with self._admit():
+            self._provider().validate_workflow(action, workflow, ref, inputs, number, expected_attempt, expected_head_sha)
+            return self.task_admission.run("github_workflow", dict(
+                action=action, repository=repository, workflow=workflow, ref=ref, inputs=inputs,
+                number=number, expected_attempt=expected_attempt, expected_head_sha=expected_head_sha,
+                **({"connection_id": connection_id} if connection_id else {})), task_context)
 
     def github_release(self, action: Literal["create", "publish"], repository: str, tag_name: str,
                        name: str = "", body: str = "", draft: bool = True,

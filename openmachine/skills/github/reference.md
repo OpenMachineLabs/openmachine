@@ -40,6 +40,28 @@ credentials and binary data. Pages are 16 KiB UTF-8-safe with full hash/cursors,
 sources up to 1 MiB. Provider API/results are bounded to 2 MiB/256 KiB. The PR file
 API's 3,000-file ceiling and partial check/review/thread evidence remain explicit.
 
+Actions reads: `github_read` actions `workflows`, `workflow` (ID/filename),
+`workflow_runs` (workflow/branch/head_sha/event/status filters),
+`workflow_run`, `workflow_jobs` (run ID and `filters.attempt`; required for
+jobs). Jobs include steps. Deployment reads: `deployments` (optional `ref`,
+`head_sha`, `environment`, `task` filters), `deployment` and
+`deployment_statuses` (ID). Paginate results (filtered runs cap at 1,000);
+logs, artifacts and deployment writes are unsupported.
+
+`github_workflow(action="dispatch", repository, workflow="deploy.yml",
+ref="main", expected_head_sha=sha, inputs={"target":"staging"})`
+requests one run with up to 25 finite scalar inputs (16 KiB; never secrets).
+`rerun`, `rerun_failed`, `cancel` instead take `number` (run ID),
+`expected_attempt`, `expected_head_sha`. Preflights are non-atomic; the
+workflow must enforce SHA and environment approvals. `request_accepted`
+means acknowledgement, not completion. Read runs/jobs/deployment statuses;
+dispatch retains the returned run ID and never guesses or retries uncertainty.
+
+Actions read/write or Deployments read permissions and native grants apply.
+Unknown dispatch excludes repository workflow writes; unknown run controls
+exclude that run. Keep the original Task/operation; format 6 requires state
+contract 26.
+
 Read organization Projects via github_read actions projects, project, project_fields,
 project_items and project_item. The repository owner identifies the organization;
 number is the Project number, and project_item uses ref=item node ID. Project lists
@@ -242,13 +264,9 @@ each unresolved GitHub operation's own repository and native account binding.
 Explicit changes to unrelated repositories remain possible under ordinary scope
 validation and stage invalidation.
 
-For a retained 0.2.11 task, first inspect the running server's capabilities and
-the actual `control_task` schema. The scoped reader supports record formats 1..5;
-`bind_effect_scope` is a `control_task.transition.action`, not a separate tool.
-The original 0.2.11 runtime lacks this action even when newer source or Skill text
-is present. Update through the managed compatibility checks only under explicit
-installation authority, then refresh the client's tool catalog. Do not drop
-`task_context` to work around an older catalog.
+Older Tasks may lack `control_task`'s `bind_effect_scope` transition:
+inspect current schemas and upgrade only with explicit authority. Never omit
+`task_context` or rewrite original history.
 
 Read the original task and destination before continuing. Resume only under
 existing user authority, claim the same task, and retain its original operation ID.

@@ -2,12 +2,36 @@
 
 from copy import deepcopy
 import unittest
+from unittest.mock import patch
 
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import records, transitions
 
 
 class TaskTransitionTests(unittest.TestCase):
+    def test_dispatch_capacity_reserves_run_id_bytes_without_changing_control_identity(self):
+        record = self.record()
+        record["format"] = 6
+        operation = self.operation(record, "3" * 32, number=None, fields=["*"])
+        operation["locator"]["object_type"] = operation["effect_scope"]["resource"] = "workflow"
+        operation.update(state="admitted", observed_at_ms=None, result=None)
+        record["operations"] = [operation]
+        future = dict(operation, state="observed", observed_at_ms=records.MAX_INTEGER,
+            result={"status": "cancelled", "receipt_sha256": "f" * 64, "summary": "x" * 256,
+                    "log_offset": records.MAX_INTEGER, "failure_code": "x" * 64, "effect": "effect_verified"})
+        # This bound fits the maximum result but omits the later dispatch ID.
+        with patch.object(records, "MAX_OPERATION", len(records.canonical(future))):
+            self.fault("task_capacity", transitions.reserve, record, new_operation=operation)
+            self.assertIsNone(operation["locator"]["number"])
+            self.assertIsNone(operation["locator"]["parent_number"])
+            operation["locator"]["number"] = operation["effect_scope"]["number"] = 1
+            transitions.reserve(record, new_operation=operation)
+            self.assertEqual(operation["locator"]["number"], 1)
+        changed = deepcopy(operation)
+        changed["locator"]["number"] = 2
+        with self.assertRaises(ValueError):
+            records.Operation.model_validate(changed)
+
     def test_explicit_abandonment_is_distinct_from_success_and_cancel(self):
         original = self.record()
         original["operations"].append(self.operation(original, "3" * 32, status="unknown", local=True))

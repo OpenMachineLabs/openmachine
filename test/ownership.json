@@ -216,6 +216,7 @@
       ],
       "sources": [
         "integrations/github/__init__.py",
+        "integrations/github/actions.py",
         "integrations/github/auth.py",
         "integrations/github/client.py",
         "integrations/github/connection.py",
@@ -229,6 +230,7 @@
         "test/resilience/github/test_mcp_connection.py",
         "test/unit/github/test_device_protocol.py",
         "test/unit/github/test_operations.py",
+        "test/unit/github/test_actions.py",
         "test/unit/github/test_web_tokens.py",
         "test/component/github/test_web_broker.py"
       ]
@@ -731,6 +733,7 @@
       "test/resilience/execution/test_worktrees.py"
     ],
     "test/support/github_cases.py": [
+      "test/unit/github/test_actions.py",
       "test/component/app/test_github_admission.py",
       "test/component/github/test_transport.py",
       "test/component/tasks/test_store.py",

@@ -153,6 +153,9 @@ def validate_operation(operation: dict, current: dict) -> dict:
     value = records.Operation.model_validate(operation).model_dump()
     stages = {stage["id"]: stage for stage in current["plan"]["stages"]}
     locator = value["locator"]
+    if locator.get("object_type") == "workflow" and (
+            current["format"] < 6 or (value.get("effect_scope") or {}).get("resource") != "workflow"):
+        raise ValueError("workflow operations require format 6 and their own effect scope")
     if (value["stage_id"] not in stages or value["plan_revision"] > current["plan"]["revision"]
             or value["epoch"] > current["control"]["epoch"] or not current["created_at_ms"] <= value["admitted_at_ms"] <= current["updated_at_ms"]
             or value["observed_at_ms"] is not None and value["observed_at_ms"] > current["updated_at_ms"]):

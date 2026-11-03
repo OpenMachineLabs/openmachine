@@ -16,6 +16,97 @@ from test.support.github_cases import BASE, HEAD, MERGE, REPO, ROOT, TREE, GitHu
 
 
 class TaskAdmissionTests(TaskFixture, unittest.TestCase):
+    def test_workflow_request_acceptance_is_retained_without_run_completion_or_replay(self):
+        provider = self.github_fixture(tools=["github_workflow", "read_task", "control_task"])
+        provider.validate_workflow = github.validate_workflow
+        provider.workflow = Mock(return_value={"status": "request_accepted", "http_status": 200,
+            "receipt": {"workflow_id": 12, "run_id": 42, "ref": "main", "expected_head_sha": HEAD}, "workflow_completion_verified": False})
+        identity = uuid.uuid4().hex
+        args = dict(action="dispatch", repository=REPO, workflow="ci.yml", ref="main", expected_head_sha=HEAD,
+                    task_context=self.context_for(identity))
+        result = self.app.github_workflow(**args)
+        self.assertEqual(result["status"], "request_accepted")
+        record = self.view()["record"]
+        self.assertEqual(record["format"], 6)
+        operation = next(item for item in record["operations"] if item["id"] == identity)
+        self.assertEqual(operation["effect_scope"]["resource"], "workflow")
+        self.assertEqual(operation["result"]["status"], "succeeded")
+        self.assertIn("completion is not verified", operation["result"]["summary"])
+        self.assertIsNone(operation["effect_scope"]["number"])
+        self.assertEqual(operation["locator"]["number"], 42)
+        self.app = create_application(self.config, self.state)
+        self.app.github = provider
+        self.app.connections.request = Mock()
+        repeated = self.app.github_workflow(**args)
+        self.assertFalse(repeated["task_operation_replayed"])
+        self.assertEqual(repeated["status"], "retained_task_evidence")
+        self.assertEqual(repeated["locator"]["number"], 42)
+        self.assertEqual(self.view()["record"]["operations"][0], operation)
+        provider.workflow.assert_called_once()
+        provider.reconcile.assert_not_called()
+        self.app.connections.request.assert_not_called()
+        with self.assertRaises(Fault) as caught:
+            tasks.update(self.state, record["task_id"],
+                lambda value, now: value["operations"][0]["locator"].update(number=43), operation_ids=[identity])
+        self.assertEqual(caught.exception.code, "task_identity_conflict")
+        from pydantic import ValidationError
+        from openmachine.tasks import rows
+        with self.assertRaises(ValueError):
+            rows.validate_operation(operation, dict(record, format=5))
+        with self.assertRaises(ValidationError):
+            records.Record.model_validate(dict(record, format=5))
+
+    def test_lost_dispatch_never_acquires_a_run_id_and_excludes_repository_workflows(self):
+        provider = self.github_fixture(tools=["github_workflow", "read_task", "control_task"])
+        provider.validate_workflow = github.validate_workflow
+        provider.workflow = Mock(return_value={"status": "write_outcome_unknown", "error_code": "github_response_unknown"})
+        identity = uuid.uuid4().hex
+        args = dict(action="dispatch", repository=REPO, workflow="ci.yml", ref="main", expected_head_sha=HEAD,
+                    task_context=self.context_for(identity))
+        self.app.github_workflow(**args)
+        original = self.view()["record"]["operations"][0]
+        self.assertIsNone(original["locator"]["number"])
+        provider.reconcile.return_value = {"status": "write_outcome_unknown", "observed_run": {"id": 42, "conclusion": "success"}}
+        self.app = create_application(self.config, self.state)
+        self.app.github = provider
+        self.app.connections.request = Mock()
+        self.assertFalse(self.app.github_workflow(**args)["task_operation_replayed"])
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        for request in (dict(action="dispatch", workflow="other.yml", ref="main"),
+                        dict(action="cancel", number=42, expected_attempt=1)):
+            with self.assertRaises(Fault) as caught:
+                self.app.github_workflow(repository=REPO, expected_head_sha=HEAD, **request)
+            self.assertEqual(caught.exception.code, "task_effect_unresolved")
+        with self.assertRaises(Fault) as caught:
+            tasks.update(self.state, self.request["task_id"],
+                lambda value, now: value["operations"][0]["locator"].update(number=42), operation_ids=[identity])
+        self.assertEqual(caught.exception.code, "task_identity_conflict")
+        self.assertEqual(self.view()["record"]["operations"][0], original)
+        provider.workflow.assert_called_once()
+
+    def test_unknown_workflow_controls_remain_unknown_after_restart_and_exclude_bare_writes(self):
+        provider = self.github_fixture(tools=["github_workflow", "read_task", "control_task"])
+        provider.validate_workflow = github.validate_workflow
+        provider.workflow = Mock(return_value={"status": "write_outcome_unknown", "error_code": "github_response_unknown"})
+        identity = uuid.uuid4().hex
+        args = dict(action="rerun", repository=REPO, number=42, expected_attempt=2, expected_head_sha=HEAD,
+                    task_context=self.context_for(identity))
+        self.app.github_workflow(**args)
+        provider.reconcile.return_value = {"status": "write_outcome_unknown", "observed_run": {
+            "id": 42, "status": "completed", "conclusion": "success", "run_attempt": 3}}
+        self.app = create_application(self.config, self.state)
+        self.app.github = provider
+        self.app.connections.request = Mock()
+        repeated = self.app.github_workflow(**args)
+        self.assertFalse(repeated["task_operation_replayed"])
+        self.assertEqual(repeated["status"], "write_outcome_unknown")
+        with self.assertRaises(Fault) as caught:
+            self.app.github_workflow("cancel", REPO, number=42, expected_attempt=3, expected_head_sha=HEAD)
+        self.assertEqual(caught.exception.code, "task_effect_unresolved")
+        provider.workflow.assert_called_once()
+        result = next(item for item in self.view()["record"]["operations"] if item["id"] == identity)["result"]
+        self.assertEqual((result["status"], result["effect"]), ("unknown", "effect_unknown"))
+
     def test_release_create_retains_legacy_arguments_used_by_task_fingerprint(self):
         with patch.object(self.app.task_admission, "run", return_value={"status": "fixture"}) as run:
             self.app.github_release("create", REPO, "v1.2.3", body="Notes")

@@ -15,7 +15,7 @@ from . import task_attention, task_observation, task_receipts
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}
 EXECUTION_METHODS = {"start_execution", "create_worktree"}
-GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release"}
+GITHUB_METHODS = {"github_issue", "github_pull_request", "github_comment", "github_review", "github_review_thread", "github_merge", "github_project", "github_release", "github_workflow"}
 METHODS = FILE_METHODS | EXECUTION_METHODS | GITHUB_METHODS | {"control_execution", "cancel_execution"}
 MARKER = re.compile(r"<!-- (om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}) -->")
 # These failures are defined before effects by the existing domain owners. Anything
@@ -184,7 +184,7 @@ class TaskAdmission:
             value.setdefault("goal_witnesses", []).append(witness)
             if not effects.goal_usable(value, original):
                 raise Fault("task_evidence_invalid", "Goal recovery requires the unchanged accepted source and native authority.")
-            value["format"] = 5
+            value["format"] = max(value["format"], 5)
             value["control"].update(state="waiting_for_ai", pending_decision=None)
             transitions.handoff(value, witness_id, now, "result_ready")
 
@@ -655,6 +655,8 @@ class TaskAdmission:
             if not same_live and effects.conflicts(record, item, record, operation):
                 raise Fault("task_effect_unresolved", "Reconcile the original outstanding effect before admitting overlapping work.")
         operation = dict(operation, admitted_at_ms=now_ms)
+        if method == "github_workflow":
+            record["format"] = 6
         record["operations"].append(operation)
         if not stopping:
             stage["state"] = "running"

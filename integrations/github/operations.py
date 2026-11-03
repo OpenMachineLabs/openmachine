@@ -10,7 +10,8 @@ from urllib.parse import quote
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault, redact
 
-from . import client, connection, evidence
+from . import actions, client, connection, evidence
+from .actions import ReadFilters, WorkflowAction
 from .connection import DEFINITE_FAILURES, object_response
 
 
@@ -23,7 +24,8 @@ ReadAction = Literal["status", "repository", "branch", "commit", "file", "file_h
                      "release", "releases", "projects", "project", "project_fields",
                      "project_items", "project_item", "issue", "issues", "pull_request",
                      "pull_requests", "files", "comments", "reviews", "review_comments",
-                     "threads", "checks", "merge_context"]
+                     "threads", "checks", "merge_context", "workflows", "workflow", "workflow_runs",
+                     "workflow_run", "workflow_jobs", "deployments", "deployment", "deployment_statuses"]
 FIELDS = {
     "repository": "id full_name private default_branch archived permissions html_url",
     "issue": "id number title body state state_reason html_url created_at updated_at closed_at user assignees labels comments pull_request",
@@ -237,9 +239,11 @@ def _attribute(settings: Settings, body: str, footer: str) -> str:
 
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
          ref: str = "", path: str = "", page: int = 1, limit: int = 30, cursor: str = "",
-         expected_head_sha: str = "", expected_base_sha: str = "", offset: int = 0, *, transport) -> dict:
+         expected_head_sha: str = "", expected_base_sha: str = "", offset: int = 0, *, filters: dict | None = None, transport) -> dict:
     if action not in get_args(ReadAction) or not 1 <= page <= 1000 or not 1 <= limit <= 100 or len(cursor) > 1024:
         raise Fault("invalid_github_request", "Select a supported read action and bounded pagination.")
+    if filters is not None and action not in actions.READ_ACTIONS:
+        raise Fault("invalid_github_request", "Filters are only supported for Actions and deployment reads.")
     if action == "status" and not repository:
         return _public({"status": "authenticated", "actor": connection.read_actor(settings, transport=transport),
                         "backend": "native",
@@ -248,6 +252,10 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     actor, metadata = connection.access(settings, repository, transport=transport)
     result = {"repository": metadata["full_name"], "actor": actor, "action": action,
               "observed_at": datetime.now(timezone.utc).isoformat()}
+    if action in actions.READ_ACTIONS:
+        if cursor or expected_head_sha or expected_base_sha or offset:
+            raise Fault("invalid_github_request", "Actions/deployment reads use REST pages and their closed filters.")
+        return _public({**result, **actions.read(action, repository, number, ref, path, page, limit, filters, transport=transport)})
     root = f"repos/{repository}"
     pinned = action in {"files", "reviews", "review_comments", "threads", "merge_context"}
     pr = None
@@ -384,6 +392,13 @@ def read(settings: Settings, action: ReadAction, repository: str = "", number: i
     return _public(result)
 
 
+def workflow(settings: Settings, action: WorkflowAction, repository: str, workflow: str = "",
+             ref: str = "", inputs: dict | None = None, number: int = 0, expected_attempt: int = 0,
+             expected_head_sha: str = "", *, transport) -> dict:
+    return _public(actions.workflow(settings, action, repository, workflow, ref, inputs, number,
+                                    expected_attempt, expected_head_sha, transport=transport))
+
+
 def project(settings: Settings, action: Literal["add_item", "update_field"], repository: str,
             project_number: int, issue_number: int = 0, item_id: str = "", field_id: str = "",
             value: dict | None = None, expected_value: dict | None = None,
@@ -514,7 +529,7 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     """Bounded original-destination observation. Never resubmit a publication."""
     kind, repository = locator.get("object_type"), locator.get("repository", "")
     number, parent, anchor = locator.get("number"), locator.get("parent_number"), locator.get("anchor", "")
-    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release"}
+    if (kind not in {"issue", "pull_request", "comment", "review", "review_thread", "merge", "project", "release", "workflow"}
             or not isinstance(anchor, str) or not re.fullmatch(r"om-task:[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[0-9a-f]{32}", anchor)
             or any(value is not None and (type(value) is not int or value < 1) for value in (number, parent))):
         raise Fault("invalid_github_request", "Reconciliation requires the original bounded publication locator.")
@@ -522,6 +537,12 @@ def reconcile(settings: Settings, locator: dict, request: dict | None = None, *,
     root, marker = f"repos/{repository}", f"<!-- {anchor} -->"
     unknown = {"status": "write_outcome_unknown", "repository": repository,
                "detail": "Original destination is unresolved; no publication was repeated."}
+    if kind == "workflow":
+        # A later run (even a matching successful attempt) cannot acknowledge an
+        # earlier POST when its causal acknowledgement was lost.
+        if number is not None:
+            unknown["observed_run"] = actions.project("workflow_run", actions.run_metadata(repository, number, transport=transport))
+        return _public({**unknown, "workflow_completion_verified": False})
     if kind == "release":
         tag_name = locator.get("tag_name")
         if (not isinstance(tag_name, str) or not tag_name or len(tag_name) > 255

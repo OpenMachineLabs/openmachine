@@ -11,7 +11,11 @@ def github_scope(method: str, arguments: dict) -> dict:
     positive = lambda value: value if type(value) is int and value > 0 else None
     scope = {"resource": "object",
              "number": positive(number), "parent_number": None, "fields": ["*"]}
-    if kind == "release":
+    if kind == "workflow":
+        # Unacknowledged dispatches have no causal run ID and conservatively
+        # exclude all workflow controls, including ID/filename aliases.
+        scope.update(resource="workflow")
+    elif kind == "release":
         scope.update(resource="release", number=None, fields=["create"],
                      creation_key=records.digest(["release", arguments["tag_name"]]))
     elif kind == "project":
@@ -78,7 +82,7 @@ def operation_scope(record: dict, operation: dict) -> dict | None:
     kind = locator["object_type"]
     repository = locator["repository"].casefold()
     return {"repository": repository.split("/", 1)[0] if kind == "project" else repository,
-            "resource": kind if kind in {"comment", "review", "project"} else "object",
+            "resource": kind if kind in {"comment", "review", "project", "workflow"} else "object",
             "number": locator.get("number"),
             "parent_number": locator.get("parent_number") if kind == "review" else None,
             "fields": ["*"]}
@@ -88,6 +92,8 @@ def github_conflict(first: dict, second: dict) -> bool:
     if first["repository"].casefold() != second["repository"].casefold():
         return False
     left, right = first["resource"], second["resource"]
+    if "workflow" in {left, right}:
+        return left == right and (first["number"] is None or second["number"] is None or first["number"] == second["number"])
     if left == right == "release":
         return (not first.get("creation_key") or not second.get("creation_key")
                 or first["creation_key"] == second["creation_key"])
