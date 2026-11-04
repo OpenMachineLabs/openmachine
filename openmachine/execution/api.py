@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from openmachine import __version__
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
-from openmachine.workspace.git import context, lock_root, whole_device_writes, writer_parent_roots
+from openmachine.workspace.git import context, lock_root, whole_device_writes, writer_path_locks
 from openmachine.workspace import worktrees
 
 from . import control as controls, observation
@@ -223,10 +223,10 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
             try:
                 owned = []
                 if creation_plan is None:
-                    for parent in writer_parent_roots(config, machine, observed):
-                        parent_key = hashlib.sha256(parent.encode()).hexdigest()
+                    for path, shared in writer_path_locks(observed, shared=workspace_access == "shared"):
+                        path_key = hashlib.sha256(path.encode()).hexdigest()
                         owned.append(leases.enter_context(lease(
-                            locks / f"workspace-{parent_key}.lock", shared=True)))
+                            locks / f"writer-path-{path_key}.lock", shared=shared)))
                 owned.append(leases.enter_context(lease(
                     locks / f"workspace-{key}.lock", shared=workspace_access == "shared")))
             except Fault as error:

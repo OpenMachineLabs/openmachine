@@ -9,7 +9,7 @@ import uuid
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 from .files import MAX_SOURCE, digest, publish_file, publish_path, root_for, snapshot
-from .git import context, lock_root, writer_parent_roots
+from .git import context, lock_root, writer_path_locks
 from .worktrees import resolve_root
 from . import change_records as records, change_schema as schema
 from . import preparation
@@ -19,11 +19,11 @@ MAX_WORKSPACE_RESULT = 512 * 1024
 
 @contextmanager
 def _writer_lease(config, state, machine, root, observed):
-    """Hold relevant non-Git ancestor leases and the selected write lease."""
+    """Coordinate overlapping physical paths without serializing unrelated Git worktrees."""
     with ExitStack() as locks:
-        for parent in writer_parent_roots(config, machine, observed):
-            key = hashlib.sha256(parent.encode()).hexdigest()
-            locks.enter_context(lease(state / "locks" / f"workspace-{key}.lock", shared=True))
+        for path, shared in writer_path_locks(observed):
+            key = hashlib.sha256(path.encode()).hexdigest()
+            locks.enter_context(lease(state / "locks" / f"writer-path-{key}.lock", shared=shared))
         key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
         locks.enter_context(lease(state / "locks" / f"workspace-{key}.lock"))
         yield

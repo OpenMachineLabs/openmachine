@@ -137,24 +137,14 @@ def lock_root(config, machine: str, cwd: Path, observed: dict) -> str:
     return str(root)
 
 
-def writer_parent_roots(config, machine: str, observed: dict) -> list[str]:
-    """Share active non-Git ancestor leases across Git and non-Git lock domains."""
-    if observed["git_status"] != "observed":
-        return []
-    if whole_device_writes(config):
-        return ["/"]
+def writer_path_locks(observed: dict, *, shared: bool = False) -> list[tuple[str, bool]]:
+    """Lock canonical ancestors shared and the selected root exclusively."""
+    if observed["git_status"] == "unavailable":
+        raise Fault("context_unavailable", "Cannot lock an unverified writer target.")
     root = Path(observed["worktree"])
-    parents = set()
-    for item in config.workspaces.values():
-        if config.machine(item.machine).transport != "local":
-            continue
-        try:
-            parent = Path(item.root).resolve(strict=True)
-        except (OSError, RuntimeError):
-            continue
-        if parent != root and root.is_relative_to(parent):
-            parents.add(str(parent))
-    return sorted(parents)
+    if not root.is_absolute() or ".." in root.parts:
+        raise Fault("context_unavailable", "Cannot lock an unverified writer target.")
+    return [(str(path), True) for path in reversed(root.parents)] + [(str(root), shared)]
 
 
 def _git_environment() -> dict:

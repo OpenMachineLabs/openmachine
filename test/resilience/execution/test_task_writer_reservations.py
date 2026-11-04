@@ -159,6 +159,26 @@ class NativeWriterReservationTests(TaskFixture, unittest.TestCase):
                     task_context=self.task_context("parent-task", operation))
         self.assertEqual(self.app.write_workspace_file(**args)["status"], "applied")
 
+    def test_unrelated_non_git_worker_does_not_serialize_git_task(self):
+        bare = self.root / "unrelated-bare"
+        repo = self.root / "unrelated-git"
+        bare.mkdir()
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
+        observed = self.create_at("independent-git", "independent-worktree", repo)
+        started, release = self._held_native(bare)
+        try:
+            operation = uuid.uuid4().hex
+            result = self.app.write_workspace_file(machine="desktop", workspace_name="independent-worktree",
+                path="independent.txt", content="independent", expected_head_sha=observed["head_sha"] or "",
+                expected_sha256="", expected_workspace_identity=observed["workspace_identity"],
+                change_id=operation, task_context=self.task_context("independent-git", operation))
+            self.assertEqual(result["status"], "applied")
+            self.assertEqual(self.app.read_execution("desktop", started["execution_id"])["status"], "running")
+            self.assertEqual((repo / "independent.txt").read_text(), "independent")
+        finally:
+            self._finish_held(started, release)
+
     def test_two_native_processes_race_one_target_without_duplicate_effect(self):
         observed = self.create_at("race-a", "project", self.work)
         self.create_at("race-b", "project", self.work)
