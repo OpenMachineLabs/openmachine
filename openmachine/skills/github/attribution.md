@@ -4,9 +4,12 @@
 
 ## Attribution
 
-Read `get_capabilities.github.attribution`, the effective `[github].attribution`
-boolean (default `true` for public/private repositories). No per-client override.
-When enabled, new Issue/PR bodies use:
+Attribution is permanently enabled for native Open Machine GitHub writes on both
+public and private repositories. There is no configuration switch or per-client
+override. `get_capabilities.github.attribution` is informational and always `true`
+when GitHub integration is configured.
+
+New Issue/PR bodies and Release notes use:
 
 ```markdown
 ---
@@ -22,13 +25,12 @@ New top-level comments and review summaries use:
 Posted via [Open Machine](https://github.com/OpenMachineLabs/openmachine).
 ```
 
-Let typed writers append these exact footers once; do not add other signatures,
-tool/model explanations, versions, badges or slogans. Any separately authorized
-route uses the same setting and text, never an authentication/permission bypass.
-Verify the destination body and footer before reporting publication. `false`
-stops new automatic attribution; preserve existing footers and hidden task markers
-on edits. Do not rebrand legacy content, alter unrelated historical publications
-or decorate inline review comments. The typed writers share the exact constants in
-`integrations/github/operations.py`. Apply a setting change through the authorized
-[service configuration lifecycle](../service/management.md#exact-updates-and-compatible-rollback),
-not hot reload or a per-client switch.
+Typed writers append these exact footers once; do not add other signatures,
+tool/model explanations, versions, badges or slogans. Verify the destination
+body and footer before reporting publication. Preserve existing footers and
+hidden task markers on edits. Do not rebrand legacy content, alter unrelated
+historical publications or decorate inline review comments. The typed writers
+share the exact constants in `integrations/github/operations.py`.
+
+Remove any legacy `[github] attribution` entry from local configurations:
+both `true` and `false` values are rejected by the current schema.

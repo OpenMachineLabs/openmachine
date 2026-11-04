@@ -266,7 +266,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         self.assertEqual(operations.POSTED_FOOTER, POSTED)
         self.assertEqual(operations.FOOTERS, (CREATED, POSTED))
 
-    def test_all_new_bodies_share_the_default_on_boolean_policy(self):
+    def test_all_new_bodies_always_include_attribution(self):
         calls = (
             (github.issue, ("title", "body"), {}, CREATED),
             (github.pull_request, ("pr", "body"), {"head": "topic", "base": "main"}, CREATED),
@@ -275,15 +275,11 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
         )
         for private in (False, True):
             self.metadata["private"] = private
-            for enabled in (None, True, False):
-                config = settings(enabled)
-                self.assertIs(config.github.attribution, enabled is not False)
-                for operation, args, kwargs, footer in calls:
-                    with self.subTest(private=private, enabled=enabled, operation=operation.__name__):
-                        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-                            operation(config, "create", REPO, *args, **kwargs, transport=self.transport)
-                        expected = "body" if enabled is False else "body\n\n" + footer
-                        self.assertEqual(mutate.call_args.args[3]["body"], expected)
+            for operation, args, kwargs, footer in calls:
+                with self.subTest(private=private, operation=operation.__name__):
+                    with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+                        operation(settings(), "create", REPO, *args, **kwargs, transport=self.transport)
+                    self.assertEqual(mutate.call_args.args[3]["body"], "body\n\n" + footer)
 
     def test_all_updates_preserve_provenance_without_retroactive_branding(self):
         calls = (
@@ -292,15 +288,14 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
             (github.comment, ("edited",), {"comment_id": 9}, POSTED, self.issue_value),
             (github.review, ("edited",), {"number": 2, "review_id": 9}, POSTED, self.reviews[0]),
         )
-        for enabled in (True, False):
-            for attributed in (False, True):
-                for operation, args, kwargs, footer, current in calls:
-                    current["body"] = "old\n\n" + footer if attributed else "old"
-                    with self.subTest(enabled=enabled, attributed=attributed, operation=operation.__name__):
-                        with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-                            operation(settings(enabled), "update", REPO, *args, **kwargs, transport=self.transport)
-                        expected = "edited\n\n" + footer if attributed else "edited"
-                        self.assertEqual(mutate.call_args.args[3]["body"], expected)
+        for attributed in (False, True):
+            for operation, args, kwargs, footer, current in calls:
+                current["body"] = "old\n\n" + footer if attributed else "old"
+                with self.subTest(attributed=attributed, operation=operation.__name__):
+                    with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
+                        operation(settings(), "update", REPO, *args, **kwargs, transport=self.transport)
+                    expected = "edited\n\n" + footer if attributed else "edited"
+                    self.assertEqual(mutate.call_args.args[3]["body"], expected)
 
     def test_exact_footer_is_idempotent_and_whitespace_is_preserved(self):
         body = "body\n\n" + operations.CREATED_FOOTER
@@ -311,7 +306,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
     def test_update_preserves_existing_footer_when_replacement_has_another(self):
         self.issue_value["body"] = "old\n\n" + CREATED
         with patch.object(operations, "_mutate", return_value={"status": "verified"}) as mutate:
-            github.comment(settings(True), "update", REPO, POSTED, comment_id=9, transport=self.transport)
+            github.comment(settings(), "update", REPO, POSTED, comment_id=9, transport=self.transport)
         self.assertEqual(mutate.call_args.args[3]["body"], POSTED + "\n\n" + CREATED)
 
     def test_review_summary_is_bound_to_exact_head_without_inline_comments(self):
@@ -403,7 +398,7 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 self.assertEqual(sum(call.args[0] == "DELETE" for call in transport.call_args_list), 1)
 
     def test_unconfigured_repository_fails_closed(self):
-        self.assert_fault("github_not_allowed", github.issue, settings(True), "create", "Other/repo", "title", "body", transport=self.transport)
+        self.assert_fault("github_not_allowed", github.issue, settings(), "create", "Other/repo", "title", "body", transport=self.transport)
         self.transport.assert_not_called()
 
     def test_read_scope_never_mutates_or_widens_write_scope(self):
@@ -992,11 +987,11 @@ class GitHubTests(GitHubCaseFixture, unittest.TestCase):
                 raise Fault("github_response_unknown", "synthetic lost acknowledgement")
             return self.response(method, endpoint, payload)
         with patch.object(self, "transport", side_effect=lossy):
-            result = github.comment(settings(False), "create", REPO, "unique-test-comment", number=1, transport=self.transport)
+            result = github.comment(settings(), "create", REPO, "unique-test-comment", number=1, transport=self.transport)
             self.assertEqual(result["status"], "write_outcome_unknown")
             observed = github.read(settings(), "comments", REPO, number=1, transport=self.transport)
         self.assertEqual(len(writes), 1)
-        self.assertEqual([item["body"] for item in observed["data"]], ["unique-test-comment"])
+        self.assertEqual([item["body"] for item in observed["data"]], ["unique-test-comment\n\n" + POSTED])
 
     def test_known_rejection_is_not_an_unknown_write_or_retry(self):
         for code in ("github_access_denied", "github_network_unavailable", "github_rate_limited", "resource_busy"):

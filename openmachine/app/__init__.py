@@ -119,6 +119,7 @@ class Application:
                       "local_result_observation": True},
             "integrations": (["github"] if self.config.github is not None else []),
             "github": None if self.config.github is None else {**self.config.github.model_dump(),
+                                                           "attribution": True,
                                                            "backend": "native", "legacy_gh": "retired",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "connections": {"protocol": 2,

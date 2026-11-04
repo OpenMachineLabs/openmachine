@@ -1,4 +1,5 @@
 schema_version = 1
+# Local Core settings. OM Cloud account/device approvals are separate.
 # Advisory public-release checks while serving; false disables network checks.
 # check_for_updates = false
 
@@ -23,15 +24,10 @@ root = "/absolute/path/to/your/project"
 # write_repositories = ["owner/project"]
 # read_owners = []
 # write_owners = []
-# attribution = true # Default on; false stops new automatic Created/Posted footers.
-# Existing attribution is preserved on edits. See openmachine/skills/github/reference.md#attribution.
+# Open Machine always adds fixed Created/Posted attribution to new GitHub content.
+# There is no attribution setting; existing footers are preserved on edits.
 
 # Optional explicit Skill sources; the empty default does not scan user accounts.
 [skills]
 roots = []
 
-# execution_enabled = false
-# workspace_write_enabled = false
-# [workspaces.remote-project]
-# machine = "build"
-# root = "/home/alex/project"

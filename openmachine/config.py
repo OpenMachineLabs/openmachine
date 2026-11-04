@@ -53,7 +53,6 @@ class GitHubConfig(BaseModel):
     read_owners: list[Owner] = Field(default_factory=list, max_length=256)
     write_owners: list[Owner] = Field(default_factory=list, max_length=256)
     account: Owner | None = None
-    attribution: bool = True
 
     @model_validator(mode="after")
     def explicit_scopes(self):
@@ -106,6 +105,10 @@ class Settings(BaseModel):
     def configuration_sha256(self) -> str:
         # Native mode is part of the effective grant and its configuration identity.
         value = self.model_dump()
+        # Keep existing default-on configuration fingerprints stable.
+        # Attribution is fixed policy, not a configurable setting.
+        if value["github"] is not None:
+            value["github"]["attribution"] = True
         # An omitted/default advisory preference preserves legacy configuration identity.
         if value["check_for_updates"]:
             del value["check_for_updates"]
