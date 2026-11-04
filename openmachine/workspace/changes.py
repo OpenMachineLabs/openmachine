@@ -1,5 +1,6 @@
 """Scoped change application and readback through the original guarded publisher."""
 
+from contextlib import ExitStack, contextmanager
 import hashlib
 import os
 from pathlib import Path
@@ -8,12 +9,24 @@ import uuid
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 from .files import MAX_SOURCE, digest, publish_file, publish_path, root_for, snapshot
-from .git import context, lock_root
+from .git import context, lock_root, writer_parent_roots
 from .worktrees import resolve_root
 from . import change_records as records, change_schema as schema
 from . import preparation
 
 MAX_WORKSPACE_RESULT = 512 * 1024
+
+
+@contextmanager
+def _writer_lease(config, state, machine, root, observed):
+    """Hold relevant non-Git ancestor leases and the selected write lease."""
+    with ExitStack() as locks:
+        for parent in writer_parent_roots(config, machine, observed):
+            key = hashlib.sha256(parent.encode()).hexdigest()
+            locks.enter_context(lease(state / "locks" / f"workspace-{key}.lock", shared=True))
+        key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
+        locks.enter_context(lease(state / "locks" / f"workspace-{key}.lock"))
+        yield
 
 
 def _bound_source(source, effects):
@@ -149,8 +162,7 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
         try:
             if validate_new is not None:
                 validate_new(root)
-            key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
-            with lease(state / "locks" / f"workspace-{key}.lock"):
+            with _writer_lease(config, state, machine, root, observed):
                 if validate_effect is not None:
                     validate_effect(root)
                 plan, sources, desired = preparation._prepared(config, machine, workspace, root, request, operations)
@@ -262,12 +274,11 @@ def write_text_file(config, state: Path, machine: str, workspace: str, path: str
     desired = preparation._text(content)
     root = root_for(config, machine, workspace)
     observed = context(root)
-    key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
     private_directory(state)
     private_directory(state / "locks")
     if validate_new is not None:
         validate_new(root)
-    with lease(state / "locks" / f"workspace-{key}.lock"):
+    with _writer_lease(config, state, machine, root, observed):
         if validate_effect is not None:
             validate_effect(root)
         source = snapshot(root, path)

@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 from openmachine import execution, tasks
+from openmachine.foundation.sanitize import Fault
 from openmachine.workspace.git import context
 from test.support.tasks import TaskFixture, task_contract
 
@@ -73,6 +74,90 @@ class NativeWriterReservationTests(TaskFixture, unittest.TestCase):
                         min(result["command"]["exited_at"] for result in completed))
         for result in completed:
             self.assertEqual(result["cleanup"]["status"], "verified")
+
+    def _held_native(self, root):
+        ready = self.root / ("ready-" + root.name)
+        release = self.root / ("release-" + root.name)
+        code = ("from pathlib import Path\nimport time\n"
+                f"Path({str(ready)!r}).touch()\n"
+                f"while not Path({str(release)!r}).exists(): time.sleep(.02)\n")
+        started = self.app.start_execution(machine="desktop", execution_id=uuid.uuid4().hex,
+            cwd=str(root), argv=[sys.executable, "-c", code], timeout_seconds=15)
+        self.addCleanup(release.touch, exist_ok=True)
+        deadline = time.monotonic() + 9
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertTrue(ready.exists(), "Original native writer did not start")
+        return started, release
+
+    def _finish_held(self, started, release):
+        release.touch()
+        result = self.wait(started)
+        if result["status"] == "outcome_unknown":
+            self.assertTrue(result["command"]["exited"], result)
+            self.assertEqual(result["exit_code"], 0, result)
+            result = execution.reconcile(self.config, self.state, "desktop", started["execution_id"])
+        self.assertEqual(result["status"], "succeeded", result)
+        self.assertEqual(result["cleanup"]["status"], "verified", result)
+
+    def test_active_non_git_parent_blocks_git_task_first_write_without_effect(self):
+        parent = self.root / "outside-parent"
+        repo = parent / "repo"
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
+        observed = self.create_at("git-task", "nested-git", repo)
+        started, release = self._held_native(parent)
+        try:
+            operation = uuid.uuid4().hex
+            args = dict(machine="desktop", workspace_name="nested-git", path="blocked.txt",
+                content="not allowed", expected_head_sha=observed["head_sha"] or "",
+                expected_sha256="", expected_workspace_identity=observed["workspace_identity"],
+                change_id=operation, task_context=self.task_context("git-task", operation))
+            with self.assertRaises(Fault) as blocked:
+                self.app.write_workspace_file(**args)
+            self.assertEqual(blocked.exception.code, "resource_busy")
+            self.assertEqual(blocked.exception.effect, "known_no_effect")
+            self.assertFalse((repo / "blocked.txt").exists())
+            self.assertEqual(tasks.read(self.state, "git-task")["facts"]["operation_count"], 0)
+        finally:
+            self._finish_held(started, release)
+        operation = uuid.uuid4().hex
+        args.update(path="owned.txt", content="retained", change_id=operation,
+                    task_context=self.task_context("git-task", operation))
+        self.assertEqual(self.app.write_workspace_file(**args)["status"], "applied")
+        self.assertEqual((repo / "owned.txt").read_text(), "retained")
+        bare = uuid.uuid4().hex
+        with self.assertRaises(Fault) as caught:
+            self.app.start_execution(machine="desktop", execution_id=bare, cwd=str(parent),
+                argv=[sys.executable, "-c", "print('should not start')"])
+        self.assertEqual(caught.exception.code, "task_resource_conflict")
+        self.assertFalse((self.state / "executions" / bare).exists())
+
+    def test_active_git_worker_blocks_non_git_parent_task_first_write(self):
+        parent = self.root / "bare-parent"
+        repo = parent / "repo"
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, capture_output=True)
+        observed = self.create_at("parent-task", "bare-parent", parent)
+        started, release = self._held_native(repo)
+        try:
+            operation = uuid.uuid4().hex
+            args = dict(machine="desktop", workspace_name="bare-parent", path="blocked.txt",
+                content="not allowed", expected_head_sha="", expected_sha256="",
+                expected_workspace_identity=observed["workspace_identity"],
+                change_id=operation, task_context=self.task_context("parent-task", operation))
+            with self.assertRaises(Fault) as blocked:
+                self.app.write_workspace_file(**args)
+            self.assertEqual(blocked.exception.code, "resource_busy")
+            self.assertEqual(blocked.exception.effect, "known_no_effect")
+            self.assertFalse((parent / "blocked.txt").exists())
+            self.assertEqual(tasks.read(self.state, "parent-task")["facts"]["operation_count"], 0)
+        finally:
+            self._finish_held(started, release)
+        operation = uuid.uuid4().hex
+        args.update(path="owned.txt", content="retained", change_id=operation,
+                    task_context=self.task_context("parent-task", operation))
+        self.assertEqual(self.app.write_workspace_file(**args)["status"], "applied")
 
     def test_two_native_processes_race_one_target_without_duplicate_effect(self):
         observed = self.create_at("race-a", "project", self.work)

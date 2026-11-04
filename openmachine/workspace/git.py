@@ -137,6 +137,26 @@ def lock_root(config, machine: str, cwd: Path, observed: dict) -> str:
     return str(root)
 
 
+def writer_parent_roots(config, machine: str, observed: dict) -> list[str]:
+    """Share active non-Git ancestor leases across Git and non-Git lock domains."""
+    if observed["git_status"] != "observed":
+        return []
+    if whole_device_writes(config):
+        return ["/"]
+    root = Path(observed["worktree"])
+    parents = set()
+    for item in config.workspaces.values():
+        if config.machine(item.machine).transport != "local":
+            continue
+        try:
+            parent = Path(item.root).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if parent != root and root.is_relative_to(parent):
+            parents.add(str(parent))
+    return sorted(parents)
+
+
 def _git_environment() -> dict:
     return {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
 

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from openmachine import __version__
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
-from openmachine.workspace.git import context, lock_root, whole_device_writes
+from openmachine.workspace.git import context, lock_root, whole_device_writes, writer_parent_roots
 from openmachine.workspace import worktrees
 
 from . import control as controls, observation
@@ -221,7 +221,14 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                 observed.update(workspace_lock_root=creation_plan["destination"], creation_plan=creation_plan)
             key = hashlib.sha256(observed["workspace_lock_root"].encode()).hexdigest()
             try:
-                owned = [leases.enter_context(lease(locks / f"workspace-{key}.lock", shared=workspace_access == "shared"))]
+                owned = []
+                if creation_plan is None:
+                    for parent in writer_parent_roots(config, machine, observed):
+                        parent_key = hashlib.sha256(parent.encode()).hexdigest()
+                        owned.append(leases.enter_context(lease(
+                            locks / f"workspace-{parent_key}.lock", shared=True)))
+                owned.append(leases.enter_context(lease(
+                    locks / f"workspace-{key}.lock", shared=workspace_access == "shared")))
             except Fault as error:
                 if error.code != "resource_busy" or creation_plan is not None:
                     raise

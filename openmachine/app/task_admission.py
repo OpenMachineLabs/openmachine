@@ -533,6 +533,10 @@ class TaskAdmission:
                     execution.check_workspace_leases(config, self.app.state, scope=root)
                     key = hashlib.sha256(workspace.lock_root(config, arguments["machine"], root, observed_root).encode()).hexdigest()
                     try:
+                        for parent in workspace.writer_parent_roots(config, arguments["machine"], observed_root):
+                            parent_key = hashlib.sha256(parent.encode()).hexdigest()
+                            admission_lease.enter_context(lease(self.app.state / "locks" /
+                                                                f"workspace-{parent_key}.lock", shared=True))
                         admission_lease.enter_context(lease(self.app.state / "locks" / f"workspace-{key}.lock"))
                     except Fault as error:
                         raise Fault(error.code, str(error), error.evidence, effect="known_no_effect") from error
