@@ -55,6 +55,20 @@ Merge, release, deployment, repository access changes and auto-merge require
 separate explicit authority and current native GitHub policy checks. Do not
 rewrite published history just to satisfy a presentation convention.
 
+## Release notes
+
+Publishing a release needs the separate authority above. Draft notes with only
+these sections, in this order, and omit empty ones:
+
+- `New Features`, `Bug Fixes`, `Documentation` and `Chores`: one bullet per
+  user-visible outcome. Start with an imperative sentence, add at most two
+  sentences on impact or compatibility, and end with the PR links. Version bumps
+  and state contract changes belong under `Chores`.
+- `Changelog`: a `Full Changelog:` compare link from the previous tag, then one
+  line per merged PR with its number, title and author.
+
+Do not add other sections, fields or promotional copy.
+
 ## Labels and automation
 
 [labels.json](.github/labels.json) is the managed label source. Use the appropriate
