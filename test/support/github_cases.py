@@ -20,10 +20,8 @@ CREATED = "---\n\nCreated via [Open Machine](https://github.com/OpenMachineLabs/
 
 POSTED = "---\n\nPosted via [Open Machine](https://github.com/OpenMachineLabs/openmachine)."
 
-def settings(attribution=None, **scopes):
+def settings(**scopes):
     config = scopes or {"repositories": [REPO]}
-    if attribution is not None:
-        config["attribution"] = attribution
     return Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}}, "github": config})
 
 class GitHubCaseFixture(object):
