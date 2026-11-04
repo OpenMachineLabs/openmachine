@@ -19,6 +19,14 @@ from . import runtime
 from .state import LAUNCHER
 
 
+def _pre_release_state(state: Path, candidate_contract: int) -> None:
+    """Reject old Task bytes before stopping the selected development service."""
+    if candidate_contract >= 27:
+        storage = tasks.storage_state(state)
+        if storage["kind"] == "legacy" or storage["kind"] == "sqlite" and storage.get("schema") != 3:
+            raise Fault("task_migration_required", "Pre-release Task state requires explicit review and reset; no automatic upgrade.")
+
+
 def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None, *,
               before_change: Callable[[], None] | None = None, require_safe: bool = False) -> dict:
     candidate_path = candidate_config or service_state._configuration_for(state, record, target)
@@ -41,6 +49,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             checks.workspace_bindings_safe(state, original_settings, candidate_settings, record["probe"]["workspace"])
             checks.activation_safe(state, config=original_settings, candidate_config=candidate_settings,
                                    guards=activation_guards)
+        _pre_release_state(state, installed["state_contract"])
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
@@ -70,8 +79,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             service_state._select_configuration(state, config_path, candidate_digest, allowed)
             runtime._stop(state)
             if installed["state_contract"] >= 18:
-                tasks.migrate(state, resolve_writers=lambda current, operations: checks.resolve_task_writers(
-            state, candidate_settings, current, operations))
+                tasks.migrate(state)
             ready = _start_selected(state, record)
         except (Fault, OSError) as error:
             prior_contract = service_state._installed(state, previous)["state_contract"]
@@ -150,9 +158,9 @@ def _resume_activation(state: Path, record: dict) -> dict:
         checks.workspace_bindings_safe(state, original_settings, candidate_settings, record["probe"]["workspace"])
         checks.activation_safe(state, config=original_settings,
                                candidate_config=candidate_settings, guards=activation_guards)
+        _pre_release_state(state, service_state._installed(state, target)["state_contract"])
         runtime._stop(state)
-        tasks.migrate(state, resolve_writers=lambda current, operations: checks.resolve_task_writers(
-            state, candidate_settings, current, operations))
+        tasks.migrate(state)
         install._verify_candidate(state, record, target)
         ready = _start_selected(state, record)
         return _finish_activation(state, record, ready, bind_management=True)

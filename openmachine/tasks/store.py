@@ -24,11 +24,10 @@ from .index import (INDEX_PAGE, MAX_CHECKPOINT, metadata as validate_metadata,
 def _check_writer(connection, target: dict, identity: str | None, *, required: bool = False) -> None:
     blockers = db.writer_rows(connection, target, foreign_to=identity or "")
     if blockers:
-        reason = "historical_contested" if any(row["state"] == "contested" for row in blockers) else "active_reservation"
         raise Fault("task_resource_conflict",
                     "Choose another worktree or reconcile and safely complete the original Task.",
                     {"canonical_root": target["root"], "blocking_task_ids": sorted({row["task_id"] for row in blockers[:64]}),
-                     "reason": reason, "blockers_truncated": len(blockers) > 64}, effect="known_no_effect")
+                     "reason": "active_reservation", "blockers_truncated": len(blockers) > 64}, effect="known_no_effect")
     same = connection.execute(
         "SELECT * FROM writer_reservations WHERE task_id=? AND (root=? OR (device=? AND inode=?))",
         (identity, target["root"], target["device"], target["inode"])).fetchall()
@@ -52,6 +51,16 @@ def check_writer(state: Path, target: dict, identity: str | None = None, *, requ
             raise Fault("task_restore_unreconciled", "Account for effects after the backup watermark before new local writes.",
                         effect="known_no_effect")
         _check_writer(connection, target, identity, required=required)
+
+
+def writer_reservations(state: Path, identity: str) -> list[dict]:
+    """Bounded original physical roots for explicit plan revision only."""
+    with db.connect(state) as connection:
+        rows = connection.execute(
+            "SELECT root,device,inode FROM writer_reservations WHERE task_id=? LIMIT 65", (identity,)).fetchall()
+        if len(rows) > 64:
+            raise Fault("task_resource_unverified", "Too many original writer roots for bounded plan revision.")
+        return [dict(row) for row in rows]
 
 
 def _observation_support() -> dict:
@@ -418,7 +427,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             if writer_target is not None:
                 _check_writer(connection, writer_target, identity)
                 same_physical = connection.execute(
-                    "SELECT root FROM writer_reservations WHERE task_id=? AND device=? AND inode=? AND state='owned'",
+                    "SELECT root FROM writer_reservations WHERE task_id=? AND device=? AND inode=?",
                     (identity, writer_target["device"], writer_target["inode"])).fetchall()
                 if same_physical:
                     # Refresh the pathname atomically: a later writer selecting a
@@ -428,17 +437,17 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                             connection.execute("UPDATE writer_reservations SET root=? WHERE task_id=? AND root=?",
                                                (writer_target["root"], identity, row["root"]))
                 else:
-                    connection.execute("INSERT OR IGNORE INTO writer_reservations VALUES (?,?,?,?, 'owned')",
+                    connection.execute("INSERT OR IGNORE INTO writer_reservations VALUES (?,?,?,?)",
                         (identity, writer_target["root"], writer_target["device"], writer_target["inode"]))
             local_unresolved = connection.execute(
                 "SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 AND kind IN ('execution','change') LIMIT 1",
                 (identity,)).fetchone()
             if core["terminal"] is not None and core["terminal"]["outcome"] != "abandoned" and not local_unresolved:
-                connection.execute("DELETE FROM writer_reservations WHERE task_id=? AND state='owned'", (identity,))
+                connection.execute("DELETE FROM writer_reservations WHERE task_id=?", (identity,))
             elif retained_targets is not None:
                 if local_unresolved:
                     raise Fault("task_effect_unresolved", "Original local effects prevent target retirement.")
-                for row in connection.execute("SELECT root,device,inode FROM writer_reservations WHERE task_id=? AND state='owned'", (identity,)).fetchall():
+                for row in connection.execute("SELECT root,device,inode FROM writer_reservations WHERE task_id=?", (identity,)).fetchall():
                     root = Path(row["root"])
                     physical = next((target for target in retained_targets
                                      if (row["device"], row["inode"]) == (target["device"], target["inode"])), None)
@@ -454,6 +463,15 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                                                (physical["root"], identity, row["root"]))
                     elif not any(root.is_relative_to(target["root"]) or Path(target["root"]).is_relative_to(root)
                                  for target in retained_targets):
+                        if retained_targets:
+                            try:
+                                actual = root.stat()
+                                if root.is_symlink() or (actual.st_dev, actual.st_ino) != (row["device"], row["inode"]):
+                                    raise OSError("Original target identity changed")
+                            except OSError as error:
+                                raise Fault("task_resource_unverified",
+                                            "The original nested writer moved; verify its physical target before plan revision.",
+                                            effect="known_no_effect") from error
                         connection.execute("DELETE FROM writer_reservations WHERE task_id=? AND root=?", (identity, str(root)))
             result = _view(connection, identity, operation_ids)
         except (ValueError, TypeError, KeyError, sqlite3.IntegrityError) as error:

@@ -1,123 +1,80 @@
-"""One-time writer backfill preserves canonical history and refuses guesses."""
+"""First-release writer storage rejects pre-release migration without losing evidence."""
 
 from contextlib import closing
 import sqlite3
 import unittest
-import uuid
 
 from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.service.checks import resolve_task_writers
 from openmachine.tasks import database
-from test.support.tasks import TaskFixture, task_contract
+from test.support.tasks import TaskFixture, write_legacy_checkpoint
 
 
 class WriterMigrationTests(TaskFixture, unittest.TestCase):
-    def old_schema(self):
+    def old_schema(self, version):
         with closing(sqlite3.connect(self.path)) as connection:
             connection.execute("DROP TABLE writer_reservations")
-            connection.execute("UPDATE store SET schema=2")
+            connection.execute("UPDATE store SET schema=?", (version,))
             connection.commit()
 
-    def history(self):
-        with closing(sqlite3.connect(self.path)) as connection:
-            return {table:connection.execute(f"SELECT * FROM {table} ORDER BY 1,2").fetchall()
-                    for table in ("tasks","operations","task_events","task_updates")}
-
-    def migrate(self):
-        return tasks.migrate(self.state, resolve_writers=lambda current, operations:
-            resolve_task_writers(self.state,self.config,current,operations))
-
-    def test_unique_owner_backfill_preserves_all_history_bytes(self):
-        self.accept_plan()
-        args=self.write_arguments()
-        self.app.write_workspace_file(**args)
-        receipt=(self.state / "workspace-changes" / args["change_id"] / "record.json").read_bytes()
-        before=self.history()
-        self.old_schema()
-        self.assertEqual(self.migrate()["schema"],database.SCHEMA_VERSION)
-        self.assertEqual(self.history(),before)
-        self.assertEqual((self.state / "workspace-changes" / args["change_id"] / "record.json").read_bytes(),receipt)
+    def test_fresh_current_schema_and_idempotent_managed_open(self):
+        state = tasks.migrate(self.state)
+        self.assertEqual((state["kind"], state["schema"], state["active"]),
+                         ("sqlite", database.SCHEMA_VERSION, True))
+        self.assertEqual(tasks.migrate(self.state), state)
         with database.connect(self.state) as connection:
-            rows=connection.execute("SELECT task_id,root,state FROM writer_reservations").fetchall()
-        self.assertEqual([tuple(row) for row in rows],[("structured-one",str(self.work),"owned")])
-        self.assertEqual(self.migrate()["schema"],database.SCHEMA_VERSION)
+            columns = [row["name"] for row in connection.execute("PRAGMA table_info(writer_reservations)")]
+        self.assertEqual(columns, ["task_id", "root", "device", "inode"])
 
-    def test_configuration_remap_does_not_erase_verified_historical_owner(self):
-        self.accept_plan()
-        self.app.write_workspace_file(**self.write_arguments())
-        remapped = self.root / "remapped-root"
-        remapped.mkdir()
-        self.config.workspaces["project"] = self.config.workspaces["project"].model_copy(
-            update={"root": str(remapped)})
-        self.old_schema()
-        self.assertEqual(self.migrate()["schema"], database.SCHEMA_VERSION)
-        with database.connect(self.state) as connection:
-            rows = connection.execute("SELECT task_id,root,state FROM writer_reservations").fetchall()
-        self.assertEqual([tuple(row) for row in rows], [("structured-one", str(self.work), "owned")])
-        with self.assertRaises(Fault) as caught:
-            self.app.write_workspace_file("desktop", str(self.work), "foreign.txt", "bad", "", "")
-        self.assertEqual(caught.exception.code, "task_resource_conflict")
-        self.assertFalse((self.work / "foreign.txt").exists())
-        self.assertEqual(self.app.write_workspace_file(
-            "desktop", str(remapped), "independent.txt", "free", "", "")["status"], "written")
+    def test_prior_sqlite_versions_fail_closed_without_rewriting_task_or_receipt(self):
+        for version in (1, 2):
+            with self.subTest(schema=version):
+                state = self.root / f"old-{version}"
+                config = self.request
+                tasks.create(state, config["task_id"], config["update_id"], config["title"],
+                             config["anchors"], config["origin"], config["contract"], config["stages"])
+                with closing(sqlite3.connect(state / "tasks.db")) as connection:
+                    previous = tuple(connection.execute("SELECT current,sha256 FROM tasks").fetchone())
+                    connection.execute("DROP TABLE writer_reservations")
+                    connection.execute("UPDATE store SET schema=?", (version,))
+                    connection.commit()
+                inode = (state / "tasks.db").stat().st_ino
+                self.fault("task_migration_required", tasks.migrate, state)
+                self.assertEqual((state / "tasks.db").stat().st_ino, inode)
+                with closing(sqlite3.connect(state / "tasks.db")) as connection:
+                    self.assertEqual(connection.execute("SELECT schema FROM store").fetchone()[0], version)
+                    self.assertEqual(tuple(connection.execute("SELECT current,sha256 FROM tasks").fetchone()), previous)
+                    self.assertIsNone(connection.execute(
+                        "SELECT name FROM sqlite_master WHERE name='writer_reservations'").fetchone())
 
-    def test_historical_two_owners_are_contested_and_unrelated_root_is_free(self):
-        self.accept_plan()
-        self.app.write_workspace_file(**self.write_arguments())
-        # Construct the released writer's valid historical shape: schema 2
-        # admitted sequential writers to one target without a durable owner.
-        with database.connect(self.state,write=True) as connection:
-            connection.execute("DELETE FROM writer_reservations")
-        request=task_contract(self.context,"historical-two")
-        request["contract"]["tools"]=self.request["contract"]["tools"]
-        created=self.app.create_task(**request)["record"]
-        record=self.app.control_task(task_id="historical-two",expected_revision=created["revision"],expected_plan_revision=1,
-            expected_epoch=0,update_id=uuid.uuid4().hex,transition={"action":"claim","handoff_id":created["handoff"]["id"]})["record"]
-        args=self.write_arguments(path="second.txt")
-        args["task_context"].update(task_id="historical-two",task_revision=record["revision"],continuation_epoch=record["control"]["epoch"])
-        self.app.write_workspace_file(**args)
-        before=self.history()
-        self.old_schema()
-        self.migrate()
-        self.assertEqual(self.history(),before)
-        with self.assertRaises(Fault) as caught:
-            self.app.write_workspace_file("desktop","project","blocked.txt","bad","","")
-        self.assertEqual(caught.exception.code,"task_resource_conflict")
-        self.assertEqual(caught.exception.evidence["reason"],"historical_contested")
-        self.assertEqual(caught.exception.evidence["blocking_task_ids"],["historical-two","structured-one"])
-        self.assertFalse((self.work / "blocked.txt").exists())
-        other=self.root / "unrelated"
-        other.mkdir()
-        self.assertEqual(self.app.write_workspace_file("desktop",str(other),"free.txt","free","","")["status"],"written")
+    def test_legacy_file_store_is_preserved_not_implicitly_imported(self):
+        write_legacy_checkpoint(self.state, "old-note", "Pre-release developer work.\n")
+        root = self.state / "tasks"
+        original = {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+        self.fault("task_migration_required", tasks.migrate, self.state)
+        self.assertFalse((self.state / "tasks.db").exists())
+        self.assertEqual(original, {str(path.relative_to(root)): path.read_bytes()
+                                    for path in root.rglob("*") if path.is_file()})
 
-    def test_old_schema_activation_reads_settled_history(self):
-        self.accept_plan()
-        self.app.write_workspace_file(**self.write_arguments())
-        self.old_schema()
-        self.assertEqual(list(tasks.activation_blockers(self.state)), [])
-
-    def test_old_schema_activation_still_blocks_unknown_original(self):
-        from unittest.mock import patch
+    def test_restore_fence_and_existing_reservation_are_not_reset(self):
         self.accept_plan()
         args = self.write_arguments()
-        with patch.object(self.app.machines, "write_workspace_file",
-                          side_effect=Fault("fixture_unknown", "Lost original result")):
-            self.fault("fixture_unknown", self.app.write_workspace_file, **args)
-        self.old_schema()
-        blocked = list(tasks.activation_blockers(self.state))
-        self.assertEqual(len(blocked), 1)
-        self.assertEqual(blocked[0]["id"], args["change_id"])
+        self.app.write_workspace_file(**args)
+        before = self.task_bytes()
+        self.assertEqual(tasks.migrate(self.state)["schema"], 3)
+        self.assertEqual(self.task_bytes(), before)
+        with database.connect(self.state) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM writer_reservations").fetchone()[0], 1)
+        with database.connect(self.state, write=True) as connection:
+            connection.execute("UPDATE store SET restore_required=1")
+        self.fault("task_restore_unreconciled", tasks.migrate, self.state)
+        self.assertEqual(self.task_bytes(), before)
 
-    def test_replaced_historical_root_rejects_cutover_without_rewriting_history(self):
-        self.accept_plan()
-        self.app.write_workspace_file(**self.write_arguments())
-        self.old_schema()
-        before=self.history()
-        self.work.rename(self.root / "original")
-        self.work.mkdir()
-        self.fault("task_migration_incompatible",self.migrate)
-        self.assertEqual(self.history(),before)
+    def test_unsupported_schema_must_not_be_repaired_or_reinitialized(self):
+        self.create()
         with closing(sqlite3.connect(self.path)) as connection:
-            self.assertEqual(connection.execute("SELECT schema FROM store").fetchone()[0],2)
-            self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name='writer_reservations'").fetchone())
+            connection.execute("UPDATE store SET schema=99")
+            connection.commit()
+        original = self.path.read_bytes()
+        self.fault("task_migration_required", tasks.migrate, self.state)
+        self.assertEqual(self.path.read_bytes(), original)

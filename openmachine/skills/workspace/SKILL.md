@@ -34,10 +34,6 @@ Typed writes need the workspace-write grant. Structured task effects also need t
 [current claim and task context](../tasks/continue.md). Verify actual changed files
 and run explicitly authorized validation through the [execution tools](../execution/SKILL.md).
 
-New write/edit/patch calls respect durable Task ownership of the canonical Git
-worktree or selected non-Git root, including aliases and overlapping roots. Typed
-reads and previews do not acquire ownership. Non-Git reservations use the actual
-selected root; the existing conservative execution lease is unchanged. Worktree
-creation retains destination/common-metadata locks without reserving the source
-checkout for the Task lifetime. Explicitly revise the Task to the verified new
-worktree before its first mutation.
+Typed mutations honor Task reservations; reads/previews do not. Worktree
+creation locks its destination, not the source for Task lifetime; revise the
+Task target before its first write. See [Tasks](../tasks/SKILL.md).

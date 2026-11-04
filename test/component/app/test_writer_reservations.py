@@ -2,11 +2,12 @@
 
 from copy import deepcopy
 import sqlite3
+import sys
 import unittest
 from unittest.mock import patch
 import uuid
 
-from openmachine import tasks
+from openmachine import execution, tasks
 from openmachine.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import database
@@ -300,6 +301,57 @@ class WriterReservationTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.rows(), owners)
         self.assertEqual(self.view()["record"]["plan"]["revision"], prior["plan"]["revision"])
         self.assertEqual((descendant / "other.txt").read_text(), "other")
+
+    def _settled_nested_launch(self):
+        child = self.work / "child"
+        child.mkdir()
+        operation = uuid.uuid4().hex
+        started = self.app.start_execution(machine="desktop", execution_id=operation,
+            cwd=str(child), argv=[sys.executable, "-c", "print('nested')"],
+            task_context=self.context_for(operation))
+        result = self.wait(started)
+        if result["status"] == "outcome_unknown":
+            result = execution.reconcile(self.config, self.state, "desktop", operation)
+        self.assertEqual(result["status"], "succeeded")
+        self.app.task_admission.reconcile(tasks.read(self.state, "structured-one"))
+        original = self.rows()
+        self.assertEqual([row["root"] for row in original], [str(child)])
+        return original
+
+    def _rename_contract(self, moved):
+        context = self.app.read_workspace_file("desktop", str(moved), "AGENTS.md")["context"]
+        contract = deepcopy(self.view()["record"]["contract"])
+        contract["targets"] = [{"machine": "desktop", "workspace": str(moved),
+                                "workspace_identity": context["workspace_identity"], "head_sha": None}]
+        return contract
+
+    def test_nested_launch_reservation_rebinds_after_accepted_parent_rename(self):
+        original = self._settled_nested_launch()
+        moved = self.root / "renamed-with-nested-launch"
+        self.work.rename(moved)
+        self.control("revise_plan", contract=self._rename_contract(moved), stages=self.request["stages"],
+                     invalidated_stage_ids=["verify"], reason="Rebind actual nested launch inode")
+        rebound = self.rows()
+        self.assertEqual(len(rebound), 1)
+        self.assertEqual(rebound[0]["root"], str(moved / "child"))
+        self.assertEqual((rebound[0]["device"], rebound[0]["inode"]),
+                         (original[0]["device"], original[0]["inode"]))
+        self.denied(self.app.write_workspace_file, **self.other("foreign-nested", moved / "child"))
+        self.assertFalse((moved / "child" / "other.txt").exists())
+
+    def test_unverified_nested_parent_rename_never_releases_reservation(self):
+        original = self._settled_nested_launch()
+        moved = self.root / "renamed-missing-child"
+        self.work.rename(moved)
+        retained = self.root / "retained-child"
+        (moved / "child").rename(retained)
+        before = self.view()["record"]
+        self.fault("task_resource_unverified", self.control, "revise_plan",
+                   contract=self._rename_contract(moved), stages=self.request["stages"],
+                   invalidated_stage_ids=["verify"], reason="Do not free missing nested root")
+        self.assertEqual(self.rows(), original)
+        self.assertEqual(self.view()["record"]["plan"]["revision"], before["plan"]["revision"])
+        self.assertTrue(retained.is_dir())
 
     def test_legacy_checkpoint_id_does_not_bypass_another_task(self):
         self.app.write_workspace_file(**self.write_arguments())

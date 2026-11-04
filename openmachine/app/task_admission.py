@@ -146,6 +146,31 @@ class TaskAdmission:
             for target in change["contract"]["targets"]:
                 config = workspace.select_worktree(self.app.config, target["machine"], target["workspace"], target.get("worktree", ""))
                 retained_targets.append(workspace.writable_target(workspace.root_for(config, target["machine"], target["workspace"])))
+            # A reserved nested cwd moves with its accepted non-Git parent.
+            # Verify the original inode at the exact relative path before rebinding.
+            prior_roots = []
+            for target in record["contract"]["targets"]:
+                configured = self.app.config.workspaces.get(target["workspace"])
+                old = Path(target.get("worktree") or (
+                    configured.root if configured is not None and configured.machine == target["machine"]
+                    else target["workspace"]))
+                if old.is_absolute():
+                    prior_roots.append(old)
+            for held in tasks.writer_reservations(self.app.state, record["task_id"]):
+                previous = Path(held["root"])
+                for old in prior_roots:
+                    if not previous.is_relative_to(old):
+                        continue
+                    suffix = previous.relative_to(old)
+                    if not suffix.parts:
+                        continue
+                    for current in retained_targets[:len(change["contract"]["targets"])]:
+                        try:
+                            relocated = workspace.writable_target(Path(current["root"]) / suffix)
+                        except Fault:
+                            continue
+                        if (relocated["device"], relocated["inode"]) == (held["device"], held["inode"]):
+                            retained_targets.append(relocated)
         view = tasks.update(self.app.state, request["task_id"],
             commit,
             expected_revision=request["expected_revision"], last_update=update,

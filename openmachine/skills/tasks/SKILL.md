@@ -29,17 +29,9 @@ exception for a subsequent explicit user continuation after the interrupted turn
 has ended. Lease expiry alone may permit the bounded same-claim flow in
 [Continue](continue.md); it never grants new effects or resets a budget.
 
-A Task reserves a verified local target when its first command or typed file
-mutation is admitted. The owner is the original Task ID. Claims, release/handoff,
-pause, expiry, disconnection and restart do not release that reservation. Continue
-the same Task with its lawful current claim and context; a different caller does
-not create another owner. Original live, partial or unknown effects and abandonment
-retain ownership. Safe terminal retirement or a verified plan revision that drops
-a settled target releases it atomically.
-
-`task_resource_conflict` identifies the canonical root and blocking Tasks. Choose
-another worktree or reconcile and safely complete the original Task. Do not omit
-context, invent another operation ID or use shared shell access to bypass it.
-The boundary is cooperating mutations through one authoritative Core state;
-arbitrary shell paths, external editors and independent state directories are
-not isolated. Task reservations are separate from short native operation leases.
+A Task's first admitted local write reserves the verified target for `task_id`,
+not a client or claim. Pause, disconnection and claim changes do not release it;
+only safe terminal retirement or a verified plan revision can. Foreign/bare
+writes fail with `task_resource_conflict`: use another worktree or lawfully
+continue the original Task. Reads/previews remain available. This protects
+cooperating calls through one Core state, not arbitrary shell/external writes.

@@ -350,9 +350,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         save_json(path, service_state._json(path) | {"state_contract": 18,
                   "management_contract": 1, "payload_sha256": record["request"]["payload_sha256"]})
         storage = {"kind": "legacy", "fenced": False, "active": False}
-        def migrate(state, *, resolve_writers=None):
-            self.assertTrue(callable(resolve_writers))
-            storage.update(kind="sqlite", fenced=True, active=True)
+        def migrate(state):
+            storage.update(kind="sqlite", schema=3, fenced=True, active=True)
             return storage
         migration = self.enterContext(patch.object(tasks, "migrate", side_effect=migrate))
         self.enterContext(patch.object(tasks, "storage_state", side_effect=lambda state: dict(storage)))
