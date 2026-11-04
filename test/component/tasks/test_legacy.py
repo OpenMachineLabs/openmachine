@@ -13,11 +13,20 @@ from openmachine.tasks import database, migration, records
 from openmachine.config import SkillSources
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
+from openmachine.workspace.git import writable_target
 from test.support.continuity_cases import ContinuityCaseFixture
 from test.support.tasks import task_contract, write_legacy_checkpoint, write_legacy_task
 
 
 class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
+    def synthetic_historical_targets(self, current, operations):
+        # This component fixture invents old operation rows, not domain receipts.
+        # Give those synthetic rows a declared physical target solely to test
+        # archive/semantic preservation; native migration tests use real receipts.
+        self.assertTrue(operations)
+        self.assertTrue(all(op["locator"]["machine"] == "desktop" for op in operations))
+        return [writable_target(self.root)]
+
     def test_private_checkpoint_lookup_does_not_duplicate_progress_in_index(self):
         self.assertEqual(tasks.find(self.state)["status"], "uninitialized")
         self.assertFalse(self.state.exists())
@@ -238,7 +247,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
             index["generation"] += 1
             save_json(path, index)
         raw = (self.state / "tasks/structured-one/task.json").read_bytes()
-        active = tasks.migrate(self.state)
+        active = tasks.migrate(self.state, resolve_writers=self.synthetic_historical_targets)
         self.assertEqual((active["identity"], (self.state / "tasks.db").stat().st_ino), (prepared["identity"], inode))
         self.assertEqual((active["kind"], active["active"], active["fenced"]), ("sqlite", True, True))
         observed = tasks.read(self.state, "task-one")
@@ -336,7 +345,7 @@ class ContinuityTests(ContinuityCaseFixture, unittest.TestCase):
         root = self.state / "tasks"
         raw = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
         lock_inode = (self.state / "locks/tasks.lock").stat().st_ino
-        tasks.migrate(self.state)
+        tasks.migrate(self.state, resolve_writers=self.synthetic_historical_targets)
         archive = next(self.state.glob("tasks-legacy-*"))
         self.assertEqual({path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}, raw)
         self.assertFalse(root.exists())

@@ -68,3 +68,12 @@ A retained local start rejection is not a lost worker. A recorded pre-dispatch
 prove a failed-before-launch result. The original task operation remains with its
 ID and request hash; no execution receipt is invented. Remote, ambiguous, live or
 partial destinations remain unresolved. This correction never replays an effect.
+
+Managed writer-reservation cutover verifies historical local receipts and roots
+before its SQLite transaction. It preserves canonical Task, operation and event
+bytes. Multiple historical owners of an overlapping target become contested;
+new writes to that target remain blocked, while unrelated targets remain usable.
+Missing receipts or replaced/unverifiable historical roots stop cutover with the
+original Task and operation IDs, rather than inventing an owner. Preserve that
+evidence and use an isolated target; no force-unlock or automatic takeover exists.
+After schema cutover, old writers are incompatible, including rollback candidates.

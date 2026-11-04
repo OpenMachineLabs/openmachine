@@ -306,6 +306,8 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
         storage = retained_tasks["task_storage"]
+        if storage["kind"] == "sqlite" and storage.get("schema") == 3 and value["state_contract"] < 27:
+            raise Fault("incompatible_state", "The Task writer reservation schema requires its original compatible writer.")
         if storage["kind"] == "sqlite" and storage.get("schema") == 2 and value["state_contract"] < 25:
             raise Fault("incompatible_state", "An old Core cannot read the native-only Task schema.")
         if storage["kind"] == "sqlite" or value["state_contract"] >= 18:
@@ -428,3 +430,47 @@ def _managed_probe(state: Path, record: dict, parent: int, *, child: int | None 
     if relationship.returncode or relationship.stdout.strip() != str(parent):
         raise Fault("service_identity_mismatch", "The MCP process is not a child of the selected managed service.")
     return {**ready, "supervisor_pid": parent}
+
+
+def resolve_task_writers(state: Path, config, current: dict, operations: list[dict]) -> list[dict]:
+    """Compose original domain readers for the managed Task reservation backfill."""
+    from openmachine import execution, workspace
+
+    targets = []
+    accepted_identities = set()
+    for accepted in current["contract"]["targets"]:
+        accepted_identities.add((accepted["machine"], accepted["workspace_identity"]))
+        selected = workspace.select_worktree(config, accepted["machine"], accepted["workspace"], accepted.get("worktree", ""))
+        targets.append(workspace.writable_target(workspace.root_for(selected, accepted["machine"], accepted["workspace"])))
+    retained = {}
+    for operation in operations:
+        locator = operation["locator"]
+        if locator["kind"] == "execution" and (locator["control_seq"] is not None or operation["id"] != locator["execution_id"]):
+            continue
+        try:
+            if locator["kind"] == "execution":
+                original = execution.read_record(state / "executions" / locator["execution_id"])
+                if original["request"].get("worktree_creation") or original["context"].get("creation_plan"):
+                    continue
+                root = Path(original["context"]["worktree"])
+            else:
+                original = workspace.read_change(config, state, locator["machine"], locator["change_id"])
+                root = Path(original["context"]["root"])
+            target = workspace.writable_target(root)
+            evidence = original["context"]
+            selected_root = evidence.get("cwd", evidence.get("root"))
+            if selected_root == target["root"]:
+                if evidence.get("root_id") != [target["device"], target["inode"]]:
+                    raise Fault("context_mismatch", "Historical root identity changed.")
+            elif not selected_root or workspace.context(Path(selected_root))["workspace_identity"] != evidence["workspace_identity"]:
+                raise Fault("context_mismatch", "Historical nested root identity cannot be reconstructed.")
+        except (Fault, OSError, KeyError) as error:
+            raise Fault("task_migration_incompatible", "The original local target cannot be reconstructed; preserve its Task and receipt. No new writer authority was activated.",
+                        {"task_id": current["task_id"], "operation_id": operation["id"]}) from error
+        if ((locator["machine"], evidence["workspace_identity"]) in accepted_identities
+                or any(root.is_relative_to(item["root"]) or Path(item["root"]).is_relative_to(root)
+                       for item in targets)):
+            # An unchanged accepted physical identity outlives a configured
+            # workspace-path remap. Never let config alone discard old ownership.
+            retained[target["root"]] = target
+    return list(retained.values())

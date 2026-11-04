@@ -33,3 +33,11 @@ Preflight is not a multi-file transaction; retain partial/unknown outcomes.
 Typed writes need the workspace-write grant. Structured task effects also need the
 [current claim and task context](../tasks/continue.md). Verify actual changed files
 and run explicitly authorized validation through the [execution tools](../execution/SKILL.md).
+
+New write/edit/patch calls respect durable Task ownership of the canonical Git
+worktree or selected non-Git root, including aliases and overlapping roots. Typed
+reads and previews do not acquire ownership. Non-Git reservations use the actual
+selected root; the existing conservative execution lease is unchanged. Worktree
+creation retains destination/common-metadata locks without reserving the source
+checkout for the Task lifetime. Explicitly revise the Task to the verified new
+worktree before its first mutation.

@@ -28,3 +28,18 @@ end-of-turn boundaries, with the narrow [historical handoff recovery](continue.m
 exception for a subsequent explicit user continuation after the interrupted turn
 has ended. Lease expiry alone may permit the bounded same-claim flow in
 [Continue](continue.md); it never grants new effects or resets a budget.
+
+A Task reserves a verified local target when its first command or typed file
+mutation is admitted. The owner is the original Task ID. Claims, release/handoff,
+pause, expiry, disconnection and restart do not release that reservation. Continue
+the same Task with its lawful current claim and context; a different caller does
+not create another owner. Original live, partial or unknown effects and abandonment
+retain ownership. Safe terminal retirement or a verified plan revision that drops
+a settled target releases it atomically.
+
+`task_resource_conflict` identifies the canonical root and blocking Tasks. Choose
+another worktree or reconcile and safely complete the original Task. Do not omit
+context, invent another operation ID or use shared shell access to bypass it.
+The boundary is cooperating mutations through one authoritative Core state;
+arbitrary shell paths, external editors and independent state directories are
+not isolated. Task reservations are separate from short native operation leases.

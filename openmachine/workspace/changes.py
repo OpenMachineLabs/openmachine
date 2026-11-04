@@ -103,7 +103,7 @@ def read_change(config, state: Path, machine: str, change_id: str, observe_curre
     return result
 
 
-def _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations=None):
+def _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations=None, validate_effect=None):
     root = root_for(config, machine, workspace)
     if dry_run:
         plan, sources, desired = preparation._prepared(config, machine, workspace, root, request, operations)
@@ -136,6 +136,8 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
     # The actual owner has the same encoded width; prepared plans are sized later.
     schema.check_record_budget(record)
     patching = operations is not None
+    if validate_effect is not None:
+        validate_effect(root)
     with records._own(state, change_id) as (directory, existing):
         if existing:
             original = read_change(config, state, machine, change_id)
@@ -149,6 +151,8 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
                 validate_new(root)
             key = hashlib.sha256(lock_root(config, machine, root, observed).encode()).hexdigest()
             with lease(state / "locks" / f"workspace-{key}.lock"):
+                if validate_effect is not None:
+                    validate_effect(root)
                 plan, sources, desired = preparation._prepared(config, machine, workspace, root, request, operations)
                 if plan["context"] != record["context"]:
                     raise Fault("context_mismatch", "Workspace context changed after request admission.")
@@ -203,6 +207,8 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
                           error=code, finished_at=time.time())
             if not uncertain:
                 records._save(directory, record)
+                if code in {"task_resource_conflict", "task_resource_unverified"}:
+                    raise error
                 return records._observed(directory, record, owned=True) | {"machine": machine, "workspace": workspace}
             raise Fault("change_outcome_unknown", "Read this original change and current files; never replay uncertain effects.",
                         record | {"record_persistence": "unverified", "machine": machine, "workspace": workspace}) from error
@@ -211,13 +217,13 @@ def _apply(config, state, machine, workspace, request, change_id, dry_run, valid
 def apply_patch(config, state: Path, machine: str, workspace: str, patch_text: str,
                 expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
                 create_parents: bool = False, change_id: str = "", dry_run: bool = False,
-                expected_plan_sha256: str = "", *, validate_new=None) -> dict:
+                expected_plan_sha256: str = "", *, validate_new=None, validate_effect=None) -> dict:
     try:
         if type(dry_run) is not bool or (change_id != "" if dry_run else not schema.is_hex(change_id, 32)):
             raise Fault("invalid_change_id", "Preview requires no ID; apply requires a new 32-lowercase-hex ID.")
         request, operations = preparation._patch_request(patch_text, preconditions, expected_workspace_identity,
                                              expected_head_sha, create_parents, expected_plan_sha256)
-        return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations)
+        return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, operations, validate_effect)
     except Fault as error:
         error.evidence = {"machine": machine, "workspace": workspace, "change_id": change_id, **(error.evidence or {})}
         raise
@@ -226,12 +232,12 @@ def apply_patch(config, state: Path, machine: str, workspace: str, patch_text: s
 def edit_text_file(config, state: Path, machine: str, workspace: str, path: str, edits: list[dict],
                    expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
                    change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
-                   *, validate_new=None) -> dict:
+                   *, validate_new=None, validate_effect=None) -> dict:
     try:
         if type(dry_run) is not bool or (change_id != "" if dry_run else not schema.is_hex(change_id, 32)):
             raise Fault("invalid_change_id", "Preview requires no ID; apply requires a new 32-lowercase-hex ID.")
         request = preparation._request("edit", path, edits, expected_workspace_identity, expected_head_sha, expected_sha256, expected_plan_sha256)
-        return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new)
+        return _apply(config, state, machine, workspace, request, change_id, dry_run, validate_new, validate_effect=validate_effect)
     except Fault as error:
         error.evidence = {"machine": machine, "workspace": workspace, "change_id": change_id,
                           **(error.evidence or {})}
@@ -240,13 +246,13 @@ def edit_text_file(config, state: Path, machine: str, workspace: str, path: str,
 
 def write_text_file(config, state: Path, machine: str, workspace: str, path: str, content: str,
                     expected_head_sha: str, expected_sha256: str, change_id: str = "",
-                    expected_workspace_identity: str = "", *, validate_new=None) -> dict:
+                    expected_workspace_identity: str = "", *, validate_new=None, validate_effect=None) -> dict:
     if not schema.is_hex(change_id, 32, empty=True) or not schema.is_hex(expected_workspace_identity, 64, empty=True):
         raise Fault("invalid_precondition", "Use a valid change ID and workspace identity, or explicit empty legacy values.")
     if change_id:
         try:
             request = preparation._request("write", path, content, expected_workspace_identity, expected_head_sha, expected_sha256, "")
-            return _apply(config, state, machine, workspace, request, change_id, False, validate_new)
+            return _apply(config, state, machine, workspace, request, change_id, False, validate_new, validate_effect=validate_effect)
         except Fault as error:
             error.evidence = {"machine": machine, "workspace": workspace, "change_id": change_id, **(error.evidence or {})}
             raise
@@ -262,6 +268,8 @@ def write_text_file(config, state: Path, machine: str, workspace: str, path: str
     if validate_new is not None:
         validate_new(root)
     with lease(state / "locks" / f"workspace-{key}.lock"):
+        if validate_effect is not None:
+            validate_effect(root)
         source = snapshot(root, path)
         if (source["context"]["head_sha"] or "") != expected_head_sha:
             raise Fault("context_mismatch", "Git HEAD changed; inspect the original workspace.")

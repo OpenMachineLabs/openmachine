@@ -60,7 +60,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
           workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
           termination_grace_seconds: float | None = None, tty: bool = False, terminal_size: dict | None = None,
-          *, validate_new: Callable[[], object] | None = None) -> dict:
+          *, validate_new: Callable[[], object] | None = None, validate_effect=None) -> dict:
     target = config.machine(machine, write=True)
     keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id,
                           termination_grace_seconds, tty, terminal_size)
@@ -88,7 +88,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return observation.read(config, state, machine, execution_id)
         _admit(config, state, machine, execution_id, working, request,
-               validate_new=validate_new)
+               validate_new=validate_new, validate_effect=validate_effect)
     return observation.read(config, state, machine, execution_id)
 
 
@@ -96,7 +96,7 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
                     destination: str, base_ref: str, new_branch: str, execution_id: str,
                     expected_workspace_identity: str, worktree: str = "", task_id: str = "",
                     *, remote_worker: Path | None = None,
-                    validate_new: Callable[[], object] | None = None) -> dict:
+                    validate_new: Callable[[], object] | None = None, validate_effect=None) -> dict:
     """Create an optional checkout through the existing durable execution lifecycle."""
     before_admission = True
     try:
@@ -145,7 +145,7 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
                        "tty": False, "terminal_size": None, "worktree_creation": intent}
             before_admission = False
             _admit(config, state, machine, execution_id, Path(plan["source_root"]), request,
-                   creation_plan=plan)
+                   creation_plan=plan, validate_effect=validate_effect)
         return observation.read(config, state, machine, execution_id)
     except (Fault, OSError) as error:
         if before_admission:
@@ -184,7 +184,7 @@ def _creation_parent_roots(config: "Settings", machine: str, destination: Path) 
 def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
            working: Path, request: dict, *,
            validate_new: Callable[[], object] | None = None,
-           creation_plan: dict | None = None) -> None:
+           creation_plan: dict | None = None, validate_effect=None) -> None:
     """Admit once under the original ID lease; creation plans are internal only."""
     directory = record_directory(state, execution_id)
     locks = state / "locks"
@@ -243,6 +243,8 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
             if creation_plan is not None:
                 worktrees.validate_creation(creation_plan)
+            if validate_effect is not None:
+                validate_effect(Path(creation_plan["destination"]) if creation_plan is not None else working)
         except (Fault, OSError) as error:
             if creation_plan is None:
                 raise

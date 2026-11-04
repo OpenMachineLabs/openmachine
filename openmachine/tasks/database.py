@@ -18,10 +18,19 @@ from openmachine.foundation.state import lease, private_directory
 from . import records
 from .index import private_path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIN_ADMISSION_FREE = 16 * 1024 * 1024
 INITIALIZING = b"openmachine-task-initializing-v1\n"
 _active = ContextVar("task_transaction", default=None)
+RESERVATION_SCHEMA = """
+CREATE TABLE writer_reservations (
+ task_id TEXT NOT NULL REFERENCES tasks(task_id), root TEXT NOT NULL,
+ device INTEGER NOT NULL, inode INTEGER NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('owned','contested')),
+ PRIMARY KEY(task_id,root)) STRICT;
+CREATE INDEX writer_roots ON writer_reservations(root);
+CREATE INDEX writer_identities ON writer_reservations(device,inode);
+"""
 SCHEMA = """
 CREATE TABLE store (singleton INTEGER PRIMARY KEY CHECK(singleton=1), schema INTEGER NOT NULL,
  identity TEXT NOT NULL, active INTEGER NOT NULL, generation INTEGER NOT NULL,
@@ -62,7 +71,7 @@ CREATE TABLE operation_scopes (task_id TEXT NOT NULL, operation_id TEXT NOT NULL
  scope TEXT NOT NULL, witness TEXT, sha256 TEXT NOT NULL, PRIMARY KEY(task_id,operation_id),
  FOREIGN KEY(task_id,operation_id) REFERENCES operations(task_id,id)) STRICT;
 CREATE TABLE imports (path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL) STRICT;
-"""
+""" + RESERVATION_SCHEMA
 
 # Four declared targets at most. Indexing must not prevent retention of a
 # corrupted original Task row: the reader still detects its invalid digest.
@@ -103,14 +112,14 @@ def ensure_target_indexes(connection: sqlite3.Connection) -> None:
 def upgrade_native_schema(connection: sqlite3.Connection, *, verify_operation) -> None:
     """Managed-only atomic removal of the retired SSH column, without rewriting receipts."""
     owner = connection.execute("SELECT schema FROM store WHERE singleton=1").fetchone()
-    if owner is None or owner["schema"] not in (1, SCHEMA_VERSION):
+    if owner is None or owner["schema"] not in (1, 2, SCHEMA_VERSION):
         raise Fault("unsupported_task_format", "Unknown Task schema; retain original bytes.")
     fence = connection.execute("SELECT restore_required FROM store WHERE singleton=1").fetchone()
     if fence is None or fence["restore_required"] not in (0, 1):
         raise Fault("corrupt_tasks", "Retained Task restore fence is not verified.")
     if fence["restore_required"]:
         raise Fault("task_restore_unreconciled", "Retained restored Task authority cannot be upgraded before reconciliation.")
-    if owner["schema"] == SCHEMA_VERSION:
+    if owner["schema"] in (2, SCHEMA_VERSION):
         return
     expected = {"task_id", "id", "ordinal", "stage_id", "plan_revision", "epoch",
                 "kind", "machine", "target_identity", "repository", "effect_key",
@@ -151,7 +160,7 @@ def upgrade_native_schema(connection: sqlite3.Connection, *, verify_operation) -
         connection.execute("CREATE INDEX operation_target ON operations(machine)")
         if indexes:
             connection.execute(TARGET_INDEXES[-1])
-        connection.execute("UPDATE store SET schema=? WHERE singleton=1 AND schema=1", (SCHEMA_VERSION,))
+        connection.execute("UPDATE store SET schema=? WHERE singleton=1 AND schema=1", (2,))
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise Fault("corrupt_tasks", "Native schema upgrade changed Task foreign keys.")
         commit(connection)
@@ -323,7 +332,7 @@ def _open(state: Path, *, write: bool) -> sqlite3.Connection:
 
 def metadata(connection: sqlite3.Connection, *, preflight_native_cutover: bool = False) -> dict:
     row = connection.execute("SELECT * FROM store WHERE singleton=1").fetchone()
-    old_read = (preflight_native_cutover and row is not None and row["schema"] == 1
+    old_read = (preflight_native_cutover and row is not None and row["schema"] in (1, 2)
                 and connection.execute("PRAGMA query_only").fetchone()[0] == 1)
     if row is None or row["schema"] != SCHEMA_VERSION and not old_read:
         raise Fault("unsupported_task_format", "The Task schema needs one managed native cutover before normal operation.")
@@ -525,3 +534,18 @@ def storage_state(state: Path) -> dict:
                 "identity": owner["identity"], "generation": owner["generation"],
                 "active": bool(owner["active"]), "fenced": fenced,
                 "restore_required": bool(owner["restore_required"])}
+
+
+def writer_rows(connection, target: dict, *, foreign_to: str | None = None):
+    """Indexed overlap; ordinary conflict diagnostics are bounded to 64 owners."""
+    root = target["root"]
+    ancestors = [str(path) for path in (Path(root), *Path(root).parents)]
+    prefix = root.rstrip("/") + "/"
+    query = ("SELECT * FROM writer_reservations WHERE root IN (" + ",".join("?" for _ in ancestors)
+             + ") UNION SELECT * FROM writer_reservations WHERE root>=? AND root<? "
+             "UNION SELECT * FROM writer_reservations WHERE device=? AND inode=?")
+    arguments = (*ancestors, prefix, prefix[:-1] + "0", target["device"], target["inode"])
+    if foreign_to is not None:
+        query = "SELECT * FROM (" + query + ") WHERE task_id<>? OR state='contested' LIMIT 65"
+        arguments = (*arguments, foreign_to)
+    return connection.execute(query, arguments).fetchall()

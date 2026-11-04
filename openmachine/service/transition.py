@@ -70,17 +70,19 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             service_state._select_configuration(state, config_path, candidate_digest, allowed)
             runtime._stop(state)
             if installed["state_contract"] >= 18:
-                tasks.migrate(state)
+                tasks.migrate(state, resolve_writers=lambda current, operations: checks.resolve_task_writers(
+            state, candidate_settings, current, operations))
             ready = _start_selected(state, record)
         except (Fault, OSError) as error:
             prior_contract = service_state._installed(state, previous)["state_contract"]
             first_ledger = installed["state_contract"] >= 18 and prior_contract < 18
             native_schema = installed["state_contract"] >= 25 and prior_contract < 25
-            if first_ledger or native_schema:
+            writer_schema = installed["state_contract"] >= 27 and prior_contract < 27
+            if first_ledger or native_schema or writer_schema:
                 try:
                     storage = tasks.storage_state(state)
                     cutover = ((storage["kind"] == "sqlite" or storage["fenced"]) if first_ledger
-                               else storage["kind"] == "sqlite" and storage.get("schema") == 2)
+                               else storage["kind"] == "sqlite" and storage.get("schema", 0) >= (3 if writer_schema else 2))
                 except (Fault, OSError):
                     cutover = True  # Unreadable original evidence cannot authorize an old writer.
                 if cutover:
@@ -149,7 +151,8 @@ def _resume_activation(state: Path, record: dict) -> dict:
         checks.activation_safe(state, config=original_settings,
                                candidate_config=candidate_settings, guards=activation_guards)
         runtime._stop(state)
-        tasks.migrate(state)
+        tasks.migrate(state, resolve_writers=lambda current, operations: checks.resolve_task_writers(
+            state, candidate_settings, current, operations))
         install._verify_candidate(state, record, target)
         ready = _start_selected(state, record)
         return _finish_activation(state, record, ready, bind_management=True)

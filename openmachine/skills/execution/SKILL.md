@@ -25,3 +25,10 @@ Cancellation requests termination and does not undo prior effects. Require
 `status=succeeded`, verified exit/output and domain readback for command success;
 cancelled or timed-out commands can also exit zero. A completed command is not a
 completed task.
+
+New shell launches, including shared-access commands and bare calls, respect Task
+writer reservations at their verified launch root. Distinct Git worktrees remain
+independent even when they share Git metadata. Internal `cd` or `git -C` does not
+change the launch binding. A finished command releases its execution lease, not
+its unfinished Task's reservation. Original-ID reads and lawful cancellation
+remain available; missing receipts never authorize resubmission.

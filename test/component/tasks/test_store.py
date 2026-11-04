@@ -129,6 +129,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         tasks.update(self.state, "structured-one", lambda record, now:
                      record["operations"].append(self.operation_fixture(record, now, 1)))
         with sqlite3.connect(self.path) as connection:
+            connection.execute("DROP TABLE writer_reservations")
             connection.execute("DROP INDEX task_original_targets")
             connection.execute("DROP INDEX operation_target")
             connection.execute("ALTER TABLE operations ADD COLUMN target_identity TEXT")
@@ -155,7 +156,8 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         with sqlite3.connect(self.path) as conn:
             self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
             self.assertEqual(conn.execute("SELECT schema FROM store").fetchone()[0], 1)
-        migrated = tasks.migrate(self.state)
+        from openmachine.workspace.git import writable_target
+        migrated = tasks.migrate(self.state, resolve_writers=lambda current, operations: [writable_target(self.work)])
         self.assertEqual((migrated["schema"], migrated["identity"], migrated["generation"]),
                          (database.SCHEMA_VERSION, *row))
         with database.connect(self.state) as conn:

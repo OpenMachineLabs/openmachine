@@ -8,6 +8,7 @@ status here. Current code and tests describe implemented behavior.
 
 | Issue | Binding | Scope |
 | --- | --- | --- |
+| [#239](https://github.com/OpenMachineLabs/openmachine/issues/239) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/239#issuecomment-6624136246) | Task-owned local writable-target reservations and clientless continuation. |
 | [#138](https://github.com/OpenMachineLabs/openmachine/issues/138) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/138#classification) | Task-scoped context and environment observation; PRs #139 and #140 were merged and the Issue closed. |
 | [#2](https://github.com/OpenMachineLabs/openmachine/issues/2) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/2#current-increment-authorization) | Standalone runtime and managed lifecycle baseline. |
 | [#6](https://github.com/OpenMachineLabs/openmachine/issues/6) | `direct_issue_contract`, [approval](https://github.com/OpenMachineLabs/openmachine/issues/6) | GitHub attribution. |

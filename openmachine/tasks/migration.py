@@ -63,7 +63,7 @@ def _verify_import(connection, root: Path, manifest: list) -> None:
                 raise Fault("task_migration_incomplete", "Imported Markdown differs from its original checkpoint.")
 
 
-def migrate(state: Path) -> dict:
+def migrate(state: Path, *, resolve_writers=None) -> dict:
     """Only managed maintenance calls this; imports never observe or dispatch tools."""
     db.sqlite_runtime()
     if not state.is_absolute():
@@ -83,6 +83,9 @@ def migrate(state: Path) -> dict:
         connection = db._open(state, write=True)
         try:
             db.upgrade_native_schema(connection, verify_operation=decode_operation)
+            schema = connection.execute("SELECT schema FROM store WHERE singleton=1").fetchone()[0]
+            if schema == 2:
+                upgrade_writers(connection, resolve_writers)
             owner = db.metadata(connection)
             if owner["restore_required"]:
                 raise Fault("task_restore_unreconciled", "Migration cannot grant restored history new write authority.")
@@ -108,7 +111,7 @@ def migrate(state: Path) -> dict:
                     # Before the fence, the original controller may have resumed
                     # after a failed activation. Rebuild only its derived import.
                     connection.execute("BEGIN IMMEDIATE")
-                    for table in ("operation_scopes", "task_events", "task_updates", "operations", "stage_decisions", "tasks", "imports"):
+                    for table in ("writer_reservations", "operation_scopes", "task_events", "task_updates", "operations", "stage_decisions", "tasks", "imports"):
                         connection.execute(f"DELETE FROM {table}")
                     connection.execute("UPDATE store SET import_digest=?,generation=? WHERE singleton=1", (digest, index["generation"]))
                     db.commit(connection)
@@ -126,6 +129,8 @@ def migrate(state: Path) -> dict:
                     connection.executemany("INSERT INTO imports VALUES (?,?,?)", manifest)
                     db.commit(connection)
                 _verify_import(connection, source, manifest)
+                if not owner["active"]:
+                    upgrade_writers(connection, resolve_writers, imported=True)
                 if _manifest(source) != manifest:
                     raise Fault("task_migration_conflict", "Legacy Task bytes changed during import verification.")
                 if source == legacy:
@@ -143,6 +148,47 @@ def migrate(state: Path) -> dict:
         finally:
             connection.close()
     return db.storage_state(state)
+
+
+def upgrade_writers(connection, resolve_writers, *, imported: bool = False) -> None:
+    """Resolve historical native evidence before the one-time SQLite write fence."""
+    owners = []
+    for row in connection.execute("SELECT * FROM tasks WHERE kind='structured'"):
+        current, _ = read_current(connection, row)
+        terminal = current["terminal"]
+        if terminal is not None and terminal["outcome"] != "abandoned":
+            continue
+        operations = [decode_operation(op) for op in connection.execute(
+            "SELECT * FROM operations WHERE task_id=? AND kind IN ('execution','change') ORDER BY ordinal", (row["task_id"],))]
+        if not operations:
+            continue
+        if resolve_writers is None:
+            raise Fault("task_migration_incompatible", "Retained local operations require verified original native roots before writer cutover.",
+                        {"task_id": row["task_id"]})
+        for target in resolve_writers(current, operations):
+            owners.append((row["task_id"], target))
+    # Filesystem/domain evidence above is read only under managed maintenance,
+    # never inside this writer transaction. Historical Task bytes are untouched.
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        if not imported:
+            for statement in db.RESERVATION_SCHEMA.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
+        for identity, target in owners:
+            connection.execute("INSERT OR IGNORE INTO writer_reservations VALUES (?,?,?,?, 'owned')",
+                (identity, target["root"], target["device"], target["inode"]))
+        for identity, target in owners:
+            overlaps = db.writer_rows(connection, target)
+            if any(row["task_id"] != identity for row in overlaps):
+                for row in overlaps:
+                    connection.execute("UPDATE writer_reservations SET state='contested' WHERE task_id=? AND root=?",
+                                       (row["task_id"], row["root"]))
+        connection.execute("UPDATE store SET schema=? WHERE singleton=1", (db.SCHEMA_VERSION,))
+        db.commit(connection)
+    except BaseException:
+        connection.rollback()
+        raise
 
 
 def backup(state: Path, destination: Path) -> dict:

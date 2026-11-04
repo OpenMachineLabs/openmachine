@@ -213,6 +213,15 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         key = hashlib.sha256(b"/").hexdigest()
         with lease(self.state / "locks" / f"workspace-{key}.lock"):
             self.fault("resource_busy", self.app.start_execution, **args)
+        self.assertEqual(self.view()["record"]["operations"], [])
+        # The admission lease now rejects before publishing an operation. Retain
+        # the distinct historical recovery case by injecting a later busy result.
+        def busy(**values):
+            with lease(self.state / "locks" / f"{args['execution_id']}.lock"):
+                pass
+            raise Fault("resource_busy", "Fixture failure after Task admission, before domain launch.")
+        with patch.object(self.app.machines, "start_execution", side_effect=busy):
+            self.fault("resource_busy", self.app.start_execution, **args)
         original = self.view()["record"]["operations"][0]
         self.assertEqual(original["result"]["status"], "failed")
         self.assertFalse((self.state / "executions" / args["execution_id"]).exists())

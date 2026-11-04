@@ -116,6 +116,17 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(original["created_at"], started["created_at"])
                         self.assertEqual(original["status"], "succeeded")
                         self.assertEqual(retained_record(), before)
+                    # Every scenario is an independent Task in the same fixture
+                    # root; retire its settled original work before the next one.
+                    async with Client(self.client(), mode=mode, cache=None) as cleanup:
+                        current = (await self.observer_task_view(cleanup, identity))["record"]
+                        settled = await cleanup.call_tool("control_task", {
+                            "task_id": identity, "expected_revision": current["revision"],
+                            "expected_plan_revision": current["plan"]["revision"],
+                            "expected_epoch": current["control"]["epoch"],
+                            "update_id": uuid.uuid4().hex,
+                            "transition": {"action": "cancel", "reason": "Settled observer fixture"}})
+                        self.assertFalse(settled.is_error, settled.structured_content)
                 finally:
                     release.touch()
                     deadline = time.monotonic() + 5

@@ -93,6 +93,27 @@ def whole_device_writes(config) -> bool:
         m.transport == "local" and m.local_access == "full_access" for m in config.machines.values())
 
 
+def writable_target(cwd: Path) -> dict:
+    """Verify a physical launch/selection root, independently of its lease domain."""
+    try:
+        selected = cwd.resolve(strict=True)
+        observed = context(selected)
+        if observed["workspace_identity"] is None:
+            raise Fault("context_unavailable", "The writable target cannot be verified.", effect="known_no_effect")
+        root = Path(observed["worktree"]) if observed["git_status"] == "observed" else selected
+        before = root.stat()
+        if root.resolve(strict=True) != root or not stat.S_ISDIR(before.st_mode):
+            raise OSError("Target changed")
+        verified = context(selected)
+        after = root.stat()
+        if (verified != observed or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+            raise OSError("Target changed")
+        return {"root": str(root), "device": before.st_dev, "inode": before.st_ino}
+    except (OSError, RuntimeError) as error:
+        raise Fault("context_unavailable", "The writable target changed or is unavailable; inspect its original identity.",
+                    effect="known_no_effect") from error
+
+
 def lock_root(config, machine: str, cwd: Path, observed: dict) -> str:
     """Preserve Git lock names; all local aliases coordinate non-Git writers."""
     if observed["git_status"] == "unavailable":

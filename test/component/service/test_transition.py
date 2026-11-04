@@ -54,7 +54,8 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         events = []
         stop.side_effect = lambda state: events.append("stop")
         start.side_effect = lambda state, record: events.append("start") or {"status": "ready"}
-        def migrate(state):
+        def migrate(state, *, resolve_writers):
+            self.assertTrue(callable(resolve_writers))
             self.assertEqual(service_state._record(state)["pending"], {"from": self.a, "to": self.b, "previous": None})
             events.append("migrate")
         with patch.object(tasks, "migrate", side_effect=migrate), \
