@@ -306,6 +306,11 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
         storage = retained_tasks["task_storage"]
+        if value["state_contract"] >= 27 and (storage["kind"] == "legacy" or
+                storage["kind"] == "sqlite" and storage.get("schema") != 3):
+            raise Fault("task_migration_required", "Earlier pre-release Task state must be handled explicitly; no new writer authority.")
+        if storage["kind"] == "sqlite" and storage.get("schema") == 3 and value["state_contract"] < 27:
+            raise Fault("incompatible_state", "The Task writer reservation schema requires its original compatible writer.")
         if storage["kind"] == "sqlite" and storage.get("schema") == 2 and value["state_contract"] < 25:
             raise Fault("incompatible_state", "An old Core cannot read the native-only Task schema.")
         if storage["kind"] == "sqlite" or value["state_contract"] >= 18:

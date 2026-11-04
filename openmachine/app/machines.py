@@ -43,35 +43,38 @@ class Machines:
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
-                             expected_workspace_identity: str = "", worktree: str = "") -> dict:
+                             expected_workspace_identity: str = "", worktree: str = "", *, effect_guard=None) -> dict:
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.write_text_file(config, self.state, machine, workspace_name, path, content,
             expected_head_sha, expected_sha256, change_id, expected_workspace_identity,
-            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root),
+            validate_effect=effect_guard or (lambda root: tasks.check_writer(self.state, workspace.writable_target(root))))
 
     def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
                             expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
                             change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
-                            worktree: str = "") -> dict:
+                            worktree: str = "", *, effect_guard=None) -> dict:
         arguments = dict(workspace=workspace_name, path=path, edits=edits,
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run,
                          expected_plan_sha256=expected_plan_sha256)
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.edit_text_file(config, self.state, machine, **arguments,
-            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root),
+            validate_effect=effect_guard or (lambda root: tasks.check_writer(self.state, workspace.writable_target(root))))
 
     def apply_workspace_patch(self, machine: str, workspace_name: str, patch: str,
                               expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
                               create_parents: bool = False, change_id: str = "", dry_run: bool = False,
-                              expected_plan_sha256: str = "", worktree: str = "") -> dict:
+                              expected_plan_sha256: str = "", worktree: str = "", *, effect_guard=None) -> dict:
         arguments = dict(workspace=workspace_name, patch_text=patch,
                          expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
                          preconditions=preconditions, create_parents=create_parents, change_id=change_id,
                          dry_run=dry_run, expected_plan_sha256=expected_plan_sha256)
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         return workspace.apply_patch(config, self.state, machine, **arguments,
-            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root))
+            validate_new=lambda root: execution.check_workspace_leases(config, self.state, scope=root),
+            validate_effect=effect_guard or (lambda root: tasks.check_writer(self.state, workspace.writable_target(root))))
 
     def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
                         new_branch: str, execution_id: str, expected_workspace_identity: str,
@@ -80,7 +83,8 @@ class Machines:
             workspace_name=workspace_name, destination=destination, base_ref=base_ref,
             new_branch=new_branch, execution_id=execution_id, expected_workspace_identity=expected_workspace_identity,
             worktree=worktree, task_id=task_id,
-            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
+            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None,
+            validate_effect=lambda root: tasks.check_writer(self.state, {"root": str(root), "device": -1, "inode": -1}))
 
     def read_workspace_change(self, machine: str, change_id: str, observe_current: bool = False,
                               *, cancelled: threading.Event | None = None) -> dict:
@@ -91,11 +95,12 @@ class Machines:
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
                         task_id: str = "", termination_grace_seconds: float | None = None,
-                        tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False) -> dict:
+                        tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False, effect_guard=None) -> dict:
         self.config.machine(machine, write=True)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
             expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
-            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None)
+            validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None,
+            validate_effect=effect_guard or (lambda root: tasks.check_writer(self.state, workspace.writable_target(root))))
 
     def read_execution(self, machine: str, execution_id: str, offset: int = 0,
                        max_bytes: int = execution.MAX_READ, wait_seconds: float = 0,

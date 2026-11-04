@@ -351,7 +351,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
                   "management_contract": 1, "payload_sha256": record["request"]["payload_sha256"]})
         storage = {"kind": "legacy", "fenced": False, "active": False}
         def migrate(state):
-            storage.update(kind="sqlite", fenced=True, active=True)
+            storage.update(kind="sqlite", schema=3, fenced=True, active=True)
             return storage
         migration = self.enterContext(patch.object(tasks, "migrate", side_effect=migrate))
         self.enterContext(patch.object(tasks, "storage_state", side_effect=lambda state: dict(storage)))

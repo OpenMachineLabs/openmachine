@@ -129,6 +129,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         tasks.update(self.state, "structured-one", lambda record, now:
                      record["operations"].append(self.operation_fixture(record, now, 1)))
         with sqlite3.connect(self.path) as connection:
+            connection.execute("DROP TABLE writer_reservations")
             connection.execute("DROP INDEX task_original_targets")
             connection.execute("DROP INDEX operation_target")
             connection.execute("ALTER TABLE operations ADD COLUMN target_identity TEXT")
@@ -144,29 +145,16 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         with sqlite3.connect(self.path) as connection:
             return tuple(connection.execute("SELECT payload,sha256 FROM operations").fetchone())
 
-    def test_native_schema_migrates_old_local_database_without_rewriting_original_receipts(self):
+    def test_pre_release_native_schema_refuses_upgrade_and_preserves_receipts(self):
         original = self._retained_v1_sqlite()
-        with sqlite3.connect(self.path) as conn:
-            row = conn.execute("SELECT identity,generation FROM store").fetchone()
         self.fault("unsupported_task_format", tasks.read, self.state, "structured-one")
-        preflight = tasks.check_state(self.state)
-        self.assertEqual((preflight["task_storage"]["schema"], preflight["task_records"],
-                          preflight["structured_task_records"]), (1, 1, 1))
-        with sqlite3.connect(self.path) as conn:
-            self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
-            self.assertEqual(conn.execute("SELECT schema FROM store").fetchone()[0], 1)
-        migrated = tasks.migrate(self.state)
-        self.assertEqual((migrated["schema"], migrated["identity"], migrated["generation"]),
-                         (database.SCHEMA_VERSION, *row))
-        with database.connect(self.state) as conn:
-            columns = [info["name"] for info in conn.execute("PRAGMA table_info(operations)")]
-            self.assertNotIn("target_identity", columns)
-            self.assertEqual(tuple(conn.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
-            self.assertTrue(database.target_indexes_ready(conn))
-        restored = self.app.read_task("structured-one", section="operations", operation_id=f"{1:032x}")
-        self.assertEqual(restored["items"][0]["locator"]["machine"], "desktop")
-        self.assertNotIn("target_identity", restored["items"][0]["locator"])
-        self.assertEqual(tasks.migrate(self.state)["schema"], database.SCHEMA_VERSION)
+        self.assertEqual(tasks.check_state(self.state)["task_storage"]["schema"], 1)
+        self.fault("task_migration_required", tasks.migrate, self.state)
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(connection.execute("SELECT schema FROM store").fetchone()[0], 1)
+            self.assertIn("target_identity", [row[1] for row in connection.execute("PRAGMA table_info(operations)")])
+            self.assertEqual(tuple(connection.execute("SELECT payload,sha256 FROM operations").fetchone()), original)
+        self.fault("unsupported_task_format", tasks.read, self.state, "structured-one")
 
     def test_retired_schema_restore_fence_never_mutates_old_database(self):
         self._retained_v1_sqlite()
@@ -174,7 +162,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
             connection.execute("UPDATE store SET restore_required=1")
             original = tuple(connection.execute(
                 "SELECT payload,sha256,target_identity FROM operations").fetchone())
-        self.fault("task_restore_unreconciled", tasks.migrate, self.state)
+        self.fault("task_migration_required", tasks.migrate, self.state)
         with sqlite3.connect(self.path) as connection:
             self.assertEqual(connection.execute("SELECT schema FROM store").fetchone()[0], 1)
             self.assertEqual(tuple(connection.execute(
@@ -185,7 +173,7 @@ class StructuredTaskTests(TaskFixture, unittest.TestCase):
         with sqlite3.connect(self.path) as conn:
             original = tuple(conn.execute("SELECT payload,sha256,target_identity FROM operations").fetchone())
         self.fault("corrupt_tasks", tasks.check_state, self.state)
-        self.fault("task_migration_incompatible", tasks.migrate, self.state)
+        self.fault("task_migration_required", tasks.migrate, self.state)
         with sqlite3.connect(self.path) as conn:
             self.assertEqual(conn.execute("SELECT schema FROM store").fetchone()[0], 1)
             self.assertIn("target_identity", [item[1] for item in conn.execute("PRAGMA table_info(operations)")])

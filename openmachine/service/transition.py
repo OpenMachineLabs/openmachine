@@ -19,6 +19,14 @@ from . import runtime
 from .state import LAUNCHER
 
 
+def _pre_release_state(state: Path, candidate_contract: int) -> None:
+    """Reject old Task bytes before stopping the selected development service."""
+    if candidate_contract >= 27:
+        storage = tasks.storage_state(state)
+        if storage["kind"] == "legacy" or storage["kind"] == "sqlite" and storage.get("schema") != 3:
+            raise Fault("task_migration_required", "Pre-release Task state requires explicit review and reset; no automatic upgrade.")
+
+
 def _activate(state: Path, record: dict, target: str, candidate_config: Path | None = None, *,
               before_change: Callable[[], None] | None = None, require_safe: bool = False) -> dict:
     candidate_path = candidate_config or service_state._configuration_for(state, record, target)
@@ -41,6 +49,7 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             checks.workspace_bindings_safe(state, original_settings, candidate_settings, record["probe"]["workspace"])
             checks.activation_safe(state, config=original_settings, candidate_config=candidate_settings,
                                    guards=activation_guards)
+        _pre_release_state(state, installed["state_contract"])
         original = dict(record)
         pending = record["pending"]
         previous = pending["from"] if pending is not None else record["current"]
@@ -76,11 +85,12 @@ def _activate(state: Path, record: dict, target: str, candidate_config: Path | N
             prior_contract = service_state._installed(state, previous)["state_contract"]
             first_ledger = installed["state_contract"] >= 18 and prior_contract < 18
             native_schema = installed["state_contract"] >= 25 and prior_contract < 25
-            if first_ledger or native_schema:
+            writer_schema = installed["state_contract"] >= 27 and prior_contract < 27
+            if first_ledger or native_schema or writer_schema:
                 try:
                     storage = tasks.storage_state(state)
                     cutover = ((storage["kind"] == "sqlite" or storage["fenced"]) if first_ledger
-                               else storage["kind"] == "sqlite" and storage.get("schema") == 2)
+                               else storage["kind"] == "sqlite" and storage.get("schema", 0) >= (3 if writer_schema else 2))
                 except (Fault, OSError):
                     cutover = True  # Unreadable original evidence cannot authorize an old writer.
                 if cutover:
@@ -148,6 +158,7 @@ def _resume_activation(state: Path, record: dict) -> dict:
         checks.workspace_bindings_safe(state, original_settings, candidate_settings, record["probe"]["workspace"])
         checks.activation_safe(state, config=original_settings,
                                candidate_config=candidate_settings, guards=activation_guards)
+        _pre_release_state(state, service_state._installed(state, target)["state_contract"])
         runtime._stop(state)
         tasks.migrate(state)
         install._verify_candidate(state, record, target)

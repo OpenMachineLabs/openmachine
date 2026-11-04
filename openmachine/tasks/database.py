@@ -18,7 +18,7 @@ from openmachine.foundation.state import lease, private_directory
 from . import records
 from .index import private_path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIN_ADMISSION_FREE = 16 * 1024 * 1024
 INITIALIZING = b"openmachine-task-initializing-v1\n"
 _active = ContextVar("task_transaction", default=None)
@@ -62,6 +62,12 @@ CREATE TABLE operation_scopes (task_id TEXT NOT NULL, operation_id TEXT NOT NULL
  scope TEXT NOT NULL, witness TEXT, sha256 TEXT NOT NULL, PRIMARY KEY(task_id,operation_id),
  FOREIGN KEY(task_id,operation_id) REFERENCES operations(task_id,id)) STRICT;
 CREATE TABLE imports (path TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL) STRICT;
+CREATE TABLE writer_reservations (
+ task_id TEXT NOT NULL REFERENCES tasks(task_id), root TEXT NOT NULL,
+ device INTEGER NOT NULL, inode INTEGER NOT NULL,
+ PRIMARY KEY(task_id,root)) STRICT;
+CREATE INDEX writer_roots ON writer_reservations(root);
+CREATE INDEX writer_identities ON writer_reservations(device,inode);
 """
 
 # Four declared targets at most. Indexing must not prevent retention of a
@@ -98,66 +104,6 @@ def ensure_target_indexes(connection: sqlite3.Connection) -> None:
     for statement in TARGET_INDEXES:
         connection.execute(statement)
     commit(connection)
-
-
-def upgrade_native_schema(connection: sqlite3.Connection, *, verify_operation) -> None:
-    """Managed-only atomic removal of the retired SSH column, without rewriting receipts."""
-    owner = connection.execute("SELECT schema FROM store WHERE singleton=1").fetchone()
-    if owner is None or owner["schema"] not in (1, SCHEMA_VERSION):
-        raise Fault("unsupported_task_format", "Unknown Task schema; retain original bytes.")
-    fence = connection.execute("SELECT restore_required FROM store WHERE singleton=1").fetchone()
-    if fence is None or fence["restore_required"] not in (0, 1):
-        raise Fault("corrupt_tasks", "Retained Task restore fence is not verified.")
-    if fence["restore_required"]:
-        raise Fault("task_restore_unreconciled", "Retained restored Task authority cannot be upgraded before reconciliation.")
-    if owner["schema"] == SCHEMA_VERSION:
-        return
-    expected = {"task_id", "id", "ordinal", "stage_id", "plan_revision", "epoch",
-                "kind", "machine", "target_identity", "repository", "effect_key",
-                "admitted_at_ms", "observed_at_ms", "pending", "unresolved",
-                "outcome", "payload", "sha256", "locator_id"}
-    columns = [row["name"] for row in connection.execute("PRAGMA table_info(operations)")]
-    if len(columns) != len(expected) or set(columns) != expected:
-        raise Fault("corrupt_tasks", "Retained Task operation schema is not the original schema.")
-    indexes = {row["name"]: row["sql"] for row in connection.execute(
-        "SELECT name,sql FROM sqlite_master WHERE type='index' AND "
-        "(name LIKE 'task_target_%' OR name='task_original_targets')")}
-    old = {f"task_target_{i}": sql for i, sql in enumerate(TARGET_INDEXES[:4])}
-    old["task_original_targets"] = (
-        "CREATE INDEX task_original_targets ON operations(task_id,kind,machine,target_identity)")
-    if indexes and indexes != old:
-        raise Fault("corrupt_tasks", "Retained Task indexes are incomplete or changed.")
-    target = connection.execute(
-        "SELECT sql FROM sqlite_master WHERE type='index' AND name='operation_target'").fetchone()
-    if target is None or target["sql"] != (
-            "CREATE INDEX operation_target ON operations(machine,target_identity)"):
-        raise Fault("corrupt_tasks", "Retained operation target index is missing or changed.")
-    connection.execute("BEGIN IMMEDIATE")
-    try:
-        for row in connection.execute("SELECT * FROM operations"):
-            if row["target_identity"] is not None:
-                raise Fault("task_migration_incompatible", "SSH-pinned history is not native authority.")
-            value = decode(row["payload"], row["sha256"])
-            locator = value.get("locator")
-            if (not isinstance(locator, dict) or locator.get("kind") != row["kind"]
-                    or (locator.get("kind") in ("execution", "change")
-                        and ("target_identity" not in locator or locator["target_identity"] is not None))):
-                raise Fault("task_migration_incompatible", "Original operation is not a local receipt.")
-            verify_operation(row)
-        connection.execute("DROP INDEX operation_target")
-        if indexes:
-            connection.execute("DROP INDEX task_original_targets")
-        connection.execute("ALTER TABLE operations DROP COLUMN target_identity")
-        connection.execute("CREATE INDEX operation_target ON operations(machine)")
-        if indexes:
-            connection.execute(TARGET_INDEXES[-1])
-        connection.execute("UPDATE store SET schema=? WHERE singleton=1 AND schema=1", (SCHEMA_VERSION,))
-        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
-            raise Fault("corrupt_tasks", "Native schema upgrade changed Task foreign keys.")
-        commit(connection)
-    except BaseException:
-        connection.rollback()
-        raise
 
 
 def sqlite_runtime() -> dict:
@@ -323,7 +269,7 @@ def _open(state: Path, *, write: bool) -> sqlite3.Connection:
 
 def metadata(connection: sqlite3.Connection, *, preflight_native_cutover: bool = False) -> dict:
     row = connection.execute("SELECT * FROM store WHERE singleton=1").fetchone()
-    old_read = (preflight_native_cutover and row is not None and row["schema"] == 1
+    old_read = (preflight_native_cutover and row is not None and row["schema"] in (1, 2)
                 and connection.execute("PRAGMA query_only").fetchone()[0] == 1)
     if row is None or row["schema"] != SCHEMA_VERSION and not old_read:
         raise Fault("unsupported_task_format", "The Task schema needs one managed native cutover before normal operation.")
@@ -525,3 +471,18 @@ def storage_state(state: Path) -> dict:
                 "identity": owner["identity"], "generation": owner["generation"],
                 "active": bool(owner["active"]), "fenced": fenced,
                 "restore_required": bool(owner["restore_required"])}
+
+
+def writer_rows(connection, target: dict, *, foreign_to: str | None = None):
+    """Indexed overlap; ordinary conflict diagnostics are bounded to 64 owners."""
+    root = target["root"]
+    ancestors = [str(path) for path in (Path(root), *Path(root).parents)]
+    prefix = root.rstrip("/") + "/"
+    query = ("SELECT * FROM writer_reservations WHERE root IN (" + ",".join("?" for _ in ancestors)
+             + ") UNION SELECT * FROM writer_reservations WHERE root>=? AND root<? "
+             "UNION SELECT * FROM writer_reservations WHERE device=? AND inode=?")
+    arguments = (*ancestors, prefix, prefix[:-1] + "0", target["device"], target["inode"])
+    if foreign_to is not None:
+        query = "SELECT * FROM (" + query + ") WHERE task_id<>? LIMIT 65"
+        arguments = (*arguments, foreign_to)
+    return connection.execute(query, arguments).fetchall()

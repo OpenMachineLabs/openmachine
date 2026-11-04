@@ -93,7 +93,7 @@ class DependencyFixture(object):
             "openmachine.app.environment": ("openmachine.foundation.sanitize", "openmachine.execution"),
             "openmachine.app.machines": ("openmachine.config", "openmachine.execution", "openmachine.workspace",
                                          "openmachine.tasks", "openmachine.foundation.*"),
-            "openmachine.app.task_admission": ("openmachine.execution", "openmachine.tasks", "openmachine.app.task_attention",
+            "openmachine.app.task_admission": ("openmachine.execution", "openmachine.tasks", "openmachine.workspace", "openmachine.app.task_attention",
                                                "openmachine.app.task_observation", "openmachine.app.task_receipts",
                                                "openmachine.tasks.records", "openmachine.tasks.transitions", "openmachine.tasks.effects", "openmachine.foundation.*"),
             "openmachine.app.task_attention": ("openmachine.tasks.records",),
