@@ -245,13 +245,26 @@ class WriterReservationTests(TaskFixture, unittest.TestCase):
                                 "workspace_identity": context["workspace_identity"], "head_sha": None}]
         self.control("revise_plan", contract=contract, stages=self.request["stages"],
                      invalidated_stage_ids=["verify"], reason="Retain the same verified physical directory under its new name")
-        self.assertEqual(self.rows(), before)
+        rebound = self.rows()
+        self.assertEqual(len(rebound), 1)
+        self.assertEqual(rebound[0]["root"], str(moved))
+        self.assertEqual((rebound[0]["device"], rebound[0]["inode"]),
+                         (before[0]["device"], before[0]["inode"]))
         self.assertEqual((moved.stat().st_dev, moved.stat().st_ino),
                          (before[0]["device"], before[0]["inode"]))
         with self.assertRaises(Fault) as caught:
             self.app.write_workspace_file("desktop", str(moved), "foreign-after-rename.txt", "bad", "", "")
         self.assertEqual(caught.exception.code, "task_resource_conflict")
         self.assertFalse((moved / "foreign-after-rename.txt").exists())
+        descendant = moved / "nested"
+        descendant.mkdir()
+        with self.assertRaises(Fault) as caught:
+            self.app.write_workspace_file("desktop", str(descendant), "bare-child.txt", "bad", "", "")
+        self.assertEqual(caught.exception.code, "task_resource_conflict")
+        self.assertFalse((descendant / "bare-child.txt").exists())
+        other = self.other("renamed-descendant", descendant)
+        self.denied(self.app.write_workspace_file, **other)
+        self.assertFalse((descendant / "other.txt").exists())
         handoff = self.view()["record"]["handoff"]
         self.assertIsNotNone(handoff)
         self.control("claim", handoff_id=handoff["id"])
@@ -262,7 +275,31 @@ class WriterReservationTests(TaskFixture, unittest.TestCase):
             change_id=operation, task_context=self.context_for(operation))
         self.assertEqual(result["status"], "applied")
         self.assertEqual((moved / "lawful-continuation.txt").read_text(), "continued")
-        self.assertEqual(self.rows(), before)
+        self.assertEqual(self.rows(), rebound)
+
+    def test_rename_revision_refuses_a_foreign_writer_admitted_during_unverified_gap(self):
+        self.app.write_workspace_file(**self.write_arguments())
+        moved = self.root / "renamed-with-foreign-descendant"
+        self.work.rename(moved)
+        descendant = moved / "nested"
+        descendant.mkdir()
+        # External filesystem renames are not fenced until the Task lawfully
+        # revises its target. Never invent two owners at that later revision.
+        foreign = self.other("early-foreign-descendant", descendant)
+        self.assertEqual(self.app.write_workspace_file(**foreign)["status"], "applied")
+        owners = self.rows()
+        self.assertEqual(len(owners), 2)
+        prior = self.view()["record"]
+        context = self.app.read_workspace_file("desktop", str(moved), "AGENTS.md")["context"]
+        contract = deepcopy(prior["contract"])
+        contract["targets"] = [{"machine": "desktop", "workspace": str(moved),
+                                "workspace_identity": context["workspace_identity"], "head_sha": None}]
+        self.fault("task_resource_conflict", self.control, "revise_plan", contract=contract,
+                   stages=self.request["stages"], invalidated_stage_ids=["verify"],
+                   reason="Reject a false double owner after external rename")
+        self.assertEqual(self.rows(), owners)
+        self.assertEqual(self.view()["record"]["plan"]["revision"], prior["plan"]["revision"])
+        self.assertEqual((descendant / "other.txt").read_text(), "other")
 
     def test_legacy_checkpoint_id_does_not_bypass_another_task(self):
         self.app.write_workspace_file(**self.write_arguments())

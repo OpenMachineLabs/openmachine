@@ -417,11 +417,17 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                 (core["revision"], db.bump(connection), payload, sha, count, len(new_witnesses) - len(old_witnesses), json.dumps(stages), identity))
             if writer_target is not None:
                 _check_writer(connection, writer_target, identity)
-                # A renamed canonical root retains the same physical Task owner.
-                # Never duplicate its reservation under a new pathname.
-                if not connection.execute(
-                        "SELECT 1 FROM writer_reservations WHERE task_id=? AND device=? AND inode=?",
-                        (identity, writer_target["device"], writer_target["inode"])).fetchone():
+                same_physical = connection.execute(
+                    "SELECT root FROM writer_reservations WHERE task_id=? AND device=? AND inode=? AND state='owned'",
+                    (identity, writer_target["device"], writer_target["inode"])).fetchall()
+                if same_physical:
+                    # Refresh the pathname atomically: a later writer selecting a
+                    # child of the renamed root must still see this reservation.
+                    for row in same_physical:
+                        if row["root"] != writer_target["root"]:
+                            connection.execute("UPDATE writer_reservations SET root=? WHERE task_id=? AND root=?",
+                                               (writer_target["root"], identity, row["root"]))
+                else:
                     connection.execute("INSERT OR IGNORE INTO writer_reservations VALUES (?,?,?,?, 'owned')",
                         (identity, writer_target["root"], writer_target["device"], writer_target["inode"]))
             local_unresolved = connection.execute(
@@ -434,9 +440,20 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
                     raise Fault("task_effect_unresolved", "Original local effects prevent target retirement.")
                 for row in connection.execute("SELECT root,device,inode FROM writer_reservations WHERE task_id=? AND state='owned'", (identity,)).fetchall():
                     root = Path(row["root"])
-                    if not any((row["device"], row["inode"]) == (target["device"], target["inode"])
-                               or root.is_relative_to(target["root"]) or Path(target["root"]).is_relative_to(root)
-                               for target in retained_targets):
+                    physical = next((target for target in retained_targets
+                                     if (row["device"], row["inode"]) == (target["device"], target["inode"])), None)
+                    if physical is not None:
+                        # Rebind the retained inode to its verified canonical path
+                        # in the same transaction as the revised Task plan.
+                        if row["root"] != physical["root"]:
+                            # An unrelated Task may have reserved a descendant
+                            # after an external rename but before plan revision.
+                            # Refuse the rebind rather than creating two owners.
+                            _check_writer(connection, physical, identity)
+                            connection.execute("UPDATE writer_reservations SET root=? WHERE task_id=? AND root=?",
+                                               (physical["root"], identity, row["root"]))
+                    elif not any(root.is_relative_to(target["root"]) or Path(target["root"]).is_relative_to(root)
+                                 for target in retained_targets):
                         connection.execute("DELETE FROM writer_reservations WHERE task_id=? AND root=?", (identity, str(root)))
             result = _view(connection, identity, operation_ids)
         except (ValueError, TypeError, KeyError, sqlite3.IntegrityError) as error:
