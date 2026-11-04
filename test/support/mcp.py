@@ -28,7 +28,7 @@ class MCPFixture(object):
         self.config = self.root / "config.toml"
         self.config.write_text('schema_version = 1\ncheck_for_updates = false\n[machines.desktop]\ntransport = "local"\nlocal_access = "full_access"\nexecution_enabled = true\n'
                                '[workspaces.example]\nmachine = "desktop"\nroot = ' + json.dumps(str(self.work)) + '\n'
-                               '[github]\nrepositories = ["Example/repo"]\nattribution = false\n')
+                               '[github]\nrepositories = ["Example/repo"]\n')
         self.state = self.root / "state"
         self.socket = self.state / "mcp.sock"
         self.processes = []
