@@ -392,7 +392,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
                         return {"status": "ready", "version": expected_version, "configuration_sha256": fingerprint,
                                 "pid": caps["lifecycle"]["pid"], "file_sha256": read["sha256"],
-                                "tunnel": "not_probed", "chatgpt": "not_probed"}
+                                "tunnel": "not_probed", "client": "not_probed", "chatgpt": "not_probed"}
     except Exception as error:
         # SDK task groups may wrap a failure. Never echo returned file data or exception payloads.
         def fault(exc):

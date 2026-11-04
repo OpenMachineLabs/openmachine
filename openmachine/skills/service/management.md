@@ -200,10 +200,10 @@ recovery. Explicit stop prevents automatic restart for the current login session
 | `activation_pending` / `recovery_required` | Preserve selection, installations and receipts; read status, then explicitly request compatible rollback. |
 | Changed launcher or incomplete setup | Preserve unknown ownership; reconcile only verified task-owned artifacts. |
 | Corrupt/incompatible retained state | Preserve original evidence; do not reinitialize history or bypass its reader. |
-| Runtime ready, ChatGPT unavailable | Diagnose the separate tunnel/client route; local readiness is not client acceptance. |
+| Runtime ready, client unavailable | Diagnose the separate tunnel/client route; local readiness is not client acceptance. |
 
 No continuity is promised through reboot, sleep, logout, interpreter removal,
 disk loss or account tampering. A new runtime cannot reconstruct a dead PTY.
-Source merge, installed tests, native transitions and actual ChatGPT/Tunnel
+Source merge, installed tests, native transitions and actual client/tunnel
 acceptance remain separate evidence; use disposable fixtures, not production
 workloads, for authorized transition tests.

@@ -75,7 +75,7 @@ Start and file operation IDs equal the original execution/change IDs. Input and
 cancellation have distinct operation IDs while retaining original execution/sequence.
 A bare `task_id` is only a legacy association, not a structured execution grant.
 Claims last at most 300 seconds or earlier handoff/authority expiry. Native-account
-ownership is not a ChatGPT conversation identity, caller-presence proof or
+ownership is not a client conversation identity, caller-presence proof or
 untrusted-chat isolation.
 
 On reattachment, inspect original outstanding receipts and current task/plan/epoch.

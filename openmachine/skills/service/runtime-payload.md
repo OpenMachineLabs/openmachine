@@ -102,7 +102,7 @@ STATE/service/versions/<identity>/        final venv and installation.json
 The JSON result reports `status: prepared`, the installation/payload identities,
 actual version, runtime path, retained `launch_python`, and `path_environment` with
 portable Git first. `selection: unchanged` and `service: not_started` are explicit:
-this is not service readiness, activation, transport readiness, or ChatGPT acceptance.
+this is not service readiness, activation, transport readiness, or client acceptance.
 The lifecycle owner consumes these retained paths through `manage install/update`. Do not point
 a LaunchAgent or original worker at the replaceable source App.
 

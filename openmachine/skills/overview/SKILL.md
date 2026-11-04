@@ -114,6 +114,6 @@ access needed. Respect user pause, platform refusal, exhausted budgets and the
 Never promise background continuation after ending a turn.
 
 Native commands retain account access beyond reader scopes: OM is not an OS
-sandbox or a multi-tenant executor. Returned files/logs reach ChatGPT through
-OpenAI; exclusions and best-effort redaction are not a secret vault. A lost worker,
+sandbox or a multi-tenant executor. Returned files/logs reach the calling client
+and its model provider; exclusions and best-effort redaction are not a secret vault. A lost worker,
 installation or response never authorizes reconstruction or replay.

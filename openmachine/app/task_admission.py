@@ -52,7 +52,7 @@ class TaskAdmission:
     @property
     def principal(self) -> str:
         # The private native-account endpoint is the verified S1 boundary. This
-        # is neither a model-supplied identity nor a ChatGPT conversation ID.
+        # is neither a model-supplied identity nor a client conversation ID.
         return f"native-uid:{os.getuid()}"
 
     def _require_foreground_clear(self, view: dict) -> None:

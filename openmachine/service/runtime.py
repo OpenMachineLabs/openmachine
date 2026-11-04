@@ -432,7 +432,7 @@ def status(config_path: Path, state: Path) -> dict:
     if not os.path.lexists(state / "service/service.json"):
         if os.path.lexists(state / "service/launch.py") or os.path.lexists(_plist_path(state)):
             raise Fault("service_state_invalid", "An incomplete installation exists; preserve its files and inspect the original setup before retrying.")
-        return {"status": "not_installed", "tunnel": "not_probed", "chatgpt": "not_probed"}
+        return {"status": "not_installed", "tunnel": "not_probed", "client": "not_probed", "chatgpt": "not_probed"}
     record = service_state._record(state)
     if str(config_path.resolve()) != record["config"]:
         raise Fault("service_configuration_mismatch", "Use the configuration registered with this state directory.")
@@ -441,7 +441,7 @@ def status(config_path: Path, state: Path) -> dict:
     installed = service_state._installed(state, record["current"])
     result = {"status": "unready" if observed["loaded"] else "stopped", **observed, "current": record["current"], "previous": record["previous"],
               "pending": record["pending"], "version": installed["version"], "commit": installed.get("commit"),
-              "tunnel": "not_probed", "chatgpt": "not_probed"}
+              "tunnel": "not_probed", "client": "not_probed", "chatgpt": "not_probed"}
     recovery = service_state._read_recovery(state)
     result["recovery"] = recovery["episode"] if recovery else None
     managed = service_state._installed(state, record["current"])["state_contract"] >= 8
