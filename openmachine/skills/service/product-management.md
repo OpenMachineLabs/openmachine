@@ -18,7 +18,7 @@ not infer support from the product version string.
 | Command after `manage --contract 1` | Effect |
 | --- | --- |
 | `status` | Actual native identity and MCP/configuration/file readiness; no repair. |
-| `configure --workspace /absolute/project` | Create validated private first-run config, never overwrite. Optional `--enable-commands` and `--enable-workspace-writes` grant the two capabilities independently; both default off. The same inputs are available on `init`. |
+| `configure --workspace /absolute/project` | Create validated private first-run config, never overwrite. Optional `--local-access` (`read_only` or `full_access`) selects native access, defaulting to `read_only`. Independent `--enable-commands` and `--enable-workspace-writes` flags both default off. The same inputs are available on `init`. |
 | `bind --identity SHA256` | Bind an existing owned managed registration to an exact verified retained payload implementation. Inspect status first. No service start or policy change. |
 | `start` | Clear deliberate Stop and request actual readiness, retaining recovery budgets. |
 | `stop` | Persist deliberate Stop before unloading the verified job; workers retain their original IDs and sessions. |
@@ -66,10 +66,25 @@ Core registers only retained Python/entry/environment paths, never donor App
 paths. First-run configuration is local-only; later grant changes use the existing
 explicit configuration workflow and candidate snapshots.
 
+When `capabilities` includes `configure:local_access`, a management caller may
+explicitly select the native mode. Full read/write and execution capability needs
+all three options on `configure` (or `init`):
+
+```text
+--local-access full_access --enable-commands --enable-workspace-writes
+```
+
+Neither boolean promotes Read Only to Full, and Full alone enables neither
+boolean. A caller requiring this input must check the additive capability, not
+infer support from `management_contract=1` or a version string. This configures
+native OS-account capability; it does not authorize another transport's remote
+requests or enlarge OS privileges. No existing installation is migrated.
+
 After a lost first-run configuration reply, `configure --verify-existing` with
 the original inputs only reads and verifies an exact private owned configuration.
-It never creates, overwrites or repairs a file, and rejects changed grants or
-profiles. The additive `configure:verify_existing` capability allows an
+It never creates, overwrites or repairs a file, and rejects a changed native
+access mode, command/write flags or workspace profile. The additive
+`configure:verify_existing` capability allows an
 authorized management caller to verify this step before continuing its original
 install operation. Installed state still rejects first-run configuration; this
 is not a configuration editor.

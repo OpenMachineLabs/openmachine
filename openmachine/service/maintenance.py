@@ -600,7 +600,7 @@ def machines(config_path: Path, state: Path) -> dict:
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
-                "capabilities": [*CAPABILITIES, "configure:verify_existing", "update:configuration_consent",
+                "capabilities": [*CAPABILITIES, "configure:local_access", "configure:verify_existing", "update:configuration_consent",
                                  "update:selection_consent", "update:workspace_reference_guard"],
                 "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
                 "implementation_state_contract": service_state.STATE_CONTRACT}
