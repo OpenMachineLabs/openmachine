@@ -20,6 +20,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                                         openmachine.__version__, self.processes[-1].pid)
         self.assertEqual(ready["status"], "ready")
         self.assertEqual(ready["tunnel"], "not_probed")
+        self.assertEqual(ready["client"], "not_probed")
         self.assertEqual(ready["chatgpt"], "not_probed")
         self.assertNotIn("text", ready)
         self.assertEqual(ready["file_sha256"], hashlib.sha256((self.work / "AGENTS.md").read_bytes()).hexdigest())

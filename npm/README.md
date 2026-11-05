@@ -32,8 +32,8 @@ Run 'openmachine status', 'openmachine start' or 'openmachine stop' afterwards.
 Core runs independently of the terminal. Use 'openmachine startup on' or
 'openmachine startup off' to choose login startup without changing deliberate Stop.
 Only 'openmachine start' clears that Stop.
-Use 'openmachine core ...' to call a native Core CLI command. The ChatGPT
-connection and upstream MCP tunnel are not installed or approved by npm.
+Use 'openmachine core ...' to call a native Core CLI command. AI client
+connections and upstream MCP tunnels are not installed or approved by npm.
 
 To update, first run 'npm install -g openmachine@latest', then 'openmachine update'.
 The second command applies the verified bundled Core through its existing managed

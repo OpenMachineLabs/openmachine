@@ -68,7 +68,7 @@ def _observation_support() -> dict:
                         "runtime_recovery": False, "events_delivery": False},
             "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
                 "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
-                "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
+                "blocker": "Caller continuation is not observed; native-account claims are not client presence or automatic wake."}]}
 
 
 def _selected(connection, identity: str, current: dict, operation_ids=()) -> list[dict]:

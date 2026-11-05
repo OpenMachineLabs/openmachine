@@ -58,7 +58,7 @@ plan revision, even when that operation's historical outcome remains verified.
 An expired, nonterminal contract can be explicitly reauthorized with `revise_plan`.
 Supply the complete revised contract and stage definitions, a future expiry and
 at least one new `authority_refs` entry. A reference records the supplied authority;
-it does not verify a ChatGPT user's identity or create a native grant. Current
+it does not verify the client user's identity or create a native grant. Current
 targets, exact workspace identity/HEAD and repository account grants are checked.
 A live foreign owner must release first. Cancellation and terminal history cannot
 be reopened; an expired paused task stays paused, with no new owner or handoff,

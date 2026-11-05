@@ -184,7 +184,7 @@ async function setup(args, environment) {
     output.write('Open Machine Core is ready. Commands and workspace writes: ' +
       (commands ? 'commands allowed' : 'commands disabled') + ', ' +
       (writes ? 'edits allowed' : 'edits disabled') + '.\n');
-    output.write('ChatGPT connection is a separate step.\n');
+    output.write('Connecting an AI client is a separate step.\n');
     return status;
   } finally {
     rl?.close();

@@ -149,7 +149,7 @@ explicit retained-coverage map in the PR.
 All tests remain under root `test/`; no additional test framework, network
 account or GPU is required. Private disposable directories, short owned processes
 and local Unix sockets are fixtures, not production projects or live
-ChatGPT acceptance.
+client acceptance.
 
 ## Compatibility and packaging
 
@@ -197,7 +197,7 @@ records, explicit retirement errors and rejection of native account substitution
 ## Evidence boundaries
 
 Mocked launchctl is not native service acceptance; private-socket SDK sessions are
-not real ChatGPT conversations; simulated native transport is not live-device evidence.
+not real client conversations; simulated native transport is not live-device evidence.
 A true transition uses distinct immutable candidates, preserved original workers/
 records/configuration and verified restoration or explicit uncertainty. Run such
 checks only on authorized disposable resources, never production services or NAS/GPU

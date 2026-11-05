@@ -21,4 +21,4 @@ Select exact reviewed artifacts and preserve original environments, target archi
 state and stable locks. Never repair a compatibility gate by deleting history or
 fabricating an installation manifest. Unknown or pending work retains original IDs;
 software rollback does not reverse user effects. Local readiness, installed tests,
-tunnel readiness and real ChatGPT acceptance are separate observations.
+tunnel readiness and real client acceptance are separate observations.

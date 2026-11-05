@@ -164,7 +164,7 @@ class Application:
                        "task_page_bytes": tasks.MAX_PAGE_BYTES, "task_page_entries": tasks.MAX_PAGE_ITEMS,
                        "task_active_operations": tasks.MAX_ACTIVE_OPERATIONS,
                        "task_result_bytes": MAX_TASK_RESULT_BYTES},
-            "boundary": "Native account access, not a sandbox. No live ChatGPT/Tunnel health probe.",
+            "boundary": "Native account access, not a sandbox. No live client or tunnel health probe.",
         }
 
     def inspect_context(self, machine: str, workspace_name: str, worktree: str = "", task_id: str = "",
