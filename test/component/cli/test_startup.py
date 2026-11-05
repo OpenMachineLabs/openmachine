@@ -28,11 +28,13 @@ print(json.dumps({"code": code, "stdout": out.getvalue(), "stderr": err.getvalue
 '''
 
 
-# Only native registration observations are simulated. The CLI, first-run writer,
-# private files, configuration parser and capability checks remain real.
+# Only host eligibility and native registration observations are simulated.
+# Keep the interpreter platform intact for dependency imports on other hosts;
+# the CLI, first-run writer, private files, parser and capabilities remain real.
 CONFIGURE_HOST = """
-sys.platform = "darwin"
-from openmachine.service import runtime
+from types import SimpleNamespace
+from openmachine.service import maintenance, runtime
+maintenance.sys = SimpleNamespace(platform="darwin")
 runtime._native = lambda state: {"loaded": False}
 runtime.socket_alive = lambda path: False
 """
