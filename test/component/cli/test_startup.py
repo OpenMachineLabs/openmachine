@@ -93,16 +93,22 @@ exec(body)
         # Only the absent/corrupt-state paths are simulated on non-macOS CI;
         # no native job, socket, service process or installed state is consulted.
         host = 'import os\nsys.platform = "darwin"\nos.getuid = lambda: 501\n'
+        # Linux examples simulate only the host/systemd capability predicate.
+        # Distro labels have no acceptance role and prove no native installation.
+        linux = ('import os\nimport platform\nfrom openmachine.service import systemd\n'
+                 'sys.platform = "linux"\nos.getuid = lambda: 501\n'
+                 'platform.machine = lambda: "x86_64"\n'
+                 'platform.libc_ver = lambda: ("glibc", "2.39")\n'
+                 'systemd.supported = lambda: True\n')
         cases = [(host, arguments + ["status"], 0, "not_installed", None),
                  (host, arguments + ["--contract", "99", "status"], 1, "incompatible", "incompatible_management"),
                  (host, ["--config", "relative.toml", "--state-dir", str(self.state), "manage", "status"],
                   1, "unknown", "invalid_service_path"),
-                 ('import os\nimport platform\nsys.platform = "linux"\nos.getuid = lambda: 501\n'
-                  'platform.machine = lambda: "x86_64"\n'
-                  'platform.freedesktop_os_release = lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"}\n',
+                 (linux + 'platform.freedesktop_os_release = lambda: {"ID": "ubuntu", "VERSION_ID": "22.04"}\n',
                   arguments + ["status"], 0, "not_installed", None),
-                 ('import platform\nsys.platform = "linux"\n'
-                  'platform.freedesktop_os_release = lambda: {"ID": "debian", "VERSION_ID": "12"}\n',
+                 (linux + 'platform.freedesktop_os_release = lambda: {"ID": "debian", "VERSION_ID": "12"}\n',
+                  arguments + ["status"], 0, "not_installed", None),
+                 (linux + "systemd.supported = lambda: False\n",
                   arguments + ["status"], 1, "unknown", "unsupported_service_host")]
         for setup, argv, code, status, reason in cases:
             with self.subTest(status=status, reason=reason):
