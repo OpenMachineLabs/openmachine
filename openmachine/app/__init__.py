@@ -434,8 +434,7 @@ class Application:
         bindings = dict(contract.get("github_connections", {}))
         default = None
         if bind_new and contract.get("github_source") == "cloud" and any(repo not in bindings for repo in contract["repositories"]):
-            from integrations.github.cloud import resolve
-            default = resolve(self.connections)
+            default = self.connections.cloud_default()
         for repository in contract["repositories"]:
             binding = bindings.get(repository)
             if bind_new:

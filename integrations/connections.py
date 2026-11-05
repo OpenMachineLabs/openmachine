@@ -90,6 +90,10 @@ class Connections:
         from integrations.github.cloud import bind
         return bind(self, request)
 
+    def cloud_default(self) -> str:
+        from integrations.github.cloud import resolve
+        return resolve(self)
+
     def _policy(self, item: Connection, repository: str, write=False):
         config = self._enabled()
         from integrations.github import connection
