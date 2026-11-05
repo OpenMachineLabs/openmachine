@@ -52,6 +52,29 @@ class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, self.digest))
 
 
+class LinuxSystemdCapabilityTests(unittest.TestCase):
+    def test_systemd_capability_requires_binary_executables_and_glibc(self):
+        with patch.object(systemd.platform, "machine", return_value="x86_64"), \
+                patch.object(systemd.platform, "libc_ver", return_value=("glibc", "2.34")), \
+                patch.object(systemd.os.path, "isfile", return_value=True), \
+                patch.object(systemd.os, "access", return_value=True):
+            self.assertTrue(systemd.supported())
+        for missing in ("/usr/bin/systemctl", "/usr/bin/loginctl"):
+            with self.subTest(missing=missing), \
+                    patch.object(systemd.platform, "machine", return_value="x86_64"), \
+                    patch.object(systemd.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                    patch.object(systemd.os.path, "isfile", side_effect=lambda path: path != missing):
+                self.assertFalse(systemd.supported())
+        for arch, libc, version in (("aarch64", "glibc", "2.39"),
+                                    ("x86_64", "glibc", "2.33"),
+                                    ("x86_64", "musl", "1.2"),
+                                    ("x86_64", "glibc", "2.34rc1")):
+            with self.subTest(arch=arch, libc=libc, version=version), \
+                    patch.object(systemd.platform, "machine", return_value=arch), \
+                    patch.object(systemd.platform, "libc_ver", return_value=(libc, version)):
+                self.assertFalse(systemd.supported())
+
+
 class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()

@@ -3,6 +3,7 @@
 import ctypes
 import os
 from pathlib import Path
+import platform
 import re
 import shlex
 import signal
@@ -10,12 +11,17 @@ import stat
 import time
 
 from openmachine.foundation.sanitize import Fault
-from . import payload, processes
+from . import processes
 
 
 def supported() -> bool:
     # Check the required binaries and runtime ABI, not a distribution name.
-    return (payload.linux_host_supported()
+    if platform.machine() != "x86_64":
+        return False
+    libc, version = platform.libc_ver()
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
+    return (libc == "glibc" and match is not None
+            and (int(match[1]), int(match[2])) >= (2, 34)
             and all(os.path.isfile(path) and os.access(path, os.X_OK)
                     for path in ("/usr/bin/systemctl", "/usr/bin/loginctl")))
 
