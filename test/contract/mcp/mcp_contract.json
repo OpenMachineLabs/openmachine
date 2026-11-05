@@ -125,6 +125,12 @@
       "approval": "Current maintainer request authorizes bounded GitHub Actions reads and one workflow control tool.",
       "base_commit": "c9c7b1638a859c14f0d9e4ca01754dc6cfe3cb35",
       "change": "Add eight github_read Actions/deployment actions, one closed optional filters object, and github_workflow with native mutation annotations. Preserve the released baseline and every unrelated schema and annotation."
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/246#evidence-and-authorization",
+      "base_commit": "cffec73ba5bc3797b33416b56805a57b54bddfcc",
+      "change": "Add only the optional native/cloud github_source selector to Task contracts, defaulting to native and omitted from native persisted serialization. Cloud Task admission resolves the account default once and retains the existing github_connections binding. Preserve every tool name, annotation and unrelated field. This deliberate expectation follows the approved contract, not regeneration from candidate output.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/246"
     }
   ],
   "baseline": {
@@ -803,6 +809,15 @@
                 "maxItems": 16,
                 "title": "Tools",
                 "type": "array"
+              },
+              "github_source": {
+                "default": "native",
+                "enum": [
+                  "native",
+                  "cloud"
+                ],
+                "title": "Github Source",
+                "type": "string"
               }
             },
             "required": [
@@ -1370,6 +1385,15 @@
                 "maxItems": 16,
                 "title": "Tools",
                 "type": "array"
+              },
+              "github_source": {
+                "default": "native",
+                "enum": [
+                  "native",
+                  "cloud"
+                ],
+                "title": "Github Source",
+                "type": "string"
               }
             },
             "required": [
