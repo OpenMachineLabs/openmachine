@@ -252,6 +252,38 @@ class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
         self.assertIn(b'ExecStart=:"/private/quoted path/%%python" "literal$dollar" "a\\"b"', rendered)
         self.assertIn(b"WorkingDirectory=/private/state space/%%literal\n", rendered)
 
+    def test_first_registration_uses_safe_modes_with_permissive_umask(self):
+        from openmachine.service import install
+        unit = runtime._plist_path(self.state)
+        self.assertFalse((self.root / ".config").exists())
+        self.commands.return_value = subprocess.CompletedProcess([], 0, "", "")
+        original_umask = os.umask(0o002)
+        try:
+            with patch.object(systemd, "absent"), patch.object(install, "_verify_candidate"), \
+                    patch.object(runtime, "socket_alive", return_value=False):
+                result = transition._register(self.config, self.state, self.a, "project", "hello.txt")
+        finally:
+            os.umask(original_umask)
+        self.assertEqual(result["status"], "installed")
+        for directory in (self.root / ".config", self.root / ".config/systemd", unit.parent):
+            info = directory.lstat()
+            self.assertEqual(info.st_uid, os.getuid())
+            self.assertEqual(info.st_mode & 0o777, 0o755)
+        self.assertEqual(unit.stat().st_mode & 0o777, 0o600)
+
+    def test_first_registration_rejects_preexisting_group_writable_parent(self):
+        from openmachine.service import install
+        unit = runtime._plist_path(self.state)
+        parent = unit.parent.parent
+        parent.mkdir(mode=0o755, parents=True)
+        parent.chmod(0o775)
+        with patch.object(systemd, "absent"), patch.object(install, "_verify_candidate"), \
+                patch.object(runtime, "socket_alive", return_value=False):
+            self.assert_fault("service_definition_mismatch", lambda: transition._register(
+                self.config, self.state, self.a, "project", "hello.txt"))
+        self.assertFalse(unit.exists())
+        self.assertEqual(parent.stat().st_mode & 0o777, 0o775)
+
     def test_registration_rejects_symlink_ancestor_before_creating_directories(self):
         from openmachine.service import install
         foreign = self.root / "foreign"

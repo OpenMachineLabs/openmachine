@@ -225,12 +225,12 @@ def _register(config_path: Path, state: Path, identity: str, workspace: str, pat
                 before_change()
             record = service_state._bind_management(state, record, identity)
             record.update(format=2, policy={"desired": "stopped", "start_at_login": False})
+        unit_path = runtime._plist_path(state)
         if sys.platform == "linux":
-            runtime.systemd.absent(runtime._plist_path(state))
-            runtime.systemd.check_path(runtime._plist_path(state), allow_missing=True)
-        runtime._plist_path(state).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-        if sys.platform == "linux":
-            runtime.systemd.check_path(runtime._plist_path(state))
+            runtime.systemd.absent(unit_path)
+            runtime.systemd.prepare_unit_directory(unit_path)
+        else:
+            unit_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         for destination, content in ((root / "launch.py", LAUNCHER.encode()), (root / "service.log", b""),
                                      (runtime._plist_path(state), runtime._definition_bytes(runtime._definition(state, record)))):
             fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

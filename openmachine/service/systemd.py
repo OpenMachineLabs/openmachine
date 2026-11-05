@@ -43,6 +43,20 @@ def check_path(path: Path, *, allow_missing: bool = False) -> None:
             raise Fault("service_definition_mismatch", "The unit directory chain is not owned and safe; it was not changed.")
 
 
+def prepare_unit_directory(path: Path) -> None:
+    """Create only missing owned unit ancestors with fixed safe directory modes."""
+    check_path(path, allow_missing=True)
+    home = Path.home()
+    for parent in (*reversed(path.parent.parents), path.parent):
+        if parent == home or not parent.is_relative_to(home):
+            continue
+        # Path.mkdir(parents=True) uses 0777 for intermediate directories,
+        # which can create group-writable systemd ancestors under umask 0002.
+        parent.mkdir(mode=0o755, exist_ok=True)
+        check_path(path, allow_missing=True)
+    check_path(path)
+
+
 def _quote(value: str) -> str:
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise Fault("invalid_service_path", "Native unit values cannot contain control characters.")
