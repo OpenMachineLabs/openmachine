@@ -43,10 +43,17 @@ class DeviceAction(Model):
     user_code: str = Field(pattern=r"^[A-Z0-9-]{4,32}$")
 
 
+class CloudBinding(Model):
+    origin: str = Field(pattern=r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$")
+    principal_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,256}$")
+    account_id: ID
+    core_binding: Fingerprint
+
+
 class Connection(Model):
     id: ID
     provider: Literal["github"]
-    backend: Literal["gh", "native"]
+    backend: Literal["gh", "native", "cloud"]
     account_id: Revision
     account_login: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
     authorization_revision: Revision
@@ -56,6 +63,7 @@ class Connection(Model):
     credential_store: Literal["keychain", "file"] | None = None
     credential_ref: ID | None = None
     refresh_expires_at_ms: Number | None = None
+    cloud: CloudBinding | None = None
 
     @model_validator(mode="after")
     def native_fields(self):
@@ -63,7 +71,16 @@ class Connection(Model):
         invalid = any(v is None for v in values) if self.backend == "native" else any(v is not None for v in values)
         if invalid:
             raise ValueError("invalid credential binding")
+        if (self.backend == "cloud") != (self.cloud is not None):
+            raise ValueError("invalid cloud binding")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialized(self, handler):
+        value = handler(self)
+        if self.cloud is None:
+            value.pop("cloud", None)
+        return value
 
     def binding(self) -> dict:
         return {"connection_id": self.id, "account_id": self.account_id,
@@ -166,7 +183,7 @@ class WebIntent(Model):
 
 
 class Store(Model):
-    format: Literal[1, 2, 3]
+    format: Literal[1, 2, 3, 4]
     connections: dict[ID, Connection] = Field(default_factory=dict, max_length=MAX_CONNECTIONS)
     attempts: dict[ID, Attempt] = Field(default_factory=dict, max_length=MAX_ATTEMPTS)
     web_core_id: ID | None = None
@@ -182,6 +199,8 @@ class Store(Model):
 
     @model_validator(mode="after")
     def valid(self):
+        if self.format < 4 and any(c.backend == "cloud" for c in self.connections.values()):
+            raise ValueError("cloud connections require format 4")
         if (any(k != v.id for k, v in self.connections.items())
                 or any(a.connection_id not in self.connections for a in self.attempts.values() if a.connection_id)):
             raise ValueError("invalid connection reference")
@@ -243,7 +262,7 @@ def _load(path: Path) -> Store:
         raise ValueError("oversized state")
     value = json.loads(raw, object_pairs_hook=pairs)
     fields = {"format", "connections", "attempts"}
-    if isinstance(value, dict) and value.get("format") == 3:
+    if isinstance(value, dict) and value.get("format") in {3, 4}:
         fields |= {"web_core_id", "web_intents"}
     if not isinstance(value, dict) or set(value) != fields or type(value["format"]) is not int:
         raise ValueError("invalid state fields")
@@ -310,7 +329,8 @@ class ConnectionStore:
             yield value
 
     def save(self, value: Store):
-        value.format = 3 if value.web_core_id is not None or value.web_intents else max(2, value.format)
+        value.format = max(value.format, 4 if any(c.backend == "cloud" for c in value.connections.values()) else
+                           3 if value.web_core_id is not None or value.web_intents else 2)
         data = value.model_dump()
         Store.model_validate(data)
         if len(json.dumps(data).encode()) > MAX_BYTES:

@@ -83,8 +83,13 @@ class Application:
         repository = arguments.get("repository", (arguments.get("locator") or {}).get("repository", ""))
         try:
             provider = self._provider()
+            locator = arguments.get("locator") or {}
             transport = self.connections.request(repository, connection_id=selected, binding=binding,
-                write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound)
+                write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound,
+                scope={"operation": operation, "action": arguments.get("action", locator.get("object_type", "")),
+                       "number": arguments.get("number", locator.get("number")) or 0,
+                       "project_number": arguments.get("project_number", locator.get("number") if locator.get("object_type") == "project" else 0) or 0})
+
         except Fault as error:
             if operation not in {"read", "reconcile"}:
                 raise Fault(error.code, str(error), error.evidence, effect="known_no_effect") from error
@@ -123,6 +128,7 @@ class Application:
                                                            "backend": "native", "legacy_gh": "retired",
                                                            "probe_status": "not_probed", "read_and_merge": True},
             "connections": {"protocol": 2,
+                            "cloud_proxy_protocol": 1,
                             "methods": ["device_code"] if self.config.github and self.connections.native.CLIENT_ID else [],
                             "native_login": bool(self.config.github and self.connections.native.CLIENT_ID),
                             "login_cancellation": True},
@@ -426,10 +432,15 @@ class Application:
         if github_write and not contract["repositories"]:
             raise Fault("invalid_task_contract", "A GitHub mutation scope needs explicit repositories.")
         bindings = dict(contract.get("github_connections", {}))
+        default = None
+        if bind_new and contract.get("github_source") == "cloud" and any(repo not in bindings for repo in contract["repositories"]):
+            from integrations.github.cloud import resolve
+            default = resolve(self.connections)
         for repository in contract["repositories"]:
             binding = bindings.get(repository)
             if bind_new:
-                binding = self.connections.select(repository, binding=binding, write=github_write).binding()
+                binding = self.connections.select(repository, connection_id=default if binding is None else "",
+                                                  binding=binding, write=github_write).binding()
                 bindings[repository] = binding
             observed = self._github_call("read", dict(action="repository", repository=repository),
                                          binding=binding, historical_unbound=not bind_new and binding is None)

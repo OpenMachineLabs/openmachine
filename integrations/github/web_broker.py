@@ -65,7 +65,7 @@ def _remaining_timeout(deadline: float) -> float:
     return remaining
 
 
-def _response(peer, deadline: float) -> dict:
+def _response(peer, deadline: float, *, maximum: int = MAX_BODY) -> dict:
     def receive(limit):
         peer.settimeout(_remaining_timeout(deadline))
         chunk = peer.recv(limit)
@@ -90,13 +90,13 @@ def _response(peer, deadline: float) -> dict:
         if not separator or not re.fullmatch(r"[a-z0-9-]+", name) or name in headers:
             raise ValueError("invalid refresh headers")
         headers[name] = value.strip()
-    if (not re.fullmatch(r"[0-9]{1,5}", headers.get("content-length", ""))
+    if (not re.fullmatch(r"[0-9]{1,7}", headers.get("content-length", ""))
             or headers.get("content-type", "").split(";", 1)[0].lower() != "application/json"
             or "no-store" not in {part.strip().lower() for part in headers.get("cache-control", "").split(",")}
             or "transfer-encoding" in headers or headers.get("content-encoding", "identity") != "identity"):
         raise ValueError("invalid refresh framing")
     size = int(headers["content-length"])
-    if not 0 < size <= MAX_BODY or len(body) > size:
+    if not 0 < size <= maximum or len(body) > size:
         raise ValueError("invalid refresh size")
     while len(body) < size:
         body += receive(min(4096, size - len(body)))

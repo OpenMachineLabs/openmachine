@@ -111,7 +111,9 @@ class ApplicationAdmissionFixture(object):
                 if name.startswith("github_"):
                     self.assertIs(actual.arguments.pop("transport"), request.return_value)
                     expected.arguments.pop("transport")
-                    request.assert_called_once_with("example/project", connection_id="", binding=None, write=True, historical_unbound=False)
+                    request.assert_called_once_with("example/project", connection_id="", binding=None, write=True, historical_unbound=False,
+                        scope={"operation": name.removeprefix("github_"), "action": expected.arguments.get("action", ""),
+                               "number": expected.arguments.get("number", 0), "project_number": expected.arguments.get("project_number", 0)})
                 else:
                     request.assert_not_called()
                 self.assertEqual(actual.arguments, expected.arguments)

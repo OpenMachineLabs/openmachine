@@ -1,4 +1,4 @@
-# Native GitHub account connections
+# GitHub account connections
 
 [Domain guide](SKILL.md)
 
@@ -7,7 +7,7 @@
 Connection protocol **2** provides one runtime-owned native account lifecycle on
 existing private MCP. Assistant-initiated accounts use GitHub App Device Flow; `existing_gh`
 onboarding and the gh request backend are retired. Runtime requests require a
-selected native connection and an explicit transport; there is no CLI fallback.
+selected native or Cloud connection and an explicit transport; there is no CLI fallback.
 Saved gh connections, login attempts, task bindings and receipts remain readable.
 Their stored status describes history, not current execution support; capabilities
 report `legacy_gh: retired`. Requests through an old binding or an unbound historical
@@ -61,7 +61,7 @@ stores are explicit failures, not automatic deletion or replay of old request ID
 Account selection is stable per operation/task. No global active token is changed.
 Per-account coordination serializes refresh and disconnect; new logins use unique
 credential slots, so late results cannot overwrite another account or undo a
-cancel/disconnect. New work accepts native bindings only; old task identities and
+cancel/disconnect. New work accepts native or explicit Cloud bindings; old task identities and
 serialized evidence are not migrated to a different authentication backend.
 
 Device Flow requests refresh access tokens near expiry. The same owner checks refresh
@@ -70,7 +70,7 @@ otherwise idle accounts. No high-frequency keepalive or always-open network
 connection is needed. GitHub currently returns eight-hour access tokens and
 six-month rotating refresh grants; routine successful rotation renews both.
 
-For web credentials, Core uses only the fixed owner-authenticated local Connector
+For retained local-web credentials, Core uses only the fixed owner-authenticated local Connector
 broker for refresh. An unexpired local token remains usable without Cloud; web
 rotation starts on expiry or a definite authentication rejection. Core saves the
 original refresh ID before dispatch and durably verifies the rotated pair. A lost
@@ -107,3 +107,25 @@ Empty optional fields are omitted from legacy canonical bytes. New creation retr
 compare the original caller request, not subsequently resolved connection state.
 Routine native credential rotation preserves authorization revisions. Account
 recovery does not replay a GitHub mutation or renew task authority.
+
+## Cloud-managed accounts
+
+An approved connector can bind a Cloud account through the fixed owner-only
+`cloud-bind` interface. Core stores only source, actor and authorization-revision
+metadata. Provider access/refresh tokens stay in the account service; bounded
+requests pass through the existing private connector broker and restricted proxy.
+Core retains repository policy, GitHub business checks, Tasks and original results.
+A Cloud connection is never represented as a fabricated local keychain credential.
+
+For new Cloud-backed Task contracts, `github_source="cloud"` resolves the account
+service's persisted default during new admission and pins `github_connections`.
+Original Task-ID recovery happens first. Changing the default affects new tasks,
+not continuation or reconciliation. Echo retained source/bindings when revising a
+contract; do not remove them to work around a compatibility error. Direct local
+Device Flow retains its independent selection and requires no Cloud account.
+
+Connection format 4 and state contract 28 cover this credential-free source.
+Existing local formats, tokens, login attempts and task receipts are preserved;
+there is no automatic upload or source fallback. A lost proxy reply remains an
+unknown effect. A revoked or incompatible source requires the original account's
+explicit recovery, never a replacement account or repeated mutation.

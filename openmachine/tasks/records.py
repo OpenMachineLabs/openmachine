@@ -158,11 +158,14 @@ class Contract(Model):
     tools: Annotated[list[Name], Field(max_length=16)]
     sources: Annotated[list[Source], Field(max_length=16)]
     expires_at_ms: Integer
+    github_source: Literal["native", "cloud"] = "native"
     github_connections: dict[Repository, GitHubBinding] = Field(default_factory=dict, max_length=8)
 
     @model_serializer(mode="wrap")
     def serialized(self, handler):
         value = handler(self)
+        if self.github_source == "native":
+            value.pop("github_source", None)
         if not self.github_connections:
             value.pop("github_connections", None)
         return value
