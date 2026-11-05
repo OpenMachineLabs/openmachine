@@ -17,21 +17,27 @@ MANIFEST_LIMIT = 4 * 1024 * 1024
 FILE_LIMIT = 20000
 BYTE_LIMIT = 2 * 1024 * 1024 * 1024
 TARGET = {"os": "macos", "arch": "arm64", "minimum_os": "13.0"}
-LINUX_TARGET = {"os": "linux", "arch": "x86_64", "distribution": "ubuntu", "version": "24.04"}
+# The pinned Git and cryptography Linux binaries require glibc >= 2.34.
+LINUX_TARGET = {"os": "linux", "arch": "x86_64", "libc": "glibc",
+                "minimum_glibc": "2.34", "service_manager": "systemd-user"}
+
+
+def linux_host_supported() -> bool:
+    if sys.platform != "linux" or platform.machine() != "x86_64":
+        return False
+    libc, version = platform.libc_ver()
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
+    return libc == "glibc" and match is not None and (int(match[1]), int(match[2])) >= (2, 34)
 
 
 def host_target() -> dict:
-    if sys.platform == "linux" and platform.machine() == "x86_64":
-        try:
-            release = platform.freedesktop_os_release()
-        except OSError:
-            release = {}
-        if release.get("ID") == "ubuntu" and release.get("VERSION_ID") == "24.04":
-            return LINUX_TARGET
+    if linux_host_supported():
+        return LINUX_TARGET
     if (sys.platform == "darwin" and platform.machine() == "arm64"
             and int(platform.mac_ver()[0].split(".")[0]) >= 13):
         return TARGET
-    raise Fault("unsupported_payload_host", "Payloads require Apple Silicon macOS 13+ or Ubuntu 24.04 x86_64.")
+    raise Fault("unsupported_payload_host",
+                "Payloads require Apple Silicon macOS 13+ or x86_64 Linux with glibc 2.34+.")
 
 
 def _relative(value: str) -> PurePosixPath:

@@ -81,7 +81,7 @@ def _definition_bytes(definition: dict) -> bytes:
 
 def require_host() -> None:
     if os.getuid() == 0 or not (sys.platform == "darwin" or sys.platform == "linux" and systemd.supported()):
-        raise Fault("unsupported_service_host", "Managed services require a nonroot macOS or Ubuntu 24.04 x86_64 user.")
+        raise Fault("unsupported_service_host", "Managed services require a nonroot macOS user or x86_64 glibc 2.34+ Linux with systemd user services.")
 
 
 def _verify_files(state: Path, record: dict) -> dict:

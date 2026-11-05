@@ -1,4 +1,4 @@
-"""Ubuntu native management and verified payload boundaries."""
+"""Portable Linux native management and verified payload boundaries."""
 
 import unittest
 import os
@@ -12,23 +12,39 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
-    def test_wrong_arch_release_and_owner_fail_closed(self):
-        self.manifest["target"] = {"os": "linux", "arch": "x86_64", "distribution": "ubuntu", "version": "24.04"}
+    def test_wrong_arch_and_owner_fail_closed(self):
+        self.manifest["target"] = payload.LINUX_TARGET
         digest = self.seal()
         with patch.object(payload.sys, "platform", "linux"), \
-                patch.object(payload.platform, "machine", return_value="aarch64"), \
-                patch.object(payload.platform, "freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}):
+                patch.object(payload.platform, "machine", return_value="aarch64"):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
-        with patch.object(payload.sys, "platform", "linux"), patch.object(payload.os, "getuid", return_value=os.getuid() + 1):
-            self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, digest))
-
-    def test_verified_ubuntu_payload_is_accepted_on_exact_target(self):
-        self.manifest["target"] = {"os": "linux", "arch": "x86_64", "distribution": "ubuntu", "version": "24.04"}
-        digest = self.seal()
         with patch.object(payload.sys, "platform", "linux"), \
                 patch.object(payload.platform, "machine", return_value="x86_64"), \
-                patch.object(payload.platform, "freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}):
-            self.assertEqual(payload.verify(self.source, digest)["target"], self.manifest["target"])
+                patch.object(payload.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                patch.object(payload.os, "getuid", return_value=os.getuid() + 1):
+            self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, digest))
+
+    def test_glibc_payload_is_distro_independent(self):
+        self.manifest["target"] = payload.LINUX_TARGET
+        digest = self.seal()
+        for release in ({"ID": "ubuntu", "VERSION_ID": "22.04"}, {"ID": "debian", "VERSION_ID": "12"},
+                        {"ID": "fedora", "VERSION_ID": "43"}, {"ID": "rocky", "VERSION_ID": "9"},
+                        {"ID": "arch"}, {"ID": "opensuse-tumbleweed"}):
+            with self.subTest(release=release), \
+                    patch.object(payload.sys, "platform", "linux"), \
+                    patch.object(payload.platform, "machine", return_value="x86_64"), \
+                    patch.object(payload.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                    patch.object(payload.platform, "freedesktop_os_release", return_value=release):
+                self.assertEqual(payload.verify(self.source, digest)["target"], payload.LINUX_TARGET)
+
+    def test_old_glibc_and_musl_hosts_fail_closed(self):
+        self.manifest["target"] = payload.LINUX_TARGET
+        digest = self.seal()
+        for libc in (("glibc", "2.33"), ("musl", "1.2.5"), ("", ""), ("glibc", "invalid")):
+            with self.subTest(libc=libc), patch.object(payload.sys, "platform", "linux"), \
+                    patch.object(payload.platform, "machine", return_value="x86_64"), \
+                    patch.object(payload.platform, "libc_ver", return_value=libc):
+                self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
 
     def test_linux_rejects_macos_payload_even_with_matching_digest(self):
         with patch.object(payload.sys, "platform", "linux"), \
@@ -40,9 +56,7 @@ class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.enterContext(patch.object(maintenance.sys, "platform", "linux"))
-        self.enterContext(patch.object(maintenance.platform, "machine", return_value="x86_64"))
-        self.enterContext(patch.object(maintenance.platform, "freedesktop_os_release",
-                                     return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}))
+        self.enterContext(patch.object(systemd, "supported", return_value=True))
         self.enterContext(patch.object(Path, "home", return_value=self.root))
         self.commands = self.enterContext(patch.object(processes, "run"))
 
@@ -216,10 +230,10 @@ class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
             start.assert_not_called()
         self.assertTrue(service_state.stopped(service_state._record(self.state)))
 
-    def test_unsupported_linux_hosts_are_rejected(self):
-        for release in ({"ID": "debian", "VERSION_ID": "12"}, {"ID": "ubuntu", "VERSION_ID": "22.04"}):
-            with patch.object(maintenance.platform, "freedesktop_os_release", return_value=release):
-                self.assertEqual(maintenance.dispatch(self.config, self.state, "status")["reason"], "unsupported_service_host")
+    def test_missing_native_capability_is_rejected(self):
+        with patch.object(systemd, "supported", return_value=False):
+            self.assertEqual(maintenance.dispatch(self.config, self.state, "status")["reason"],
+                             "unsupported_service_host")
 
     def test_parent_death_setup_rejects_orphan_race_and_kernel_failure(self):
         libc = Mock()

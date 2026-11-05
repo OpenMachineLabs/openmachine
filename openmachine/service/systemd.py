@@ -1,9 +1,8 @@
-"""Ubuntu 24.04 user units; native identity checks, never a second lifecycle owner."""
+"""Owned Linux systemd user units; native identity checks, never a second lifecycle owner."""
 
 import ctypes
 import os
 from pathlib import Path
-import platform
 import re
 import shlex
 import signal
@@ -11,15 +10,14 @@ import stat
 import time
 
 from openmachine.foundation.sanitize import Fault
-from . import processes
+from . import payload, processes
 
 
 def supported() -> bool:
-    try:
-        release = platform.freedesktop_os_release()
-        return platform.machine() == "x86_64" and release.get("ID") == "ubuntu" and release.get("VERSION_ID") == "24.04"
-    except OSError:
-        return False
+    # Check the required binaries and runtime ABI, not a distribution name.
+    return (payload.linux_host_supported()
+            and all(os.path.isfile(path) and os.access(path, os.X_OK)
+                    for path in ("/usr/bin/systemctl", "/usr/bin/loginctl")))
 
 
 def unit_path(label: str) -> Path:
