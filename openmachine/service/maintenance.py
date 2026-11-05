@@ -361,8 +361,13 @@ def _uninstalled(state: Path) -> None:
         raise Fault("service_adoption_required", "Existing runtime history is not a clean first-run state; inspect its original owner.")
     if any(os.path.lexists(item) for item in (root / "service.json", root / "launch.py", root / "service.log", root / "manage.py", runtime._plist_path(state))):
         raise Fault("service_already_installed", "Existing or incomplete native registration requires readback; no silent adoption is permitted.")
-    if runtime._native(state)["loaded"] or runtime.socket_alive(state / "mcp.sock"):
-        raise Fault("service_already_running", "An existing native job or listener blocks installation; nothing was stopped.")
+    if sys.platform == "linux":
+        # First-run absence must not read a service record that does not exist yet.
+        runtime.systemd.absent(runtime._plist_path(state))
+    elif runtime._native(state)["loaded"]:
+        raise Fault("service_already_running", "An existing native job blocks installation; nothing was stopped.")
+    if runtime.socket_alive(state / "mcp.sock"):
+        raise Fault("service_already_running", "An existing listener blocks installation; nothing was stopped.")
 
 
 def _bound(config_path: Path, state: Path, record: dict) -> None:

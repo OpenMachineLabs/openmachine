@@ -46,6 +46,30 @@ class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
         self.enterContext(patch.object(Path, "home", return_value=self.root))
         self.commands = self.enterContext(patch.object(processes, "run"))
 
+    def test_clean_first_configuration_checks_absence_without_installed_record(self):
+        config, state = self.root / "fresh.toml", self.root / "fresh-state"
+        self.commands.return_value = subprocess.CompletedProcess([], 4,
+            "LoadState=not-found\nMainPID=0\nFragmentPath=\n", "")
+        result = maintenance.dispatch(config, state, "configure", workspace=self.root)
+        self.assertEqual(result["status"], "configured", result)
+        self.assertTrue(config.is_file())
+        self.assertFalse(state.exists())
+        self.assertEqual(self.commands.call_count, 1)
+        self.assertIn("show", self.commands.call_args.args[0])
+
+    def test_first_configuration_rejects_occupied_or_unobservable_native_unit(self):
+        self.definition_fixture()
+        for index, expected in enumerate(("service_identity_mismatch", "user_service_unavailable")):
+            if index:
+                self.commands.side_effect = None
+                self.commands.return_value = subprocess.CompletedProcess([], 1, "", "No user manager")
+            config, state = self.root / f"denied-{index}.toml", self.root / f"denied-state-{index}"
+            result = maintenance.dispatch(config, state, "configure", workspace=self.root)
+            self.assertEqual(result.get("reason"), expected, result)
+            self.assertFalse(config.exists())
+            self.assertFalse(state.exists())
+        self.assertFalse(any("start" in call.args[0] for call in self.commands.call_args_list))
+
     def definition_fixture(self):
         path = runtime._plist_path(self.state)
         path.parent.mkdir(parents=True)

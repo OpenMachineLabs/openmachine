@@ -90,11 +90,34 @@ jobs:
           sudo cp -a "$RUNNER_TEMP/payload" /home/om-linux-test/payload
           sudo cp -a test /home/om-linux-test/test
           sudo chown -R om-linux-test:om-linux-test /home/om-linux-test
+          # Only this disposable user manager gets the offline/no-toolchain sandbox.
+          # The runner and its build/upload tools are outside these namespaces.
+          dropin="/run/systemd/system/user@$test_uid.service.d"
+          sudo mkdir "$dropin"
+          {
+            echo '[Service]'
+            echo 'Environment=HOME=/home/om-linux-test XDG_CONFIG_HOME=/home/om-linux-test/.config'
+            echo 'Environment=XDG_DATA_HOME=/home/om-linux-test/.local/share XDG_CACHE_HOME=/home/om-linux-test/.cache'
+            echo 'PrivateNetwork=yes'
+            printf 'InaccessiblePaths=-/usr/local -/opt'
+            for tool in /usr/bin/python* /usr/bin/pip* /usr/bin/git* /usr/bin/node* \
+                        /usr/bin/npm /usr/bin/npx /usr/bin/rustc /usr/bin/cargo \
+                        /usr/bin/cc /usr/bin/gcc* /usr/bin/g++* /usr/bin/clang*; do
+              printf ' -%s' "$tool"
+            done
+            printf '\n'
+          } | sudo tee "$dropin/acceptance.conf"
+          sudo systemctl daemon-reload
           sudo systemctl start "user@$test_uid.service"
+          sudo -u om-linux-test mkdir -m 700 /home/om-linux-test/evidence
           manifest_sha=$(sha256sum /home/om-linux-test/payload/manifest.json | cut -d ' ' -f 1)
-          sudo -u om-linux-test env HOME=/home/om-linux-test XDG_RUNTIME_DIR="/run/user/$test_uid" \
-            OM_NATIVE_FIRST_USE=1 OM_NATIVE_DISPOSABLE_USER="$test_uid" \
-            OM_NATIVE_PAYLOAD=/home/om-linux-test/payload OM_NATIVE_PAYLOAD_SHA256="$manifest_sha" \
+          sudo -u om-linux-test env -i HOME=/home/om-linux-test XDG_RUNTIME_DIR="/run/user/$test_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$test_uid/bus" PATH=/usr/bin:/bin \
+            /usr/bin/systemd-run --user --wait --pipe --collect --unit=om-native-acceptance \
+            --setenv=HOME=/home/om-linux-test --setenv=PATH=/usr/bin:/bin \
+            --setenv=OM_NATIVE_FIRST_USE=1 --setenv=OM_NATIVE_DISPOSABLE_USER="$test_uid" \
+            --setenv=OM_NATIVE_SANDBOX=1 --setenv=OM_NATIVE_EVIDENCE=/home/om-linux-test/evidence/first-use.json \
+            --setenv=OM_NATIVE_PAYLOAD=/home/om-linux-test/payload --setenv=OM_NATIVE_PAYLOAD_SHA256="$manifest_sha" \
             /home/om-linux-test/payload/python/bin/python3 -I -B -c \
             'import os,sys,unittest; os.chdir("/home/om-linux-test"); sys.path.insert(0,os.getcwd()); unittest.main(module=None, argv=["native", "test.resilience.service.test_maintenance_process.NativeFirstUseTests"])'
       - name: Retain the exact unsigned candidate and native diagnostics
@@ -109,7 +132,12 @@ jobs:
           fi
           if test -f "$RUNNER_TEMP/om-user-created"; then
             test_uid=$(id -u om-linux-test)
-            sudo journalctl --no-pager -b "_UID=$test_uid" --lines=100
+            sudo journalctl --no-pager -b "_UID=$test_uid" --lines=300 > "$RUNNER_TEMP/linux-evidence/journal.txt"
+            if sudo test -f /home/om-linux-test/evidence/first-use.json; then
+              sudo cat /home/om-linux-test/evidence/first-use.json > "$RUNNER_TEMP/linux-evidence/first-use.json"
+              cat "$RUNNER_TEMP/linux-evidence/first-use.json"
+            fi
+            sudo systemctl cat "user@$test_uid.service" > "$RUNNER_TEMP/linux-evidence/user-manager.txt"
           fi
       - name: Upload unsigned candidate evidence, not a public release
         if: always()
@@ -125,6 +153,7 @@ jobs:
           if test -f "$RUNNER_TEMP/om-user-created"; then
             test_uid=$(id -u om-linux-test)
             sudo systemctl stop "user@$test_uid.service"
-            sudo loginctl terminate-user om-linux-test
+            # The stopped manager has already removed its login record.
+            test "$(sudo systemctl show "user@$test_uid.service" -p ActiveState --value)" = inactive
             sudo userdel --remove om-linux-test
           fi

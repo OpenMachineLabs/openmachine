@@ -2,6 +2,11 @@
 
 import json
 import asyncio
+import errno
+import hashlib
+import platform
+import socket
+import stat
 import os
 from pathlib import Path
 import shutil
@@ -37,6 +42,10 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 @unittest.skipUnless(sys.platform in {"darwin", "linux"} and os.environ.get("OM_NATIVE_FIRST_USE") == "1",
                      "opt-in native first-use test with an explicitly trusted payload")
 class NativeFirstUseTests(unittest.TestCase):
+    def save_evidence(self):
+        self.evidence_path.write_text(json.dumps(self.evidence, indent=2) + "\n")
+        self.evidence_path.chmod(0o600)
+
     def tool(self, state, name, arguments):
         import httpx2 as httpx
         from mcp import ClientSession
@@ -49,12 +58,16 @@ class NativeFirstUseTests(unittest.TestCase):
                     async with ClientSession(reader, writer) as session:
                         await session.initialize()
                         return await session.call_tool(name, arguments)
-        return asyncio.run(invoke())
+        result = asyncio.run(invoke())
+        self.evidence["tools"].append({"name": name, "arguments": arguments,
+                                       "result": result.model_dump(mode="json", by_alias=True)})
+        self.save_evidence()
+        return result
 
     def test_isolated_install_start_ready_and_stop(self):
         source = Path(os.environ["OM_NATIVE_PAYLOAD"]).resolve(strict=True)
         digest = os.environ["OM_NATIVE_PAYLOAD_SHA256"]
-        payload.verify(source, digest)
+        manifest = payload.verify(source, digest)
         if sys.platform == "linux":
             self.assertEqual(os.environ.get("OM_NATIVE_DISPOSABLE_USER"), str(os.getuid()),
                              "Linux acceptance requires an explicitly owned disposable account")
@@ -66,9 +79,15 @@ class NativeFirstUseTests(unittest.TestCase):
         operation = uuid.uuid4().hex
         command = [str(source / "python/bin/python3"), "-I", "-B", "-m", "openmachine.cli",
                    "--config", str(config), "--state-dir", str(state), "manage", "--contract", "1"]
-        evidence = {"fixture": str(root), "operation_id": operation, "steps": [],
-                    "host_tools": {name: shutil.which(name) for name in ("python3", "git", "pip", "cc")},
-                    "tool_boundary": "bundled interpreter and Git; host tooling may still be installed"}
+        evidence = {"fixture": str(root), "operation_id": operation, "steps": [], "tools": [],
+                    "uid": os.getuid(), "platform": platform.platform(), "python": sys.version,
+                    "manifest_sha256": digest, "core": manifest["core"], "target": manifest["target"],
+                    "host_tools": {name: shutil.which(name) for name in
+                                   ("python3", "git", "pip", "cc", "node", "npm", "rustc", "cargo")},
+                    "tool_boundary": "host tooling may still be installed; not absence proof"}
+        self.evidence = evidence
+        self.evidence_path = Path(os.environ.get("OM_NATIVE_EVIDENCE", str(root / "test-result.json")))
+        self.save_evidence()
         started = time.monotonic()
 
         def call(*arguments):
@@ -83,11 +102,25 @@ class NativeFirstUseTests(unittest.TestCase):
             evidence["steps"].append(step)
             observed = json.loads(result.stdout)
             step["reply"] = observed
+            self.save_evidence()
             self.assertIn(result.returncode, (0, 1), result.stderr)
             self.assertEqual(observed.get("management_contract"), 1, observed)
             return observed
 
         try:
+            if sys.platform == "linux":
+                import openmachine
+                self.assertTrue(Path(openmachine.__file__).resolve().is_relative_to(source / "python"))
+                evidence["os_release"] = platform.freedesktop_os_release()
+                if os.environ.get("OM_NATIVE_SANDBOX") == "1":
+                    self.assertTrue(all(value is None for value in evidence["host_tools"].values()), evidence)
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                        with self.assertRaises(OSError) as unavailable:
+                            probe.connect(("198.18.0.1", 9))
+                    self.assertEqual(unavailable.exception.errno, errno.ENETUNREACH)
+                    evidence["tool_boundary"] = "host developer tools inaccessible; no external IPv4 route"
+                    evidence["network_errno"] = unavailable.exception.errno
+                    self.save_evidence()
             self.assertEqual(call("status")["status"], "not_installed")
             self.assertEqual(call("configure", "--workspace", str(project))["status"], "configured")
             # Disable optional release observation in this offline fixture.
@@ -106,7 +139,7 @@ class NativeFirstUseTests(unittest.TestCase):
             while rejected["status"] in {"accepted", "busy"} and time.monotonic() < deadline:
                 time.sleep(0.2)
                 rejected = call("operation", "--operation-id", reject_id)
-            self.assertIn(rejected["status"], {"rejected", "unknown"}, rejected)
+            self.assertEqual(rejected.get("reason"), "invalid_runtime_payload", rejected)
             self.assertEqual(call("status")["status"], "not_installed")
             accepted = call("install", "--operation-id", operation, "--payload", str(source),
                             "--sha256", digest, "--probe-workspace", "project", "--probe-path", "hello.txt")
@@ -116,6 +149,16 @@ class NativeFirstUseTests(unittest.TestCase):
                 accepted = call("operation", "--operation-id", operation)
             self.assertEqual(accepted["status"], "completed", accepted)
             self.assertEqual(accepted["operation"]["operation_id"], operation)
+            # The exact original ID reads its receipt; a new install never adopts it.
+            repeated = call("install", "--operation-id", operation, "--payload", str(source),
+                            "--sha256", digest, "--probe-workspace", "project", "--probe-path", "hello.txt")
+            self.assertEqual(repeated["operation"], accepted["operation"])
+            extra_id = uuid.uuid4().hex
+            refused = call("install", "--operation-id", extra_id, "--payload", str(source),
+                           "--sha256", digest, "--probe-workspace", "project", "--probe-path", "hello.txt")
+            self.assertIn(refused.get("reason"), {"service_already_installed", "service_adoption_required"}, refused)
+            self.assertFalse((state / "service/operations" / (extra_id + ".json")).exists())
+            self.assertEqual(config.read_bytes(), original_config)
             stopped = call("status")
             self.assertEqual(stopped["status"], "stopped", stopped)
             self.assertFalse(stopped["startup"]["enabled"])
@@ -124,6 +167,18 @@ class NativeFirstUseTests(unittest.TestCase):
             observed = call("status")
             self.assertEqual(observed["status"], "ready", observed)
             self.assertEqual(observed["current"], stopped["current"])
+            socket_info = (state / "mcp.sock").lstat()
+            self.assertTrue(stat.S_ISSOCK(socket_info.st_mode))
+            self.assertEqual(socket_info.st_uid, os.getuid())
+            self.assertEqual(stat.S_IMODE(socket_info.st_mode), 0o600)
+            unit = runtime._plist_path(state)
+            evidence["native_identity"] = {"socket_uid": socket_info.st_uid,
+                "socket_mode": stat.S_IMODE(socket_info.st_mode), "unit_uid": unit.stat().st_uid,
+                "unit_mode": stat.S_IMODE(unit.stat().st_mode), "unit": unit.read_text(),
+                "unit_sha256": hashlib.sha256(unit.read_bytes()).hexdigest()}
+            self.assertEqual(unit.stat().st_uid, os.getuid())
+            self.assertEqual(stat.S_IMODE(unit.stat().st_mode), 0o600)
+            self.save_evidence()
             denied = self.tool(state, "start_execution", {"machine": "local", "execution_id": uuid.uuid4().hex,
                 "cwd": str(project), "argv": [str(source / "python/bin/python3"), "-c", "pass"]})
             self.assertTrue(denied.is_error, denied)
@@ -131,7 +186,6 @@ class NativeFirstUseTests(unittest.TestCase):
             if sys.platform == "linux":
                 # Explicit Full with commands only: the packaged service must
                 # preserve this native worker through supervisor loss/restart.
-                import hashlib
                 candidate = root / "full.toml"
                 candidate.write_text(original_config.decode().replace('local_access = "read_only"',
                     'local_access = "full_access"').replace('execution_enabled = false', 'execution_enabled = true'))
@@ -147,6 +201,10 @@ class NativeFirstUseTests(unittest.TestCase):
                     update = call("operation", "--operation-id", update_id)
                 self.assertEqual(update["status"], "completed", update)
                 original_config = candidate.read_bytes()
+                settings = load(config)
+                self.assertEqual(settings.machine("local").local_access, "full_access")
+                self.assertTrue(settings.machine("local").execution_enabled)
+                self.assertFalse(settings.machine("local").workspace_write_enabled)
                 observed = call("status")
                 self.assertEqual(observed["status"], "ready", observed)
                 execution_id = uuid.uuid4().hex
@@ -191,6 +249,18 @@ class NativeFirstUseTests(unittest.TestCase):
             self.assertFalse(stopped["loaded"])
             self.assertFalse(runtime.socket_alive(state / "mcp.sock"))
             self.assertEqual(call("resume")["status"], "stopped")
+            stopped_restart = subprocess.run(command[:-3] + ["service", "restart"], cwd="/",
+                                             capture_output=True, text=True, timeout=60)
+            evidence["stopped_restart"] = {"exit_code": stopped_restart.returncode,
+                "stdout": stopped_restart.stdout, "stderr": stopped_restart.stderr}
+            self.assertEqual(stopped_restart.returncode, 0, stopped_restart.stderr)
+            self.assertEqual(call("status")["status"], "stopped")
+            if sys.platform == "linux":
+                # A native start must not override the durable Stop intent.
+                native_start = runtime.systemd.command("start", runtime._plist_path(state).name)
+                self.assertEqual(native_start.returncode, 0, native_start.stderr)
+                self.assertEqual(call("status")["status"], "stopped")
+                self.assertFalse(runtime.socket_alive(state / "mcp.sock"))
             self.assertEqual(call("operation", "--operation-id", operation)["operation"], accepted["operation"])
             self.assertEqual(config.read_bytes(), original_config)
             self.assertEqual((state / "service/service.json").stat().st_mode & 0o777, 0o600)
@@ -220,6 +290,9 @@ class NativeFirstUseTests(unittest.TestCase):
             for directory, _, _ in os.walk(root, followlinks=False):
                 path = Path(directory)
                 path.chmod(path.stat().st_mode | 0o200)
+            evidence["result"] = "PASS"
+            evidence["seconds"] = round(time.monotonic() - started, 2)
+            self.save_evidence()
             shutil.rmtree(root)
             print(json.dumps({"native_first_use": "passed", "seconds": round(time.monotonic() - started, 2),
                               "steps": [{k: v for k, v in step.items() if k not in {"reply", "stdout", "stderr"}}
@@ -228,8 +301,10 @@ class NativeFirstUseTests(unittest.TestCase):
             # Keep the exact state and operation after failure; never replay it.
             evidence["seconds"] = round(time.monotonic() - started, 2)
             evidence["error"] = {"type": type(error).__name__, "detail": str(error)}
+            evidence["result"] = "FAIL"
+            self.save_evidence()
             (root / "test-result.json").write_text(json.dumps(evidence, indent=2))
-            print(f"Native first-use failed; original evidence retained at {root / 'test-result.json'}", flush=True)
+            print(f"Native first-use failed; original evidence retained at {self.evidence_path}", flush=True)
             raise
 
 
