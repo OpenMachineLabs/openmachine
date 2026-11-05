@@ -299,6 +299,12 @@ class NativeFirstUseTests(unittest.TestCase):
             self.assertEqual(stopped_restart.returncode, 0, stopped_restart.stderr)
             self.assertEqual(call("status")["status"], "stopped")
             if sys.platform == "linux":
+                # This disposable fixture deliberately SIGKILLed its supervisor
+                # and exceeded the 60-second user-unit start budget. Clear only
+                # this test unit's counters before exercising a real native
+                # start; leave the shipped rate-limit policy unchanged.
+                reset = runtime.systemd.command("reset-failed", runtime._plist_path(state).name)
+                self.assertEqual(reset.returncode, 0, reset.stderr)
                 # A native start must not override the durable Stop intent.
                 native_start = runtime.systemd.command("start", runtime._plist_path(state).name)
                 self.assertEqual(native_start.returncode, 0, native_start.stderr)

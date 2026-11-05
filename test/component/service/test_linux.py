@@ -99,6 +99,8 @@ class LinuxManagementTests(ServiceCaseFixture, unittest.TestCase):
     def test_unit_keeps_workers_and_rejects_changed_files_before_control(self):
         path = self.definition_fixture()
         self.assertIn(b"KillMode=process\n", path.read_bytes())
+        self.assertIn(b"StartLimitBurst=3\n", path.read_bytes())
+        self.assertIn(b"Restart=on-failure\n", path.read_bytes())
         self.assertEqual(runtime._verify_files(self.state, self.record)["WorkingDirectory"], str(self.state))
         for mode in (0o644, 0o660):
             path.chmod(mode)
