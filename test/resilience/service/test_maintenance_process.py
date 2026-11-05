@@ -160,6 +160,25 @@ class NativeFirstUseTests(unittest.TestCase):
                         "code": getattr(failure, "code", type(failure).__name__),
                         "cause": repr(failure.__cause__)}
                 unit = runtime._plist_path(state)
+                diagnostics["unit_path"] = str(unit)
+                diagnostics["home"] = str(Path.home())
+                diagnostics["unit_ancestors"] = []
+                for ancestor in (*reversed(unit.parent.parents), unit.parent):
+                    try:
+                        info = ancestor.lstat()
+                    except FileNotFoundError:
+                        diagnostics["unit_ancestors"].append({"path": str(ancestor), "missing": True})
+                    else:
+                        diagnostics["unit_ancestors"].append({
+                            "path": str(ancestor), "uid": info.st_uid,
+                            "mode": oct(stat.S_IMODE(info.st_mode)), "symlink": stat.S_ISLNK(info.st_mode)})
+                try:
+                    runtime.systemd.check_path(unit, allow_missing=True)
+                    diagnostics["unit_path_check"] = "verified"
+                except Exception as failure:
+                    diagnostics["unit_path_check"] = {
+                        "code": getattr(failure, "code", type(failure).__name__),
+                        "cause": repr(failure.__cause__)}
                 if unit.is_file():
                     diagnostics["unit_mode"] = stat.S_IMODE(unit.stat().st_mode)
                     diagnostics["unit_sha256"] = hashlib.sha256(unit.read_bytes()).hexdigest()
