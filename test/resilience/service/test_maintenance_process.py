@@ -248,7 +248,18 @@ class NativeFirstUseTests(unittest.TestCase):
                 self.assertEqual(settings.machine("local").local_access, "full_access")
                 self.assertTrue(settings.machine("local").execution_enabled)
                 self.assertFalse(settings.machine("local").workspace_write_enabled)
-                observed = call("status")
+                # A completed update can briefly report recovering while
+                # systemd starts the replacement supervisor asynchronously.
+                # Require real readiness within a bounded interval; fail on
+                # any terminal or unexpected state rather than masking it.
+                deadline = time.monotonic() + 45
+                while True:
+                    observed = call("status")
+                    if observed["status"] == "ready" or observed["status"] not in {"recovering", "starting"}:
+                        break
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.5)
                 self.assertEqual(observed["status"], "ready", observed)
                 execution_id = uuid.uuid4().hex
                 marker = project / "worker-starts.txt"
