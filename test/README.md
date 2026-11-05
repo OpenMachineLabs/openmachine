@@ -26,7 +26,7 @@ configuration, not new macOS privacy permissions, login-session behavior, Cloud
 authorization or signed distribution. Reuse unchanged passing evidence; reserve
 those separate acceptance checks for changes that need them.
 
-On Ubuntu 24.04 x86_64, the opt-in `linux_native` quality workflow runs this case
+On Ubuntu 24.04 x86_64, the PR and opt-in `linux_native` quality workflow runs this case
 with its own disposable user and systemd unit. It additionally checks supervisor
 loss and original Execution survival. It does not enable linger or prove that
 developer tools are absent; available host tools are recorded explicitly.
@@ -154,7 +154,7 @@ explicit retained-coverage map in the PR.
 All tests remain under root `test/`; no additional test framework, network
 account or GPU is required. Private disposable directories, short owned processes
 and local Unix sockets are fixtures, not production projects or live
-ChatGPT acceptance.
+client acceptance.
 
 ## Compatibility and packaging
 
@@ -202,7 +202,7 @@ records, explicit retirement errors and rejection of native account substitution
 ## Evidence boundaries
 
 Mocked launchctl is not native service acceptance; private-socket SDK sessions are
-not real ChatGPT conversations; simulated native transport is not live-device evidence.
+not real client conversations; simulated native transport is not live-device evidence.
 A true transition uses distinct immutable candidates, preserved original workers/
 records/configuration and verified restoration or explicit uncertainty. Run such
 checks only on authorized disposable resources, never production services or NAS/GPU

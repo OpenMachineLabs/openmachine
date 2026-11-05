@@ -6,7 +6,7 @@ On this page:
 
 - [Install](#install)
 - [Configure and run](#configure-and-run)
-- [Connect the official tunnel](#connect-the-official-tunnel)
+- [Connect a client](#connect-a-client)
 - [Skills](#skills)
 - [Platform and acceptance](#platform-and-acceptance)
 - [Release update notices](#release-update-notices)
@@ -73,7 +73,7 @@ remain readable, but their retired backend cannot execute requests.
 Unknown fields are rejected, not ignored. Plain `doctor` checks configuration and
 directory existence, not effective file access or network readiness. Managed
 `doctor --service` verifies the selected runtime, MCP identity and an actual
-permitted file read; neither command claims tunnel or ChatGPT readiness.
+permitted file read; neither command claims tunnel or client readiness.
 
 `serve` listens only at `<state-dir>/mcp.sock`, with directory mode 0700 and socket
 mode 0600. It opens no TCP port, manages no tunnel and installs no OS service.
@@ -82,19 +82,22 @@ is using a stale socket before manually removing it. Graceful shutdown removes
 only this instance's socket. Existing state with broader permissions is rejected,
 never silently chmodded. Keep socket paths within the host's Unix-socket limit.
 
-## Connect the official tunnel
+## Connect a client
 
-Manage upstream `tunnel-client` separately. Its inspected local binding is:
+Any MCP client can operate Core; Core does not depend on a particular client or
+model provider. A client reaches the private socket through a separately managed
+route, such as Open Machine Cloud or an upstream MCP tunnel. For example, the
+upstream `tunnel-client` route uses this inspected local binding:
 
 ```text
 --mcp.server-url=channel=main,url=http://localhost/mcp,unix-socket=/absolute/path/to/state/mcp.sock
 ```
 
-Keep logical Host `localhost` and Host/Origin protection. Follow the
-[Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
-for the selected route's credentials and eligibility; keep secrets in supported
-local references, not pasted commands. A socket/handshake is not actual ChatGPT
-acceptance. Never reconfigure a production bridge to test a candidate.
+Keep logical Host `localhost` and Host/Origin protection. Follow the route
+provider's documentation, such as OpenAI's
+[Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels),
+for credentials and eligibility; keep secrets in supported local references, not
+pasted commands. A socket/handshake is not actual client acceptance. Never reconfigure a production bridge to test a candidate.
 
 ## Skills
 

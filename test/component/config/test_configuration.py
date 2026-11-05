@@ -15,6 +15,8 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
             'schema_version = 1\n[machines.any]\ntransport = "local"\n[workspaces.x]\nmachine = "missing"\nroot = "/tmp"\n',
             'schema_version = 1\n[machines.any]\ntransport = "local"\n[workspaces.x]\nmachine = "any"\nroot = "relative"\n',
             'schema_version = 1\n[machines.any]\ntransport = "local"\nexecution_enabled = "true"\n',
+            'schema_version = 1\n[machines.any]\ntransport = "local"\n[github]\nattribution = true\n',
+            'schema_version = 1\n[machines.any]\ntransport = "local"\n[github]\nattribution = false\n',
         ):
             with self.subTest(text=text):
                 path.write_text(text)

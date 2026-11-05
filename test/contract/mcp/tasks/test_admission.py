@@ -1,5 +1,6 @@
 """contract mcp tasks test_admission behavior."""
 
+import asyncio
 import sys
 import unittest
 import uuid
@@ -63,13 +64,34 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(paused["task_feedback"]["status"], "supervised", paused["task_feedback"])
                     self.assertEqual(paused["task_feedback"]["foreground"]["reason"], "task_stopped")
 
+                    sibling = self.root / ("independent-" + mode)
+                    sibling.mkdir()
                     independent = {key: value for key, value in arguments.items() if key != "task_context"}
-                    independent["execution_id"] = uuid.uuid4().hex
+                    independent.update(cwd=str(sibling), execution_id=uuid.uuid4().hex)
+                    conflict = await client.call_tool("start_execution",
+                        dict(independent, cwd=str(self.work), execution_id=uuid.uuid4().hex))
+                    self.assertTrue(conflict.is_error)
+                    self.assertEqual(conflict.structured_content["error"]["code"], "task_resource_conflict")
                     self.assertEqual((await call("start_execution", independent))["task_feedback"]["status"], "unbound")
                     completed = await self.execution_until(client,
                         {"machine": "desktop", "execution_id": independent["execution_id"]},
                         lambda value: value["status"] == "succeeded")
                     self.assertEqual(completed["task_feedback"]["status"], "unbound")
+                    deadline = asyncio.get_running_loop().time() + 8
+                    while True:
+                        evidence = await call("read_task", {"task_id": task_id,
+                            "section": "operations", "operation_id": execution_id})
+                        if (evidence["items"][0]["result"] or {}).get("status") == "succeeded":
+                            break
+                        self.assertLess(asyncio.get_running_loop().time(), deadline)
+                        await asyncio.sleep(0.03)
+                    current = (await call("read_task", {"task_id": task_id}))["record"]
+                    await call("control_task", {"task_id": task_id,
+                        "expected_revision": current["revision"],
+                        "expected_plan_revision": current["plan"]["revision"],
+                        "expected_epoch": current["control"]["epoch"],
+                        "update_id": uuid.uuid4().hex,
+                        "transition": {"action": "cancel", "reason": "Settled isolated protocol fixture"}})
 
     async def test_supervised_write_keeps_original_context_on_both_protocols(self):
         self.launch()
@@ -98,6 +120,30 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                         "expected_plan_revision": created["plan"]["revision"],
                         "expected_epoch": created["control"]["epoch"], "update_id": uuid.uuid4().hex,
                         "transition": {"action": "claim", "handoff_id": created["handoff"]["id"]}}))["record"]
+                    renewal = {"task_id": task_id, "expected_revision": claimed["revision"],
+                        "expected_plan_revision": claimed["plan"]["revision"],
+                        "expected_epoch": claimed["control"]["epoch"], "update_id": uuid.uuid4().hex,
+                        "transition": {"action": "renew", "claim_id": claimed["control"]["owner"]["claim_id"]}}
+                    renewed = (await call("control_task", renewal))["record"]
+                    self.assertEqual(renewed["control"]["epoch"], claimed["control"]["epoch"])
+                    self.assertEqual(renewed["control"]["owner"]["claim_id"], claimed["control"]["owner"]["claim_id"])
+                    rejected = await client.call_tool("control_task", dict(renewal, update_id=uuid.uuid4().hex))
+                    self.assertTrue(rejected.is_error)
+                    diagnostic = rejected.structured_content
+                    self.assertEqual(diagnostic["error"]["code"], "task_conflict")
+                    self.assertEqual(diagnostic["reason"], "snapshot_changed")
+                    self.assertEqual(diagnostic["changed_fields"], ["task_revision"])
+                    self.assertEqual(diagnostic["expected"]["task_revision"], claimed["revision"])
+                    self.assertEqual(diagnostic["task_revision"], renewed["revision"])
+                    self.assertNotIn("ownership changed", diagnostic["error"]["message"])
+                    rejected = await client.call_tool("control_task", dict(renewal,
+                        expected_revision=renewed["revision"], update_id=uuid.uuid4().hex,
+                        transition={"action": "renew", "claim_id": "f" * 32}))
+                    self.assertTrue(rejected.is_error)
+                    self.assertEqual(rejected.structured_content["error"]["code"], "task_owner_conflict")
+                    self.assertEqual(rejected.structured_content["reason"], "claim_mismatch")
+                    self.assertEqual((await call("read_task", {"task_id": task_id}))["record"], renewed)
+                    claimed = renewed
                     change_id = uuid.uuid4().hex
                     path = "accepted-" + mode + ".txt"
                     content = "One accepted effect on " + mode + "\n"
@@ -149,4 +195,11 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(operation["epoch"], claimed["control"]["epoch"])
                     self.assertEqual(operation["plan_revision"], claimed["plan"]["revision"])
                     self.assertEqual((self.work / path).read_text(), later)
+                    current = (await call("read_task", {"task_id": task_id}))["record"]
+                    await call("control_task", {"task_id": task_id,
+                        "expected_revision": current["revision"],
+                        "expected_plan_revision": current["plan"]["revision"],
+                        "expected_epoch": current["control"]["epoch"],
+                        "update_id": uuid.uuid4().hex,
+                        "transition": {"action": "cancel", "reason": "Settled isolated protocol fixture"}})
         self.assertFalse((self.state / "executions").exists())

@@ -4,10 +4,10 @@ from contextlib import ExitStack
 from copy import deepcopy
 import hashlib
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 
-from openmachine import execution, tasks
+from openmachine import execution, tasks, workspace
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
 from openmachine.tasks import effects, records, transitions
@@ -52,7 +52,7 @@ class TaskAdmission:
     @property
     def principal(self) -> str:
         # The private native-account endpoint is the verified S1 boundary. This
-        # is neither a model-supplied identity nor a ChatGPT conversation ID.
+        # is neither a model-supplied identity nor a client conversation ID.
         return f"native-uid:{os.getuid()}"
 
     def _require_foreground_clear(self, view: dict) -> None:
@@ -140,10 +140,42 @@ class TaskAdmission:
                 transitions.material(value, now, "decision",
                     f"Goal witness {witness['id']} revalidated at HEAD {goal['head_sha']}, base {goal['base_sha']}; digest {records.digest(goal)}.",
                     operation["stage_id"], identity)
+        retained_targets = None
+        if action == "revise_plan" and retained is None:
+            retained_targets = []
+            for target in change["contract"]["targets"]:
+                config = workspace.select_worktree(self.app.config, target["machine"], target["workspace"], target.get("worktree", ""))
+                retained_targets.append(workspace.writable_target(workspace.root_for(config, target["machine"], target["workspace"])))
+            # A reserved nested cwd moves with its accepted non-Git parent.
+            # Verify the original inode at the exact relative path before rebinding.
+            prior_roots = []
+            for target in record["contract"]["targets"]:
+                configured = self.app.config.workspaces.get(target["workspace"])
+                old = Path(target.get("worktree") or (
+                    configured.root if configured is not None and configured.machine == target["machine"]
+                    else target["workspace"]))
+                if old.is_absolute():
+                    prior_roots.append(old)
+            for held in tasks.writer_reservations(self.app.state, record["task_id"]):
+                previous = Path(held["root"])
+                for old in prior_roots:
+                    if not previous.is_relative_to(old):
+                        continue
+                    suffix = previous.relative_to(old)
+                    if not suffix.parts:
+                        continue
+                    for current in retained_targets[:len(change["contract"]["targets"])]:
+                        try:
+                            relocated = workspace.writable_target(Path(current["root"]) / suffix)
+                        except Fault:
+                            continue
+                        if (relocated["device"], relocated["inode"]) == (held["device"], held["inode"]):
+                            retained_targets.append(relocated)
         view = tasks.update(self.app.state, request["task_id"],
             commit,
             expected_revision=request["expected_revision"], last_update=update,
-            upgrade=True, operation_ids=operation_ids)
+            expected_plan_revision=request["expected_plan_revision"], expected_epoch=request["expected_epoch"],
+            upgrade=True, operation_ids=operation_ids, retained_targets=retained_targets)
         if action == "cancel" and view["record"]["terminal"] is None:
             view = self._cancel_owned(view, request["update_id"])
         return view
@@ -189,6 +221,7 @@ class TaskAdmission:
             transitions.handoff(value, witness_id, now, "result_ready")
 
         return tasks.update(self.app.state, record["task_id"], commit, expected_revision=context["task_revision"],
+                            expected_plan_revision=context["plan_revision"], expected_epoch=context["continuation_epoch"],
                             allow_observations=True, upgrade=True, operation_ids=[operation["id"]])
 
     def _check_abandon(self, record: dict) -> None:
@@ -272,12 +305,14 @@ class TaskAdmission:
                         raise
         return self.reconcile(tasks.read(self.app.state, view["task_id"]))
 
-    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False, binding=None) -> dict:
+    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False, binding=None, effect_guard=None) -> dict:
         if method not in METHODS:
             raise Fault("unsupported_operation", "Task admission applies only to the explicit existing mutation entrypoints.")
         if method in GITHUB_METHODS:
             return self.app._github_call(method.removeprefix("github_"), arguments,
                                          binding=binding, historical_unbound=supervised and binding is None)
+        if effect_guard is not None:
+            arguments = dict(arguments, effect_guard=effect_guard)
         if method in EXECUTION_METHODS and supervised:
             return getattr(self.app.machines, method)(**arguments, task_admitted=True)
         return getattr(self.app.machines, method)(**arguments)
@@ -483,10 +518,42 @@ class TaskAdmission:
             operation["request_sha256"] = self._fingerprint(method, arguments, operation)
             if method in GITHUB_METHODS and record["format"] >= 3:
                 operation["effect_scope"] = effects.github_scope(method, arguments)
-            admitted = tasks.update(self.app.state, record["task_id"],
-                lambda value, now: self._admit(value, operation, context, method, now),
-                expected_revision=context["task_revision"],
-                allow_observations=True, upgrade=True, operation_ids=operation_ids, reserve_disk=method != "cancel_execution")
+            target = None
+            effect_guard = None
+            with ExitStack() as admission_lease:
+                if method in FILE_METHODS | {"start_execution"}:
+                    config = self.app.config
+                    if method == "start_execution":
+                        root = Path(arguments["cwd"]).resolve(strict=True)
+                    else:
+                        config = workspace.select_worktree(config, arguments["machine"], arguments["workspace_name"], arguments.get("worktree", ""))
+                        root = workspace.root_for(config, arguments["machine"], arguments["workspace_name"])
+                    target = workspace.writable_target(root)
+                    observed_root = workspace.context(root)
+                    execution.check_workspace_leases(config, self.app.state, scope=root)
+                    key = hashlib.sha256(workspace.lock_root(config, arguments["machine"], root, observed_root).encode()).hexdigest()
+                    try:
+                        for path, shared in workspace.writer_path_locks(observed_root):
+                            path_key = hashlib.sha256(path.encode()).hexdigest()
+                            admission_lease.enter_context(lease(self.app.state / "locks" /
+                                                                f"writer-path-{path_key}.lock", shared=shared))
+                        admission_lease.enter_context(lease(self.app.state / "locks" / f"workspace-{key}.lock"))
+                    except Fault as error:
+                        raise Fault(error.code, str(error), error.evidence, effect="known_no_effect") from error
+                    if workspace.writable_target(root) != target:
+                        raise Fault("context_mismatch", "The selected target changed before admission.", effect="known_no_effect")
+                admitted = tasks.update(self.app.state, record["task_id"],
+                    lambda value, now: self._admit(value, operation, context, method, now),
+                    expected_revision=context["task_revision"],
+                    expected_plan_revision=context["plan_revision"], expected_epoch=context["continuation_epoch"],
+                    allow_observations=True, upgrade=True, operation_ids=operation_ids, reserve_disk=method != "cancel_execution",
+                    writer_target=target)
+            if target is not None:
+                def effect_guard(root):
+                    if workspace.writable_target(root) != target:
+                        raise Fault("context_mismatch", "The admitted physical target changed before dispatch.", effect="known_no_effect")
+                    tasks.check_writer(self.app.state, target, record["task_id"], required=True)
+
             operation = next(item for item in admitted["record"]["operations"] if item["id"] == context["operation_id"])
             expected = {operation["id"]: records.digest(operation)}
             dispatch_arguments = (dict(arguments, expected_base_ref=locator["merge"]["base_ref"])
@@ -505,7 +572,7 @@ class TaskAdmission:
                     acknowledged = True
                 dispatch_arguments = dict(arguments, on_acknowledgement=retain_acknowledgement)
             try:
-                observed = self._dispatch(method, dispatch_arguments, supervised=True, binding=locator.get("connection"))
+                observed = self._dispatch(method, dispatch_arguments, supervised=True, binding=locator.get("connection"), effect_guard=effect_guard)
             except (Fault, OSError) as error:
                 if acknowledged:
                     # The original acknowledgement is already durable. A later

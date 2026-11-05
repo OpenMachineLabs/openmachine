@@ -33,3 +33,7 @@ Preflight is not a multi-file transaction; retain partial/unknown outcomes.
 Typed writes need the workspace-write grant. Structured task effects also need the
 [current claim and task context](../tasks/continue.md). Verify actual changed files
 and run explicitly authorized validation through the [execution tools](../execution/SKILL.md).
+
+Typed mutations honor Task reservations; reads/previews do not. Worktree
+creation locks its destination, not the source for Task lifetime; revise the
+Task target before its first write. See [Tasks](../tasks/SKILL.md).

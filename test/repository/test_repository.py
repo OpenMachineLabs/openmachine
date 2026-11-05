@@ -133,6 +133,10 @@ class RepositoryChecks(unittest.TestCase):
             "https://github.com/OpenMachineLabs/" + "internal-service/pull/9",
             "https://chatgpt.com/" + "c/01234567-abcd-ef01-2345-0123456789ab",
             "https://chat.openai.com/" + "share/01234567-abcd-ef01-2345-0123456789ab",
+            "https://claude.ai/" + "chat/01234567-abcd-ef01-2345-0123456789ab",
+            "https://claude.ai/" + "share/01234567-abcd-ef01-2345-0123456789ab",
+            "https://gemini.google.com/" + "app/0123456789abcdef",
+            "https://gemini.google.com/" + "share/0123456789ab",
         )
         for text in allowed:
             with self.subTest(text=text):
@@ -370,7 +374,9 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn("  runtime:\n    needs: repository\n    name: runtime\n", quality)
         required, native = quality.split("\n  linux-native:\n", 1)
         self.assertNotIn("\n    if:", required)
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.linux_native", native)
+        self.assertIn("github.event_name == 'pull_request'", native)
+        self.assertIn("github.event.action != 'edited'", native)
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.linux_native", native)
         self.assertIn("OM_NATIVE_DISPOSABLE_USER", native)
         self.assertNotIn("enable-linger", native)
         self.assertNotIn("-metadata-edit", quality)

@@ -10,7 +10,7 @@ import unittest
 from openmachine import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.tasks import database
-from test.support.tasks import ContinuityFixture, task_contract, write_legacy_checkpoint
+from test.support.tasks import ContinuityFixture, task_contract
 from test.support.goal_recovery import GoalRecoveryFixture
 from test.support.github_cases import ACTOR, REPO
 
@@ -258,18 +258,12 @@ if entry=="create":
 else:
     tasks.migrate(state)
 '''
-        for entry in ("create", "migrate", "legacy"):
-            points = ("schema_before", "schema_after", "published")
-            if entry != "legacy":
-                points += ("prepared_partial", "lock_linked", "marker_cleared")
+        for entry in ("create", "migrate"):
+            points = ("schema_before", "schema_after", "published",
+                      "prepared_partial", "lock_linked", "marker_cleared")
             for point in points:
                 with self.subTest(entry=entry, point=point):
                     state = self.root / ("initialize-" + entry + "-" + point)
-                    originals = {}
-                    if entry == "legacy":
-                        write_legacy_checkpoint(state, "legacy-one", "Retain original migration bytes.\n")
-                        originals = {p.relative_to(state / "tasks"): p.read_bytes()
-                                     for p in (state / "tasks").rglob("*") if p.is_file()}
                     result = subprocess.run([sys.executable, "-I", "-c", code, str(state), point, entry],
                         input=json.dumps(self.request), capture_output=True, text=True, timeout=15)
                     self.assertEqual(result.returncode, 91, result.stderr)
@@ -284,7 +278,7 @@ else:
                     if original:
                         self.assertEqual(lock.read_bytes(), marker)
                         self.assertEqual(lock.stat().st_nlink, original.st_nlink)
-                    if point == "published" and entry != "legacy":
+                    if point == "published":
                         with self.assertRaises(Fault) as caught:
                             with database.connect(state, write=True):
                                 self.fail("Pending initialization admitted a write")
@@ -299,11 +293,6 @@ else:
                     self.assertEqual(tasks.check_state(state)["task_records"], int(entry != "migrate"))
                     self.assertFalse((state / "tasks").exists())
                     self.assertFalse((state / "executions").exists())
-                    if originals:
-                        archives = list(state.glob("tasks-legacy-*"))
-                        self.assertEqual(len(archives), 1)
-                        self.assertEqual({p.relative_to(archives[0]): p.read_bytes()
-                                          for p in archives[0].rglob("*") if p.is_file()}, originals)
 
     def test_two_processes_cannot_commit_different_controls_at_one_revision(self):
         request = dict(self.request)

@@ -17,7 +17,10 @@
         "test/contract/mcp/projects/test_catalog.py",
         "test/component/workspace/test_reads.py",
         "test/contract/mcp/execution/test_schema.py",
-        "test/contract/mcp/workspace/test_reads.py"
+        "test/contract/mcp/workspace/test_reads.py",
+        "test/component/app/test_writer_reservations.py",
+        "test/resilience/execution/test_task_writer_reservations.py",
+        "test/resilience/tasks/test_mcp_writer_reservations.py"
       ],
       "sources": [
         "openmachine/app/__init__.py",
@@ -145,7 +148,10 @@
         "test/resilience/app/test_mcp_observer.py",
         "test/resilience/app/test_task_execution.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/component/app/test_target_environment.py"
+        "test/component/app/test_target_environment.py",
+        "test/component/app/test_writer_reservations.py",
+        "test/resilience/execution/test_task_writer_reservations.py",
+        "test/resilience/tasks/test_mcp_writer_reservations.py"
       ],
       "sources": [
         "openmachine/execution/__init__.py",
@@ -321,7 +327,8 @@
         "test/component/service/test_transition.py",
         "test/resilience/execution/test_process.py",
         "test/component/connections/test_github_web.py",
-        "test/component/cli/test_startup.py"
+        "test/component/cli/test_startup.py",
+        "test/component/tasks/test_writer_migration.py"
       ],
       "sources": [
         "openmachine/service/__init__.py",
@@ -596,7 +603,11 @@
         "test/resilience/tasks/test_mcp_restart.py",
         "test/resilience/tasks/test_persistence.py",
         "test/unit/tasks/test_effects.py",
-        "test/unit/tasks/test_transitions.py"
+        "test/unit/tasks/test_transitions.py",
+        "test/component/app/test_writer_reservations.py",
+        "test/resilience/execution/test_task_writer_reservations.py",
+        "test/resilience/tasks/test_mcp_writer_reservations.py",
+        "test/component/tasks/test_writer_migration.py"
       ]
     },
     "workspace": {
@@ -611,7 +622,10 @@
         "test/resilience/execution/test_worktrees.py",
         "test/resilience/tasks/test_mcp_legacy_workflow.py",
         "test/component/app/test_target_environment.py",
-        "test/component/projects/test_catalog.py"
+        "test/component/projects/test_catalog.py",
+        "test/component/app/test_writer_reservations.py",
+        "test/resilience/execution/test_task_writer_reservations.py",
+        "test/resilience/tasks/test_mcp_writer_reservations.py"
       ],
       "sources": [
         "openmachine/workspace/__init__.py",
@@ -793,7 +807,8 @@
       "test/resilience/workspace/test_mcp_patch_restart.py",
       "test/contract/mcp/server/test_updates.py",
       "test/contract/mcp/server/test_github_web.py",
-      "test/contract/mcp/projects/test_catalog.py"
+      "test/contract/mcp/projects/test_catalog.py",
+      "test/resilience/tasks/test_mcp_writer_reservations.py"
     ],
     "test/support/payload_cases.py": [
       "test/component/service/test_install_payload.py",
@@ -859,7 +874,10 @@
       "test/resilience/workspace/test_legacy_lock.py",
       "test/component/app/test_target_environment.py",
       "test/component/connections/test_github_web.py",
-      "test/component/github/test_transport.py"
+      "test/component/github/test_transport.py",
+      "test/component/app/test_writer_reservations.py",
+      "test/resilience/execution/test_task_writer_reservations.py",
+      "test/component/tasks/test_writer_migration.py"
     ],
     "test/support/workspace.py": [
       "test/component/service/test_workspace_compatibility.py",

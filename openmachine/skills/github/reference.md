@@ -23,7 +23,6 @@ read_repositories = ["owner/reference"]
 write_repositories = ["owner/project"]
 read_owners = []
 write_owners = []
-attribution = true
 ```
 
 Write grants include reads; empty scope grants none. Owner/repository matching

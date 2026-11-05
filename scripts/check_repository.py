@@ -38,7 +38,8 @@ def english_errors(text: str) -> list[str]:
 # guard, not a general-purpose secret scanner.
 SIBLING_REPO = re.compile(r"\bOpenMachineLabs/([A-Za-z0-9_.-]+)\b", re.I)
 CHAT_SESSION = re.compile(
-    r"https?://(?:chatgpt[.]com|chat[.]openai[.]com)/(?:c|share)/[A-Za-z0-9_-]+", re.I
+    r"https?://(?:(?:chatgpt[.]com|chat[.]openai[.]com)/(?:c|share)"
+    r"|claude[.]ai/(?:chat|share)|gemini[.]google[.]com/(?:app|share))/[A-Za-z0-9_-]+", re.I
 )
 
 

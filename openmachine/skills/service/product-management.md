@@ -39,7 +39,9 @@ A PID alone is not readiness. `startup.enabled` comes from the owning GUI user's
 `launchctl print-disabled` override and the verified RunAtLoad definition, separate
 from `policy.start_at_login`. A denied or unverified change is not success; read
 status to compare requested policy with the effective native registration.
-Tunnel and ChatGPT evidence remain `not_probed`.
+Tunnel and client evidence remain `not_probed` in `tunnel` and `client`. The
+legacy `chatgpt` field mirrors `client` for released Desktop builds; new readers
+use `client`.
 
 A bound result's `entry` contains `python`, `path`, `config`, `state` and retained
 anchor `identity`. The actual command-line consumer is:
@@ -197,7 +199,7 @@ operations are nonblocking only when their exact retained task result names a
 pre-admission validation failure that cannot have allocated a change receipt.
 
 These CLI/reader tests are separate from native GUI startup permission, signed
-product installation/update and real ChatGPT-route acceptance. Management adds
+product installation/update and real client-route acceptance. Management adds
 no daemon, HTTP service, transport or release feed.
 
 ## Ubuntu native runtime

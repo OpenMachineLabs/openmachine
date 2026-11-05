@@ -102,7 +102,7 @@ STATE/service/versions/<identity>/        final venv and installation.json
 The JSON result reports `status: prepared`, the installation/payload identities,
 actual version, runtime path, retained `launch_python`, and `path_environment` with
 portable Git first. `selection: unchanged` and `service: not_started` are explicit:
-this is not service readiness, activation, transport readiness, or ChatGPT acceptance.
+this is not service readiness, activation, transport readiness, or client acceptance.
 The lifecycle owner consumes these retained paths through `manage install/update`. Do not point
 a LaunchAgent or original worker at the replaceable source App.
 
@@ -150,7 +150,7 @@ links before copying or executing the payload. The retained Python, Git and
 wheelhouse support installation without target-side dependency downloads or a
 separate developer Python/Git installation.
 
-The opt-in `linux_native` quality workflow builds the selected candidate and runs
+The PR and opt-in `linux_native` quality workflow builds the selected candidate and runs
 `NativeFirstUseTests` with a disposable hosted Ubuntu account and private native
 unit. It does not enable linger. This verifies packaged first use, original
 maintenance readback, MCP/file readiness, stop/resume/restart and supervisor-loss

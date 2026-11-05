@@ -18,7 +18,7 @@ PROTOCOL = 1
 # Contract 25 reads retained native Task receipts and upgrades the SQLite
 # Task schema once, without admitting SSH worker or target identity semantics.
 # Contract 26 retains format-6 workflow request outcomes and effect exclusions.
-STATE_CONTRACT = 26
+STATE_CONTRACT = 27
 MANAGEMENT_CONTRACT = 1
 READINESS_SECONDS = 5
 HEALTH_INTERVAL_SECONDS = 30

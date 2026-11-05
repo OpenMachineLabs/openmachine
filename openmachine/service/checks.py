@@ -306,6 +306,11 @@ def _candidate_state_once(python: Path, config_path: Path, state: Path, expected
             raise ValueError("candidate ignores persistent stopped or startup intent")
         retained_tasks = tasks.check_state(state)
         storage = retained_tasks["task_storage"]
+        if value["state_contract"] >= 27 and (storage["kind"] == "legacy" or
+                storage["kind"] == "sqlite" and storage.get("schema") != 3):
+            raise Fault("task_migration_required", "Earlier pre-release Task state must be handled explicitly; no new writer authority.")
+        if storage["kind"] == "sqlite" and storage.get("schema") == 3 and value["state_contract"] < 27:
+            raise Fault("incompatible_state", "The Task writer reservation schema requires its original compatible writer.")
         if storage["kind"] == "sqlite" and storage.get("schema") == 2 and value["state_contract"] < 25:
             raise Fault("incompatible_state", "An old Core cannot read the native-only Task schema.")
         if storage["kind"] == "sqlite" or value["state_contract"] >= 18:
@@ -387,7 +392,7 @@ async def _probe(socket_path: Path, config_path: Path, probe: dict, expected_ver
                             raise Fault("service_read_unavailable", "The service could not read the selected permitted file; check the path and OS file permissions.")
                         return {"status": "ready", "version": expected_version, "configuration_sha256": fingerprint,
                                 "pid": caps["lifecycle"]["pid"], "file_sha256": read["sha256"],
-                                "tunnel": "not_probed", "chatgpt": "not_probed"}
+                                "tunnel": "not_probed", "client": "not_probed", "chatgpt": "not_probed"}
     except Exception as error:
         # SDK task groups may wrap a failure. Never echo returned file data or exception payloads.
         def fault(exc):

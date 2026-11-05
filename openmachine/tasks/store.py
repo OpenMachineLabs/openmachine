@@ -21,12 +21,54 @@ from .index import (INDEX_PAGE, MAX_CHECKPOINT, metadata as validate_metadata,
                     private_path, read_checkpoint, read_index, read_structured, task_id)
 
 
+def _check_writer(connection, target: dict, identity: str | None, *, required: bool = False) -> None:
+    blockers = db.writer_rows(connection, target, foreign_to=identity or "")
+    if blockers:
+        raise Fault("task_resource_conflict",
+                    "Choose another worktree or reconcile and safely complete the original Task.",
+                    {"canonical_root": target["root"], "blocking_task_ids": sorted({row["task_id"] for row in blockers[:64]}),
+                     "reason": "active_reservation", "blockers_truncated": len(blockers) > 64}, effect="known_no_effect")
+    same = connection.execute(
+        "SELECT * FROM writer_reservations WHERE task_id=? AND (root=? OR (device=? AND inode=?))",
+        (identity, target["root"], target["device"], target["inode"])).fetchall()
+    if any(row["root"] == target["root"] and
+           (row["device"], row["inode"]) != (target["device"], target["inode"]) for row in same):
+        raise Fault("context_mismatch", "The reserved root was replaced; retain its original Task and target evidence.",
+                    effect="known_no_effect")
+    if required and not same:
+        raise Fault("task_resource_unverified", "The original Task reservation is missing; do not dispatch or replay work.",
+                    effect="known_no_effect")
+
+
+def check_writer(state: Path, target: dict, identity: str | None = None, *, required: bool = False) -> None:
+    with db.connect(state) as connection:
+        if connection is None:
+            if required or os.path.lexists(state / "tasks"):
+                raise Fault("task_migration_required", "Verify original Task ownership before new local effects.",
+                            effect="known_no_effect")
+            return
+        if db.metadata(connection)["restore_required"]:
+            raise Fault("task_restore_unreconciled", "Account for effects after the backup watermark before new local writes.",
+                        effect="known_no_effect")
+        _check_writer(connection, target, identity, required=required)
+
+
+def writer_reservations(state: Path, identity: str) -> list[dict]:
+    """Bounded original physical roots for explicit plan revision only."""
+    with db.connect(state) as connection:
+        rows = connection.execute(
+            "SELECT root,device,inode FROM writer_reservations WHERE task_id=? LIMIT 65", (identity,)).fetchall()
+        if len(rows) > 64:
+            raise Fault("task_resource_unverified", "Too many original writer roots for bounded plan revision.")
+        return [dict(row) for row in rows]
+
+
 def _observation_support() -> dict:
     return {"support": {"structured_records": True, "supervised_admission": True,
                         "runtime_recovery": False, "events_delivery": False},
             "observations": [{"kind": "caller", "state": "unknown", "source": "not_observed",
                 "observed_at_ms": None, "last_progress_at_ms": None, "next_attempt_at_ms": None,
-                "blocker": "Caller continuation is not observed; native-account claims are not ChatGPT presence or automatic wake."}]}
+                "blocker": "Caller continuation is not observed; native-account claims are not client presence or automatic wake."}]}
 
 
 def _selected(connection, identity: str, current: dict, operation_ids=()) -> list[dict]:
@@ -221,9 +263,15 @@ def create(state: Path, identity: str, update_id: str, title: str, anchors: list
 
 def update(state: Path, identity: str, transform: Callable[[dict, int], None], *,
            expected_revision: int | None = None, last_update: dict | None = None,
+           expected_plan_revision: int | None = None, expected_epoch: int | None = None,
            allow_observations: bool = False,
-           observation: bool = False, upgrade: bool = False, operation_ids=(), reserve_disk: bool = True) -> dict:
-    """Commit bounded current state, touched rows and audit together; callbacks do no IO."""
+           observation: bool = False, upgrade: bool = False, operation_ids=(), reserve_disk: bool = True,
+           writer_target: dict | None = None, retained_targets: list[dict] | None = None) -> dict:
+    """Commit bounded current state, touched rows and audit together; callbacks do no IO.
+
+    Expected plan/epoch describe a revision rejection; transforms retain their
+    existing plan/epoch guards and the store retains its original CAS ordering.
+    """
     task_id(identity)
     with db.connect(state, write=True) as connection:
         if connection is None:
@@ -241,9 +289,7 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
         compatible = (expected_revision is not None and allow_observations and original["format"] >= 4
                       and original["control_revision"] <= expected_revision <= original["revision"])
         if expected_revision is not None and expected_revision != original["revision"] and not compatible:
-            raise Fault("task_conflict", "Task authority advanced; read the current revision before another transition.",
-                        {"task_id": identity, "task_revision": original["revision"], "plan_revision": original["plan"]["revision"],
-                         "continuation_epoch": original["control"]["epoch"]})
+            raise records.version_conflict(original, expected_revision, expected_plan_revision, expected_epoch)
         value = deepcopy(original)
         if upgrade and value["format"] == 3:
             value.update(format=4, control_revision=original["revision"], effect_scopes=[])
@@ -378,6 +424,55 @@ def update(state: Path, identity: str, transform: Callable[[dict, int], None], *
             payload, sha = db.encoded(packed)
             connection.execute("UPDATE tasks SET revision=?,change_seq=?,current=?,sha256=?,operation_count=?,scope_count=scope_count+?,stage_counts=? WHERE task_id=?",
                 (core["revision"], db.bump(connection), payload, sha, count, len(new_witnesses) - len(old_witnesses), json.dumps(stages), identity))
+            if writer_target is not None:
+                _check_writer(connection, writer_target, identity)
+                same_physical = connection.execute(
+                    "SELECT root FROM writer_reservations WHERE task_id=? AND device=? AND inode=?",
+                    (identity, writer_target["device"], writer_target["inode"])).fetchall()
+                if same_physical:
+                    # Refresh the pathname atomically: a later writer selecting a
+                    # child of the renamed root must still see this reservation.
+                    for row in same_physical:
+                        if row["root"] != writer_target["root"]:
+                            connection.execute("UPDATE writer_reservations SET root=? WHERE task_id=? AND root=?",
+                                               (writer_target["root"], identity, row["root"]))
+                else:
+                    connection.execute("INSERT OR IGNORE INTO writer_reservations VALUES (?,?,?,?)",
+                        (identity, writer_target["root"], writer_target["device"], writer_target["inode"]))
+            local_unresolved = connection.execute(
+                "SELECT 1 FROM operations WHERE task_id=? AND unresolved=1 AND kind IN ('execution','change') LIMIT 1",
+                (identity,)).fetchone()
+            if core["terminal"] is not None and core["terminal"]["outcome"] != "abandoned" and not local_unresolved:
+                connection.execute("DELETE FROM writer_reservations WHERE task_id=?", (identity,))
+            elif retained_targets is not None:
+                if local_unresolved:
+                    raise Fault("task_effect_unresolved", "Original local effects prevent target retirement.")
+                for row in connection.execute("SELECT root,device,inode FROM writer_reservations WHERE task_id=?", (identity,)).fetchall():
+                    root = Path(row["root"])
+                    physical = next((target for target in retained_targets
+                                     if (row["device"], row["inode"]) == (target["device"], target["inode"])), None)
+                    if physical is not None:
+                        # Rebind the retained inode to its verified canonical path
+                        # in the same transaction as the revised Task plan.
+                        if row["root"] != physical["root"]:
+                            # An unrelated Task may have reserved a descendant
+                            # after an external rename but before plan revision.
+                            # Refuse the rebind rather than creating two owners.
+                            _check_writer(connection, physical, identity)
+                            connection.execute("UPDATE writer_reservations SET root=? WHERE task_id=? AND root=?",
+                                               (physical["root"], identity, row["root"]))
+                    elif not any(root.is_relative_to(target["root"]) or Path(target["root"]).is_relative_to(root)
+                                 for target in retained_targets):
+                        if retained_targets:
+                            try:
+                                actual = root.stat()
+                                if root.is_symlink() or (actual.st_dev, actual.st_ino) != (row["device"], row["inode"]):
+                                    raise OSError("Original target identity changed")
+                            except OSError as error:
+                                raise Fault("task_resource_unverified",
+                                            "The original nested writer moved; verify its physical target before plan revision.",
+                                            effect="known_no_effect") from error
+                        connection.execute("DELETE FROM writer_reservations WHERE task_id=? AND root=?", (identity, str(root)))
             result = _view(connection, identity, operation_ids)
         except (ValueError, TypeError, KeyError, sqlite3.IntegrityError) as error:
             raise Fault("invalid_task_transition", "The transaction violates current Task or original evidence constraints; no new effect was admitted.") from error
@@ -631,7 +726,9 @@ def activation_blockers(state: Path):
                         if effects.unresolved(op):
                             yield op
         return
-    with db.connect(state) as connection:
+    # Activation checks retained schema-1/2 history before managed cutover.
+    # Maintenance here is read-only and preserves the original receipt guards.
+    with db.connect(state, maintenance=True) as connection:
         if connection is None:
             return
         for row in connection.execute("SELECT * FROM operations WHERE unresolved=1"):

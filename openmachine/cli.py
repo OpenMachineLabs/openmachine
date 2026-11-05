@@ -174,7 +174,7 @@ def main() -> int:
                            if config.machine(item.machine).transport == "local" and not Path(item.root).is_dir()]
             print(json.dumps({"version": __version__, "commit": running_commit(__version__), "configuration": "valid", "unavailable_workspaces": unavailable,
                               "state_directory_exists": args.state_dir.is_dir(),
-                              "mcp_service": "not_probed", "tunnel": "not_probed", "chatgpt": "not_probed",
+                              "mcp_service": "not_probed", "tunnel": "not_probed", "client": "not_probed", "chatgpt": "not_probed",
                               "github": "not_probed" if config.github is not None else "disabled",
                               "machine_runtime": "native"}))
             return int(bool(unavailable))

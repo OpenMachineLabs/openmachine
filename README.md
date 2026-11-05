@@ -54,7 +54,7 @@ https://github.com/user-attachments/assets/f22519e6-e3ad-405c-a725-9ce53a642bcc
 | Skills | Discover packaged operating guides and reviewed external Skill roots. |
 | Service and runtime | Manage the macOS service, retained updates and compatible rollback. |
 
-**Long-running jobs and task continuation:** Already-started jobs can keep running after a ChatGPT conversation disconnects. A job's execution status (running, completed, or failed) is separate from whether ChatGPT is ready to continue or needs user input. Finishing a job **does not automatically wake ChatGPT or start the next stage**. For a structured task, keep the original Task ID to review results and explicitly continue the remaining authorized work without rerunning completed steps.
+**Long-running jobs and task continuation:** Already-started jobs can keep running after the AI client's conversation disconnects. A job's execution status (running, completed, or failed) is separate from whether the client is ready to continue or needs user input. Finishing a job **does not automatically wake the client or start the next stage**. For a structured task, keep the original Task ID to review results and explicitly continue the remaining authorized work without rerunning completed steps.
 
 ## Quick start
 
@@ -75,7 +75,7 @@ openmachine startup on
 
 The npm-managed route is the default and only supported consumer installer today. The package currently targets Apple Silicon macOS; Linux and other source-based setups remain developer/advanced paths until npm packages for those platforms are published. Windows is not supported.
 
-To use ChatGPT, configure and verify the connection separately. The npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
+Open Machine works with any MCP-capable AI client. Configure and verify that client's connection separately; the npm installer does not set up an MCP tunnel or approve client tools. Command execution and workspace writes are **disabled by default**.
 
 The npm `openmachine` command manages setup and service status; `openmachine core ...` runs the underlying Python CLI. See the [npm installer README](npm/README.md).
 

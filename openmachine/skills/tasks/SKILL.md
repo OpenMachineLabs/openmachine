@@ -28,3 +28,10 @@ end-of-turn boundaries, with the narrow [historical handoff recovery](continue.m
 exception for a subsequent explicit user continuation after the interrupted turn
 has ended. Lease expiry alone may permit the bounded same-claim flow in
 [Continue](continue.md); it never grants new effects or resets a budget.
+
+A Task's first admitted local write reserves the verified target for `task_id`,
+not a client or claim. Pause, disconnection and claim changes do not release it;
+only safe terminal retirement or a verified plan revision can. Foreign/bare
+writes fail with `task_resource_conflict`: use another worktree or lawfully
+continue the original Task. Reads/previews remain available. This protects
+cooperating calls through one Core state, not arbitrary shell/external writes.

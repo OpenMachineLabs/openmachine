@@ -40,7 +40,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_sqlite_candidate_requires_same_authority_and_supported_actual_engine(self):
         tasks.migrate(self.state)
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (26, "sqlite"))
+        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (27, "sqlite"))
         storage = proof["task_storage"]
         for delta in ({"state_contract": 17}, {"task_storage": None},
                       {"task_storage": storage | {"identity": "f" * 32}},
@@ -132,28 +132,28 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assert_fault("unsupported_task_format", lambda: service.check_state(self.config, self.state))
         self.assertEqual(json.loads(paths[0].read_text())["format_version"], 999)
 
-    def test_actual_task_reader_covers_terminal_history_and_rejects_partial_candidate_proof(self):
-        from test.support.tasks import task_contract, terminal_task_fixture
+    def test_current_task_reader_covers_terminal_history_and_rejects_partial_candidate_proof(self):
+        from test.support.tasks import task_contract, terminal_task_fixture, replace_task_record
         request = task_contract()
-        created = self.legacy_task_fixture(request)
-        path = self.state / "tasks/structured-one/task.json"
-        write_legacy_task(self.state, terminal_task_fixture(created["record"]))
-        raw = path.read_bytes()
+        created = tasks.create(self.state, request["task_id"], request["update_id"],
+            request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])
+        replace_task_record(self.state, terminal_task_fixture(created["record"]))
+        before = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (26, 1, 1))
-        actual = service_checks._candidate_state(Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT)
-        self.assertEqual(actual, proof)
-        for change in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
-                       {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0}, {"task_records": True},
-                       {"task_store_present": 1}, {"structured_task_read_formats": [True]},
-                       {"structured_task_read_formats": [1, 1]}, {"task_index_coverage": "incomplete"},
-                       {"task_index_generation": proof["task_index_generation"] - 1}):
-            with self.subTest(change=change), patch.object(service_processes, "run", return_value=subprocess.CompletedProcess(
-                    [], 0, json.dumps(proof | change), "")):
-                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(Path(sys.executable), self.config, self.state))
-        self.assertEqual(path.read_bytes(), raw)
-        path.unlink()
-        self.assert_fault("corrupt_tasks", lambda: service.check_state(self.config, self.state))
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (27, 1, 1))
+        self.assertEqual(service_checks._candidate_state(
+            Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
+        for delta in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
+                      {"structured_task_read_formats": [1, 2]}, {"structured_task_records": 0},
+                      {"task_records": True}, {"task_store_present": 1},
+                      {"structured_task_read_formats": [True]},
+                      {"task_index_coverage": "incomplete"},
+                      {"task_index_generation": proof["task_index_generation"] - 1}):
+            with self.subTest(delta=delta), patch.object(service_processes, "run",
+                return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
+                    Path(sys.executable), self.config, self.state))
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"], before)
 
     def test_candidate_resamples_a_concurrent_task_generation_once(self):
         from test.support.tasks import task_contract
@@ -202,85 +202,86 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(len(set(attempts)), 3)
         self.assertEqual(service_state._record(self.state), selection)
 
-    def test_scoped_task_history_requires_contract_16_and_complete_actual_reader(self):
-        from test.support.tasks import task_contract
+    def test_scoped_current_task_history_requires_complete_actual_reader(self):
+        from test.support.tasks import task_contract, replace_task_record
         from openmachine.tasks import records
         repository = "fixture/project"
         binding = {"connection_id": "a" * 32, "account_id": 1, "authorization_revision": 1}
         request = task_contract()
         request["contract"].update(repositories=[repository], github_connections={repository: binding})
-        created = self.legacy_task_fixture(request)
-        value = created["record"]
-        self.assertEqual(value["format"], 4)
+        value = tasks.create(self.state, request["task_id"], request["update_id"],
+            request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])["record"]
         value.update(revision=value["revision"] + 1, updated_at_ms=value["updated_at_ms"] + 1)
         value["control_revision"] = value["revision"]
         operation_id = "b" * 32
-        scope = {"resource": "object", "number": 17, "parent_number": None, "fields": ["labels"]}
         value["operations"] = [{"id": operation_id, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
             "request_sha256": "b" * 64, "source_sha256": value["plan"]["stages"][0]["source_sha256"],
             "locator": {"kind": "github", "repository": repository, "object_type": "pull_request",
                 "number": 17, "parent_number": None, "anchor": "om-task:structured-one:" + operation_id,
                 "connection": binding}, "admitted_at_ms": value["updated_at_ms"], "state": "unknown",
             "observed_at_ms": value["updated_at_ms"], "result": {"status": "unknown", "receipt_sha256": None,
-                "summary": "Synthetic retained dispatch uncertainty.", "log_offset": None,
+                "summary": "Synthetic retained uncertainty.", "log_offset": None,
                 "failure_code": "github_response_unknown", "effect": "effect_unknown"}}]
         value["effect_scopes"] = [{"id": "c" * 32, "operation_id": operation_id,
-            "request_sha256": "b" * 64, "scope": scope, "principal_ref": "fixture:owner",
+            "request_sha256": "b" * 64, "scope": {"resource": "object", "number": 17,
+                "parent_number": None, "fields": ["labels"]}, "principal_ref": "fixture:owner",
             "at_ms": value["updated_at_ms"]}]
-        path = self.state / "tasks/structured-one/task.json"
-        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
-        paths = [path, self.state / "tasks/index.json"]
-        before = [item.read_bytes() for item in paths]
+        replace_task_record(self.state, value)
+        original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (26, [4]))
-        self.assertIn(4, proof["structured_task_read_formats"])
-        self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [4]))
+        self.assertEqual(service_checks._candidate_state(
+            Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
                       {"structured_task_formats_present": []}, {"structured_task_formats_present": [3]},
                       {"structured_task_formats_present": [4.0]}, {"structured_task_formats_present": [4, 4]}):
             with self.subTest(delta=delta), patch.object(service_processes, "run",
-                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
-        self.assertEqual([item.read_bytes() for item in paths], before)
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"], original)
 
-    def test_format_5_goal_semantics_require_a_reader_that_preserves_the_new_contract(self):
-        from test.support.tasks import task_contract
+    def test_current_format_5_reader_contract_is_not_downgraded(self):
+        from test.support.tasks import task_contract, replace_task_record
         from openmachine.tasks import records
-        value = self.legacy_task_fixture(task_contract())["record"]
+        request = task_contract()
+        value = tasks.create(self.state, request["task_id"], request["update_id"],
+            request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])["record"]
         value["format"] = 5
-        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
-        path = self.state / "tasks/structured-one/task.json"
-        before = path.read_bytes()
+        replace_task_record(self.state, value)
+        original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (26, [5]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [5]))
         self.assertIn(5, proof["structured_task_read_formats"])
-        for delta in ({"state_contract": 23}, {"structured_task_read_formats": [1, 2, 3, 4]},
+        for delta in ({"state_contract": 23},
+                      {"structured_task_read_formats": [1, 2, 3, 4]},
                       {"structured_task_formats_present": [4]}):
             with self.subTest(delta=delta), patch.object(service_processes, "run",
-                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"], original)
 
-    def test_format_6_workflow_semantics_reject_old_contracts_and_missing_reader_support(self):
-        from test.support.tasks import task_contract
+    def test_current_format_6_reader_contract_is_not_downgraded(self):
+        from test.support.tasks import task_contract, replace_task_record
         from openmachine.tasks import records
-        value = self.legacy_task_fixture(task_contract())["record"]
+        request = task_contract()
+        value = tasks.create(self.state, request["task_id"], request["update_id"],
+            request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])["record"]
         value["format"] = 6
-        write_legacy_task(self.state, records.Record.model_validate(value).model_dump())
-        path = self.state / "tasks/structured-one/task.json"
-        before = path.read_bytes()
+        replace_task_record(self.state, value)
+        original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (26, [6]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [6]))
         self.assertIn(6, proof["structured_task_read_formats"])
-        for delta in ({"state_contract": 25}, {"structured_task_read_formats": [1, 2, 3, 4, 5]},
+        for delta in ({"state_contract": 25},
+                      {"structured_task_read_formats": [1, 2, 3, 4, 5]},
                       {"structured_task_formats_present": [5]}):
             with self.subTest(delta=delta), patch.object(service_processes, "run",
-                    return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
+                return_value=subprocess.CompletedProcess([], 0, json.dumps(proof | delta), "")):
                 self.assert_fault("incompatible_state", lambda: service_checks._candidate_state(
                     Path(sys.executable), self.config, self.state))
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(tasks.read(self.state, "structured-one")["record"], original)
 
     def test_format_3_history_keeps_directional_contract_15_compatibility(self):
         from test.support.tasks import task_contract
@@ -400,18 +401,17 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             service_checks._candidate_state(Path(sys.executable),self.config,self.state)
         self.assertEqual([path.read_bytes() for path in records],before)
 
-    def test_unfenced_activation_reads_new_legacy_operations_and_rejects_dual_authority(self):
+    def test_pre_release_unresolved_legacy_history_blocks_activation_without_import(self):
         record = self.legacy_task_fixture()["record"]
-        with patch.object(task_migration, "_verify_import", side_effect=Fault("task_migration_incomplete", "Fixture failed import.")):
-            self.assert_fault("task_migration_incomplete", lambda: tasks.migrate(self.state))
-        service_checks.activation_safe(self.state)
+        self.assert_fault("task_migration_required", lambda: tasks.migrate(self.state))
         now = time.time_ns() // 1000000
         operation = {"id": "a" * 32, "stage_id": "verify", "plan_revision": 1, "epoch": 0,
             "request_sha256": "b" * 64, "source_sha256": record["plan"]["stages"][0]["source_sha256"],
             "locator": {"kind": "execution", "machine": "desktop",
-                "execution_id": "a" * 32, "control_seq": None},
+                        "execution_id": "a" * 32, "control_seq": None},
             "admitted_at_ms": now, "state": "unknown", "observed_at_ms": now,
-            "result": {"status": "unknown", "receipt_sha256": None, "summary": "Original unresolved work.", "log_offset": None}}
+            "result": {"status": "unknown", "receipt_sha256": None,
+                       "summary": "Original unresolved work.", "log_offset": None}}
         record["operations"] = [operation]
         record.update(revision=2, control_revision=2, updated_at_ms=now)
         record["control"].update(state="paused", stop_intent="pause")
@@ -428,14 +428,9 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         original = path.read_bytes()
         self.assertEqual(list(tasks.activation_blockers(self.state)), [operation])
         self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        self.assert_fault("task_migration_required", lambda: tasks.migrate(self.state))
         self.assertEqual(path.read_bytes(), original)
-        path.write_bytes(b"{}")
-        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
-        path.write_bytes(original)
-        with task_database.connect(self.state, maintenance=True, write=True) as connection:
-            connection.execute("UPDATE store SET active=1")
-        self.assert_fault("corrupt_tasks", lambda: list(tasks.activation_blockers(self.state)))
-        self.assert_fault("activation_deferred", lambda: service_checks.activation_safe(self.state))
+        self.assertFalse((self.state / "tasks.db").exists())
 
     def test_product_admission_defers_actual_unresolved_task_and_execution_readers(self):
         from test.support.tasks import task_contract

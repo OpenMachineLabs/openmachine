@@ -61,6 +61,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
                                  "--state-dir", str(self.state), "doctor"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.state.exists())
+        self.assertEqual(json.loads(result.stdout)["client"], "not_probed")
         self.assertEqual(json.loads(result.stdout)["chatgpt"], "not_probed")
         self.assertIsNone(json.loads(result.stdout)["commit"])
 

@@ -232,11 +232,6 @@ def _project(kind: str, value: dict) -> dict:
     return result
 
 
-def _attribute(settings: Settings, body: str, footer: str) -> str:
-    """Apply the single configured policy after the writer has checked access."""
-    return _append(body, footer) if settings.github.attribution else body
-
-
 def read(settings: Settings, action: ReadAction, repository: str = "", number: int = 0,
          ref: str = "", path: str = "", page: int = 1, limit: int = 30, cursor: str = "",
          expected_head_sha: str = "", expected_base_sha: str = "", offset: int = 0, *, filters: dict | None = None, transport) -> dict:
@@ -870,7 +865,7 @@ def release(settings: Settings, action: Literal["create", "publish"], repository
                 raise Fault("github_evidence_unavailable",
                             "The bounded Release listing cannot prove this tag is unused; creation was not sent.")
             payload = {"tag_name": tag_name, "name": name or tag_name,
-                       "body": _attribute(settings, body, CREATED_FOOTER),
+                       "body": _append(body, CREATED_FOOTER),
                        "draft": draft, "prerelease": prerelease}
             method, endpoint = "POST", root
             readback = lambda value: f"{root}/{value['id']}"
@@ -925,7 +920,7 @@ def issue(settings: Settings, action: Literal["create", "update"], repository: s
         if action == "create":
             if not title or state is not None or expected_fields is not None:
                 raise Fault("invalid_github_request", "Creating an Issue requires a title; state and expected_fields are update-only.")
-            submitted = _attribute(settings, body or "", CREATED_FOOTER)
+            submitted = _append(body or "", CREATED_FOOTER)
             method, endpoint = "POST", root
             payload = {"title": title, "body": submitted, **metadata}
             readback = lambda result: f"{root}/{result['number']}"
@@ -1038,7 +1033,7 @@ def pull_request(settings: Settings, action: Literal["create", "update", "ready_
                 branch = object_response(transport("GET", f"repos/{repository}/branches/{quote(head, safe='')}"))
                 if object_response(branch.get("commit")).get("sha") != expected_head_sha:
                     raise Fault("github_candidate_changed", "The pushed branch changed before PR creation.")
-            submitted = _attribute(settings, body or "", CREATED_FOOTER)
+            submitted = _append(body or "", CREATED_FOOTER)
             method, endpoint = "POST", root
             payload = {"title": title, "body": submitted, "head": head, "base": base, "draft": draft}
             readback = lambda value: f"{root}/{value['number']}"
@@ -1078,7 +1073,7 @@ def comment(settings: Settings, action: Literal["create", "update", "delete"], r
             if number < 1 or expected_fields is not None:
                 raise Fault("invalid_github_request", "Posting a comment requires an Issue or PR number; expected_fields is update-only.")
             object_response(transport("GET", f"repos/{repository}/issues/{number}"))
-            submitted = _attribute(settings, body, POSTED_FOOTER)
+            submitted = _append(body, POSTED_FOOTER)
             method, endpoint = "POST", f"repos/{repository}/issues/{number}/comments"
             payload = {"body": submitted}
             readback = lambda result: f"repos/{repository}/issues/comments/{result['id']}"
@@ -1145,7 +1140,7 @@ def review(settings: Settings, action: Literal["create", "update"], repository: 
                 raise Fault("github_self_review", "GitHub does not permit self-approval or self-requested changes; submit COMMENT without claiming independent approval.")
             # A review may report failed checks. Missing evidence, unlike a known failure, rejects submission.
             evidence.merge_gate(repository, number, expected_head_sha, current["base"]["sha"], transport=transport)
-            submitted = _attribute(settings, body, POSTED_FOOTER)
+            submitted = _append(body, POSTED_FOOTER)
             method, endpoint = "POST", f"repos/{repository}/pulls/{number}/reviews"
             payload = {"commit_id": expected_head_sha, "event": event, "body": submitted}
             readback = lambda result: f"{endpoint}/{result['id']}"

@@ -61,13 +61,14 @@ jobs:
         run: python3 scripts/premerge.py --ci --force
 
   linux-native:
-    if: github.event_name == 'workflow_dispatch' && inputs.linux_native
+    if: (github.event_name == 'pull_request' && github.event.action != 'edited') || (github.event_name == 'workflow_dispatch' && inputs.linux_native)
     needs: repository
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -76,11 +77,11 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/build"
           "$RUNNER_TEMP/build/bin/python" -m pip install -r requirements.lock
-          "$RUNNER_TEMP/build/bin/python" -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/wheels" .
+          "$RUNNER_TEMP/build/bin/python" -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/wheels" .
           "$RUNNER_TEMP/build/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/wheels/*.whl
           "$RUNNER_TEMP/build/bin/python" scripts/build_runtime_payload.py \
             --wheel "$RUNNER_TEMP"/wheels/*.whl --requirements "$GITHUB_WORKSPACE/requirements.lock" \
-            --commit "$GITHUB_SHA" --cache "$RUNNER_TEMP/inputs" --output "$RUNNER_TEMP/payload"
+            --commit "$(git rev-parse HEAD)" --cache "$RUNNER_TEMP/inputs" --output "$RUNNER_TEMP/payload"
       - name: Exercise only a disposable account and its native unit
         run: |
           sudo useradd --create-home --shell /bin/bash om-linux-test
@@ -96,6 +97,28 @@ jobs:
             OM_NATIVE_PAYLOAD=/home/om-linux-test/payload OM_NATIVE_PAYLOAD_SHA256="$manifest_sha" \
             /home/om-linux-test/payload/python/bin/python3 -I -B -c \
             'import os,sys,unittest; os.chdir("/home/om-linux-test"); sys.path.insert(0,os.getcwd()); unittest.main(module=None, argv=["native", "test.resilience.service.test_maintenance_process.NativeFirstUseTests"])'
+      - name: Retain the exact unsigned candidate and native diagnostics
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/linux-evidence"
+          if test -f "$RUNNER_TEMP/payload/manifest.json"; then
+            cp "$RUNNER_TEMP/payload/manifest.json" "$RUNNER_TEMP/linux-evidence/manifest.json"
+            sha256sum "$RUNNER_TEMP/payload/manifest.json" | tee "$RUNNER_TEMP/linux-evidence/manifest.sha256"
+            tar -czf "$RUNNER_TEMP/linux-evidence/runtime-ubuntu-24.04-x86_64.tar.gz" -C "$RUNNER_TEMP" payload
+            sha256sum "$RUNNER_TEMP/linux-evidence/runtime-ubuntu-24.04-x86_64.tar.gz" > "$RUNNER_TEMP/linux-evidence/archive.sha256"
+          fi
+          if test -f "$RUNNER_TEMP/om-user-created"; then
+            test_uid=$(id -u om-linux-test)
+            sudo journalctl --no-pager -b "_UID=$test_uid" --lines=100
+          fi
+      - name: Upload unsigned candidate evidence, not a public release
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: core-linux-native-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/linux-evidence/
+          if-no-files-found: error
+          retention-days: 14
       - name: Remove only the disposable account and its remaining processes
         if: always()
         run: |

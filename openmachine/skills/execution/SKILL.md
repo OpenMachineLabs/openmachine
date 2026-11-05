@@ -25,3 +25,6 @@ Cancellation requests termination and does not undo prior effects. Require
 `status=succeeded`, verified exit/output and domain readback for command success;
 cancelled or timed-out commands can also exit zero. A completed command is not a
 completed task.
+
+Bare/shared shell launches respect Task reservations at their verified launch
+root; internal `cd` does not change that binding. See [Tasks](../tasks/SKILL.md).
