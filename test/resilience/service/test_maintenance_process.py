@@ -147,6 +147,30 @@ class NativeFirstUseTests(unittest.TestCase):
             while accepted["status"] in {"accepted", "busy"} and time.monotonic() < deadline:
                 time.sleep(0.5)
                 accepted = call("operation", "--operation-id", operation)
+            if accepted["status"] != "completed" and sys.platform == "linux":
+                # Preserve the original failure and its native evidence.
+                from openmachine.service import state as service_state
+                diagnostics = {}
+                try:
+                    selected = service_state._record(state)
+                    runtime._verify_files(state, selected)
+                    diagnostics["definition_files"] = "verified"
+                except Exception as failure:
+                    diagnostics["definition_files"] = {
+                        "code": getattr(failure, "code", type(failure).__name__),
+                        "cause": repr(failure.__cause__)}
+                unit = runtime._plist_path(state)
+                if unit.is_file():
+                    diagnostics["unit_mode"] = stat.S_IMODE(unit.stat().st_mode)
+                    diagnostics["unit_sha256"] = hashlib.sha256(unit.read_bytes()).hexdigest()
+                try:
+                    diagnostics["unit_manager"] = {
+                        key: value for key, value in runtime.systemd._show(unit).items()
+                        if key in {"LoadState", "FragmentPath", "DropInPaths", "NeedDaemonReload"}}
+                except Exception as failure:
+                    diagnostics["unit_manager_error"] = getattr(failure, "code", type(failure).__name__)
+                evidence["install_failure_diagnostics"] = diagnostics
+                self.save_evidence()
             self.assertEqual(accepted["status"], "completed", accepted)
             self.assertEqual(accepted["operation"]["operation_id"], operation)
             # The exact original ID reads its receipt; a new install never adopts it.
