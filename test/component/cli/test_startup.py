@@ -28,6 +28,18 @@ print(json.dumps({"code": code, "stdout": out.getvalue(), "stderr": err.getvalue
 '''
 
 
+# Only host eligibility and native registration observations are simulated.
+# Keep the interpreter platform intact for dependency imports on other hosts;
+# the CLI, first-run writer, private files, parser and capabilities remain real.
+CONFIGURE_HOST = """
+from types import SimpleNamespace
+from openmachine.service import maintenance, runtime
+maintenance.sys = SimpleNamespace(platform="darwin")
+runtime._native = lambda state: {"loaded": False}
+runtime.socket_alive = lambda path: False
+"""
+
+
 class StartupTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="om-startup-", dir="/tmp")
@@ -92,6 +104,7 @@ exec(body)
                 value = json.loads(result["stdout"])
                 self.assertEqual((result["code"], value["status"], value.get("reason")), (code, status, reason))
                 self.assertEqual(value["management_contract"], 1)
+                self.assertIn("configure:local_access", value["capabilities"])
                 self.assertEqual(result["stderr"], "")
         self.assertFalse(self.state.exists())
         directory = self.state / "service"
@@ -110,6 +123,10 @@ exec(body)
         self.assertEqual(result["code"], 0, result["stderr"])
         self.assertIn("pydantic", result["modules"])
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
+        from openmachine.config import load
+        machine = load(self.config).machines["local"]
+        self.assertEqual((machine.local_access, machine.execution_enabled, machine.workspace_write_enabled),
+                         ("read_only", False, False))
         original = self.config.read_bytes()
         result = self.run_child(CLI, arguments=args + ["init", "--workspace", str(self.root)])
         self.assertEqual(result["code"], 1)
@@ -122,6 +139,94 @@ exec(body)
         self.assertEqual(result["code"], 1)
         self.assertIn("error", json.loads(result["stderr"]))
         self.assertFalse(self.state.exists())
+
+    def test_explicit_full_first_run_cli_and_management_readback(self):
+        from openmachine.bootstrap import create_application
+        from openmachine.config import load
+        for command in (["init"], ["manage", "configure"]):
+            with self.subTest(command=command):
+                config_path = self.root / (command[0] + ".toml")
+                args = ["--config", str(config_path), "--state-dir", str(self.state), *command,
+                        "--workspace", str(self.root), "--local-access", "full_access",
+                        "--enable-commands", "--enable-workspace-writes"]
+                result = self.run_child(CONFIGURE_HOST + CLI, arguments=args)
+                self.assertEqual(result["code"], 0, result)
+                value = json.loads(result["stdout"])
+                config = load(config_path)
+                machine = config.machines["local"]
+                self.assertEqual((machine.transport, machine.local_access, machine.execution_enabled,
+                                  machine.workspace_write_enabled), ("local", "full_access", True, True))
+                self.assertEqual(config.machine("local", write=True), machine)
+                self.assertEqual(config.workspace_machine("local"), machine)
+                capabilities = create_application(config, self.state).get_capabilities()
+                self.assertTrue(capabilities["machines"]["local"]["workspace_write_effective"])
+                self.assertEqual(capabilities["machines"]["local"]["local_access"], "full_access")
+                self.assertEqual(capabilities["configuration_sha256"], value["configuration_sha256"])
+                before = config_path.read_bytes()
+                if command[0] == "manage":
+                    self.assertEqual(value["management_contract"], 1)
+                    self.assertIn("configure:local_access", value["capabilities"])
+                    self.assertIn("configure:verify_existing", value["capabilities"])
+                    verified = self.run_child(CONFIGURE_HOST + CLI, arguments=args + ["--verify-existing"])
+                    self.assertEqual(verified["code"], 0, verified)
+                    self.assertEqual(json.loads(verified["stdout"])["configuration_sha256"], value["configuration_sha256"])
+                    changed = ["read_only" if arg == "full_access" else arg for arg in args]
+                    denied = self.run_child(CONFIGURE_HOST + CLI, arguments=changed + ["--verify-existing"])
+                    self.assertEqual(denied["code"], 1, denied)
+                    self.assertEqual(json.loads(denied["stdout"])["reason"], "configuration_mismatch")
+                repeated = self.run_child(CONFIGURE_HOST + CLI, arguments=args)
+                self.assertEqual(repeated["code"], 1, repeated)
+                self.assertEqual(config_path.read_bytes(), before)
+        self.assertFalse(self.state.exists())
+
+    def test_management_default_does_not_infer_full_from_boolean_flags(self):
+        from openmachine.config import load
+        from openmachine.foundation.sanitize import Fault
+        for commands, writes in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(commands=commands, writes=writes):
+                path = self.root / f"default-{commands}-{writes}.toml"
+                args = ["--config", str(path), "--state-dir", str(self.state),
+                        "manage", "configure", "--workspace", str(self.root)]
+                if commands:
+                    args.append("--enable-commands")
+                if writes:
+                    args.append("--enable-workspace-writes")
+                result = self.run_child(CONFIGURE_HOST + CLI, arguments=args)
+                self.assertEqual(result["code"], 0, result)
+                config = load(path)
+                machine = config.machines["local"]
+                self.assertEqual((machine.local_access, machine.execution_enabled, machine.workspace_write_enabled),
+                                 ("read_only", commands, writes))
+                with self.assertRaises(Fault):
+                    config.machine("local", write=True)
+                with self.assertRaises(Fault):
+                    config.workspace_machine("local")
+                verified = self.run_child(CONFIGURE_HOST + CLI, arguments=args + ["--verify-existing"])
+                self.assertEqual(verified["code"], 0, verified)
+        self.assertFalse(self.state.exists())
+
+    def test_invalid_first_run_access_is_a_parser_error_without_effects(self):
+        for command in (["init"], ["manage", "configure"]):
+            args = ["--config", str(self.config), "--state-dir", str(self.state), *command,
+                    "--workspace", str(self.root), "--local-access", "invalid"]
+            result = self.run_child(CLI, blocked=LIGHTWEIGHT, arguments=args)
+            self.assertEqual(result["code"], 2, result)
+            self.assertIn("invalid choice", result["stderr"])
+            self.assertFalse(self.config.exists())
+            self.assertFalse(self.state.exists())
+
+    def test_first_run_full_does_not_adopt_an_existing_installation(self):
+        retained = self.state / "service" / "service.json"
+        retained.parent.mkdir(parents=True)
+        retained.write_text("original installation evidence")
+        args = ["--config", str(self.config), "--state-dir", str(self.state), "manage", "configure",
+                "--workspace", str(self.root), "--local-access", "full_access",
+                "--enable-commands", "--enable-workspace-writes"]
+        result = self.run_child(CONFIGURE_HOST + CLI, arguments=args)
+        self.assertEqual(result["code"], 1, result)
+        self.assertEqual(json.loads(result["stdout"])["reason"], "service_already_installed")
+        self.assertFalse(self.config.exists())
+        self.assertEqual(retained.read_text(), "original installation evidence")
 
     def test_service_exports_keep_original_callable_identity(self):
         result = self.run_child('''

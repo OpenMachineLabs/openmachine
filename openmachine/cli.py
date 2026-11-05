@@ -16,7 +16,8 @@ def main() -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--state-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
-    init = commands.add_parser("init", help="Create disabled configuration without overwriting existing files")
+    init = commands.add_parser("init", help="Create first-run configuration without overwriting existing files")
+    init.add_argument("--local-access", choices=("read_only", "full_access"), default="read_only")
     init.add_argument("--enable-commands", action="store_true")
     init.add_argument("--enable-workspace-writes", action="store_true")
     init.add_argument("--workspace", type=Path, help="An existing absolute local workspace to register")
@@ -63,6 +64,7 @@ def main() -> int:
     startup.add_argument("--enabled", choices=("true", "false"), required=True)
     configure = management.add_parser("configure", help="Create first-run config without overwrite; grants are independent")
     configure.add_argument("--workspace", type=Path, required=True)
+    configure.add_argument("--local-access", choices=("read_only", "full_access"), default="read_only")
     configure.add_argument("--enable-commands", action="store_true")
     configure.add_argument("--enable-workspace-writes", action="store_true")
     configure.add_argument("--verify-existing", action="store_true", help="Read back the exact first-run inputs after a lost reply; never create or overwrite")
@@ -121,7 +123,7 @@ def main() -> int:
             if action == "startup":
                 inputs["enabled"] = args.enabled == "true"
             if action == "configure":
-                inputs.update(workspace=args.workspace, commands=args.enable_commands,
+                inputs.update(workspace=args.workspace, local_access=args.local_access, commands=args.enable_commands,
                               workspace_writes=args.enable_workspace_writes, verify_existing=args.verify_existing)
             result = dispatch(args.config, args.state_dir, action, contract=args.contract, **inputs)
             print(json.dumps(result))
@@ -133,7 +135,7 @@ def main() -> int:
             return 0
         if args.command == "init":
             from openmachine.config import initialize
-            print(json.dumps(initialize(args.config, args.workspace, commands=args.enable_commands,
+            print(json.dumps(initialize(args.config, args.workspace, local_access=args.local_access, commands=args.enable_commands,
                                         workspace_writes=args.enable_workspace_writes)))
             return 0
         if args.command in ("service", "update", "rollback"):
