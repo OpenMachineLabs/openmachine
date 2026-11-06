@@ -96,8 +96,9 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
             denied: list[Path], exceptions: list[Path]) -> str:
     """Generate one profile: read the machine except denied areas, write only granted roots.
 
-    Seatbelt applies the last matching rule, so each later block narrows or re-allows the one
-    before it and the protected and control denials come last.
+    For the same operation Seatbelt applies the last matching rule, so each later block narrows or
+    re-allows the one before it and the protected and control denials come last. A later broader
+    operation (file-read*) does not override an earlier narrower denial (file-read-data).
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
