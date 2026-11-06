@@ -25,7 +25,8 @@
       "sources": [
         "openmachine/app/__init__.py",
         "openmachine/app/environment.py",
-        "openmachine/app/machines.py"
+        "openmachine/app/machines.py",
+        "openmachine/app/scope.py"
       ],
       "tests": [
         "test/component/app/test_environment.py",
@@ -37,7 +38,8 @@
         "test/component/app/test_workspace_dispatch.py",
         "test/resilience/app/test_legacy_execution.py",
         "test/resilience/app/test_mcp_workflows.py",
-        "test/component/app/test_target_environment.py"
+        "test/component/app/test_target_environment.py",
+        "test/component/app/test_operation_scope.py"
       ]
     },
     "bootstrap": {
@@ -165,7 +167,8 @@
         "openmachine/execution/records.py",
         "openmachine/execution/worker.py",
         "openmachine/execution/environment.py",
-        "openmachine/execution/resources.py"
+        "openmachine/execution/resources.py",
+        "openmachine/execution/seatbelt.py"
       ],
       "tests": [
         "test/component/execution/test_admission.py",
@@ -183,7 +186,9 @@
         "test/resilience/execution/test_worktrees.py",
         "test/unit/execution/test_output.py",
         "test/unit/execution/test_records.py",
-        "test/component/execution/test_resources.py"
+        "test/component/execution/test_resources.py",
+        "test/component/execution/test_seatbelt.py",
+        "test/resilience/execution/test_operation_scope.py"
       ]
     },
     "foundation": {
@@ -202,7 +207,8 @@
         "test/unit/github/test_operations.py",
         "test/unit/github/test_projects.py",
         "test/unit/github/test_releases.py",
-        "test/component/projects/test_catalog.py"
+        "test/component/projects/test_catalog.py",
+        "test/resilience/execution/test_operation_scope.py"
       ],
       "sources": [
         "openmachine/__init__.py",
@@ -870,6 +876,7 @@
       "test/component/app/test_writer_reservations.py",
       "test/resilience/execution/test_task_writer_reservations.py",
       "test/component/tasks/test_writer_migration.py",
+      "test/component/app/test_operation_scope.py",
       "test/component/connections/test_github_cloud.py"
     ],
     "test/support/workspace.py": [
@@ -880,6 +887,10 @@
       "test/component/workspace/test_worktrees.py",
       "test/resilience/workspace/test_leases.py",
       "test/component/projects/test_catalog.py"
+    ],
+    "test/support/operation_scope.py": [
+      "test/component/app/test_operation_scope.py",
+      "test/resilience/execution/test_operation_scope.py"
     ]
   }
 }

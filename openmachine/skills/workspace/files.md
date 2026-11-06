@@ -151,16 +151,18 @@ hashes before/after; a file receipt or old test PASS is not current acceptance.
 
 ## Project catalog
 
-Require `get_capabilities.project_catalog.protocol == 1` before using
+Require `get_capabilities.project_catalog.protocol == 2` before using
 `inspect_projects`. This optional local-only reader changes no existing workspace
 operation, grant, configuration or persistent state.
 
-Omit `workspace_name` to page configured roots for the named machine. Supply it
-to list direct child directories under that approved root; `path` defaults to
-`.`. Lists contain metadata only, sorted by workspace name or relative path.
-Echo `snapshot` with `next_offset`; changed listings return `source_changed`.
-Credential paths, descendant symlinks and non-directories are excluded. A row
-with `error` has no usable identity; unavailable Git is never a plain folder.
+`action="root"` returns this account's Desktop folder from the account database,
+or `desktop_missing`, `desktop_redirected`, `desktop_access_denied` or
+`desktop_unsupported`; it never falls back to another directory. `action="list"`
+with an explicit `workspace_name` (and `path`, default `.`) returns direct child
+directory names only, sorted by relative path: no Git probe, link following,
+content read or recursion. Echo `snapshot` with `next_offset`; changed listings
+return `source_changed`, and an OS listing denial returns `directory_access_denied`.
+Credential paths, symlinks and non-directories are excluded.
 
 Use `action="inspect"`, a workspace and a relative path to select a directory.
 Retain the exact `(machine, workspace_name, relative_path, target_id)` tuple.
@@ -175,8 +177,9 @@ reservation or atomic fence against an uncooperative native process.
 Clients must enforce approved target scope and current native authority at
 dispatch and result delivery. A parent selection does not authorize a nested
 repository/worktree automatically. Existing `workspace_identity` and source/HEAD
-guards remain mandatory; `target_id` is not a replacement. Native commands remain
-OS-account operations, not a sandbox.
+guards remain mandatory; `target_id` is not a replacement. Only
+[operation scope](../execution/SKILL.md#operation-scope) confines native commands'
+writes to selected directories.
 
 No catalog call registers workspaces. A subfolder can remain bound to its parent,
 avoiding overlapping non-Git registrations. When an operation requires an

@@ -305,7 +305,8 @@ class TaskAdmission:
                         raise
         return self.reconcile(tasks.read(self.app.state, view["task_id"]))
 
-    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False, binding=None, effect_guard=None) -> dict:
+    def _dispatch(self, method: str, arguments: dict, *, supervised: bool = False, binding=None, effect_guard=None,
+                  scope: dict | None = None) -> dict:
         if method not in METHODS:
             raise Fault("unsupported_operation", "Task admission applies only to the explicit existing mutation entrypoints.")
         if method in GITHUB_METHODS:
@@ -313,6 +314,11 @@ class TaskAdmission:
                                          binding=binding, historical_unbound=supervised and binding is None)
         if effect_guard is not None:
             arguments = dict(arguments, effect_guard=effect_guard)
+        if scope is not None:
+            # The compiled operation scope is not request identity: retries keep their original receipt.
+            if method not in EXECUTION_METHODS:
+                raise Fault("scope_invalid", "Only native execution methods carry a process scope.", effect="known_no_effect")
+            arguments = dict(arguments, scope=scope)
         if method in EXECUTION_METHODS and supervised:
             return getattr(self.app.machines, method)(**arguments, task_admitted=True)
         return getattr(self.app.machines, method)(**arguments)
@@ -379,9 +385,9 @@ class TaskAdmission:
         return records.digest({"method": method, "arguments": arguments,
             "plan_revision": operation["plan_revision"], "source_sha256": operation["source_sha256"]})
 
-    def _legacy(self, method: str, arguments: dict, locator: dict | None) -> dict:
+    def _legacy(self, method: str, arguments: dict, locator: dict | None, scope: dict | None = None) -> dict:
         if locator is None or method == "cancel_execution":
-            return self._dispatch(method, arguments)
+            return self._dispatch(method, arguments, scope=scope)
         if method in GITHUB_METHODS:
             proposed = {"locator": locator, "effect_scope": effects.github_scope(method, arguments)}
             if tasks.effect_conflicts(self.app.state, {}, proposed):
@@ -395,9 +401,9 @@ class TaskAdmission:
                 self.app.task_receipts.read({"locator": locator})
             except Fault:
                 raise index_error from None
-            return self._dispatch(method, arguments, supervised=method in EXECUTION_METHODS)
+            return self._dispatch(method, arguments, scope=scope, supervised=method in EXECUTION_METHODS)
         if binding is None:
-            return self._dispatch(method, arguments)
+            return self._dispatch(method, arguments, scope=scope)
         if method in FILE_METHODS | EXECUTION_METHODS:
             try:
                 self.app.task_receipts.read({"locator": locator})
@@ -405,14 +411,14 @@ class TaskAdmission:
                 pass
             else:
                 # Native immutable-ID reconciliation cannot create another effect.
-                return self._dispatch(method, arguments, supervised=method in EXECUTION_METHODS)
+                return self._dispatch(method, arguments, scope=scope, supervised=method in EXECUTION_METHODS)
         raise Fault("task_context_required", "This original effect was supervised; retain task_context before a new consequence.")
 
-    def run(self, method: str, arguments: dict, context: dict | None) -> dict:
+    def run(self, method: str, arguments: dict, context: dict | None, *, scope: dict | None = None) -> dict:
         if context is None and method == "cancel_execution":
             # Preserve the existing original-ID stop route even while a task
             # admission identity is busy or its canonical evidence is unavailable.
-            return self._dispatch(method, arguments)
+            return self._dispatch(method, arguments, scope=scope)
         if context is not None:
             context = records.normalize_context(context)
             arguments = self._normalize(method, arguments, context)
@@ -420,7 +426,7 @@ class TaskAdmission:
         if context is not None and locator is None:
             raise Fault("task_operation_conflict", "Supervised effects require a durable original operation identity.")
         if locator is None:
-            return self._dispatch(method, arguments)
+            return self._dispatch(method, arguments, scope=scope)
         key = tasks.operation_key(locator)
         # These coordinate one effect identity, not task progress or a running
         # worker's lifetime. Task locks are never held across domain/network IO.
@@ -446,9 +452,9 @@ class TaskAdmission:
                     self.app.task_receipts.read({"locator": locator})
                 except Fault:
                     raise error from None
-                return self._dispatch(method, arguments)
+                return self._dispatch(method, arguments, scope=scope)
             if context is None:
-                return self._legacy(method, arguments, locator)
+                return self._legacy(method, arguments, locator, scope)
             operation_ids = [context["operation_id"]]
             if method in {"control_execution", "cancel_execution"}:
                 operation_ids.append(locator["execution_id"])
@@ -572,7 +578,7 @@ class TaskAdmission:
                     acknowledged = True
                 dispatch_arguments = dict(arguments, on_acknowledgement=retain_acknowledgement)
             try:
-                observed = self._dispatch(method, dispatch_arguments, supervised=True, binding=locator.get("connection"), effect_guard=effect_guard)
+                observed = self._dispatch(method, dispatch_arguments, scope=scope, supervised=True, binding=locator.get("connection"), effect_guard=effect_guard)
             except (Fault, OSError) as error:
                 if acknowledged:
                     # The original acknowledgement is already durable. A later

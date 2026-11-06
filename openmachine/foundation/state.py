@@ -40,8 +40,9 @@ def save_json(path: Path, value: dict) -> None:
 
 
 @contextmanager
-def lease(path: Path, *, shared: bool = False, wait: bool = False, create: bool = True):
-    flags = (os.O_RDWR | os.O_CREAT) if create else os.O_RDONLY
+def lease(path: Path, *, shared: bool = False, wait: bool = False, create: bool = True, read_only: bool = False):
+    # read_only: a descriptor inherited by a sandboxed command must not write state files.
+    flags = ((os.O_RDONLY if read_only else os.O_RDWR) | os.O_CREAT) if create else os.O_RDONLY
     fd = os.open(path, flags | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "rb") as lease:
         try:

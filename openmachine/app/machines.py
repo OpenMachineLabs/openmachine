@@ -78,11 +78,12 @@ class Machines:
 
     def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
                         new_branch: str, execution_id: str, expected_workspace_identity: str,
-                        worktree: str = "", task_id: str = "", *, task_admitted: bool = False) -> dict:
+                        worktree: str = "", task_id: str = "", *, task_admitted: bool = False,
+                        scope: dict | None = None) -> dict:
         return execution.create_worktree(self.config, self.state, machine,
             workspace_name=workspace_name, destination=destination, base_ref=base_ref,
             new_branch=new_branch, execution_id=execution_id, expected_workspace_identity=expected_workspace_identity,
-            worktree=worktree, task_id=task_id,
+            worktree=worktree, task_id=task_id, scope=scope,
             validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None,
             validate_effect=lambda root: tasks.check_writer(self.state, {"root": str(root), "device": -1, "inode": -1}))
 
@@ -95,10 +96,12 @@ class Machines:
                         timeout_seconds: int = execution.DEFAULT_TIMEOUT, expected_head_sha: str = "",
                         workspace_access: str = "exclusive", resource_keys: list[str] | None = None,
                         task_id: str = "", termination_grace_seconds: float | None = None,
-                        tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False, effect_guard=None) -> dict:
+                        tty: bool = False, terminal_size: dict | None = None, *, task_admitted: bool = False, effect_guard=None,
+                        scope: dict | None = None) -> dict:
         self.config.machine(machine, write=True)
         return execution.start(self.config, self.state, machine, execution_id, cwd, argv, timeout_seconds,
             expected_head_sha, workspace_access, resource_keys, task_id, termination_grace_seconds, tty, terminal_size,
+            scope=scope,
             validate_new=(lambda: tasks.require_legacy(self.state, task_id)) if task_id and not task_admitted else None,
             validate_effect=effect_guard or (lambda root: tasks.check_writer(self.state, workspace.writable_target(root))))
 

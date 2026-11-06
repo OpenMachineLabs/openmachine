@@ -127,6 +127,11 @@
       "change": "Add eight github_read Actions/deployment actions, one closed optional filters object, and github_workflow with native mutation annotations. Preserve the released baseline and every unrelated schema and annotation."
     },
     {
+      "approval": "Maintainer request on 2026-11-06 authorizes Core operation-scoped filesystem enforcement for Cloud Selected Projects up to a mergeable PR.",
+      "base_commit": "da4efd1046d9a8db1002097289e21432063d193b",
+      "change": "Add one optional Connector-injected operation_scope object (protocol 1) to the eleven filesystem tools and the root action to inspect_projects. Every other input, default and annotation is unchanged."
+    },
+    {
       "approval": "https://github.com/OpenMachineLabs/openmachine/issues/246#evidence-and-authorization",
       "base_commit": "cffec73ba5bc3797b33416b56805a57b54bddfcc",
       "change": "Add only the optional native/cloud github_source selector to Task contracts, defaulting to native and omitted from native persisted serialization. Cloud Task admission resolves the account default once and retains the existing github_connections binding. Preserve every tool name, annotation and unrelated field. This deliberate expectation follows the approved contract, not regeneration from candidate output.",
@@ -217,6 +222,119 @@
             ],
             "title": "TaskContext",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -290,6 +408,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1192,6 +1321,119 @@
             ],
             "title": "Target",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -1268,6 +1510,17 @@
             "pattern": "^[0-9a-f]{32}$",
             "title": "Update Id",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1608,6 +1861,119 @@
             ],
             "title": "Target",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -1653,6 +2019,17 @@
             "pattern": "^[0-9a-f]{32}$",
             "title": "Update Id",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1722,6 +2099,119 @@
             ],
             "title": "TaskContext",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -1777,6 +2267,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -1896,6 +2397,119 @@
             ],
             "title": "TaskContext",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -1968,6 +2582,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -3509,6 +4134,17 @@
             ],
             "default": null,
             "title": "Ports"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -3516,7 +4152,122 @@
           "workspace_name"
         ],
         "title": "inspect_contextArguments",
-        "type": "object"
+        "type": "object",
+        "$defs": {
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
+          }
+        }
       }
     },
     "inspect_skills": {
@@ -3656,6 +4407,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -3664,7 +4426,122 @@
           "action"
         ],
         "title": "inspect_workspaceArguments",
-        "type": "object"
+        "type": "object",
+        "$defs": {
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
+          }
+        }
       }
     },
     "list_executions": {
@@ -4019,6 +4896,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4027,7 +4915,122 @@
           "path"
         ],
         "title": "read_workspace_fileArguments",
-        "type": "object"
+        "type": "object",
+        "$defs": {
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
+          }
+        }
       }
     },
     "reconcile_execution": {
@@ -4160,6 +5163,119 @@
             ],
             "title": "TaskContext",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -4238,6 +5354,17 @@
             "minimum": 1,
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4328,6 +5455,119 @@
               "cols"
             ],
             "title": "TerminalSize",
+            "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
             "type": "object"
           }
         },
@@ -4428,6 +5668,17 @@
             ],
             "title": "Workspace Access",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4532,6 +5783,119 @@
             ],
             "title": "TaskContext",
             "type": "object"
+          },
+          "OperationScope": {
+            "additionalProperties": false,
+            "description": "Selected Projects map injected by the Connector; public MCP callers never supply it.",
+            "properties": {
+              "authority": {
+                "$ref": "#/$defs/ScopeAuthority"
+              },
+              "protocol": {
+                "const": 1,
+                "title": "Protocol",
+                "type": "integer"
+              },
+              "roots": {
+                "items": {
+                  "$ref": "#/$defs/ScopeRoot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "title": "Roots",
+                "type": "array"
+              }
+            },
+            "required": [
+              "protocol",
+              "authority",
+              "roots"
+            ],
+            "title": "OperationScope",
+            "type": "object"
+          },
+          "ScopeAuthority": {
+            "additionalProperties": false,
+            "properties": {
+              "grant_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "title": "Grant Id",
+                "type": "string"
+              },
+              "grant_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Grant Revision",
+                "type": "integer"
+              },
+              "policy_revision": {
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "title": "Policy Revision",
+                "type": "integer"
+              },
+              "session_generation": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "title": "Session Generation",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "policy_revision",
+              "grant_id",
+              "grant_revision",
+              "session_generation"
+            ],
+            "title": "ScopeAuthority",
+            "type": "object"
+          },
+          "ScopeRoot": {
+            "additionalProperties": false,
+            "properties": {
+              "machine": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Machine",
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "read_only",
+                  "full_access"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "relative_path": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Relative Path",
+                "type": "string"
+              },
+              "target_id": {
+                "pattern": "^[0-9a-f]{64}$",
+                "title": "Target Id",
+                "type": "string"
+              },
+              "workspace_name": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "title": "Workspace Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "machine",
+              "workspace_name",
+              "relative_path",
+              "target_id",
+              "mode"
+            ],
+            "title": "ScopeRoot",
+            "type": "object"
           }
         },
         "properties": {
@@ -4590,6 +5954,17 @@
             "maxLength": 4096,
             "title": "Worktree",
             "type": "string"
+          },
+          "operation_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperationScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4750,6 +6125,7 @@
           "action": {
             "default": "list",
             "enum": [
+              "root",
               "list",
               "inspect"
             ],

@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -30,19 +31,29 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
     def listing(self, **kwargs):
         return self.app.inspect_projects("local", "project", **kwargs)
 
-    def test_configured_roots_are_paged_without_cross_machine_or_path_leaks(self):
-        self.config.workspaces["absent"] = Workspace(machine="local", root=str(self.root / "absent"))
-        self.config.machines["other"] = Machine(transport="local", local_access="full_access")
-        self.config.workspaces["private"] = Workspace(machine="other", root=str(self.root))
-        first = self.app.inspect_projects("local", limit=1)
-        self.assertEqual(first["projects"][0]["error"], "project_unavailable")
-        self.assertNotIn("target_id", first["projects"][0])
-        last = self.app.inspect_projects("local", offset=first["next_offset"], expected_snapshot=first["snapshot"])
-        self.assertEqual(last["projects"], [self.target()])
-        self.assertFalse(last["has_more"])
-        self.assertNotIn(str(self.root), json.dumps(last))
-        self.config.workspaces.pop("absent")
-        self.fault("source_changed", lambda: self.app.inspect_projects("local", expected_snapshot=first["snapshot"]))
+    def test_root_is_the_account_desktop_without_fallback(self):
+        home = self.root / "home"
+        desktop = home / "Desktop"
+        desktop.mkdir(parents=True)
+        root = lambda: self.app.inspect_projects("local", action="root")
+        with (patch.object(catalog.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=str(home))),
+              patch.object(catalog.sys, "platform", "darwin"), patch.dict(os.environ, {"HOME": str(self.work)})):
+            self.assertEqual(root(), {"protocol": 2, "root": {"machine": "local", "workspace_name": str(desktop),
+                                                              "relative_path": ".", "name": "Desktop"}})
+            desktop.rename(home / "Moved")
+            desktop.symlink_to(home / "Moved", target_is_directory=True)
+            self.fault("desktop_redirected", root)
+            desktop.unlink()
+            self.fault("desktop_missing", root)
+            desktop.write_text("")
+            self.fault("desktop_redirected", root)
+            with patch.object(catalog.os, "lstat", side_effect=PermissionError):
+                self.fault("desktop_access_denied", root)
+        with patch.object(catalog.sys, "platform", "linux"):
+            self.fault("desktop_unsupported", root)
+        # Configured roots, including installation probes, are never an implicit listing.
+        self.fault("invalid_project_request", lambda: self.app.inspect_projects("local"))
+        self.fault("invalid_project_request", lambda: self.app.inspect_projects("local", "project", "root"))
 
     def test_listing_is_metadata_only_nonrecursive_and_preserves_local_authority(self):
         (self.work / "folder/deeper").mkdir(parents=True)
@@ -54,14 +65,14 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
         self.config.machines["local"].execution_enabled = False
         self.config.machines["local"].workspace_write_enabled = False
         before = self.config.model_dump()
-        rows = self.listing()["projects"]
-        self.assertEqual([(row["relative_path"], row["kind"]) for row in rows],
-                         [("folder", "folder"), ("repo", "git_repo")])
-        self.assertEqual(rows[0], self.target("folder"))
+        with patch.object(catalog, "context", side_effect=AssertionError("listing probed Git")):
+            rows = self.listing()["directories"]
+        self.assertEqual(rows, [{"relative_path": "folder", "name": "folder"}, {"relative_path": "repo", "name": "repo"}])
+        self.assertEqual(self.target("repo")["kind"], "git_repo")
         self.assertNotIn("answer =", json.dumps(rows))
         self.assertEqual(self.config.model_dump(), before)
         self.assertFalse(self.state.exists())
-        self.assertFalse(self.app.get_capabilities()["project_catalog"]["register"])
+        self.assertEqual(self.app.get_capabilities()["project_catalog"]["actions"], ["root", "list", "inspect"])
         self.assertEqual(self.app.read_workspace_file("local", "project", "source.py")["text"], self.file.read_bytes().decode())
         self.fault("workspace_write_disabled", self.apply)
 
@@ -141,7 +152,8 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
         (self.work / "broken").mkdir()
         (self.work / "broken/.git").write_text("gitdir: /missing\n")
         self.fault("project_unavailable", lambda: self.target("broken"))
-        self.assertEqual(self.listing()["projects"][0]["error"], "project_unavailable")
+        # Listing never inspects a child's Git control file; selection does.
+        self.assertEqual(self.listing()["directories"], [{"relative_path": "broken", "name": "broken"}])
         subprocess.run(["git", "init", "--bare", "-q", str(self.work / "bare")], check=True)
         self.fault("project_unavailable", lambda: self.target("bare"))
         self.initialize_git()
@@ -157,7 +169,7 @@ class ProjectCatalogTests(WorkspaceFixture, unittest.TestCase):
         first = self.listing(limit=1)
         second = self.listing(offset=first["next_offset"], limit=1, expected_snapshot=first["snapshot"])
         last = self.listing(offset=second["next_offset"], expected_snapshot=second["snapshot"])
-        self.assertEqual([page["projects"][0]["name"] for page in (first, second, last)], ["a", "m", "z"])
+        self.assertEqual([page["directories"][0]["name"] for page in (first, second, last)], ["a", "m", "z"])
         self.assertFalse(last["has_more"])
         self.assertIsNone(last["next_offset"])
         (self.work / "b").mkdir()

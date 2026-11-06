@@ -3,16 +3,17 @@
 import os
 from pathlib import Path
 import selectors
+import shutil
 import signal
 import subprocess
 import time
 
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
-from openmachine.workspace.git import context
+from openmachine.workspace.git import capture, context
 from openmachine.workspace import worktrees
 
-from . import control, logs
+from . import control, logs, seatbelt
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process, boot_identity
 from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, read_record
@@ -131,6 +132,44 @@ def _run(directory: Path, record: dict, process: Process, output, interrupted,
             "succeeded" if record["exit_code"] == 0 and not record.get("error") else "failed")
 
 
+def _git_identity() -> dict[str, str]:
+    """Only the user's global Git identity enters a scoped private HOME."""
+    identity = {}
+    for key in ("name", "email"):
+        try:
+            raw, code, clipped = capture(Path("/"), ["config", "--global", "--get", "user." + key])
+        except Fault:
+            continue
+        if code == 0 and not clipped:
+            identity[key] = raw.decode("utf-8", errors="replace").strip()
+    return identity
+
+
+def _scoped_launch(record: dict) -> tuple[str | None, dict | None]:
+    """Return the verified original profile and constructed environment, or no sandbox."""
+    scope = record.get("scope")
+    if scope is None:
+        return None, None
+    text = record["sandbox_profile"]
+    if seatbelt.digest(text) != scope["profile_sha256"] or seatbelt.unavailable_reason() is not None:
+        raise Fault("scope_backend_failed", "The original operation scope cannot be applied; no command was launched.")
+    private = Path(scope["private"])
+    seatbelt.prepare(private, _git_identity())
+    return text, seatbelt.environment(os.environ, private)
+
+
+def _remove_private(record: dict) -> None:
+    if record.get("scope") is None:
+        return
+    try:
+        shutil.rmtree(record["scope"]["private"])
+        record["private_cleanup"] = "verified"
+    except FileNotFoundError:
+        record["private_cleanup"] = "verified"
+    except OSError:
+        record["private_cleanup"] = "failed"
+
+
 def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
     for fd in (worker_fd, *owned_fds):
         os.fstat(fd)
@@ -189,8 +228,10 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
                                                       directory, record, process, selector, _publish)
                         try:
                             native_boot = boot_identity()
+                            sandbox, environment = _scoped_launch(record)
                             process.launch(request["argv"], request["cwd"], owned_fds, tty=request["tty"],
-                                           terminal_size=request["terminal_size"], deadline=preparation_deadline)
+                                           terminal_size=request["terminal_size"], deadline=preparation_deadline,
+                                           sandbox=sandbox, env=environment)
                         except (OSError, ValueError, Fault, subprocess.SubprocessError) as error:
                             record["error"] = ("launch_unverified" if process.launch_uncertain else
                                                error.code if isinstance(error, Fault) else type(error).__name__)
@@ -231,6 +272,7 @@ def worker(directory: Path, worker_fd: int, *owned_fds: int) -> None:
         record["control_ready"] = False
         if process is not None:
             process.close()
+        _remove_private(record)
     # Readers cannot observe the lease-release/publication gap as a lost worker.
     with lease(directory / "control.lock", wait=True, create=False):
         for fd in (*owned_fds, worker_fd):

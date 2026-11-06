@@ -55,8 +55,11 @@ contains real checks.
 - Test observable behavior and important failure paths, not private structure.
   Reuse fixtures; do not build a second implementation inside tests.
 - Update documentation where the change belongs. Change root Markdown files
-  only for essential, enduring guidance, never for routine PR details. Prefer
-  the least prose and code that fully solves the problem.
+  only for essential, enduring guidance, never for routine PR details.
+- Write Skills and docs as the shortest precise instructions an agent can act
+  on: state each fact once in its owner, link instead of repeating, and cut
+  text that does not change behavior. Prefer the least prose and code that
+  fully solves the problem.
 
 ## English and safety
 
