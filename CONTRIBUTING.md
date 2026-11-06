@@ -99,7 +99,8 @@ A small documentation correction does not need a separate Spec or rollback plan.
 Use a descriptive commit subject such as `fix(workspace): handle missing files`
 or `docs(readme): clarify installation`. Commit subjects follow
 `domain(scope): outcome`, use printable ASCII and fit within 72 characters.
-Prefer concise English PR descriptions; titles may be up to 100 characters.
+Prefer concise English PR descriptions. A squash merge appends ` (#N)` to the PR
+title, so the title plus that suffix must also fit within 72 characters.
 Respond to review comments with focused updates.
 
 Maintainers review design, safety, tests and CI before deciding on a merge.

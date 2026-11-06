@@ -141,6 +141,10 @@ def metadata_errors(obj: dict, kind: str) -> list[str]:
         return ["metadata must be a JSON object"]
     title = obj.get("title", "")
     errors = title_errors(title, kind)
+    number = obj.get("number")
+    if kind == "pr" and not errors and isinstance(number, int) and len(f"{title} (#{number})") > 72:
+        # Main audits the squash subject, the PR title plus " (#N)", as a commit.
+        errors.append("PR title plus its ' (#N)' squash suffix must fit within 72 characters")
     if isinstance(title, str):
         errors += public_boundary_errors(title)
     body = obj.get("body")
