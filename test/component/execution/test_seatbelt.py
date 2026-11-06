@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -32,22 +33,35 @@ class ProfileTests(unittest.TestCase):
         for path in (writable, worktree):
             path.mkdir(parents=True)
         (worktree / ".git").write_text("gitdir: elsewhere\n")
+        (writable / ".git/worktrees/wt").mkdir(parents=True)
+        (writable / ".git/worktrees/wt/commondir").write_text("../..\n")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(readable=[readable], writable=[writable, worktree], private=self.root / "private",
                                     control=[self.root / "state"], path_environment="", home=self.root / "home")
+            with self.assertRaises(Fault) as caught:
+                seatbelt.profile(readable=[self.root / 'quote"d'], writable=[writable], private=self.root, control=[],
+                                 path_environment="", home=self.root)
+            self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
         self.assertEqual(lines[:2], ["(version 1)", "(deny default)"])
         self.assertEqual(lines[-1], f'(deny file-read* file-write* (subpath "{self.root / "state"}"))')
-        self.assertIn(r"Dev \(1\)\+x/core(/.*)?/\.git/(hooks(/.*)?|config|worktrees/[^/]+/config\.worktree)$", text)
-        self.assertIn(f'(deny file-write* (literal "{worktree / ".git"}"))', text)
-        self.assertNotIn(f'(literal "{writable / ".git"}")', text)
+        self.assertIn(r"Dev \(1\)\+x/core" + seatbelt.PROTECTED_REGEX, text)
+        for path in (worktree / ".git", writable / ".git", writable / ".git/worktrees/wt/commondir"):
+            self.assertIn(f'(deny file-write* (literal "{path}"))', text)
+        self.assertNotIn(f'(literal "{readable / ".git"}")', text)
         self.assertNotIn("SecurityServer", text)
         self.assertNotIn("appleevents", text.lower())
         self.assertIn('(allow file-read* file-write* (literal "/dev/ttys004"))', seatbelt.own_terminal(text, "/dev/ttys004"))
-        with self.assertRaises(Fault) as caught:
-            seatbelt.profile(readable=[self.root / 'quote"d'], writable=[writable], private=self.root, control=[],
-                             path_environment="", home=self.root)
-        self.assertEqual(caught.exception.code, "scope_unsupported")
+
+    def test_protected_git_files_cover_worktrees_and_submodules_but_not_refs(self):
+        pattern = re.compile("^/r" + seatbelt.PROTECTED_REGEX)
+        for path in (".git/hooks", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir",
+                     ".git/worktrees/wt/config.worktree", ".git/modules/lib/config", ".git/modules/a/b/hooks/post-checkout",
+                     ".git/modules/lib/config.worktree", ".git/modules/lib/worktrees/wt/config.worktree", "sub/.git/config"):
+            self.assertRegex("/r/" + path, pattern)
+        for path in (".git/config.lock", ".git/refs/heads/config", ".git/refs/heads/hooks/x", ".git/worktrees/wt/gitdir",
+                     ".git/info/exclude", "config", "hooks/x", ".gitconfig"):
+            self.assertNotRegex("/r/" + path, pattern)
 
     def test_environment_and_private_home_hold_no_inherited_secrets(self):
         base = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C", "TERM": "xterm", "HOME": "/Users/real",
@@ -59,7 +73,6 @@ class ProfileTests(unittest.TestCase):
         seatbelt.prepare(private, {"name": "Fixture", "email": "fixture@example.invalid\n[core]"})
         self.assertEqual((private / "home/.gitconfig").read_text(), "[user]\n\tname = Fixture\n")
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)
-
 
 
 if __name__ == "__main__":

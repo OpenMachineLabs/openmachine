@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -57,14 +58,9 @@ def _denied(message: str) -> Fault:
 
 
 def protected(path: Path) -> bool:
-    """Files Git and IDEs execute later outside the sandbox; never written under scope."""
-    parts = path.parts
-    for index, part in enumerate(parts):
-        if part in PROTECTED_DIRECTORIES:
-            return True
-        if part == ".git" and index + 1 < len(parts) and parts[index + 1] in {"hooks", "config"}:
-            return True
-    return False
+    """Files Git and IDEs execute later outside the sandbox; the process profile denies the same set."""
+    return (any(part in PROTECTED_DIRECTORIES for part in path.parts)
+            or re.search(r"(^|/)\.git/" + execution.PROTECTED_GIT + "$", path.as_posix()) is not None)
 
 
 @dataclass(frozen=True)
@@ -115,6 +111,13 @@ class Scope:
             return None
         return top, owner
 
+    @staticmethod
+    def _reciprocal(path: Path, common: str) -> bool:
+        """Registration metadata is writable by scoped work; only the worktree's own pointer proves it."""
+        observed = workspace.context(path)
+        return (observed["git_status"] == "observed" and observed["worktree"] == str(path)
+                and observed["common_dir"] == common and observed["git_dir"] != common)
+
     def mode(self, path: Path) -> str | None:
         """A registered worktree is more specific than an enclosing selected parent."""
         if self._controlled(path):
@@ -147,7 +150,8 @@ class Scope:
             for item in workspace.registered_worktrees(root.path):
                 path = Path(item["worktree"])
                 if (item["prunable"] or item["bare"] or path == root.path or not path.is_dir()
-                        or self._controlled(path) or not self._widens(self._owner(path), root.mode)):
+                        or self._controlled(path) or not self._widens(self._owner(path), root.mode)
+                        or not self._reciprocal(path, observed["common_dir"])):
                     continue
                 trees.append({"path": str(path), "source_target_id": root.target_id, "mode": root.mode})
         return {"authority": self.authority, "roots": [root.receipt() for root in self.roots],

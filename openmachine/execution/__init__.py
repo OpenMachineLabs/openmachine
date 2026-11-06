@@ -7,4 +7,5 @@ from .records import (CONTROL_ACTIONS, CONTROL_PROTOCOL, CREATION_FORMAT, DEFAUL
                       MAX_INPUT, MAX_TIMEOUT, control_request, read_record)
 from .control import CONTROL_SECONDS, MAX_FRAME
 from .environment import OBSERVATION_VERSION, TARGET_SECTIONS, MAX_SELECTORS, inspect_environment, validate_observation_inputs
-from .seatbelt import BACKEND as SEATBELT_BACKEND, account_home, unavailable_reason as seatbelt_unavailable_reason
+from .seatbelt import (BACKEND as SEATBELT_BACKEND, PROTECTED_GIT, account_home,
+                       unavailable_reason as seatbelt_unavailable_reason)

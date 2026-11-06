@@ -45,10 +45,18 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         (self.core / "outside").symlink_to(self.personal, target_is_directory=True)
         os.link(self.personal / "secret.txt", self.core / "planted")
         for script in ("cat outside/secret.txt", f"ln {self.personal}/secret.txt copy", f"ls {self.state}",
-                       "echo x > .git/hooks/pre-commit", "git config user.name changed", "mkdir .vscode"):
+                       "echo x > .git/hooks/pre-commit", "git config user.name changed", "echo x > .git/config.worktree",
+                       "echo /tmp > .git/commondir", "mv .git .git-moved", "mkdir -p .git/modules/lib/hooks", "mkdir .vscode"):
             result = self.shell(script)
             self.assertEqual(result["status"], "failed", script)
             self.assertNotIn("SECRET", result["output"], script)
+        forged = self.shell(f"mkdir .git/worktrees && mkdir .git/worktrees/forged && cd .git/worktrees/forged && "
+                            f"echo {self.personal}/.git > gitdir && echo ../.. > commondir && "
+                            f"echo 'ref: refs/heads/main' > HEAD && touch locked")
+        self.assertEqual(forged["status"], "succeeded", forged["output"])
+        widened = self.shell(f"echo x > {self.personal}/owned")
+        self.assertIn(DENIED, widened["output"])
+        self.assertNotIn(str(self.personal), {item["path"] for item in widened["scope"]["worktrees"]})
         # Path-based enforcement: a hardlink placed inside a granted root before launch is in scope.
         self.assertIn("PERSONAL-SECRET", self.shell("cat planted")["output"])
 
@@ -120,6 +128,7 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
                             "commit -qam inherited && cat ../desktop/file.txt", cwd=destination)
         self.assertEqual(inside["status"], "succeeded", inside["output"])
         self.assertIn(DENIED, self.shell("echo 'gitdir: /tmp/x' > .git", cwd=destination)["output"])
+        self.assertIn(DENIED, self.shell(f"echo /tmp > {self.core}/.git/worktrees/core-wt/commondir")["output"])
         self.fault("path_out_of_scope", lambda: self.app.create_worktree(
             "local", str(self.core), str(self.personal / "wt"), "main", uuid.uuid4().hex,
             context["workspace_identity"], "denied-wt", operation_scope=self.scope()))

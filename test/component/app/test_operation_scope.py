@@ -75,6 +75,31 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
             "local", str(self.dev), patch_text, "0" * 64, "", [{"path": "desktop/new.txt", "expected_sha256": ""}],
             change_id=uuid.uuid4().hex, operation_scope=self.scope()))
 
+    def test_protected_files_match_the_process_profile(self):
+        for path in (".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir", ".git/worktrees/wt/config.worktree",
+                     ".git/modules/lib/hooks/post-checkout", ".git/modules/lib/config", ".vscode/tasks.json", "a/.idea/x"):
+            self.assertTrue(operation_scope.protected(self.core / path), path)
+        for path in ("file.txt", ".git/refs/heads/config", ".git/info/exclude", "config", ".gitconfig"):
+            self.assertFalse(operation_scope.protected(self.core / path), path)
+
+    def test_only_reciprocal_worktrees_inherit_full_access(self):
+        real = self.dev / "core-wt"
+        self.git(self.core, "worktree", "add", "-q", "-b", "wt", str(real))
+        # Scoped work can write registration metadata in a Full repository; forge one for an unrelated folder.
+        forged = self.core / ".git" / "worktrees" / "forged"
+        forged.mkdir()
+        for name, text in (("gitdir", f"{self.personal}/.git\n"), ("commondir", "../..\n"),
+                           ("HEAD", "ref: refs/heads/main\n"), ("locked", "\n")):
+            (forged / name).write_text(text)
+        listed = self.git(self.core, "worktree", "list", "--porcelain")
+        self.assertIn(f"worktree {self.personal}\n", listed + "\n")
+        compiled = operation_scope.compile(self.config, self.state, "local", self.scope())
+        trees = compiled.process_request()["worktrees"]
+        self.assertEqual([(item["path"], item["mode"]) for item in trees], [(str(real), "full_access")])
+        self.assertEqual(compiled.mode(real), "full_access")
+        self.assertIsNone(compiled.mode(self.personal))
+        self.fault("path_out_of_scope", lambda: self.read(self.personal, "secret.txt"))
+
     def test_unconfinable_or_unsupported_work_starts_nothing(self):
         self.fault("scope_unconfined_capability", lambda: self.app.start_codex_task(
             "local", uuid.uuid4().hex, str(self.core), "Goal", "https://example.invalid/", ["https://example.invalid"],

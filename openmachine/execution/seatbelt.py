@@ -23,8 +23,10 @@ MACH_SERVICES = ("com.apple.system.opendirectoryd.libinfo", "com.apple.system.op
 DEVICES = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/dtracehelper", "/dev/ptmx")
 TOOLCHAIN_BINS = {"bin", "sbin", "shims"}
 KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
-# Files that Git and IDEs execute later outside any sandbox; never writable under scope.
-PROTECTED_REGEX = r"(/.*)?/\.git/(hooks(/.*)?|config|worktrees/[^/]+/config\.worktree)$"
+# Git files that later run code outside any sandbox, relative to a .git directory: hooks,
+# configuration and the commondir redirect of the repository, its worktrees and its submodules.
+PROTECTED_GIT = r"(modules/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir|worktrees/[^/]+/config\.worktree)"
+PROTECTED_REGEX = r"(/.*)?/\.git/" + PROTECTED_GIT + "$"
 PROTECTED_IDE_REGEX = r"(/.*)?/\.(vscode|idea)(/.*)?$"
 
 
@@ -152,10 +154,14 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     for root in writable:
         lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_REGEX}"))')
         lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_IDE_REGEX}"))')
-        pointer = root / ".git"
-        if pointer.is_file() and not pointer.is_symlink():
-            # An existing linked worktree's gitdir pointer; new worktrees still create theirs.
-            lines.append(f"(deny file-write* (literal {_literal(pointer)}))")
+        git = root / ".git"
+        if os.path.lexists(git):
+            # Renaming, replacing or repointing .git would carry hooks and config out of the regex.
+            lines.append(f"(deny file-write* (literal {_literal(git)}))")
+        if git.is_dir() and not git.is_symlink():
+            # Existing worktrees' commondir redirects; new registrations still create theirs.
+            lines.extend(f"(deny file-write* (literal {_literal(path)}))"
+                         for path in sorted(git.glob("worktrees/*/commondir")))
     lines.append(f"(deny file-read* file-write* {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 
