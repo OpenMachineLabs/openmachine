@@ -122,25 +122,38 @@ def _restore_configuration(state: Path, record: dict, digest: str, edited: str, 
                            before_change: Callable[[], None]) -> dict:
     """Reselect the current installation's recorded configuration over an edit.
 
-    Only the exact confirmed edited bytes are replaced. Renew only the blocked
-    readiness episode that such an edit causes; every other block remains."""
-    with lease(state / "locks/lifecycle.lock"):
+    Only the confirmed edited bytes, or this restore's own result, are replaced,
+    so an interrupted original repeats safely. Only the readiness block such an
+    edit causes is renewed; any other block refuses before a change."""
+    with lease(state / "locks/lifecycle.lock"), ExitStack() as guards:
         current = service_state._record(state)
         if (current["current"] != record["current"] or current["pending"] is not None
                 or current.get("configurations", {}).get(current["current"]) != digest):
             raise Fault("selection_changed", "The selected installation changed before its configuration was restored.")
-        checks._candidate_state(service_state._runtime(state, current["current"]) / "bin/python",
-                                service_state._saved_configuration(state, digest), state)
-        before_change()
-        service_state._select_configuration(state, Path(current["config"]), digest, {edited})
-        runtime._stop(state)
         recovery = service_state._read_recovery(state)
-        if recovery and recovery["episode"] and recovery["episode"]["reason"] == "blocked_service_identity_mismatch":
+        episode = recovery["episode"] if recovery else None
+        mismatch = episode is not None and episode["reason"] == "blocked_service_identity_mismatch"
+        if episode is not None and episode["reason"].startswith("blocked_") and not mismatch:
+            raise Fault("runtime_recovery_blocked", "Another readiness block remains; the configuration was not restored.")
+        config_path, saved = Path(current["config"]), service_state._saved_configuration(state, digest)
+        checks._candidate_state(service_state._runtime(state, current["current"]) / "bin/python", saved, state)
+        live, restored = load(config_path), load(saved)
+        checks.workspace_bindings_safe(state, live, restored, current["probe"]["workspace"])
+        checks.activation_safe(state, config=live, candidate_config=restored, guards=guards)
+        before_change()
+        service_state._select_configuration(state, config_path, digest, {edited, digest})
+        runtime._stop(state)
+        if mismatch:
             with lease(state / "service/recovery.lock"):
                 service_state._save_recovery(state, None)
     if service_state.stopped(current):
         return {"status": "stopped", "readiness": "not_probed"}
-    return runtime._start(state, current)
+    try:
+        return runtime._start(state, current)
+    except Fault:
+        # The restored selection is committed. Readiness stays with the runtime
+        # lifecycle and is reported as observed, never fabricated.
+        return runtime.status(config_path, state)
 
 
 def _task_cutover(state: Path, record: dict, *, committed: bool = False) -> bool:

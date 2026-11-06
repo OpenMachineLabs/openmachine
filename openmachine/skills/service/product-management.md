@@ -117,7 +117,9 @@ With `update:restore_configuration`, an update whose candidate is the selected
 installation's own recorded configuration restores those bytes over the confirmed
 edited active file instead of returning `same_installation`, renews only a
 `blocked_service_identity_mismatch` readiness block, and restarts the runtime.
-Any other same-installation change still returns `same_installation`.
+Workspace-reference and activation guards apply; any other readiness block
+refuses before a change, and an interrupted restore continues under its original
+ID. Any other same-installation change still returns `same_installation`.
 
 Omitting both flags retains the earlier update contract; a consent-dependent
 client must not silently fall back when this capability is absent. Preserve all

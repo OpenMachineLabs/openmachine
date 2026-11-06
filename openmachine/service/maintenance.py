@@ -81,6 +81,15 @@ def _cutover_selection(state: Path, record: dict) -> dict | None:
     return selected
 
 
+def _restoring(record: dict, selected: dict) -> bool:
+    """An update reselecting the current installation's own recorded configuration."""
+    request, prepared = record["request"], record["prepared"]
+    return (request["action"] == "update" and prepared is not None
+            and selected["current"] == prepared["identity"] and selected["pending"] is None
+            and request["candidate_sha256"] != request["config_sha256"]
+            and selected.get("configurations", {}).get(selected["current"]) == request["candidate_sha256"])
+
+
 def _operation_path(state: Path, identity: str) -> Path:
     if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{32}", identity):
         raise Fault("invalid_operation_id", "Use the original 32-lowercase-hex maintenance operation ID.")
@@ -286,7 +295,8 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         record = _read(state, identity)
         if record["request"]["config"] != str(config_path):
             raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
-        if record["phase"] not in CONTINUABLE and _cutover_selection(state, record) is None:
+        if (record["phase"] not in CONTINUABLE and _cutover_selection(state, record) is None
+                and not _restoring(record, service_state._record(state))):
             raise Fault("maintenance_not_continuable", "Preparation or activation may have occurred; read original state without replay.")
         python = sys.executable
         if record["phase"] != "accepted":
@@ -401,6 +411,12 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
                 _bound(Path(request["config"]), state, selected)
                 result = transition._resume_activation(state, selected)
                 _save(state, record, "completed", outcome=result)
+            elif _restoring(record, selected := service_state._record(state)):
+                # An interrupted restore repeats idempotently under its original ID.
+                _bound(Path(request["config"]), state, selected)
+                result = transition._restore_configuration(state, selected, request["candidate_sha256"],
+                                                           request["config_sha256"], before_change=lambda: None)
+                _save(state, record, "completed", outcome=result)
             return
         snapshot = _inputs_unchanged(state, record)
         if record["phase"] == "accepted":
@@ -451,15 +467,14 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         else:
             selected = service_state._record(state)
             _bound(config, state, selected)
-            if selected["current"] == prepared["identity"] and request["candidate_sha256"] != request["config_sha256"]:
+            if _restoring(record, selected):
                 # Only the selected installation's own recorded configuration may
-                # be restored over an edited file; any other change needs a
-                # distinct candidate installation.
-                if selected.get("configurations", {}).get(selected["current"]) != request["candidate_sha256"]:
-                    raise Fault("same_installation", "A configuration change requires an explicit distinct candidate installation.")
+                # be restored over an edited file.
                 result = transition._restore_configuration(state, selected, request["candidate_sha256"],
                                                            request["config_sha256"], before_change=before_change)
             elif selected["current"] == prepared["identity"]:
+                if request["candidate_sha256"] != request["config_sha256"]:
+                    raise Fault("same_installation", "A configuration change requires an explicit distinct candidate installation.")
                 result = runtime.status(config, state)
                 if "management" not in selected:
                     with lease(state / "locks/lifecycle.lock"):
