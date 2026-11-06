@@ -15,8 +15,12 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
     def test_download_tags_pin_oldest_supported_linux_glibc(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
         common = ["--implementation", "cp", "--python-version", "3.13", "--abi", "cp313"]
-        self.assertEqual(builder["wheel_target_options"](payload.LINUX_TARGET),
-                         ["--platform", "manylinux_2_34_x86_64", *common])
+        linux_options = builder["wheel_target_options"](payload.LINUX_TARGET)
+        linux_tags = [f"manylinux_2_{minor}_x86_64" for minor in range(34, 4, -1)]
+        linux_tags += ["manylinux2014_x86_64", "manylinux2010_x86_64", "manylinux1_x86_64"]
+        self.assertEqual(linux_options,
+                         [part for tag in linux_tags for part in ("--platform", tag)] + common)
+        self.assertNotIn("manylinux_2_35_x86_64", linux_options)
         self.assertEqual(builder["wheel_target_options"](payload.TARGET),
                          ["--platform", "macosx_13_0_arm64", *common])
 

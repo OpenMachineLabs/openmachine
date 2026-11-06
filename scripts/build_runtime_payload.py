@@ -57,10 +57,13 @@ exec "$root/bin/git" "$@"
 def wheel_target_options(target: dict) -> list[str]:
     # Never resolve wheels against the builder's newer glibc: the payload
     # promises compatibility with the oldest accepted native Linux ABI.
-    platform_tag = ("manylinux_2_34_x86_64" if target == payload.LINUX_TARGET
-                    else "macosx_13_0_arm64")
-    return ["--platform", platform_tag, "--implementation", "cp",
-            "--python-version", "3.13", "--abi", "cp313"]
+    # Explicit pip --platform does not automatically add older manylinux tags.
+    # Accept older, forward-compatible wheels while excluding glibc > 2.34.
+    tags = ([f"manylinux_2_{minor}_x86_64" for minor in range(34, 4, -1)]
+            + ["manylinux2014_x86_64", "manylinux2010_x86_64", "manylinux1_x86_64"]
+            if target == payload.LINUX_TARGET else ["macosx_13_0_arm64"])
+    return [arg for tag in tags for arg in ("--platform", tag)] + [
+        "--implementation", "cp", "--python-version", "3.13", "--abi", "cp313"]
 
 
 def main() -> None:
