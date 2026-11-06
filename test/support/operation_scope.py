@@ -7,10 +7,10 @@ import tempfile
 import time
 from unittest.mock import patch
 
-from openmachine import execution
-from openmachine.bootstrap import create_application
+from openmachine.chat import execution
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.execution.records import TERMINAL
+from openmachine.chat.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
 
 AUTHORITY = {"policy_revision": 7, "grant_id": "grant-fixture", "grant_revision": 3, "session_generation": 12}

@@ -16,10 +16,11 @@ from typing import TYPE_CHECKING
 from openmachine import __version__
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
-from openmachine.workspace.git import context, lock_root, whole_device_writes, writer_path_locks
-from openmachine.workspace import worktrees
+from openmachine.chat.workspace.git import context, lock_root, whole_device_writes, writer_path_locks
+from openmachine.chat.workspace import worktrees
 
-from . import control as controls, observation, seatbelt
+from openmachine.execution import seatbelt
+from . import control as controls, observation
 from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
                       effective_request, read_record, reconciled_record, record_directory,

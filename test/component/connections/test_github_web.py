@@ -14,7 +14,7 @@ import uuid
 
 from integrations import connection_state, credentials
 from integrations.github import auth, web_authorization
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import GitHubConfig
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json

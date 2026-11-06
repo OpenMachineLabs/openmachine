@@ -7,10 +7,10 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import tasks
-from openmachine.execution.records import TERMINAL
-from openmachine.tasks import database, store as task_store
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.execution.records import TERMINAL
+from openmachine.chat.tasks import database, store as task_store
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract
 from test.support.execution import ExecutionFixture
@@ -133,7 +133,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual([item["id"] for item in retained["items"]], [args["execution_id"]])
 
     def test_original_cancel_remains_available_with_busy_task_identity(self):
-        from openmachine.tasks import records, transitions
+        from openmachine.chat.tasks import records, transitions
         self.accept_plan()
         args = self.start_arguments("import time; time.sleep(30)")
         original = self.app.start_execution(**args)
@@ -203,9 +203,9 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
             payload.write_text(json.dumps({"config": self.config.model_dump(mode="json"), "state": str(state), "request": args}))
             code = '''import json,os,sys
 from pathlib import Path
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.tasks import database
+from openmachine.chat.tasks import database
 value=json.loads(Path(sys.argv[1]).read_text())
 original=database.commit
 def stop(connection):

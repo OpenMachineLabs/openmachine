@@ -7,7 +7,8 @@ import sys
 import time
 import unittest
 from unittest.mock import call, patch
-from openmachine import execution, service, tasks
+from openmachine import service
+from openmachine.chat import execution, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks as service_checks
@@ -16,8 +17,8 @@ from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
-from openmachine.tasks import database as task_database, migration as task_migration, records as task_records
-from openmachine.tasks.index import structured_metadata
+from openmachine.chat.tasks import database as task_database, migration as task_migration, records as task_records
+from openmachine.chat.tasks.index import structured_metadata
 from test.support.service_cases import ServiceCaseFixture
 from test.support.tasks import write_legacy_checkpoint, write_legacy_task
 
@@ -32,7 +33,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(service_checks._candidate_state(Path(sys.executable), self.config, self.state), previous)
 
     def legacy_task_fixture(self, request=None):
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         from test.support.tasks import task_contract
         value = records.new_record(records.normalize_create(request or task_contract()), time.time_ns() // 1000000)
         return {"record": write_legacy_task(self.state, value)}
@@ -204,7 +205,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_scoped_current_task_history_requires_complete_actual_reader(self):
         from test.support.tasks import task_contract, replace_task_record
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         repository = "fixture/project"
         binding = {"connection_id": "a" * 32, "account_id": 1, "authorization_revision": 1}
         request = task_contract()
@@ -243,7 +244,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_current_format_5_reader_contract_is_not_downgraded(self):
         from test.support.tasks import task_contract, replace_task_record
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         request = task_contract()
         value = tasks.create(self.state, request["task_id"], request["update_id"],
             request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])["record"]
@@ -264,7 +265,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_current_format_6_reader_contract_is_not_downgraded(self):
         from test.support.tasks import task_contract, replace_task_record
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         request = task_contract()
         value = tasks.create(self.state, request["task_id"], request["update_id"],
             request["title"], request["anchors"], request["origin"], request["contract"], request["stages"])["record"]
@@ -285,7 +286,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_format_3_history_keeps_directional_contract_15_compatibility(self):
         from test.support.tasks import task_contract
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         request = task_contract()
         created = self.legacy_task_fixture(request)
         value = created["record"]
@@ -350,7 +351,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
 
     def test_actual_local_change_reader_blocks_old_candidate_that_ignores_store(self):
-        from openmachine import workspace
+        from openmachine.chat import workspace
         self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nlocal_access="full_access"\nexecution_enabled=true\n'
                                '[workspaces.project]\nmachine="local"\nroot=' + json.dumps(str(self.root)) + '\n')
         config = service_checks.load(self.config)
@@ -372,7 +373,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(service_state._record(self.state), self.record)
 
     def test_change_format_coverage_is_directional_and_requires_actual_readers(self):
-        from openmachine import workspace
+        from openmachine.chat import workspace
         self.config.write_text('schema_version=1\n[machines.local]\ntransport="local"\nlocal_access="full_access"\nworkspace_write_enabled=true\n'
                                '[workspaces.project]\nmachine="local"\nroot='+json.dumps(str(self.root))+'\n')
         config = service_checks.load(self.config)
@@ -434,7 +435,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
 
     def test_product_admission_defers_actual_unresolved_task_and_execution_readers(self):
         from test.support.tasks import task_contract
-        from openmachine.tasks import records
+        from openmachine.chat.tasks import records
         request = task_contract()
         created = self.legacy_task_fixture(request)
         service_checks.activation_safe(self.state)

@@ -24,8 +24,9 @@
       ],
       "sources": [
         "openmachine/app/__init__.py",
-        "openmachine/app/environment.py",
-        "openmachine/app/machines.py",
+        "openmachine/chat/app/__init__.py",
+        "openmachine/chat/app/environment.py",
+        "openmachine/chat/app/machines.py",
         "openmachine/app/scope.py"
       ],
       "tests": [
@@ -56,7 +57,7 @@
       ],
       "sources": [
         "integrations/__init__.py",
-        "openmachine/bootstrap.py"
+        "openmachine/chat/bootstrap.py"
       ],
       "tests": [
         "test/component/bootstrap/test_composition.py"
@@ -158,16 +159,17 @@
       ],
       "sources": [
         "openmachine/execution/__init__.py",
+        "openmachine/chat/execution/__init__.py",
         "openmachine/execution/__main__.py",
-        "openmachine/execution/api.py",
-        "openmachine/execution/control.py",
-        "openmachine/execution/logs.py",
-        "openmachine/execution/observation.py",
-        "openmachine/execution/process.py",
-        "openmachine/execution/records.py",
-        "openmachine/execution/worker.py",
-        "openmachine/execution/environment.py",
-        "openmachine/execution/resources.py",
+        "openmachine/chat/execution/api.py",
+        "openmachine/chat/execution/control.py",
+        "openmachine/chat/execution/logs.py",
+        "openmachine/chat/execution/observation.py",
+        "openmachine/chat/execution/process.py",
+        "openmachine/chat/execution/records.py",
+        "openmachine/chat/execution/worker.py",
+        "openmachine/chat/execution/environment.py",
+        "openmachine/chat/execution/resources.py",
         "openmachine/execution/seatbelt.py"
       ],
       "tests": [
@@ -307,15 +309,16 @@
         "test/contract/mcp/projects/test_catalog.py"
       ],
       "sources": [
-        "openmachine/mcp/__init__.py",
-        "openmachine/mcp/connections.py",
-        "openmachine/mcp/environment.py",
-        "openmachine/mcp/execution.py",
-        "openmachine/mcp/protocol.py",
-        "openmachine/mcp/tasks.py",
-        "openmachine/mcp/workspace.py",
-        "openmachine/server.py",
-        "openmachine/github_web_http.py"
+        "openmachine/chat/__init__.py",
+        "openmachine/chat/mcp/__init__.py",
+        "openmachine/chat/mcp/connections.py",
+        "openmachine/chat/mcp/environment.py",
+        "openmachine/chat/mcp/execution.py",
+        "openmachine/chat/mcp/protocol.py",
+        "openmachine/chat/mcp/tasks.py",
+        "openmachine/chat/mcp/workspace.py",
+        "openmachine/chat/server.py",
+        "openmachine/chat/github_web_http.py"
       ],
       "tests": [
         "test/component/server/test_mcp_admission.py",
@@ -504,7 +507,7 @@
         "test/resilience/tasks/test_mcp_restart.py"
       ],
       "sources": [
-        "openmachine/app/task_admission.py"
+        "openmachine/chat/app/task_admission.py"
       ],
       "tests": [
         "test/component/app/test_github_admission.py",
@@ -522,7 +525,7 @@
         "test/component/app/test_task_admission.py"
       ],
       "sources": [
-        "openmachine/app/task_attention.py"
+        "openmachine/chat/app/task_attention.py"
       ],
       "tests": [
         "test/component/app/test_task_attention.py",
@@ -540,8 +543,8 @@
         "test/resilience/app/test_task_execution.py"
       ],
       "sources": [
-        "openmachine/app/task_observation.py",
-        "openmachine/app/task_observer.py"
+        "openmachine/chat/app/task_observation.py",
+        "openmachine/chat/app/task_observer.py"
       ],
       "tests": [
         "test/component/app/test_task_observer.py",
@@ -563,7 +566,7 @@
         "test/resilience/app/test_task_execution.py"
       ],
       "sources": [
-        "openmachine/app/task_receipts.py"
+        "openmachine/chat/app/task_receipts.py"
       ],
       "tests": []
     },
@@ -583,15 +586,15 @@
         "test/resilience/workspace/test_mcp_patch_restart.py"
       ],
       "sources": [
-        "openmachine/tasks/__init__.py",
-        "openmachine/tasks/database.py",
-        "openmachine/tasks/effects.py",
-        "openmachine/tasks/index.py",
-        "openmachine/tasks/migration.py",
-        "openmachine/tasks/records.py",
-        "openmachine/tasks/rows.py",
-        "openmachine/tasks/store.py",
-        "openmachine/tasks/transitions.py",
+        "openmachine/chat/tasks/__init__.py",
+        "openmachine/chat/tasks/database.py",
+        "openmachine/chat/tasks/effects.py",
+        "openmachine/chat/tasks/index.py",
+        "openmachine/chat/tasks/migration.py",
+        "openmachine/chat/tasks/records.py",
+        "openmachine/chat/tasks/rows.py",
+        "openmachine/chat/tasks/store.py",
+        "openmachine/chat/tasks/transitions.py",
         "scripts/retire_chat_recovery_once.py"
       ],
       "tests": [
@@ -627,17 +630,17 @@
         "test/resilience/tasks/test_mcp_writer_reservations.py"
       ],
       "sources": [
-        "openmachine/workspace/__init__.py",
-        "openmachine/workspace/change_records.py",
-        "openmachine/workspace/change_schema.py",
-        "openmachine/workspace/changes.py",
-        "openmachine/workspace/files.py",
-        "openmachine/workspace/git.py",
-        "openmachine/workspace/inspect.py",
-        "openmachine/workspace/patch.py",
-        "openmachine/workspace/preparation.py",
-        "openmachine/workspace/worktrees.py",
-        "openmachine/workspace/signals.py"
+        "openmachine/chat/workspace/__init__.py",
+        "openmachine/chat/workspace/change_records.py",
+        "openmachine/chat/workspace/change_schema.py",
+        "openmachine/chat/workspace/changes.py",
+        "openmachine/chat/workspace/files.py",
+        "openmachine/chat/workspace/git.py",
+        "openmachine/chat/workspace/inspect.py",
+        "openmachine/chat/workspace/patch.py",
+        "openmachine/chat/workspace/preparation.py",
+        "openmachine/chat/workspace/worktrees.py",
+        "openmachine/chat/workspace/signals.py"
       ],
       "tests": [
         "test/component/workspace/test_changes.py",
@@ -719,9 +722,9 @@
         "test/contract/mcp/server/test_catalog.py"
       ],
       "sources": [
-        "openmachine/projects/__init__.py",
-        "openmachine/projects/catalog.py",
-        "openmachine/mcp/projects.py"
+        "openmachine/chat/projects/__init__.py",
+        "openmachine/chat/projects/catalog.py",
+        "openmachine/chat/mcp/projects.py"
       ],
       "tests": [
         "test/component/projects/test_catalog.py",

@@ -2,8 +2,8 @@
 
 import os
 import unittest
-from openmachine import workspace
-from openmachine.workspace.git import MAX_READ
+from openmachine.chat import workspace
+from openmachine.chat.workspace.git import MAX_READ
 from openmachine.config import Workspace
 from openmachine.foundation.sanitize import Fault
 from test.support.runtime_cases import RuntimeCaseFixture

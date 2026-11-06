@@ -2,7 +2,7 @@
 
 import json
 import unittest
-from openmachine.mcp import protocol
+from openmachine.chat.mcp import protocol
 
 
 class ObservationAdmissionTests(unittest.TestCase):

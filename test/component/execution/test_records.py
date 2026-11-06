@@ -4,8 +4,8 @@ import sys
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import execution
-from openmachine.execution import api
+from openmachine.chat import execution
+from openmachine.chat.execution import api
 from openmachine.foundation.state import private_directory, save_json
 from test.support.execution_cases import ExecutionCaseFixture
 

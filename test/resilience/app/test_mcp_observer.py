@@ -6,7 +6,7 @@ import time
 import unittest
 import uuid
 from mcp import Client
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.state import lease
 from test.support.mcp import MCPFixture
 

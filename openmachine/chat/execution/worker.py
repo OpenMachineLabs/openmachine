@@ -10,10 +10,11 @@ import time
 
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
-from openmachine.workspace.git import capture, context
-from openmachine.workspace import worktrees
+from openmachine.chat.workspace.git import capture, context
+from openmachine.chat.workspace import worktrees
 
-from . import control, logs, seatbelt
+from openmachine.execution import seatbelt
+from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process, boot_identity
 from .records import CREATION_FORMAT, FORMAT, STOP_STATUS, read_record

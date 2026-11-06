@@ -6,7 +6,7 @@ import subprocess
 import unittest
 import uuid
 from mcp import ClientSession
-from openmachine.mcp import protocol
+from openmachine.chat.mcp import protocol
 from test.support.mcp import MCPFixture
 
 

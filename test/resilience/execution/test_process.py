@@ -12,8 +12,9 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import execution, service
-from openmachine.execution import api, observation, process
+from openmachine import service
+from openmachine.chat import execution
+from openmachine.chat.execution import api, observation, process
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from openmachine.service import checks as service_checks
@@ -226,7 +227,7 @@ while True: time.sleep(0.05)
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(self.start(code, execution_id=identity, termination_grace_seconds=0)["status"], "succeeded")
         self.assertEqual((self.work / "once").read_text(), "1")
-        script = ('import sys; from pathlib import Path; from openmachine.execution.records import read_record; '
+        script = ('import sys; from pathlib import Path; from openmachine.chat.execution.records import read_record; '
                   'print(read_record(Path(sys.argv[1]))["status"])')
         output = subprocess.check_output([sys.executable, "-I", "-c", script, str(path.parent)], text=True)
         self.assertEqual(output.strip(), "succeeded")

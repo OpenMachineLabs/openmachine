@@ -8,10 +8,10 @@ import threading
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import workspace
-from openmachine.bootstrap import create_application
+from openmachine.chat import workspace
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace import changes, change_records, change_schema, files
+from openmachine.chat.workspace import changes, change_records, change_schema, files
 from test.support.workspace import WorkspaceFixture
 
 
@@ -269,7 +269,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         self.assertFalse((self.work / "empty").exists())
 
     def test_patch_invalid_grammar_paths_and_preconditions_reject_before_admission(self):
-        from openmachine.workspace import patch as patcher
+        from openmachine.chat.workspace import patch as patcher
         valid = self.patch_document("*** Add File: new\n+ok\n")
         invalid = ["```\n" + valid, valid + "\n", valid.replace("\n", "\r\n"),
                    self.patch_document("*** Update File: source.py\n@@ function\n-a\n+b\n"),
@@ -339,7 +339,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
         self.assertEqual((self.work / "first").read_text(), "later\n")
 
     def test_patch_limits_and_complete_record_budget_reject_before_target_effects(self):
-        from openmachine.workspace import patch as patcher
+        from openmachine.chat.workspace import patch as patcher
         self.fault("request_limit", lambda: patcher.parse(self.patch_document("*** Add File: new\n+" + "x" * 131072 + "\n")))
         self.fault("request_limit", lambda: patcher.parse(self.patch_document("".join(f"*** Add File: p{i}\n" for i in range(33)))))
         body = self.patch_document("*** Update File: source.py\n" + "@@\n-a\n+b\n" * 65)

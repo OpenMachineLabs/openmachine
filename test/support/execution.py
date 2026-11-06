@@ -5,10 +5,10 @@ import subprocess
 import tempfile
 import time
 from unittest.mock import patch
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.config import Settings, Workspace
-from openmachine.execution import api
-from openmachine.execution.records import TERMINAL
+from openmachine.chat.execution import api
+from openmachine.chat.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
 
 
@@ -82,7 +82,7 @@ class ExecutionFixture(object):
 
     def injected_worker(self, setup):
         original = subprocess.Popen
-        script = 'import sys; from pathlib import Path; import openmachine.execution.worker as w\n' + setup + '\nw.worker(Path(sys.argv[1]),*(int(x) for x in sys.argv[2:]))'
+        script = 'import sys; from pathlib import Path; import openmachine.chat.execution.worker as w\n' + setup + '\nw.worker(Path(sys.argv[1]),*(int(x) for x in sys.argv[2:]))'
         def launch(argv, *args, **kwargs):
             if len(argv) > 3 and argv[1:4] == ["-I", "-m", "openmachine.execution"]:
                 argv = [argv[0], "-I", "-c", script, *argv[4:]]

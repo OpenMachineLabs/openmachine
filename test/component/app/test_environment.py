@@ -6,8 +6,8 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from test.support.tasks import TaskFixture

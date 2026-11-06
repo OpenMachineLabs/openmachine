@@ -23,19 +23,19 @@ from pydantic import ValidationError
 import uvicorn
 
 from openmachine import __version__, service, skills
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.github_web_http import _GitHubWebApp, _owner_http_protocol
+from openmachine.chat.github_web_http import _GitHubWebApp, _owner_http_protocol
 from openmachine.service.updates import ReleaseUpdates
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
-from openmachine.mcp.protocol import READ, _reply, _result, MAX_WAITERS
-from openmachine.mcp.connections import register_connections, register_github_tools
-from openmachine.mcp.workspace import register_workspace_tools
-from openmachine.mcp.environment import register_environment_tools
-from openmachine.mcp.projects import register_project_tools
-from openmachine.mcp.tasks import register_task_tools
-from openmachine.mcp.execution import register_execution_tools
+from openmachine.chat.mcp.protocol import READ, _reply, _result, MAX_WAITERS
+from openmachine.chat.mcp.connections import register_connections, register_github_tools
+from openmachine.chat.mcp.workspace import register_workspace_tools
+from openmachine.chat.mcp.environment import register_environment_tools
+from openmachine.chat.mcp.projects import register_project_tools
+from openmachine.chat.mcp.tasks import register_task_tools
+from openmachine.chat.mcp.execution import register_execution_tools
 
 
 def create_server(config: Settings, state: Path, *, application=None) -> MCPServer:

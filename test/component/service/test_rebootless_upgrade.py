@@ -8,13 +8,14 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine import __version__, execution, tasks
-from openmachine.app import task_receipts
+from openmachine import __version__
+from openmachine.chat import execution, tasks
+from openmachine.chat.app import task_receipts
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import checks
-from openmachine.workspace.git import context
+from openmachine.chat.workspace.git import context
 from test.support.runtime_cases import RuntimeCaseFixture
 
 

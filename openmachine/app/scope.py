@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from openmachine import execution, projects, workspace
+from openmachine.chat import execution, projects, workspace
 from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
 from openmachine.foundation.sanitize import Fault
 

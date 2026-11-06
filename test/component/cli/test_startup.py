@@ -10,8 +10,8 @@ import unittest
 import openmachine
 
 
-LIGHTWEIGHT = ("pydantic", "openmachine.config", "openmachine.execution", "openmachine.tasks",
-               "openmachine.workspace", "openmachine.service.checks", "openmachine.service.install",
+LIGHTWEIGHT = ("pydantic", "openmachine.config", "openmachine.chat.execution", "openmachine.chat.tasks",
+               "openmachine.chat.workspace", "openmachine.service.checks", "openmachine.service.install",
                "openmachine.service.transition", "mcp", "httpx2")
 CLI = '''
 import contextlib
@@ -141,7 +141,7 @@ exec(body)
         self.assertFalse(self.state.exists())
 
     def test_explicit_full_first_run_cli_and_management_readback(self):
-        from openmachine.bootstrap import create_application
+        from openmachine.chat.bootstrap import create_application
         from openmachine.config import load
         for command in (["init"], ["manage", "configure"]):
             with self.subTest(command=command):
@@ -251,7 +251,7 @@ print(json.dumps({"exports": len(owners)}))
 from pathlib import Path
 from openmachine.service import check_state
 value = check_state(Path(sys.argv[1]), Path(sys.argv[2]))
-assert all(name in sys.modules for name in ("openmachine.execution", "openmachine.tasks", "openmachine.workspace"))
+assert all(name in sys.modules for name in ("openmachine.chat.execution", "openmachine.chat.tasks", "openmachine.chat.workspace"))
 print(json.dumps(value))
 ''', arguments=[str(self.config), str(self.state)])
         self.assertEqual(result["protocol"], 1)
@@ -272,6 +272,6 @@ else:
     raise AssertionError("The invalid configured probe was accepted")
 assert "mcp" in sys.modules and "httpx2" in sys.modules
 print(json.dumps({"validated": True}))
-''', arguments=[str(self.config), str(self.state)], blocked=("openmachine.tasks", "openmachine.execution",
-                "openmachine.workspace", "openmachine.service.install", "openmachine.service.transition"))
+''', arguments=[str(self.config), str(self.state)], blocked=("openmachine.chat.tasks", "openmachine.chat.execution",
+                "openmachine.chat.workspace", "openmachine.service.install", "openmachine.service.transition"))
         self.assertTrue(result["validated"])

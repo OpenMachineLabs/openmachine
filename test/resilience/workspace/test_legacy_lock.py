@@ -3,7 +3,7 @@
 import sys
 import unittest
 import uuid
-from openmachine import execution, workspace
+from openmachine.chat import execution, workspace
 from test.support.continuity_cases import ContinuityCaseFixture
 
 

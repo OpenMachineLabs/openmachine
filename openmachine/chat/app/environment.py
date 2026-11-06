@@ -4,7 +4,7 @@ import json
 import re
 import time
 
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.foundation.sanitize import Fault
 
 SECTIONS = ("workspace", "worktrees", "activity", "runtime") + execution.TARGET_SECTIONS

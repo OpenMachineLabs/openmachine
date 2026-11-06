@@ -4,10 +4,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 import threading
 import time
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
-from openmachine.tasks import records
+from openmachine.chat.tasks import records
 from . import task_observation as observation, task_receipts
 
 

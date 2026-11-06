@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from openmachine import tasks
-from openmachine.app import task_attention
+from openmachine.chat import tasks
+from openmachine.chat.app import task_attention
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture
@@ -49,7 +49,7 @@ class TaskAttentionTests(TaskFixture, unittest.TestCase):
         self.control("pause", reason="Independent work stays independent.")
         receipt = {"execution_id": "a" * 32, "task_id": "", "status": "succeeded", "exit_code": 0}
         with patch.object(self.app.machines, "read_execution", return_value=receipt), \
-                patch("openmachine.app.tasks.read", side_effect=AssertionError("Unbound receipt looked up a task.")):
+                patch("openmachine.chat.app.tasks.read", side_effect=AssertionError("Unbound receipt looked up a task.")):
             result = self.app.read_execution("desktop", receipt["execution_id"])
         self.assertEqual(result, {**receipt, "task_feedback": {"status": "unbound"}})
 

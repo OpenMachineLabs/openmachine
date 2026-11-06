@@ -4,9 +4,9 @@ import errno
 import random
 import re
 import time
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import effects, records, transitions
+from openmachine.chat.tasks import effects, records, transitions
 
 INTERVAL_MS = 2000
 READ_SECONDS = 2.0

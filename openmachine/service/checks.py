@@ -21,7 +21,7 @@ from .state import PROTOCOL, READINESS_SECONDS, STATE_CONTRACT
 
 def check_state(config_path: Path, state: Path) -> dict:
     """Use the candidate's actual readers; never rewrite existing persistent data."""
-    from openmachine import execution, tasks, workspace
+    from openmachine.chat import execution, tasks, workspace
 
     config = load(config_path)
     executions = _execution_state(state)
@@ -35,7 +35,7 @@ def check_state(config_path: Path, state: Path) -> dict:
 
 def _execution_state(state: Path) -> dict:
     """Bind compatible readers to retained original-ID reconciliation outcomes."""
-    from openmachine import execution
+    from openmachine.chat import execution
 
     count = reconciliations = 0
     fingerprint = hashlib.sha256()
@@ -156,7 +156,7 @@ def _task_operation_blocks_activation(operation: dict, historical: dict | None =
 
 def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: str) -> None:
     """Keep original Task/change/worktree routes when a configured workspace changes."""
-    from openmachine import tasks, workspace
+    from openmachine.chat import tasks, workspace
 
     def target_rebound(machine: str) -> bool:
         old, new = current.machines[machine], candidate.machines.get(machine)
@@ -186,7 +186,7 @@ def workspace_bindings_safe(state: Path, current, candidate, probe_workspace: st
 
 def activation_safe(state: Path, *, config=None, candidate_config=None, guards=None) -> None:
     """Admit controller replacement without resolving old work or releasing guards."""
-    from openmachine import execution, tasks, workspace
+    from openmachine.chat import execution, tasks, workspace
 
     historical, unresolved, candidate_machines = {}, [], set()
     root = state / "executions"
@@ -239,7 +239,7 @@ def activation_safe(state: Path, *, config=None, candidate_config=None, guards=N
 
 def _change_support(value: dict) -> set[int]:
     """Interpret an actual reader's coverage, including W1/W2's format-1 report."""
-    from openmachine import workspace
+    from openmachine.chat import workspace
 
     latest = value.get("workspace_change_format")
     formats = value.get("workspace_change_read_formats", [latest])
@@ -270,7 +270,7 @@ def _candidate_state(python: Path, config_path: Path, state: Path, expected_cont
 
 def _candidate_state_once(python: Path, config_path: Path, state: Path, expected_contract: int | None = None,
                           *, env: dict[str, str] | None = None) -> dict:
-    from openmachine import execution, tasks, workspace
+    from openmachine.chat import execution, tasks, workspace
 
     result = processes.run([str(python), "-I", "-m", "openmachine.service", "check-state", str(config_path), str(state)],
                   **({"env": env} if env is not None else {}))

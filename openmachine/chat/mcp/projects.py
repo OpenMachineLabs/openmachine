@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from openmachine.mcp.protocol import READ, _reply
+from openmachine.chat.mcp.protocol import READ, _reply
 
 
 def register_project_tools(application, guided_tool):

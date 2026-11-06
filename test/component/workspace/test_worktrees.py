@@ -8,11 +8,11 @@ import subprocess
 import unittest
 import uuid
 
-from openmachine import workspace
+from openmachine.chat import workspace
 from openmachine.config import Workspace
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace import worktrees
-from openmachine.workspace.git import context
+from openmachine.chat.workspace import worktrees
+from openmachine.chat.workspace.git import context
 from test.support.workspace import WorkspaceFixture
 
 

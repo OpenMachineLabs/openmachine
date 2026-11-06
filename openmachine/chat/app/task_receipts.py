@@ -4,7 +4,7 @@ import os
 import re
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
-from openmachine.tasks import records
+from openmachine.chat.tasks import records
 
 
 def receipt_result(status: str, facts: dict | None = None, summary: str = "", *, failure_code=None, effect=None) -> dict:

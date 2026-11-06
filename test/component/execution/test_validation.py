@@ -1,7 +1,7 @@
 """Tests for execution behavior at the component layer."""
 
 import unittest
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.foundation.sanitize import Fault
 from test.support.execution_cases import ExecutionCaseFixture
 

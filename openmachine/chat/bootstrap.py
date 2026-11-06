@@ -4,8 +4,8 @@ from pathlib import Path
 
 import integrations.codex as codex
 from integrations.connections import Connections
-from openmachine.app import Application
-from openmachine.app.machines import Machines
+from openmachine.chat.app import Application
+from openmachine.chat.app.machines import Machines
 from openmachine.config import Settings
 
 

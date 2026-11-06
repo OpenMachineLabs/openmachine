@@ -8,10 +8,10 @@ import tempfile
 import time
 from unittest.mock import patch
 import uuid
-from openmachine import execution, tasks
-from openmachine.execution.records import TERMINAL
+from openmachine.chat import execution, tasks
+from openmachine.chat.execution.records import TERMINAL
 from openmachine.config import Settings
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 
 
@@ -132,7 +132,7 @@ class TaskFixture(ContinuityFixture):
 class ObserverFixture(TaskFixture):
     def setUp(self):
         TaskFixture.setUp(self)
-        from openmachine.app import task_observation
+        from openmachine.chat.app import task_observation
         self.observer_module = task_observation
         # Only unit scheduling is accelerated. Real process/MCP tests use S0's 2s.
         self.interval = patch.object(task_observation, "INTERVAL_MS", 100)
@@ -199,7 +199,7 @@ class ObserverFixture(TaskFixture):
 def write_legacy_task(state, record):
     """Author explicit historical bytes in a disposable fixture, never a runtime writer."""
     from openmachine.foundation.state import private_directory, save_json
-    from openmachine.tasks import records, index
+    from openmachine.chat.tasks import records, index
     if (state / "tasks.db").exists():
         raise ValueError("Seed legacy bytes before creating a SQLite fixture")
     state = private_directory(state)
@@ -222,8 +222,8 @@ def write_legacy_task(state, record):
 
 def replace_task_record(state, record):
     """Seed one explicit historical shape inside a disposable SQLite fixture."""
-    from openmachine.tasks import database, records
-    from openmachine.tasks.rows import insert_record
+    from openmachine.chat.tasks import database, records
+    from openmachine.chat.tasks.rows import insert_record
     value = {key: item for key, item in record.items() if key not in {"_facts", "_decisions"}}
     value = records.Record.model_validate(value).model_dump()
     with database.connect(state, write=True) as connection:
@@ -236,7 +236,7 @@ def replace_task_record(state, record):
 
 def write_legacy_checkpoint(state, identity, body, title="Legacy fixture", anchors=None):
     from openmachine.foundation.state import private_directory, save_json
-    from openmachine.tasks import index
+    from openmachine.chat.tasks import index
     if (state / "tasks.db").exists():
         raise ValueError("Seed legacy bytes before creating a SQLite fixture")
     state = private_directory(state)

@@ -4,9 +4,9 @@ from contextlib import closing
 import sqlite3
 import unittest
 
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import database
+from openmachine.chat.tasks import database
 from test.support.tasks import TaskFixture, write_legacy_checkpoint
 
 

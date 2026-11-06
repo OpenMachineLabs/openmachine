@@ -103,8 +103,8 @@ class TargetContextTests(TaskFixture, unittest.TestCase):
                     self.fault("invalid_context_request", self.observe, **arguments)
         with patch.object(self.app.machines, "inspect_environment", side_effect=AssertionError("Unexpected collector")):
             self.observe()
-        with patch("openmachine.execution.resources._read", side_effect=AssertionError("Unexpected OS read")), \
-             patch("openmachine.execution.resources._command", side_effect=AssertionError("Unexpected OS reader")):
+        with patch("openmachine.chat.execution.resources._read", side_effect=AssertionError("Unexpected OS read")), \
+             patch("openmachine.chat.execution.resources._command", side_effect=AssertionError("Unexpected OS reader")):
             section = self.observe(sections=["services"])["sections"]["services"]
         self.assertEqual(section["status"], "not_selected")
         self.assertFalse(section["complete"])

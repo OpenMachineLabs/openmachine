@@ -10,16 +10,18 @@ import time
 from types import ModuleType
 from typing import Literal
 
-from openmachine import __version__, execution, projects, service, skills, tasks, workspace
+from openmachine import __version__, service, skills
+from openmachine.chat import execution, projects, tasks, workspace
 from openmachine.config import Settings
-from openmachine.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
+from openmachine.chat.execution import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, SEGMENT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_PAGE
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
-from . import environment, scope as scopes, task_attention
+from openmachine.app import scope as scopes
+from . import environment, task_attention
 from .machines import Machines
-from .scope import OperationScope
+from openmachine.app.scope import OperationScope
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
 from .task_receipts import TaskReceipts

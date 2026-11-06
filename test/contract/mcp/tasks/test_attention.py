@@ -5,7 +5,7 @@ import unittest
 import uuid
 
 from mcp import Client
-from openmachine import tasks
+from openmachine.chat import tasks
 from test.support.mcp import MCPFixture
 
 

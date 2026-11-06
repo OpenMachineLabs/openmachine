@@ -11,10 +11,11 @@ import unittest
 from openmachine.service.state import STATE_CONTRACT
 from unittest.mock import patch
 import uuid
-from openmachine import execution, service
-from openmachine.bootstrap import create_application
-from openmachine.execution import control
-from openmachine.execution.records import CONTROL_PROTOCOL, MAX_CONTROL_SEQ, MAX_INPUT, TERMINAL
+from openmachine import service
+from openmachine.chat import execution
+from openmachine.chat.bootstrap import create_application
+from openmachine.chat.execution import control
+from openmachine.chat.execution.records import CONTROL_PROTOCOL, MAX_CONTROL_SEQ, MAX_INPUT, TERMINAL
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, save_json
 from test.support.execution import ExecutionFixture

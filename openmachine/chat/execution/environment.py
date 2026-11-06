@@ -11,7 +11,7 @@ import struct
 import sys
 import time
 
-from openmachine import workspace
+from openmachine.chat import workspace
 from openmachine.foundation.files import excluded
 from openmachine.foundation.sanitize import Fault
 

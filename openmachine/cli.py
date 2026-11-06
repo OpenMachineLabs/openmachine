@@ -155,7 +155,7 @@ def main() -> int:
         from openmachine.config import load
         config = load(args.config)
         if args.command == "rebuild-task-index":
-            from openmachine.bootstrap import create_application
+            from openmachine.chat.bootstrap import create_application
             print(json.dumps(create_application(config, args.state_dir).rebuild_task_index(args.expected_generation)))
             return 0
         if args.command == "doctor":
@@ -167,7 +167,7 @@ def main() -> int:
                 print(json.dumps(result))
                 return int(result["status"] != "ready")
             if args.github:
-                from openmachine.bootstrap import create_application
+                from openmachine.chat.bootstrap import create_application
                 print(json.dumps(create_application(config, args.state_dir).github_read("status", args.repository)))
                 return 0
             unavailable = [name for name, item in config.workspaces.items()
@@ -178,7 +178,7 @@ def main() -> int:
                               "github": "not_probed" if config.github is not None else "disabled",
                               "machine_runtime": "native"}))
             return int(bool(unavailable))
-        from openmachine.server import serve
+        from openmachine.chat.server import serve
         serve(config, args.state_dir, managed=args.managed_child)
         return 0
     except (Fault, OSError) as error:

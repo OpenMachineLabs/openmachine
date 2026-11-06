@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 from openmachine import __version__, service
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from test.support.continuity_cases import ContinuityCaseFixture
 
 

@@ -6,8 +6,8 @@ import time
 import unittest
 import uuid
 from mcp import Client
-from openmachine import tasks
-from openmachine.execution.records import TERMINAL
+from openmachine.chat import tasks
+from openmachine.chat.execution.records import TERMINAL
 from test.support.mcp import MCPFixture
 
 

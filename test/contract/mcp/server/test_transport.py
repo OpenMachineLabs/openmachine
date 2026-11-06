@@ -138,7 +138,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_unstructured_handler_failure_never_claims_no_dispatch(self):
         marker = self.root / "handler-count"
-        self.launch(bootstrap=("from pathlib import Path\nfrom openmachine.app import Application\n"
+        self.launch(bootstrap=("from pathlib import Path\nfrom openmachine.chat.app import Application\n"
             "def fail_after_effect(self):\n"
             f"    marker = Path({str(marker)!r})\n"
             "    marker.write_text(str(int(marker.read_text()) + 1) if marker.exists() else '1')\n"
@@ -159,7 +159,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_handler_validation_errors_remain_unknown_for_sync_and_async_tools(self):
         marker = self.root / "validation-count"
         self.launch(bootstrap=("from pathlib import Path\nfrom pydantic import TypeAdapter\n"
-            "from openmachine.app import Application\n"
+            "from openmachine.chat.app import Application\n"
             "def fail_after_effect(self, *args, **kwargs):\n"
             f"    marker = Path({str(marker)!r})\n"
             "    marker.write_text(str(int(marker.read_text()) + 1) if marker.exists() else '1')\n"
@@ -182,7 +182,7 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_handler_entry_is_isolated_from_concurrent_rejected_calls(self):
         ready, release = self.root / "handler-ready", self.root / "handler-release"
-        self.launch(bootstrap=("from pathlib import Path\nimport time\nfrom openmachine.app import Application\n"
+        self.launch(bootstrap=("from pathlib import Path\nimport time\nfrom openmachine.chat.app import Application\n"
             "def blocked_handler(self, *args, **kwargs):\n"
             f"    Path({str(ready)!r}).touch()\n"
             "    deadline = time.monotonic() + 5\n"

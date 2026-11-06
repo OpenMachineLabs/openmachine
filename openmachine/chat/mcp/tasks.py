@@ -6,8 +6,8 @@ import threading
 from typing import Annotated, Literal
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
-from openmachine import tasks
-from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT, OperationScope,
+from openmachine.chat import tasks
+from openmachine.chat.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT, OperationScope,
                                       _operation_scope, _reply, _result, _submit_owned)
 
 def register_task_tools(application, guided_tool, waiting):

@@ -9,10 +9,10 @@ from unittest.mock import Mock, patch
 import uuid
 
 from integrations import github
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import records
+from openmachine.chat.tasks import records
 from test.support.tasks import TaskFixture, replace_task_record, task_contract
 
 

@@ -6,7 +6,7 @@ import os
 import subprocess
 import unittest
 from unittest.mock import patch
-from openmachine.workspace import changes
+from openmachine.chat.workspace import changes
 from test.support.workspace import WorkspaceFixture
 
 
@@ -130,14 +130,14 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
 
     def test_filtered_git_failure_and_clipped_records_are_not_absence(self):
         self.initialize_git()
-        with patch("openmachine.workspace.inspect.capture", return_value=(b"", 1, False)):
+        with patch("openmachine.chat.workspace.inspect.capture", return_value=(b"", 1, False)):
             self.fault("git_failed", lambda: self.app.inspect_workspace("local", "project", "files", path_glob="*.py"))
-        with patch("openmachine.workspace.inspect.capture", return_value=(b"source.py\0incomplete", -9, True)):
+        with patch("openmachine.chat.workspace.inspect.capture", return_value=(b"source.py\0incomplete", -9, True)):
             page = self.app.inspect_workspace("local", "project", "files", path_glob="*")
         self.assertEqual([item["name"] for item in page["entries"]], ["source.py"])
         self.assertTrue(page["truncated"])
         self.assertFalse(page["complete"])
-        with patch("openmachine.workspace.inspect.capture", return_value=(b"\xff.py\0", 0, False)):
+        with patch("openmachine.chat.workspace.inspect.capture", return_value=(b"\xff.py\0", 0, False)):
             page = self.app.inspect_workspace("local", "project", "files", path_glob="*")
         self.assertEqual(page["skipped"]["unsupported_path"], 1)
         self.assertFalse(page["complete"])
@@ -157,7 +157,7 @@ class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
     def test_discovery_limits_and_invalid_filters_fail_truthfully(self):
         for index in range(5):
             (self.work / f"item{index}.py").write_text("ordinary\n")
-        with patch("openmachine.workspace.inspect.MAX_SCAN_ENTRIES", 2):
+        with patch("openmachine.chat.workspace.inspect.MAX_SCAN_ENTRIES", 2):
             page = self.app.inspect_workspace("local", "project", "search", query="absent", path_glob="*.py")
         self.assertLessEqual(page["scanned_entries"], 2)
         self.assertTrue(page["truncated"])

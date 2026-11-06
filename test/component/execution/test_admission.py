@@ -10,7 +10,7 @@ from test.support.runtime_cases import RuntimeCaseFixture
 
 class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
     def test_retired_local_approval_cannot_read_originals_or_environment(self):
-        from openmachine.app.machines import Machines
+        from openmachine.chat.app.machines import Machines
         result = self.wait(self.start('print("original receipt")'))
         machine = Machines(self.config, self.state)
         self.config.machines["my-laptop"].local_access = None
@@ -57,7 +57,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         for git in (False, True):
             if git:
                 self._git("init", "-q")
-            from openmachine.workspace.git import context, lock_root
+            from openmachine.chat.workspace.git import context, lock_root
             selected = lock_root(self.config, "my-laptop", nested, context(nested))
             key = hashlib.sha256(selected.encode()).hexdigest()
             identity = uuid.uuid4().hex

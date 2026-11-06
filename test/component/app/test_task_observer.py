@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import task_contract

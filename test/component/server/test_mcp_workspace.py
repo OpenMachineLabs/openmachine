@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import server
+from openmachine.chat import server
 from openmachine.config import Settings
 from test.support.mcp import MCPFixture
 import os
@@ -39,8 +39,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(denied.structured_content["error"]["code"], "execution_disabled")
 
     async def test_patch_disconnect_and_partial_receipt_keep_original_effects(self):
-        from openmachine.bootstrap import create_application
-        from openmachine.workspace import changes
+        from openmachine.chat.bootstrap import create_application
+        from openmachine.chat.workspace import changes
         root = self.root.resolve()
         file = self.work / "source"
         file.write_text("old\n")
@@ -94,8 +94,8 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
             self.assertFalse((self.work / "second").exists())
 
     async def test_disconnected_edit_observer_does_not_stop_or_repeat_original_publication(self):
-        from openmachine.bootstrap import create_application
-        from openmachine.workspace import changes
+        from openmachine.chat.bootstrap import create_application
+        from openmachine.chat.workspace import changes
         with tempfile.TemporaryDirectory(prefix="om-edit-disconnect-", dir="/tmp") as directory:
             root = Path(directory).resolve()
             file = root / "source.py"

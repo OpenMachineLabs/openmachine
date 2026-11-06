@@ -6,19 +6,21 @@
 
 | Owner | Responsibility |
 | --- | --- |
-| `server.py`, `cli.py` | MCP assembly, middleware, lifespan, socket serving and command entries. |
-| `mcp/` | Shared wire schemas/replies and direct Connections, Workspace, Task and Execution tool registration. |
-| `bootstrap.py`, `app/` | Enabled-component assembly, lifecycle/task admission and target routing. |
-| `execution/` | Original commands, pipe/PTY controls, cleanup, receipts and bounded logs. |
-| `workspace/` | Source/Git observations, preparation, change records and guarded publication. |
-| `tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
+| `cli.py` | Command entries. |
+| `chat/server.py` | MCP assembly, middleware, lifespan and socket serving. |
+| `chat/mcp/` | Shared wire schemas/replies and direct Connections, Workspace, Task and Execution tool registration. |
+| `chat/bootstrap.py`, `chat/app/` | Enabled-component assembly, lifecycle/task admission and target routing. |
+| `chat/execution/` | Original commands, pipe/PTY controls, cleanup, receipts and bounded logs. |
+| `chat/workspace/`, `chat/projects/` | Source/Git observations, preparation, change records and guarded publication. |
+| `chat/tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
+| `app/scope.py`, `execution/seatbelt.py` | Operation scope and Seatbelt confinement used by Chat. |
 | `service/` | Installation, compatibility/readiness, supervision and activation/restoration. |
 | `foundation/` | Shared IO, private state, locks and safe errors; no domain ownership. |
 | `integrations/` | Complete native GitHub implementation; no second engine. |
 
 Workspace preparation and record ownership are separate from application.
 Task models remain in `records.py`; pure decisions live in `transitions.py`.
-`app/task_observer.py` owns threads/leases; `task_observation.py` owns receipt
+`chat/app/task_observer.py` owns threads/leases; `task_observation.py` owns receipt
 observation facts, and `task_attention.py` derives bounded foreground stop views.
 Service remains independent of consuming applications. Existing
 `python -m openmachine.execution` and `python -m openmachine.service check-state`

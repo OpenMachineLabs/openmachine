@@ -8,9 +8,9 @@ from pathlib import Path
 import sqlite3
 import unittest
 from unittest.mock import patch
-from openmachine import tasks
-from openmachine.tasks import database, records, store as task_store
-from openmachine.tasks.rows import put_legacy
+from openmachine.chat import tasks
+from openmachine.chat.tasks import database, records, store as task_store
+from openmachine.chat.tasks.rows import put_legacy
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract, terminal_task_fixture, replace_task_record

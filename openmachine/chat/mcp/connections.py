@@ -4,8 +4,8 @@ import asyncio
 from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
-from openmachine import tasks
-from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, GITHUB_READ, GITHUB_WRITE,
+from openmachine.chat import tasks
+from openmachine.chat.mcp.protocol import (READ, WRITE, LOCAL_WRITE, GITHUB_READ, GITHUB_WRITE,
                                       GitHubNames, _reply, _submit_owned, _task_context)
 
 def register_connections(application, guided_tool):

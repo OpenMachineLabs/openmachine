@@ -3,7 +3,7 @@
 from pathlib import Path
 import threading
 
-from openmachine import execution, tasks, workspace
+from openmachine.chat import execution, tasks, workspace
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 
