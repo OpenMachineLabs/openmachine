@@ -8,8 +8,10 @@ Keep templates and automation in English. Reuse the managed label manifest;
 do not add status, priority, or architecture taxonomies without a current need.
 
 Quality checks must stay read-only, bounded, and runnable on GitHub-hosted
-Ubuntu 24.04 without private infrastructure. All workflow jobs use the fixed
-`ubuntu-24.04` runner; repository variables must not select private machines.
+runners without private infrastructure. Primary repository, runtime and required
+native jobs pin `ubuntu-24.04`; additional real native acceptance jobs may pin
+`ubuntu-22.04` and `ubuntu-26.04`. Runner labels must be explicit and reviewed;
+repository variables must not select private machines.
 
 Repository hygiene remains dependency-free; a separate product job may install
 the locked public runtime dependencies. Pin external actions to full commit SHAs and disable persisted checkout credentials. Read event JSON as data;

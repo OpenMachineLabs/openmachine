@@ -98,7 +98,6 @@ exec(body)
         linux = ('import os\nimport platform\nfrom openmachine.service import systemd\n'
                  'sys.platform = "linux"\nos.getuid = lambda: 501\n'
                  'platform.machine = lambda: "x86_64"\n'
-                 'platform.libc_ver = lambda: ("glibc", "2.39")\n'
                  'systemd.supported = lambda: True\n')
         cases = [(host, arguments + ["status"], 0, "not_installed", None),
                  (host, arguments + ["--contract", "99", "status"], 1, "incompatible", "incompatible_management"),

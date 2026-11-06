@@ -18,10 +18,13 @@ def supported() -> bool:
     # Check the required binaries and runtime ABI, not a distribution name.
     if platform.machine() != "x86_64":
         return False
-    libc, version = platform.libc_ver()
-    match = re.fullmatch(r"([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
-    return (libc == "glibc" and match is not None
-            and (int(match[1]), int(match[2])) >= (2, 34)
+    try:
+        version = os.confstr("CS_GNU_LIBC_VERSION")
+    except (AttributeError, OSError, ValueError):
+        return False
+    match = (re.fullmatch(r"glibc ([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
+             if isinstance(version, str) else None)
+    return (match is not None and (int(match[1]), int(match[2])) >= (2, 34)
             and all(os.path.isfile(path) and os.access(path, os.X_OK)
                     for path in ("/usr/bin/systemctl", "/usr/bin/loginctl")))
 

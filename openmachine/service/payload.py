@@ -25,9 +25,14 @@ LINUX_TARGET = {"os": "linux", "arch": "x86_64", "libc": "glibc",
 def linux_host_supported() -> bool:
     if sys.platform != "linux" or platform.machine() != "x86_64":
         return False
-    libc, version = platform.libc_ver()
-    match = re.fullmatch(r"([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
-    return libc == "glibc" and match is not None and (int(match[1]), int(match[2])) >= (2, 34)
+    # Read the installed libc, not the executable's build-time ELF symbols.
+    try:
+        version = os.confstr("CS_GNU_LIBC_VERSION")
+    except (AttributeError, OSError, ValueError):
+        return False
+    match = (re.fullmatch(r"glibc ([0-9]+)\.([0-9]+)(?:\.[0-9]+)*", version)
+             if isinstance(version, str) else None)
+    return match is not None and (int(match[1]), int(match[2])) >= (2, 34)
 
 
 def host_target() -> dict:

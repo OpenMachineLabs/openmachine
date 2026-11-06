@@ -395,7 +395,7 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
-        expected_jobs = {"quality.yml": 3, "metadata.yml": 1,
+        expected_jobs = {"quality.yml": 5, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1,
                          "npm-package.yml": 1, "npm-release.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
@@ -406,8 +406,15 @@ class RepositoryChecks(unittest.TestCase):
         for name, expected_count in expected_jobs.items():
             with self.subTest(workflow=name):
                 workflow = workflows[name]
-                runner = "macos-15" if name in {"npm-package.yml", "npm-release.yml"} else "ubuntu-24.04"
-                self.assertEqual(workflow.count("    runs-on: " + runner), expected_count)
+                if name == "quality.yml":
+                    self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), 3)
+                    for label in ("ubuntu-22.04", "ubuntu-26.04"):
+                        self.assertEqual(workflow.count("    runs-on: " + label), 1)
+                    self.assertIn("steps: &linux_native_steps", workflow)
+                    self.assertEqual(workflow.count("steps: *linux_native_steps"), 2)
+                else:
+                    runner = "macos-15" if name in {"npm-package.yml", "npm-release.yml"} else "ubuntu-24.04"
+                    self.assertEqual(workflow.count("    runs-on: " + runner), expected_count)
                 self.assertNotIn("CORE_CI_RUNNER", workflow)
                 self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
                 if name == "npm-package.yml":

@@ -66,7 +66,7 @@ jobs:
     needs: repository
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    steps:
+    steps: &linux_native_steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -128,8 +128,8 @@ jobs:
           if test -f "$RUNNER_TEMP/payload/manifest.json"; then
             cp "$RUNNER_TEMP/payload/manifest.json" "$RUNNER_TEMP/linux-evidence/manifest.json"
             sha256sum "$RUNNER_TEMP/payload/manifest.json" | tee "$RUNNER_TEMP/linux-evidence/manifest.sha256"
-            tar -czf "$RUNNER_TEMP/linux-evidence/runtime-ubuntu-24.04-x86_64.tar.gz" -C "$RUNNER_TEMP" payload
-            sha256sum "$RUNNER_TEMP/linux-evidence/runtime-ubuntu-24.04-x86_64.tar.gz" > "$RUNNER_TEMP/linux-evidence/archive.sha256"
+            tar -czf "$RUNNER_TEMP/linux-evidence/runtime-linux-gnu-x86_64.tar.gz" -C "$RUNNER_TEMP" payload
+            sha256sum "$RUNNER_TEMP/linux-evidence/runtime-linux-gnu-x86_64.tar.gz" > "$RUNNER_TEMP/linux-evidence/archive.sha256"
           fi
           if test -f "$RUNNER_TEMP/om-user-created"; then
             test_uid=$(id -u om-linux-test)
@@ -144,7 +144,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: core-linux-native-${{ github.event.pull_request.head.sha || github.sha }}
+          name: core-linux-native-${{ github.job }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/linux-evidence/
           if-no-files-found: error
           retention-days: 14
@@ -158,3 +158,19 @@ jobs:
             test "$(sudo systemctl show "user@$test_uid.service" -p ActiveState --value)" = inactive
             sudo userdel --remove om-linux-test
           fi
+
+  # Keep the original required check; run the same isolated native fixture
+  # on the oldest and newest supported Ubuntu LTS GitHub-hosted runners.
+  linux-native-ubuntu-22:
+    if: (github.event_name == 'pull_request' && github.event.action != 'edited') || (github.event_name == 'workflow_dispatch' && inputs.linux_native)
+    needs: repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps: *linux_native_steps
+
+  linux-native-ubuntu-26:
+    if: (github.event_name == 'pull_request' && github.event.action != 'edited') || (github.event_name == 'workflow_dispatch' && inputs.linux_native)
+    needs: repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps: *linux_native_steps

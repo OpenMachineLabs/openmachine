@@ -25,7 +25,7 @@ class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
         with patch.object(payload.sys, "platform", "linux"), \
                 patch.object(payload.platform, "machine", return_value="x86_64"), \
-                patch.object(payload.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                patch.object(payload.os, "confstr", return_value="glibc 2.39"), \
                 patch.object(payload.os, "getuid", return_value=os.getuid() + 1):
             self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, digest))
 
@@ -48,17 +48,17 @@ class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
             with self.subTest(release=release, glibc=version), \
                     patch.object(payload.sys, "platform", "linux"), \
                     patch.object(payload.platform, "machine", return_value="x86_64"), \
-                    patch.object(payload.platform, "libc_ver", return_value=("glibc", version)), \
+                    patch.object(payload.os, "confstr", return_value="glibc " + version), \
                     patch.object(payload.platform, "freedesktop_os_release", return_value=release):
                 self.assertEqual(payload.verify(self.source, digest)["target"], payload.LINUX_TARGET)
 
     def test_old_glibc_and_musl_hosts_fail_closed(self):
         self.manifest["target"] = payload.LINUX_TARGET
         digest = self.seal()
-        for libc in (("glibc", "2.33"), ("musl", "1.2.5"), ("", ""), ("glibc", "invalid")):
+        for libc in ("glibc 2.33", "glibc 2.31", "musl 1.2.5", "", "glibc invalid", None):
             with self.subTest(libc=libc), patch.object(payload.sys, "platform", "linux"), \
                     patch.object(payload.platform, "machine", return_value="x86_64"), \
-                    patch.object(payload.platform, "libc_ver", return_value=libc):
+                    patch.object(payload.os, "confstr", return_value=libc):
                 self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
 
     def test_linux_rejects_macos_payload_even_with_matching_digest(self):
@@ -70,23 +70,23 @@ class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
 class LinuxSystemdCapabilityTests(unittest.TestCase):
     def test_systemd_capability_requires_binary_executables_and_glibc(self):
         with patch.object(systemd.platform, "machine", return_value="x86_64"), \
-                patch.object(systemd.platform, "libc_ver", return_value=("glibc", "2.34")), \
+                patch.object(systemd.os, "confstr", return_value="glibc 2.34"), \
                 patch.object(systemd.os.path, "isfile", return_value=True), \
                 patch.object(systemd.os, "access", return_value=True):
             self.assertTrue(systemd.supported())
         for missing in ("/usr/bin/systemctl", "/usr/bin/loginctl"):
             with self.subTest(missing=missing), \
                     patch.object(systemd.platform, "machine", return_value="x86_64"), \
-                    patch.object(systemd.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                    patch.object(systemd.os, "confstr", return_value="glibc 2.39"), \
                     patch.object(systemd.os.path, "isfile", side_effect=lambda path: path != missing):
                 self.assertFalse(systemd.supported())
-        for arch, libc, version in (("aarch64", "glibc", "2.39"),
-                                    ("x86_64", "glibc", "2.33"),
-                                    ("x86_64", "musl", "1.2"),
-                                    ("x86_64", "glibc", "2.34rc1")):
-            with self.subTest(arch=arch, libc=libc, version=version), \
+        for arch, libc in (("aarch64", "glibc 2.39"),
+                          ("x86_64", "glibc 2.33"),
+                          ("x86_64", "musl 1.2"),
+                          ("x86_64", "glibc 2.34rc1")):
+            with self.subTest(arch=arch, libc=libc), \
                     patch.object(systemd.platform, "machine", return_value=arch), \
-                    patch.object(systemd.platform, "libc_ver", return_value=(libc, version)):
+                    patch.object(systemd.os, "confstr", return_value=libc):
                 self.assertFalse(systemd.supported())
 
 
