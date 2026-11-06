@@ -24,6 +24,13 @@ HOME_DENIED = (".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/gh", ".con
                ".sh_history", "Library", "Pictures", "Music", "Movies")
 HOME_READABLE = ("Library/Developer",)  # Developer tools' data inside the denied Library.
 SYSTEM_DENIED = ("/Volumes", "/Library/Keychains")  # External and network volumes; system keychains.
+# Secret-named files outside selected roots: unreadable contents, anywhere. A subset of the typed
+# tools' rule that programs can live with: public CA bundles (*.pem) and SDK "credentials" packages stay
+# readable, so HTTPS and installed tools keep working. Inside a selected root, the project reads them.
+SECRET_DIRECTORIES = (".ssh", ".aws", ".azure", ".gnupg", ".kube")
+SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.toml|id_rsa|id_ed25519|[^/]*\.(key|p12|pfx)"
+SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
+SECRET_FILE_REGEX = r"^(/.*)?/(" + SECRET_FILES + r")$"
 KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
 # Git files that later run code outside any sandbox, relative to a .git directory: hooks,
 # configuration and the commondir redirect of the repository, its worktrees and its submodules.
@@ -117,9 +124,14 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     ]
     if exceptions:
         lines.append(f"(allow file-read* process-exec {_filters('subpath', exceptions)})")
+    # A later file-read* does not override a file-read-data denial, so the selected roots below
+    # re-allow file-read-data by name. Only regular files match by name: SDK directories called
+    # "credentials" stay listable.
+    lines.append(f'(deny file-read-data (regex #"{SECRET_DIRECTORY_REGEX}"))')
+    lines.append(f'(deny file-read-data (require-all (regex #"{SECRET_FILE_REGEX}") (vnode-type REGULAR-FILE)))')
     if readable:
-        lines.append(f"(allow file-read* process-exec {_filters('subpath', readable)})")
-    lines.append(f"(allow file-read* file-write* process-exec {_filters('subpath', writable + [private])})")
+        lines.append(f"(allow file-read* file-read-data process-exec {_filters('subpath', readable)})")
+    lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
     for root in writable:
         lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_REGEX}"))')

@@ -278,13 +278,17 @@ class Application:
         request = None
         if (scope := self._scope(machine, operation_scope)) is not None:
             self._require_target(scope, machine, workspace_name, worktree=worktree, write=True)
-            parent = Path(destination).parent
-            if (not Path(destination).is_absolute() or ".." in Path(destination).parts
-                    or scopes.protected(Path(destination))):
-                raise Fault("path_out_of_scope", "Use an absolute, unprotected worktree destination.", effect="known_no_effect")
+            target, parent = Path(destination), Path(destination).parent
+            if (not target.is_absolute() or ".." in target.parts or target.name.startswith(".")
+                    or scopes.protected(target)):
+                # Dot-named folders are where tools auto-load configuration and extensions.
+                raise Fault("path_out_of_scope", "Use an absolute, unprotected worktree destination whose name does "
+                            "not start with '.'.", effect="known_no_effect")
+            source = workspace.root_for(workspace.select_worktree(self.config, machine, workspace_name, worktree),
+                                        machine, workspace_name).resolve()
             for path in (parent, parent.resolve()):
                 scope.require(path)
-                scope.require_selected(path)
+                scope.require_worktree_parent(path, source)
             request = scope.process_request()
         arguments = dict(machine=machine, workspace_name=workspace_name, destination=destination,
                          base_ref=base_ref, new_branch=new_branch, execution_id=execution_id,

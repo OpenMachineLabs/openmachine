@@ -82,6 +82,7 @@ class Scope:
     control: tuple[Path, ...]
     denied: tuple[Path, ...]
     exceptions: tuple[Path, ...]
+    home: Path
 
     def _controlled(self, path: Path) -> bool:
         return any(path == item or path.is_relative_to(item) for item in self.control)
@@ -155,11 +156,14 @@ class Scope:
         if protected(path):
             raise _denied("Git hooks/config and IDE settings are protected under Selected Projects scope.")
 
-    def require_selected(self, path: Path) -> None:
-        """A new worktree is a write, so its parent stays inside a selected folder of either mode."""
-        if self.mode(path) is None:
-            raise _denied("Create the worktree inside a Cloud-selected folder; selecting its parent as Read-only "
-                          "is enough.")
+    def require_worktree_parent(self, parent: Path, source: Path) -> None:
+        """A new worktree is a write: beside its source repository, in a .worktrees folder there, or
+        inside a selected folder. Never directly in the home or above it."""
+        base = source.parent
+        beside = () if _inside(self.home, base) else (base, base / ".worktrees")
+        if parent not in beside and self.mode(parent) is None:
+            raise _denied("Create the worktree beside its repository, in a .worktrees folder there, or inside a "
+                          "Cloud-selected folder.")
 
     def process_request(self, *, destination: Path | None = None) -> dict:
         """Plain map for execution admission: roots, inherited worktrees and control denials."""
@@ -237,4 +241,4 @@ def compile(config, state: Path, machine: str, value: dict) -> Scope:
                 raise Fault("scope_conflict", "A Read-only directory inside a Full directory cannot restrict it; "
                             "narrow the Full selection instead.", effect="known_no_effect")
     denied, exceptions = execution.read_denials(home)
-    return Scope(model.authority.model_dump(), tuple(roots), control, tuple(denied), tuple(exceptions))
+    return Scope(model.authority.model_dump(), tuple(roots), control, tuple(denied), tuple(exceptions), home)

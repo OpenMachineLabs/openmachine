@@ -47,6 +47,21 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         self.assertIn(DENIED, sibling["output"])
         self.assertFalse((self.desktop / "new.txt").exists())
 
+    def test_secret_files_and_denied_areas_open_only_inside_selected_roots(self):
+        own = self.shell("cat .env && cat ../desktop/.env && ls -a ../../personal")
+        self.assertEqual(own["status"], "succeeded", own["output"])
+        self.assertIn("ENV-CORE", own["output"])
+        self.assertIn("ENV-DESKTOP", own["output"])
+        self.assertIn(".env", own["output"])  # Names stay visible; contents do not.
+        for script in (f"cat {self.personal}/.env", f"grep -r ENV- {self.personal}"):
+            denied = self.shell(script)
+            self.assertNotIn("ENV-PERSONAL", denied["output"], script)
+            self.assertIn(DENIED, denied["output"], script)
+        tls = self.shell("curl -sS -o /dev/null -w '%{http_code}' https://example.com")
+        self.assertEqual(tls["output"].strip()[-3:], "200", tls["output"])
+        drive = self.scope(self.binding(self.drive, "read_only"), self.binding(self.core, "full_access"))
+        self.assertIn("DRIVE-SECRET", self.run_scoped(["cat", str(self.drive / "drive.txt")], scope=drive)["output"])
+
     def test_links_control_surfaces_and_other_processes_cannot_widen_scope(self):
         (self.core / "outside").symlink_to(self.drive, target_is_directory=True)
         os.link(self.drive / "drive.txt", self.core / "planted")
@@ -138,6 +153,15 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         self.fault("path_out_of_scope", lambda: self.app.create_worktree(
             "local", str(self.core), str(self.personal / "wt"), "main", uuid.uuid4().hex,
             context["workspace_identity"], "denied-wt", operation_scope=self.scope()))
+        # Beside the repository needs no selection of the parent.
+        beside = self.app.create_worktree("local", str(self.core), str(self.dev / "core-beside"), "main", uuid.uuid4().hex,
+                                          context["workspace_identity"], "beside-wt",
+                                          operation_scope=self.scope(self.binding(self.core, "full_access")))
+        beside = self.app.read_execution("local", beside["execution_id"], wait_seconds=5)
+        while beside["status"] not in {"succeeded", "failed", "outcome_unknown"}:
+            beside = self.app.read_execution("local", beside["execution_id"], wait_seconds=1)
+        self.assertEqual(beside["status"], "succeeded", beside["output"])
+        self.assertTrue((self.dev / "core-beside" / "file.txt").is_file())
 
 
 if __name__ == "__main__":

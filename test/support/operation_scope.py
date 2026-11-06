@@ -35,6 +35,9 @@ class ScopeFixture(object):
         (self.drive / "drive.txt").write_text("DRIVE-SECRET\n")
         (self.home / ".ssh" / "id_test").write_text("SSH-SECRET\n")
         (self.developer / "dev.txt").write_text("developer\n")
+        # Secret-named files: unselected (personal), Read-only (desktop) and Full (core) projects.
+        for folder in (self.personal, self.desktop, self.core):
+            (folder / ".env").write_text(f"ENV-{folder.name.upper()}\n")
         home = patch.object(execution, "account_home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)

@@ -107,6 +107,26 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
         self.assertEqual(compiled.mode(real), "full_access")
         self.assertIsNone(compiled.mode(self.personal))
 
+    def test_new_worktrees_stay_beside_their_repository_or_inside_selected_folders(self):
+        core_only = operation_scope.compile(self.config, self.state, "local", self.scope(self.binding(self.core, "full_access")))
+        for parent in (self.dev, self.dev / ".worktrees", self.core / "nested"):
+            core_only.require_worktree_parent(parent, self.core)
+        for parent in (self.personal, self.root, self.dev / "other" / ".worktrees"):
+            with self.subTest(parent=parent):
+                self.fault("path_out_of_scope", lambda: core_only.require_worktree_parent(parent, self.core))
+        # A repository directly in the home never makes the home a worktree parent.
+        with patch.object(operation_scope.execution, "account_home", return_value=self.dev):
+            beside_home = operation_scope.compile(self.config, self.state, "local",
+                                                  self.scope(self.binding(self.core, "full_access")))
+        self.fault("path_out_of_scope", lambda: beside_home.require_worktree_parent(self.dev, self.core))
+        context = self.app.read_workspace_file("local", str(self.core), "file.txt")["context"]
+        for destination in (self.dev / ".claude", self.personal / "wt"):
+            with self.subTest(destination=destination):
+                self.fault("path_out_of_scope", lambda: self.app.create_worktree(
+                    "local", str(self.core), str(destination), "main", uuid.uuid4().hex,
+                    context["workspace_identity"], "wt-" + uuid.uuid4().hex[:8], operation_scope=self.scope()))
+        self.assertFalse((self.dev / ".claude").exists())
+
     def test_unconfinable_or_unsupported_work_starts_nothing(self):
         self.fault("scope_unconfined_capability", lambda: self.app.start_codex_task(
             "local", uuid.uuid4().hex, str(self.core), "Goal", "https://example.invalid/", ["https://example.invalid"],

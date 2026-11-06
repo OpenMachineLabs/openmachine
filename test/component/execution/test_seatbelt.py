@@ -49,9 +49,13 @@ class ProfileTests(unittest.TestCase):
         order = ["(allow file-read*)", f'(deny file-read* process-exec (subpath "{self.root / "home/Library"}") '
                  f'(subpath "{self.root / "T/openmachine-scope"}"))',
                  f'(allow file-read* process-exec (subpath "{self.root / "home/Library/Developer"}"))',
-                 f'(allow file-read* process-exec (subpath "{readable}"))']
+                 f'(allow file-read* file-read-data process-exec (subpath "{readable}"))']
         self.assertEqual([lines.index(line) for line in order], sorted(lines.index(line) for line in order))
         self.assertNotIn("network", " ".join(line for line in lines if line.startswith("(deny")))
+        # Secret-name denials precede every root re-allow, which must name file-read-data to override them.
+        secret = lines.index(f'(deny file-read-data (regex #"{seatbelt.SECRET_DIRECTORY_REGEX}"))')
+        self.assertLess(secret, lines.index(f'(allow file-read* file-read-data process-exec (subpath "{readable}"))'))
+        self.assertIn(f'(allow file-read* file-read-data file-write* process-exec (subpath "{writable}")', text)
         self.assertEqual(lines[-1], f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))')
         self.assertIn(r"Dev \(1\)\+x/core" + seatbelt.PROTECTED_REGEX, text)
         for path in (worktree / ".git", writable / ".git", writable / ".git/worktrees/wt/commondir"):
@@ -70,6 +74,17 @@ class ProfileTests(unittest.TestCase):
         for path in (".git/config.lock", ".git/refs/heads/config", ".git/refs/heads/hooks/x", ".git/worktrees/wt/gitdir",
                      ".git/info/exclude", "config", "hooks/x", ".gitconfig"):
             self.assertNotRegex("/r/" + path, pattern)
+
+    def test_secret_names_skip_public_certificates_and_sdk_directories(self):
+        directories, files = re.compile(seatbelt.SECRET_DIRECTORY_REGEX), re.compile(seatbelt.SECRET_FILE_REGEX)
+        for path in ("/p/.env", "/p/.env.local", "/p/.env.example", "/p/srv.key", "/p/cert.p12", "/p/credentials",
+                     "/p/credentials.json", "/p/secrets.toml", "/p/id_ed25519", "/p/.netrc"):
+            self.assertRegex(path, files)
+        self.assertRegex("/p/.aws/config", directories)
+        for path in ("/etc/ssl/cert.pem", "/p/certifi/cacert.pem", "/p/id_rsa.pub", "/p/.environment", "/p/app.ts"):
+            self.assertNotRegex(path, files)
+            self.assertNotRegex(path, directories)
+        self.assertNotRegex("/p/aws-sdk/lib/credentials/index.js", files)
 
     def test_environment_and_private_home_hold_no_inherited_secrets(self):
         base = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C", "TERM": "xterm", "HOME": "/Users/real",
