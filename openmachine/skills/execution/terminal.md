@@ -39,7 +39,8 @@ command-exited-but-cleanup-pending `finishing`. A TERM handler returning zero ca
 still be cancelled/timed out; launch failure differs from program exit 127.
 Output drains during grace and bounded final cleanup. Native containment is the
 verified POSIX session (Linux waitid/WNOWAIT, macOS kqueue), not deliberately
-detached sessions or an OS sandbox.
+detached sessions; only [operation scope](SKILL.md#operation-scope) adds a filesystem
+sandbox.
 Unknown ownership/cleanup never becomes success or arbitrary PID adoption.
 
 Native cleanup queries may retry within the original cleanup deadline while the

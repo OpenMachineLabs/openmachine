@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from openmachine.mcp.protocol import _reply
+from openmachine.mcp.protocol import OperationScope, _operation_scope, _reply
 
 
 def register_environment_tools(application, guided_tool, machine_read):
@@ -19,6 +19,8 @@ def register_environment_tools(application, guided_tool, machine_read):
                         executables: Annotated[list[Annotated[str, Field(min_length=1, max_length=512)]] | None,
                                                Field(max_length=20)] = None,
                         ports: Annotated[list[Annotated[int, Field(strict=True, ge=1, le=65535)]] | None,
-                                         Field(max_length=20)] = None) -> CallToolResult:
+                                         Field(max_length=20)] = None,
+                        operation_scope: OperationScope | None = None) -> CallToolResult:
         """Observe the selected target and requested workspace/worktrees/activity/runtime sections. Defaults omit worktree enumeration. Activity needs an explicit task ID and indexes retained evidence, not live process occupancy. Follow source/next references, revisions and coverage; configured capabilities are not health. Opt-in environment/project/resources/services read target facts; executable selectors only resolve paths; port selectors count TCP listeners without connecting. No authority, allocation, project execution, replay or implicit instruction loading."""
-        return _reply(lambda: application.inspect_context(machine, workspace_name, worktree, task_id, sections, limit, executables, ports))
+        return _reply(lambda: application.inspect_context(machine, workspace_name, worktree, task_id, sections, limit, executables, ports,
+                                                    operation_scope=_operation_scope(operation_scope)))

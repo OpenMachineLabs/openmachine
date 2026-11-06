@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -18,7 +19,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.workspace.git import context, lock_root, whole_device_writes, writer_path_locks
 from openmachine.workspace import worktrees
 
-from . import control as controls, observation
+from . import control as controls, observation, seatbelt
 from .process import boot_identity, session_members, supported
 from .records import (CONTROL_PROTOCOL, CREATION_FORMAT, FORMAT, MAX_TIMEOUT, TERMINAL, control_request,
                       effective_request, read_record, reconciled_record, record_directory,
@@ -60,7 +61,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
           argv: list[str], timeout_seconds: int = DEFAULT_TIMEOUT, expected_head_sha: str = "",
           workspace_access: str = "exclusive", resource_keys: list[str] | None = None, task_id: str = "",
           termination_grace_seconds: float | None = None, tty: bool = False, terminal_size: dict | None = None,
-          *, validate_new: Callable[[], object] | None = None, validate_effect=None) -> dict:
+          *, validate_new: Callable[[], object] | None = None, validate_effect=None, scope: dict | None = None) -> dict:
     target = config.machine(machine, write=True)
     keys = validate_start(cwd, argv, timeout_seconds, expected_head_sha, workspace_access, resource_keys, task_id,
                           termination_grace_seconds, tty, terminal_size)
@@ -88,7 +89,7 @@ def start(config: "Settings", state: Path, machine: str, execution_id: str, cwd:
                 raise Fault("execution_conflict", "This execution ID already belongs to a different request.")
             return observation.read(config, state, machine, execution_id)
         _admit(config, state, machine, execution_id, working, request,
-               validate_new=validate_new, validate_effect=validate_effect)
+               validate_new=validate_new, validate_effect=validate_effect, scope=scope)
     return observation.read(config, state, machine, execution_id)
 
 
@@ -96,7 +97,8 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
                     destination: str, base_ref: str, new_branch: str, execution_id: str,
                     expected_workspace_identity: str, worktree: str = "", task_id: str = "",
                     *, remote_worker: Path | None = None,
-                    validate_new: Callable[[], object] | None = None, validate_effect=None) -> dict:
+                    validate_new: Callable[[], object] | None = None, validate_effect=None,
+                    scope: dict | None = None) -> dict:
     """Create an optional checkout through the existing durable execution lifecycle."""
     before_admission = True
     try:
@@ -145,7 +147,8 @@ def create_worktree(config: "Settings", state: Path, machine: str, workspace_nam
                        "tty": False, "terminal_size": None, "worktree_creation": intent}
             before_admission = False
             _admit(config, state, machine, execution_id, Path(plan["source_root"]), request,
-                   creation_plan=plan, validate_effect=validate_effect)
+                   creation_plan=plan, validate_effect=validate_effect,
+                   scope=None if scope is None else scope | {"destination": plan["destination"]})
         return observation.read(config, state, machine, execution_id)
     except (Fault, OSError) as error:
         if before_admission:
@@ -181,10 +184,40 @@ def _creation_parent_roots(config: "Settings", machine: str, destination: Path) 
     return sorted(roots)
 
 
+def _inside(path: Path, other: Path) -> bool:
+    return path == other or path.is_relative_to(other)
+
+
+def _sandbox(scope: dict, state: Path, execution_id: str, working: Path) -> tuple[dict, str]:
+    """Compile one immutable profile and receipt; the command starts only inside it."""
+    reason = seatbelt.unavailable_reason()
+    if reason is not None:
+        raise Fault("scope_unsupported", "Scoped commands need the macOS Seatbelt backend; no command was launched.",
+                    {"reason": reason}, effect="known_no_effect")
+    trees = scope["worktrees"]
+    readable = [Path(item["path"]) for item in [*scope["roots"], *trees] if item["mode"] == "read_only"]
+    writable = [Path(item["path"]) for item in [*scope["roots"], *trees] if item["mode"] == "full_access"]
+    if scope["destination"]:
+        writable.append(Path(scope["destination"]))
+    if not any(_inside(working, path) for path in writable):
+        raise Fault("path_out_of_scope", "Scoped commands start only inside a Full Cloud-selected directory.",
+                    effect="known_no_effect")
+    control = list(dict.fromkeys([*(Path(path) for path in scope["control"]), state]))
+    private = seatbelt.private_directory(execution_id)
+    text = seatbelt.profile(readable=readable, writable=writable, private=private, control=control,
+                            path_environment=os.environ.get("PATH", os.defpath), home=seatbelt.account_home())
+    effective = {"roots": scope["roots"], "worktrees": trees, "destination": scope["destination"]}
+    receipt = {"protocol": 1, "authority": scope["authority"], **effective, "backend": seatbelt.BACKEND,
+               "private": str(private), "profile_sha256": seatbelt.digest(text),
+               "effective_scope_sha256": seatbelt.digest(json.dumps(effective, sort_keys=True, separators=(",", ":"))),
+               "denials": "not_observable"}
+    return receipt, text
+
+
 def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
            working: Path, request: dict, *,
            validate_new: Callable[[], object] | None = None,
-           creation_plan: dict | None = None, validate_effect=None) -> None:
+           creation_plan: dict | None = None, validate_effect=None, scope: dict | None = None) -> None:
     """Admit once under the original ID lease; creation plans are internal only."""
     directory = record_directory(state, execution_id)
     locks = state / "locks"
@@ -207,6 +240,7 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                     raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
             if validate_new is not None:
                 validate_new()  # Only new admissions need controller reference validation.
+            sandbox = None if scope is None else _sandbox(scope, state, execution_id, working)
             if creation_plan is not None:
                 worktrees.ensure_local_objects(working)
             observed = context(working)
@@ -226,9 +260,9 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                     for path, shared in writer_path_locks(observed, shared=workspace_access == "shared"):
                         path_key = hashlib.sha256(path.encode()).hexdigest()
                         owned.append(leases.enter_context(lease(
-                            locks / f"writer-path-{path_key}.lock", shared=shared)))
+                            locks / f"writer-path-{path_key}.lock", shared=shared, read_only=scope is not None)))
                 owned.append(leases.enter_context(lease(
-                    locks / f"workspace-{key}.lock", shared=workspace_access == "shared")))
+                    locks / f"workspace-{key}.lock", shared=workspace_access == "shared", read_only=scope is not None)))
             except Fault as error:
                 if error.code != "resource_busy" or creation_plan is not None:
                     raise
@@ -242,10 +276,11 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                     digest = hashlib.sha256(root.encode()).hexdigest()
                     # Block existing container writers from either side; distinct
                     # creations can share this reservation for their own lifetime.
-                    owned.append(leases.enter_context(lease(locks / f"workspace-{digest}.lock", shared=True)))
+                    owned.append(leases.enter_context(lease(locks / f"workspace-{digest}.lock", shared=True,
+                                                            read_only=scope is not None)))
             for name in request["resource_keys"]:
                 digest = hashlib.sha256(name.encode()).hexdigest()
-                owned.append(leases.enter_context(lease(locks / f"resource-{digest}.lock")))
+                owned.append(leases.enter_context(lease(locks / f"resource-{digest}.lock", read_only=scope is not None)))
             if expected_head_sha and observed["head_sha"] != expected_head_sha:
                 raise Fault("context_mismatch", "Git HEAD changed or could not be verified; inspect it before proceeding.")
             if creation_plan is not None:
@@ -272,6 +307,8 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                            "grace_seconds": request["termination_grace_seconds"], "force_used": False},
                   "cleanup": {"containment": "posix_session",
                               "status": "pending", "error": None}}
+        if sandbox is not None:
+            record["scope"], record["sandbox_profile"] = sandbox
         with lease(directory / "control.lock"), lease(directory / "worker.lock") as worker_lease:
             save_json(directory / "record.json", record)
             fds = [lease.fileno() for lease in owned]

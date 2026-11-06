@@ -79,6 +79,8 @@ def _snapshot(directory: Path, machine: str, execution_id: str, offset: int, max
             "termination_grace_seconds": effective_request(record)["termination_grace_seconds"],
             "workspace_access": record["request"].get("workspace_access", "exclusive"),
             "resource_keys": record["request"].get("resource_keys", []),
+            # Legacy receipts were unrestricted; they never acquire scope from today's policy.
+            "scope": record.get("scope"),
             "cancel_requested": (directory / "cancel.request").is_file(),
             "error": record.get("error"), **output,
             "log_truncated": record["log_truncated"] or output["log_start_offset"] > 0,
