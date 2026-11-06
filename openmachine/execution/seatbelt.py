@@ -12,16 +12,18 @@ from openmachine.foundation.sanitize import Fault
 
 BACKEND = "macos_seatbelt"
 LIBRARY = "/usr/lib/libsandbox.1.dylib"
-SYSTEM_ROOTS = ("/usr", "/bin", "/sbin", "/System", "/Library/Apple", "/private/etc",
-                "/private/var/db/timezone", "/private/var/select", "/private/var/db/xcode_select_link",
-                "/Library/Preferences/Logging", "/Library/Developer/CommandLineTools",
-                "/opt/homebrew", "/usr/local", "/Library/Frameworks/Python.framework")
 MACH_SERVICES = ("com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
                  "com.apple.system.notification_center", "com.apple.system.logger", "com.apple.logd",
                  "com.apple.diagnosticd", "com.apple.analyticsd", "com.apple.trustd.agent",
                  "com.apple.dnssd.service", "com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent")
 DEVICES = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/dtracehelper", "/dev/ptmx")
-TOOLCHAIN_BINS = {"bin", "sbin", "shims"}
+# Default-denied reads under scope, relative to the account home: credentials, other apps' private
+# data, cloud-synced and media libraries. A selected root re-allows reading inside it.
+HOME_DENIED = (".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/gh", ".config/gcloud", ".netrc",
+               ".git-credentials", ".npmrc", ".pypirc", ".bash_history", ".zsh_history", ".zsh_sessions",
+               ".sh_history", "Library", "Pictures", "Music", "Movies")
+HOME_READABLE = ("Library/Developer",)  # Developer tools' data inside the denied Library.
+SYSTEM_DENIED = ("/Volumes", "/Library/Keychains")  # External and network volumes; system keychains.
 KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
 # Git files that later run code outside any sandbox, relative to a .git directory: hooks,
 # configuration and the commondir redirect of the repository, its worktrees and its submodules.
@@ -58,40 +60,12 @@ def account_home() -> Path:
     return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 
 
-def _inside(path: Path, other: Path) -> bool:
-    return path == other or path.is_relative_to(other)
-
-
-def toolchain_directories(path_environment: str, home: Path, control: list[Path]) -> list[Path]:
-    """Readable PATH directories; an install prefix only when it is not a shared home area."""
-    found = []
-    for entry in path_environment.split(os.pathsep):
-        if not entry or not os.path.isabs(entry):
-            continue
-        try:
-            directory = Path(entry).resolve(strict=True)
-        except (OSError, RuntimeError):
-            continue
-        candidates = [directory]
-        if directory.name in TOOLCHAIN_BINS:
-            prefix = directory.parent
-            if not _inside(prefix, home) or len(prefix.relative_to(home).parts) >= 2:
-                candidates.append(prefix)
-        for path in candidates:
-            if (not path.is_dir() or path == Path("/") or path == home or _inside(home, path)
-                    or any(_inside(path, item) or _inside(item, path) for item in control)):
-                continue
-            if path not in found:
-                found.append(path)
-    return found
-
-
-def _developer_directory() -> list[Path]:
-    try:
-        selected = Path("/private/var/db/xcode_select_link").resolve(strict=True)
-    except (OSError, RuntimeError):
-        return []
-    return [selected] if selected.is_dir() and selected != Path("/") else []
+def read_denials(home: Path) -> tuple[list[Path], list[Path]]:
+    """Default-denied read areas and the developer exceptions inside them, as physical paths."""
+    def physical(paths):
+        return list(dict.fromkeys(Path(os.path.realpath(path)) for path in paths))
+    return (physical([home / item for item in HOME_DENIED] + [Path(item) for item in SYSTEM_DENIED]),
+            physical(home / item for item in HOME_READABLE))
 
 
 def _literal(path: Path | str) -> str:
@@ -107,28 +81,21 @@ def _regex(path: Path) -> str:
     return re.sub(r"([.^$|?*+()\[\]{}])", r"\\\1", str(path))
 
 
-def _ancestors(paths: list[Path]) -> list[Path]:
-    seen = {Path("/")}
-    for path in paths:
-        seen.update(path.parents)
-    return sorted(seen)
-
-
 def _filters(kind: str, paths: list[Path]) -> str:
     return " ".join(f"({kind} {_literal(path)})" for path in paths)
 
 
 def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
-            path_environment: str, home: Path) -> str:
-    """Generate one deny-by-default profile; later rules win, so denials come last."""
-    system = [Path(item) for item in SYSTEM_ROOTS] + _developer_directory()
-    toolchains = toolchain_directories(path_environment, home, control)
+            denied: list[Path], exceptions: list[Path]) -> str:
+    """Generate one profile: read the machine except denied areas, write only granted roots.
+
+    Seatbelt applies the last matching rule, so each later block narrows or re-allows the one
+    before it and the protected and control denials come last.
+    """
     xcrun = user_temp() / "xcrun_db"
-    executable = system + toolchains + readable + writable
     lines = [
         "(version 1)", "(deny default)",
-        "(allow process-fork)",
-        f"(allow process-exec {_filters('subpath', executable)})",
+        "(allow process-fork)", "(allow process-exec)",
         "(allow signal (target same-sandbox))", "(allow process-info* (target same-sandbox))",
         "(allow sysctl-read)", "(allow pseudo-tty)", "(allow ipc-posix-sem)",
         '(allow ipc-posix-shm-read-data (ipc-posix-name "apple.shm.notification_center"))',
@@ -136,20 +103,23 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         "(allow network-outbound (remote ip))", "(allow network-inbound (local ip))",
         "(allow network-bind (local ip))", "(allow system-socket)",
         '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',
+        "(allow file-read*)",
+        # Devices: only these, the command's own PTYs and metadata; never another terminal.
+        '(deny file-read* file-write* (subpath "/dev"))',
+        '(allow file-read* (literal "/dev"))', '(allow file-read-metadata (subpath "/dev"))',
         f"(allow file-read* file-write-data {_filters('literal', [Path(item) for item in DEVICES])})",
         '(allow file-read* file-write* (subpath "/dev/fd"))',
         '(allow file-read* file-write* (require-all (regex #"^/dev/ttys[0-9]+$") (extension "com.apple.sandbox.pty")))',
         '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
-        '(allow file-read* (literal "/dev"))', '(allow file-read-metadata (subpath "/dev"))',
-        # dyld aborts every program without reading "/" itself; this lists top-level names only.
-        '(allow file-read-data (literal "/"))',
-        '(allow file-read* (literal "/var") (literal "/etc") (literal "/tmp"))',
-        f"(allow file-read-metadata {_filters('literal', _ancestors(system + toolchains + readable + writable + [private, xcrun]))})",
-        f"(allow file-read* {_filters('subpath', system + toolchains)})",
+        # Default-denied areas, plus other scoped executions' private homes.
+        f"(deny file-read* process-exec {_filters('subpath', [*denied, private.parent])})",
+        f"(allow file-read-metadata {_filters('literal', denied)})",
     ]
+    if exceptions:
+        lines.append(f"(allow file-read* process-exec {_filters('subpath', exceptions)})")
     if readable:
-        lines.append(f"(allow file-read* {_filters('subpath', readable)})")
-    lines.append(f"(allow file-read* file-write* {_filters('subpath', writable + [private])})")
+        lines.append(f"(allow file-read* process-exec {_filters('subpath', readable)})")
+    lines.append(f"(allow file-read* file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
     for root in writable:
         lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_REGEX}"))')
@@ -162,7 +132,7 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
             # Existing worktrees' commondir redirects; new registrations still create theirs.
             lines.extend(f"(deny file-write* (literal {_literal(path)}))"
                          for path in sorted(git.glob("worktrees/*/commondir")))
-    lines.append(f"(deny file-read* file-write* {_filters('subpath', control)})")
+    lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 
 

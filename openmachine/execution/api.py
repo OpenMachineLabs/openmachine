@@ -199,13 +199,15 @@ def _sandbox(scope: dict, state: Path, execution_id: str, working: Path) -> tupl
     writable = [Path(item["path"]) for item in [*scope["roots"], *trees] if item["mode"] == "full_access"]
     if scope["destination"]:
         writable.append(Path(scope["destination"]))
-    if not any(_inside(working, path) for path in writable):
-        raise Fault("path_out_of_scope", "Scoped commands start only inside a Full Cloud-selected directory.",
-                    effect="known_no_effect")
     control = list(dict.fromkeys([*(Path(path) for path in scope["control"]), state]))
+    denied, exceptions = ([Path(path) for path in scope[key]] for key in ("denied", "exceptions"))
+    if (any(_inside(working, path) for path in control) or not any(_inside(working, path) for path in readable + writable)
+            and any(_inside(working, path) for path in denied) and not any(_inside(working, path) for path in exceptions)):
+        raise Fault("path_out_of_scope", "Scoped commands cannot start in a protected or Open Machine state directory.",
+                    effect="known_no_effect")
     private = seatbelt.private_directory(execution_id)
     text = seatbelt.profile(readable=readable, writable=writable, private=private, control=control,
-                            path_environment=os.environ.get("PATH", os.defpath), home=seatbelt.account_home())
+                            denied=denied, exceptions=exceptions)
     effective = {"roots": scope["roots"], "worktrees": trees, "destination": scope["destination"]}
     receipt = {"protocol": 1, "authority": scope["authority"], **effective, "backend": seatbelt.BACKEND,
                "private": str(private), "profile_sha256": seatbelt.digest(text),

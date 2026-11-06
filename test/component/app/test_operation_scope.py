@@ -46,18 +46,25 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
         with patch.object(operation_scope, "control_paths", return_value=(self.cloud / "state",)):
             self.fault("scope_conflict", lambda: self.read(self.dev, "README"))
 
-    def test_typed_reads_follow_the_map_lexically_and_physically(self):
+    def test_typed_reads_cover_the_machine_except_denied_areas(self):
         self.assertEqual(self.read(self.desktop, "file.txt")["text"], "desktop\n")
         self.assertEqual(self.read(self.root, "Development/core/file.txt")["text"], "core\n")
-        self.fault("path_out_of_scope", lambda: self.read(self.personal, "secret.txt"))
-        self.fault("path_out_of_scope", lambda: self.read(self.root, "personal/secret.txt"))
-        (self.desktop / "escape").symlink_to(self.personal, target_is_directory=True)
+        self.assertEqual(self.read(self.personal, "notes.txt")["text"], "personal notes\n")
+        self.assertEqual(self.read(self.developer, "dev.txt")["text"], "developer\n")
+        for workspace, path in ((self.drive, "drive.txt"), (self.home, "Library/CloudStorage/GoogleDrive/drive.txt"),
+                                (self.home, ".ssh/id_test")):
+            with self.subTest(path=path):
+                self.fault("path_out_of_scope", lambda: self.read(workspace, path))
+        (self.desktop / "escape").symlink_to(self.drive, target_is_directory=True)
         self.fault("path_out_of_scope", lambda: self.app.inspect_workspace(
             "local", str(self.root), "files", "Development/desktop/escape", operation_scope=self.scope()))
+        # A directory that holds a denied area cannot be searched or inspected as a whole.
         self.fault("path_out_of_scope", lambda: self.app.inspect_workspace(
             "local", str(self.root), "search", ".", query="SECRET", operation_scope=self.scope()))
         self.fault("path_out_of_scope", lambda: self.app.inspect_context(
-            "local", str(self.personal), operation_scope=self.scope()))
+            "local", str(self.home), operation_scope=self.scope()))
+        selected = self.scope(self.binding(self.drive, "read_only"), self.binding(self.core, "full_access"))
+        self.assertEqual(self.read(self.drive, "drive.txt", selected)["text"], "DRIVE-SECRET\n")
 
     def test_typed_writes_need_full_and_never_touch_protected_files(self):
         def write(workspace, path):
@@ -66,6 +73,7 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
                                                  "", uuid.uuid4().hex, read["context"]["workspace_identity"],
                                                  operation_scope=self.scope())
         self.fault("path_out_of_scope", lambda: write(self.desktop, "new.txt"))
+        self.fault("path_out_of_scope", lambda: write(self.personal, "new.txt"))
         self.fault("path_out_of_scope", lambda: write(self.core, ".vscode/tasks.json"))
         self.assertEqual(write(self.core, "new.txt")["status"], "applied")
         self.assertEqual((self.core / "new.txt").read_text(), "changed\n")
@@ -98,14 +106,14 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
         self.assertEqual([(item["path"], item["mode"]) for item in trees], [(str(real), "full_access")])
         self.assertEqual(compiled.mode(real), "full_access")
         self.assertIsNone(compiled.mode(self.personal))
-        self.fault("path_out_of_scope", lambda: self.read(self.personal, "secret.txt"))
 
     def test_unconfinable_or_unsupported_work_starts_nothing(self):
         self.fault("scope_unconfined_capability", lambda: self.app.start_codex_task(
             "local", uuid.uuid4().hex, str(self.core), "Goal", "https://example.invalid/", ["https://example.invalid"],
             operation_scope=self.scope()))
-        self.fault("path_out_of_scope", lambda: self.app.start_execution(
-            "local", uuid.uuid4().hex, str(self.desktop), ["true"], operation_scope=self.scope()))
+        for cwd in (self.drive, self.home):
+            self.fault("path_out_of_scope", lambda: self.app.start_execution(
+                "local", uuid.uuid4().hex, str(cwd), ["true"], operation_scope=self.scope()))
         with (patch.object(seatbelt, "unavailable_reason", return_value="platform_unsupported"),
               patch.object(operation_scope.execution, "seatbelt_unavailable_reason", return_value="platform_unsupported")):
             capability = self.app.get_capabilities()["operation_scope"]

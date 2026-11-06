@@ -178,8 +178,8 @@ Clients must enforce approved target scope and current native authority at
 dispatch and result delivery. A parent selection does not authorize a nested
 repository/worktree automatically. Existing `workspace_identity` and source/HEAD
 guards remain mandatory; `target_id` is not a replacement. Only
-[operation scope](../execution/SKILL.md#operation-scope) confines native commands
-to selected directories.
+[operation scope](../execution/SKILL.md#operation-scope) confines native commands'
+writes to selected directories.
 
 No catalog call registers workspaces. A subfolder can remain bound to its parent,
 avoiding overlapping non-Git registrations. When an operation requires an

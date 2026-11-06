@@ -102,7 +102,7 @@ class Application:
 
     def _require_target(self, scope, machine: str, workspace_name: str, paths=(".",), worktree: str = "",
                         *, write: bool = False) -> None:
-        """Check typed targets lexically and physically; links cannot reach ungranted siblings."""
+        """Check typed targets lexically and physically; links cannot reach denied or ungranted paths."""
         config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
         root = workspace.root_for(config, machine, workspace_name)
         for path in paths:
@@ -282,8 +282,9 @@ class Application:
             if (not Path(destination).is_absolute() or ".." in Path(destination).parts
                     or scopes.protected(Path(destination))):
                 raise Fault("path_out_of_scope", "Use an absolute, unprotected worktree destination.", effect="known_no_effect")
-            scope.require(parent)
-            scope.require(parent.resolve())
+            for path in (parent, parent.resolve()):
+                scope.require(path)
+                scope.require_selected(path)
             request = scope.process_request()
         arguments = dict(machine=machine, workspace_name=workspace_name, destination=destination,
                          base_ref=base_ref, new_branch=new_branch, execution_id=execution_id,
@@ -543,8 +544,8 @@ class Application:
             try:
                 working = Path(cwd).resolve(strict=True)
             except (OSError, RuntimeError, TypeError) as error:
-                raise Fault("path_out_of_scope", "Select an existing Full directory as cwd.", effect="known_no_effect") from error
-            scope.require(working, write=True)
+                raise Fault("path_out_of_scope", "Use an existing readable directory as cwd.", effect="known_no_effect") from error
+            scope.require(working)
             request = scope.process_request()
         with self._admit():
             result = self.task_admission.run("start_execution", dict(machine=machine, execution_id=execution_id,

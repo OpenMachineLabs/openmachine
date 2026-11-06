@@ -1,10 +1,13 @@
-"""Disposable Selected Projects tree: Read-only parent, Full children and unrelated siblings."""
+"""Disposable Selected Projects tree: Read-only parent, Full children, siblings and a fake account home."""
 
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import time
+from unittest.mock import patch
+
+from openmachine import execution
 from openmachine.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.execution.records import TERMINAL
@@ -21,12 +24,20 @@ class ScopeFixture(object):
         self.dev = self.root / "Development"
         self.core, self.cloud, self.desktop = (self.dev / name for name in ("core", "cloud", "desktop"))
         self.personal = self.root / "personal"
-        self.drive = self.root / "CloudStorage" / "GoogleDrive"
-        for path in (self.core, self.cloud, self.desktop, self.personal, self.drive):
+        # Default-denied areas live under a fake account home; the real home is never touched.
+        self.home = self.root / "home"
+        self.drive = self.home / "Library" / "CloudStorage" / "GoogleDrive"
+        self.developer = self.home / "Library" / "Developer"
+        for path in (self.core, self.cloud, self.desktop, self.personal, self.drive, self.developer, self.home / ".ssh"):
             path.mkdir(parents=True)
         (self.dev / "README").write_text("parent\n")
-        (self.personal / "secret.txt").write_text("PERSONAL-SECRET\n")
+        (self.personal / "notes.txt").write_text("personal notes\n")
         (self.drive / "drive.txt").write_text("DRIVE-SECRET\n")
+        (self.home / ".ssh" / "id_test").write_text("SSH-SECRET\n")
+        (self.developer / "dev.txt").write_text("developer\n")
+        home = patch.object(execution, "account_home", return_value=self.home)
+        home.start()
+        self.addCleanup(home.stop)
         for repo in (self.core, self.cloud, self.desktop):
             (repo / "file.txt").write_text(repo.name + "\n")
             self.git(repo, "init", "-q", "-b", "main")

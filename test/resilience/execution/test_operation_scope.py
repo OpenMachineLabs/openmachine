@@ -19,32 +19,38 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
     def shell(self, script, *, cwd=None, tty=False):
         return self.run_scoped(["/bin/sh", "-c", script], cwd, tty=tty)
 
-    def test_commands_and_descendants_follow_the_cloud_map(self):
+    def test_commands_and_descendants_read_broadly_but_write_only_full_projects(self):
         for tty in (False, True):
             with self.subTest(tty=tty):
-                allowed = self.shell("cat ../desktop/file.txt && ls .. && echo w > new.txt && echo w > ../cloud/new.txt",
-                                     tty=tty)
+                allowed = self.shell(f"cat ../desktop/file.txt && ls .. && cat {self.personal}/notes.txt && "
+                                     f"cat {self.developer}/dev.txt && echo w > new.txt && echo w > ../cloud/new.txt", tty=tty)
                 self.assertEqual((allowed["status"], allowed["exit_code"]), ("succeeded", 0), allowed["output"])
-                self.assertIn("desktop", allowed["output"])
-                for script in ("echo x > ../desktop/file.txt", "touch ../created", "mkdir ../made",
-                               "mv ../desktop/file.txt moved", f"cat {self.personal}/secret.txt",
-                               f"ls {self.personal}", f"python3 -c \"open('{self.drive}/drive.txt').read()\"",
-                               f"sh -c 'sh -c \"cat {self.drive}/drive.txt\"'", "echo x > /private/tmp/om-scope-escape"):
+                self.assertIn("personal notes", allowed["output"])
+                for script in (f"cat {self.home}/.ssh/id_test", f"ls {self.home}/Library/CloudStorage",
+                               f"python3 -c \"open('{self.drive}/drive.txt').read()\"",
+                               f"sh -c 'sh -c \"cat {self.drive}/drive.txt\"'", "echo x > ../desktop/file.txt",
+                               "touch ../created", "mkdir ../made", "mv ../desktop/file.txt moved",
+                               f"echo x > {self.personal}/new", "echo x > /private/tmp/om-scope-escape"):
                     denied = self.shell(script, tty=tty)
                     self.assertEqual(denied["status"], "failed", script)
                     self.assertIn(DENIED, denied["output"], script)
                     self.assertNotIn("SECRET", denied["output"], script)
                 found = self.shell(f"find {self.root} -name '*.txt' 2>/dev/null; true", tty=tty)
-                self.assertNotIn("secret.txt", found["output"])
+                self.assertIn("notes.txt", found["output"])
+                self.assertNotIn("drive.txt", found["output"])
                 self.shell(f"(nohup sh -c 'sleep 0.3; echo x > {self.dev}/escaped' >/dev/null 2>&1 &); sleep 1", tty=tty)
                 self.assertFalse((self.dev / "escaped").exists())
                 self.assertEqual((self.desktop / "file.txt").read_text(), "desktop\n")
-                self.assertFalse((self.dev / "created").exists())
+                self.assertFalse((self.dev / "created").exists() or (self.personal / "new").exists())
+        sibling = self.shell("git log --oneline && echo x > new.txt", cwd=self.desktop)
+        self.assertIn("Fixture", sibling["output"])
+        self.assertIn(DENIED, sibling["output"])
+        self.assertFalse((self.desktop / "new.txt").exists())
 
     def test_links_control_surfaces_and_other_processes_cannot_widen_scope(self):
-        (self.core / "outside").symlink_to(self.personal, target_is_directory=True)
-        os.link(self.personal / "secret.txt", self.core / "planted")
-        for script in ("cat outside/secret.txt", f"ln {self.personal}/secret.txt copy", f"ls {self.state}",
+        (self.core / "outside").symlink_to(self.drive, target_is_directory=True)
+        os.link(self.drive / "drive.txt", self.core / "planted")
+        for script in ("cat outside/drive.txt", f"ln {self.personal}/notes.txt copy", f"ls {self.state}",
                        "echo x > .git/hooks/pre-commit", "git config user.name changed", "echo x > .git/config.worktree",
                        "echo /tmp > .git/commondir", "mv .git .git-moved", "mkdir -p .git/modules/lib/hooks", "mkdir .vscode"):
             result = self.shell(script)
@@ -58,7 +64,7 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         self.assertIn(DENIED, widened["output"])
         self.assertNotIn(str(self.personal), {item["path"] for item in widened["scope"]["worktrees"]})
         # Path-based enforcement: a hardlink placed inside a granted root before launch is in scope.
-        self.assertIn("PERSONAL-SECRET", self.shell("cat planted")["output"])
+        self.assertIn("DRIVE-SECRET", self.shell("cat planted")["output"])
 
         listener = socket.socket(socket.AF_UNIX)
         self.addCleanup(listener.close)
@@ -85,7 +91,7 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         self.assertEqual(descriptors["status"], "succeeded")
         self.assertNotIn("WRITABLE", descriptors["output"])
 
-        tool = self.personal / "tool"
+        tool = self.drive / "tool"
         shutil.copy("/usr/bin/true", tool)
         refused = self.run_scoped([str(tool)])
         self.assertEqual((refused["status"], refused["command"]["spawned"], refused["error"]), ("failed", False, "PermissionError"))

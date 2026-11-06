@@ -76,9 +76,12 @@ class Root:
 
 @dataclass(frozen=True)
 class Scope:
+    """Reads cover the machine except default-denied areas; writes only Full roots."""
     authority: dict
     roots: tuple[Root, ...]
     control: tuple[Path, ...]
+    denied: tuple[Path, ...]
+    exceptions: tuple[Path, ...]
 
     def _controlled(self, path: Path) -> bool:
         return any(path == item or path.is_relative_to(item) for item in self.control)
@@ -130,14 +133,33 @@ class Scope:
             return derived[1].mode
         return owner.mode if owner is not None else None
 
+    def _readable(self, path: Path) -> bool:
+        if self._controlled(path):
+            return False
+        if self.mode(path) is not None:
+            return True  # A selected root re-allows reading inside a default-denied area.
+        if any(_inside(path, item) for item in self.denied) and not any(_inside(path, item) for item in self.exceptions):
+            return False
+        # A directory holding a denied area or Open Machine state cannot be inspected as a whole.
+        return not any(_inside(item, path) for item in (*self.denied, *self.control))
+
     def require(self, path: Path, *, write: bool = False) -> None:
+        if not write:
+            if not self._readable(path):
+                raise _denied("Credentials, ~/Library, media and cloud-synced folders, external volumes and "
+                              "Open Machine state are not readable under Selected Projects scope.")
+            return
         mode = self.mode(path)
-        if mode is None:
-            raise _denied("The target is outside the Cloud-selected directories for this operation.")
-        if write and mode != "full_access":
-            raise _denied("The target is Read-only in the Cloud-selected directories; ask the owner for Full access.")
-        if write and protected(path):
+        if mode != "full_access":
+            raise _denied("Writes need a Full Cloud-selected project; ask the owner to select this project as Full.")
+        if protected(path):
             raise _denied("Git hooks/config and IDE settings are protected under Selected Projects scope.")
+
+    def require_selected(self, path: Path) -> None:
+        """A new worktree is a write, so its parent stays inside a selected folder of either mode."""
+        if self.mode(path) is None:
+            raise _denied("Create the worktree inside a Cloud-selected folder; selecting its parent as Read-only "
+                          "is enough.")
 
     def process_request(self, *, destination: Path | None = None) -> dict:
         """Plain map for execution admission: roots, inherited worktrees and control denials."""
@@ -156,7 +178,8 @@ class Scope:
                 trees.append({"path": str(path), "source_target_id": root.target_id, "mode": root.mode})
         return {"authority": self.authority, "roots": [root.receipt() for root in self.roots],
                 "worktrees": trees, "destination": str(destination) if destination else None,
-                "control": [str(path) for path in self.control]}
+                "control": [str(path) for path in self.control], "denied": [str(path) for path in self.denied],
+                "exceptions": [str(path) for path in self.exceptions]}
 
 
 def control_paths(state: Path) -> tuple[Path, ...]:
@@ -213,4 +236,5 @@ def compile(config, state: Path, machine: str, value: dict) -> Scope:
             if root.mode == "read_only" and other.mode == "full_access" and _inside(root.path, other.path):
                 raise Fault("scope_conflict", "A Read-only directory inside a Full directory cannot restrict it; "
                             "narrow the Full selection instead.", effect="known_no_effect")
-    return Scope(model.authority.model_dump(), tuple(roots), control)
+    denied, exceptions = execution.read_denials(home)
+    return Scope(model.authority.model_dump(), tuple(roots), control, tuple(denied), tuple(exceptions))

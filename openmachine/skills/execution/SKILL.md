@@ -34,12 +34,15 @@ root; internal `cd` does not change that binding. See [Tasks](../tasks/SKILL.md)
 
 A Cloud Selected Projects call carries `operation_scope`, injected by the Connector.
 Its command and every descendant then run inside the macOS Seatbelt profile shown
-in the result's `scope`: Read-only roots are readable, Full roots and their
-registered worktrees are writable, and `cwd` must be Full. `HOME`, `TMPDIR` and
-caches are private to the execution; home dotfiles, the keychain, agent sockets,
-other terminals, Git hooks/config/`commondir`, the repository's own `.git` entry
-and `.vscode`/`.idea` are unavailable to it.
-`EPERM` ("Operation not permitted") on a path outside those roots, or on a
-protected file, is a scope denial and names no path (`denials=not_observable`).
+in the result's `scope`. They may read the machine except credentials, `~/Library`
+(other than `~/Library/Developer`), Pictures, Music, Movies, `/Volumes` and Open
+Machine state; a selected root re-allows reading inside those areas. They may write
+only Full roots, their registered worktrees and a private per-execution `HOME`,
+`TMPDIR` and caches. `cwd` may be any readable directory. Git
+hooks/config/`commondir`, a writable root's own `.git` entry, `.vscode`/`.idea`,
+agent sockets and other terminals stay unavailable. The network is not restricted.
+`EPERM` ("Operation not permitted") on a denied area, a write outside Full roots or
+a protected file is a scope denial and names no path (`denials=not_observable`).
 Never retry it without scope or through another tool; only a Cloud owner grant
-change widens it. Unsupported platforms refuse scoped launch before it starts.
+change widens it. Typed tools apply the same areas. A new worktree's parent must be
+inside a selected folder. Unsupported platforms refuse scoped launch before it starts.

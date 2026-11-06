@@ -17,16 +17,16 @@ class ProfileTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
 
-    def test_toolchains_never_open_shared_home_areas(self):
+    def test_read_denials_cover_credentials_library_media_and_volumes(self):
         home = self.root / "home"
-        paths = {name: home / name for name in (".local/bin", ".nvm/versions/node/v1/bin", "bin")}
-        for path in [*paths.values(), self.root / "opt/tool/bin", self.root / "control/bin"]:
-            path.mkdir(parents=True)
-        entries = [str(path) for path in paths.values()] + [str(self.root / "opt/tool/bin"), str(home), "relative/bin",
-                                                             str(self.root / "missing/bin"), str(self.root / "control/bin")]
-        found = seatbelt.toolchain_directories(os.pathsep.join(entries), home, [self.root / "control"])
-        self.assertEqual(found, [paths[".local/bin"], paths[".nvm/versions/node/v1/bin"], home / ".nvm/versions/node/v1",
-                                 paths["bin"], self.root / "opt/tool/bin", self.root / "opt/tool"])
+        (home / "Library").mkdir(parents=True)
+        (home / "Pictures").symlink_to(self.root / "photos")
+        denied, exceptions = seatbelt.read_denials(home)
+        for path in (home / ".ssh", home / ".config/gh", home / ".zsh_history", home / "Library", home / "Movies",
+                     self.root / "photos", Path("/Volumes")):
+            self.assertIn(path, denied)
+        self.assertNotIn(home / "Desktop", denied)
+        self.assertEqual(exceptions, [home / "Library/Developer"])
 
     def test_profile_denies_by_default_and_ends_with_protected_and_control_denials(self):
         readable, writable, worktree = self.root / "Dev (1)+x", self.root / "Dev (1)+x/core", self.root / "wt"
@@ -36,15 +36,23 @@ class ProfileTests(unittest.TestCase):
         (writable / ".git/worktrees/wt").mkdir(parents=True)
         (writable / ".git/worktrees/wt/commondir").write_text("../..\n")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
-            text = seatbelt.profile(readable=[readable], writable=[writable, worktree], private=self.root / "private",
-                                    control=[self.root / "state"], path_environment="", home=self.root / "home")
+            text = seatbelt.profile(readable=[readable], writable=[writable, worktree], private=self.root / "T/openmachine-scope/exec",
+                                    control=[self.root / "state"], denied=[self.root / "home/Library"],
+                                    exceptions=[self.root / "home/Library/Developer"])
             with self.assertRaises(Fault) as caught:
                 seatbelt.profile(readable=[self.root / 'quote"d'], writable=[writable], private=self.root, control=[],
-                                 path_environment="", home=self.root)
+                                 denied=[], exceptions=[])
             self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
         self.assertEqual(lines[:2], ["(version 1)", "(deny default)"])
-        self.assertEqual(lines[-1], f'(deny file-read* file-write* (subpath "{self.root / "state"}"))')
+        # Broad reads come first; denied areas, then their exceptions and granted roots, narrow them in order.
+        order = ["(allow file-read*)", f'(deny file-read* process-exec (subpath "{self.root / "home/Library"}") '
+                 f'(subpath "{self.root / "T/openmachine-scope"}"))',
+                 f'(allow file-read* process-exec (subpath "{self.root / "home/Library/Developer"}"))',
+                 f'(allow file-read* process-exec (subpath "{readable}"))']
+        self.assertEqual([lines.index(line) for line in order], sorted(lines.index(line) for line in order))
+        self.assertNotIn("network", " ".join(line for line in lines if line.startswith("(deny")))
+        self.assertEqual(lines[-1], f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))')
         self.assertIn(r"Dev \(1\)\+x/core" + seatbelt.PROTECTED_REGEX, text)
         for path in (worktree / ".git", writable / ".git", writable / ".git/worktrees/wt/commondir"):
             self.assertIn(f'(deny file-write* (literal "{path}"))', text)
