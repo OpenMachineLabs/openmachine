@@ -1,4 +1,4 @@
-"""Assemble a native macOS or Ubuntu runtime from pinned inputs and one explicit Core wheel."""
+"""Assemble a native macOS or portable glibc Linux runtime from pinned inputs."""
 
 import argparse
 from email.parser import BytesParser
@@ -54,6 +54,15 @@ exec "$root/bin/git" "$@"
     entry.chmod(0o755)
 
 
+def wheel_target_options(target: dict) -> list[str]:
+    # Never resolve wheels against the builder's newer glibc: the payload
+    # promises compatibility with the oldest accepted native Linux ABI.
+    platform_tag = ("manylinux_2_34_x86_64" if target == payload.LINUX_TARGET
+                    else "macosx_13_0_arm64")
+    return ["--platform", platform_tag, "--implementation", "cp",
+            "--python-version", "3.13", "--abi", "cp313"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
@@ -101,9 +110,7 @@ def main() -> None:
     # Only the producer downloads. Both bootstrap population and user-side
     # preparation use the complete local wheelhouse without source builds.
     download_env = {key: value for key, value in env.items() if key != "PIP_NO_INDEX"}
-    target_options = ([] if target == payload.LINUX_TARGET else
-                      ["--platform", "macosx_13_0_arm64", "--implementation", "cp",
-                       "--python-version", "3.13", "--abi", "cp313"])
+    target_options = wheel_target_options(target)
     run([python, "-I", "-B", "-m", "pip", "download", "--index-url", "https://pypi.org/simple",
          "--only-binary=:all:", "--no-deps", *target_options,
          "--dest", str(wheels), "-r", str(output / "requirements.lock")], download_env)

@@ -8,9 +8,18 @@ import sys
 import tarfile
 import unittest
 from test.support.payload_cases import PayloadCaseFixture
+from openmachine.service import payload
 
 
 class PayloadTests(PayloadCaseFixture, unittest.TestCase):
+    def test_download_tags_pin_oldest_supported_linux_glibc(self):
+        builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
+        common = ["--implementation", "cp", "--python-version", "3.13", "--abi", "cp313"]
+        self.assertEqual(builder["wheel_target_options"](payload.LINUX_TARGET),
+                         ["--platform", "manylinux_2_34_x86_64", *common])
+        self.assertEqual(builder["wheel_target_options"](payload.TARGET),
+                         ["--platform", "macosx_13_0_arm64", *common])
+
     def test_producer_refuses_product_signing_options(self):
         script = Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"
         result = subprocess.run([

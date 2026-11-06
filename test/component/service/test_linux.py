@@ -12,6 +12,11 @@ from test.support.service_cases import ServiceCaseFixture
 
 
 class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
+    def test_portable_target_matches_signed_pair_contract(self):
+        self.assertEqual(payload.LINUX_TARGET, {
+            "os": "linux", "arch": "x86_64", "libc": "glibc",
+            "glibc_minimum": "2.34", "service": "systemd-user"})
+
     def test_wrong_arch_and_owner_fail_closed(self):
         self.manifest["target"] = payload.LINUX_TARGET
         digest = self.seal()
@@ -27,13 +32,23 @@ class LinuxPayloadTests(PayloadCaseFixture, unittest.TestCase):
     def test_glibc_payload_is_distro_independent(self):
         self.manifest["target"] = payload.LINUX_TARGET
         digest = self.seal()
-        for release in ({"ID": "ubuntu", "VERSION_ID": "22.04"}, {"ID": "debian", "VERSION_ID": "12"},
-                        {"ID": "fedora", "VERSION_ID": "43"}, {"ID": "rocky", "VERSION_ID": "9"},
-                        {"ID": "arch"}, {"ID": "opensuse-tumbleweed"}):
-            with self.subTest(release=release), \
+        # Synthetic release identities and ABI fixtures, not native distro acceptance.
+        for release, version in (
+                ({"ID": "ubuntu", "VERSION_ID": "22.04"}, "2.35"),
+                ({"ID": "ubuntu", "VERSION_ID": "26.04"}, "2.39"),
+                ({"ID": "debian", "VERSION_ID": "12"}, "2.36"),
+                ({"ID": "debian", "VERSION_ID": "13"}, "2.41"),
+                ({"ID": "fedora", "VERSION_ID": "43"}, "2.42"),
+                ({"ID": "rhel", "VERSION_ID": "9"}, "2.34"),
+                ({"ID": "rocky", "VERSION_ID": "9"}, "2.34"),
+                ({"ID": "almalinux", "VERSION_ID": "9"}, "2.34"),
+                ({"ID": "amzn", "VERSION_ID": "2023"}, "2.34"),
+                ({"ID": "arch"}, "2.42"),
+                ({"ID": "opensuse-tumbleweed"}, "2.42")):
+            with self.subTest(release=release, glibc=version), \
                     patch.object(payload.sys, "platform", "linux"), \
                     patch.object(payload.platform, "machine", return_value="x86_64"), \
-                    patch.object(payload.platform, "libc_ver", return_value=("glibc", "2.39")), \
+                    patch.object(payload.platform, "libc_ver", return_value=("glibc", version)), \
                     patch.object(payload.platform, "freedesktop_os_release", return_value=release):
                 self.assertEqual(payload.verify(self.source, digest)["target"], payload.LINUX_TARGET)
 

@@ -19,7 +19,7 @@ BYTE_LIMIT = 2 * 1024 * 1024 * 1024
 TARGET = {"os": "macos", "arch": "arm64", "minimum_os": "13.0"}
 # The pinned Git and cryptography Linux binaries require glibc >= 2.34.
 LINUX_TARGET = {"os": "linux", "arch": "x86_64", "libc": "glibc",
-                "minimum_glibc": "2.34", "service_manager": "systemd-user"}
+                "glibc_minimum": "2.34", "service": "systemd-user"}
 
 
 def linux_host_supported() -> bool:
