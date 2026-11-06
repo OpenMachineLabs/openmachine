@@ -451,9 +451,15 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         else:
             selected = service_state._record(state)
             _bound(config, state, selected)
-            if selected["current"] == prepared["identity"]:
-                if request["candidate_sha256"] != request["config_sha256"]:
+            if selected["current"] == prepared["identity"] and request["candidate_sha256"] != request["config_sha256"]:
+                # Only the selected installation's own recorded configuration may
+                # be restored over an edited file; any other change needs a
+                # distinct candidate installation.
+                if selected.get("configurations", {}).get(selected["current"]) != request["candidate_sha256"]:
                     raise Fault("same_installation", "A configuration change requires an explicit distinct candidate installation.")
+                result = transition._restore_configuration(state, selected, request["candidate_sha256"],
+                                                           request["config_sha256"], before_change=before_change)
+            elif selected["current"] == prepared["identity"]:
                 result = runtime.status(config, state)
                 if "management" not in selected:
                     with lease(state / "locks/lifecycle.lock"):
@@ -596,7 +602,7 @@ def machines(config_path: Path, state: Path) -> dict:
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
     envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
                 "capabilities": [*CAPABILITIES, "configure:local_access", "configure:verify_existing", "update:configuration_consent",
-                                 "update:selection_consent", "update:workspace_reference_guard"],
+                                 "update:restore_configuration", "update:selection_consent", "update:workspace_reference_guard"],
                 "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
                 "implementation_state_contract": service_state.STATE_CONTRACT}
     try:

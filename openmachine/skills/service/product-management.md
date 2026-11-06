@@ -113,6 +113,12 @@ or uncertain replies still require original-ID readback. Existing records are re
 are considered, never resubmitted. Activation reuses the original selection and
 configuration guards, preserving deliberate Stop and retained results.
 
+With `update:restore_configuration`, an update whose candidate is the selected
+installation's own recorded configuration restores those bytes over the confirmed
+edited active file instead of returning `same_installation`, renews only a
+`blocked_service_identity_mismatch` readiness block, and restarts the runtime.
+Any other same-installation change still returns `same_installation`.
+
 Omitting both flags retains the earlier update contract; a consent-dependent
 client must not silently fall back when this capability is absent. Preserve all
 unrelated settings in the candidate. With `update:workspace_reference_guard`,

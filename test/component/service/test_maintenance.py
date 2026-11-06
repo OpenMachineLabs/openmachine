@@ -737,6 +737,58 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(original["operation"]["outcome"]["current"], self.b)
             prepare.assert_not_called()
 
+    def restore_fixture(self, reason="blocked_service_identity_mismatch", recorded=True):
+        """Selected installation A whose owned file was edited after activation."""
+        selected = self.config.read_bytes()
+        digest = service_state._snapshot_configuration(self.state, self.config)
+        self.save(self.record | {"configurations": {self.a: digest if recorded else "f" * 64}})
+        episode = {"id": "e" * 32, "started_at_ms": 1000, "deadline_ms": 1000 + service_state.RECOVERY_MS,
+                   "attempts": 1, "next_attempt_ms": 2000, "reason": reason}
+        service_state._save_recovery(self.state, episode)
+        self.config.write_bytes(selected.replace(b'transport="local"', b'transport="local"\nexecution_enabled=false'))
+        record = self.operation_fixture()
+        record["request"].update(config_sha256=maintenance._digest(self.config), candidate_sha256=digest,
+                                 candidate_config=str(service_state._saved_configuration(self.state, digest)),
+                                 selection_sha256=maintenance._selection(self.state))
+        record["prepared"].update(identity=self.a, runtime=str(self.state / "service/versions" / self.a))
+        maintenance._save(self.state, record, "prepared")
+        return record, selected, episode
+
+    def run_restore(self, record):
+        with patch.object(maintenance, "_bound"), patch.object(service_checks, "_candidate_state", return_value={}), \
+                patch.object(service_runtime, "_stop") as stop, \
+                patch.object(service_runtime, "_start", return_value={"status": "ready"}) as start, \
+                lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, record["operation_id"], lock.fileno())
+        return maintenance._read(self.state, record["operation_id"]), stop, start
+
+    def test_update_restores_selected_configuration_over_owned_edit(self):
+        record, selected, _ = self.restore_fixture()
+        result, stop, start = self.run_restore(record)
+        self.assertEqual((result["phase"], result["outcome"]), ("completed", {"status": "ready"}))
+        self.assertEqual(self.config.read_bytes(), selected)
+        current = service_state._record(self.state)
+        self.assertEqual((current["current"], current["pending"]), (self.a, None))
+        self.assertIsNone(service_state._read_recovery(self.state)["episode"])
+        stop.assert_called_once()
+        start.assert_called_once()
+        self.assertIn("update:restore_configuration", maintenance.dispatch(self.config, self.state, "status")["capabilities"])
+
+    def test_update_restore_keeps_unrelated_blocks_and_refuses_unrecorded_configuration(self):
+        record, _, episode = self.restore_fixture(reason="blocked_readiness_budget")
+        result, _, start = self.run_restore(record)
+        self.assertEqual(result["phase"], "completed")
+        self.assertEqual(service_state._read_recovery(self.state)["episode"], episode)
+        start.assert_called_once()
+
+        record, _, _ = self.restore_fixture(recorded=False)
+        edited = self.config.read_bytes()
+        result, stop, start = self.run_restore(record)
+        self.assertEqual((result["phase"], result["reason"]), ("rejected", "same_installation"))
+        self.assertEqual(self.config.read_bytes(), edited)
+        stop.assert_not_called()
+        start.assert_not_called()
+
     def test_operation_binds_configuration_and_never_rebases_after_policy_drift(self):
         record = self.operation_fixture()
         original = self.config.read_bytes()
