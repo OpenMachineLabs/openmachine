@@ -112,12 +112,13 @@ jobs:
             --access public --provenance --registry https://registry.npmjs.org/
       - name: Verify registry artifact
         if: github.event_name == 'release'
-        timeout-minutes: 10
+        # npmjs can take over 10 minutes to serve a newly published version.
+        timeout-minutes: 35
         shell: bash
         run: |
           set -euo pipefail
           expected="$(shasum -a 1 "$RUNNER_TEMP/dist/openmachine-$VERSION.tgz" | cut -d ' ' -f1)"
-          for attempt in {1..20}; do
+          for attempt in {1..60}; do
             if actual="$(npm view "openmachine@$VERSION" dist.shasum --registry https://registry.npmjs.org/ \
                 --prefer-online --fetch-retries=0 --fetch-timeout=10000 2>"$RUNNER_TEMP/registry-error.log")"; then
               if test "$expected" != "$actual"; then
@@ -129,10 +130,10 @@ jobs:
             fi
             cat "$RUNNER_TEMP/registry-error.log" >&2
             grep -q 'E404' "$RUNNER_TEMP/registry-error.log" || exit 1
-            if test "$attempt" -lt 20; then
-              echo "Registry version not visible yet (attempt $attempt/20); retrying in 15 seconds."
-              sleep 15
+            if test "$attempt" -lt 60; then
+              echo "Registry version not visible yet (attempt $attempt/60); retrying in 30 seconds."
+              sleep 30
             fi
           done
-          echo "::error::Registry version still unavailable after 20 attempts."
+          echo "::error::Registry version still unavailable after 60 attempts."
           exit 1
