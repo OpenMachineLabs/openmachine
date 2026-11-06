@@ -17,8 +17,9 @@ from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_P
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
-from . import environment, task_attention
+from . import environment, scope as scopes, task_attention
 from .machines import Machines
+from .scope import OperationScope
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
 from .task_receipts import TaskReceipts
@@ -96,11 +97,28 @@ class Application:
             raise
         return getattr(provider, operation)(self.config, **arguments, transport=transport)
 
+    def _scope(self, machine: str, value: dict | None):
+        return None if value is None else scopes.compile(self.config, self.state, machine, value)
+
+    def _require_target(self, scope, machine: str, workspace_name: str, paths=(".",), worktree: str = "",
+                        *, write: bool = False) -> None:
+        """Check typed targets lexically and physically; links cannot reach denied or ungranted paths."""
+        config = workspace.select_worktree(self.config, machine, workspace_name, worktree)
+        root = workspace.root_for(config, machine, workspace_name)
+        for path in paths:
+            relative = Path(path)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise Fault("path_out_of_scope", "Use a relative path inside the selected directory.", effect="known_no_effect")
+            target = root.joinpath(*relative.parts)
+            scope.require(target, write=write)
+            scope.require(target.resolve(), write=write)
+
     def get_capabilities(self) -> dict:
         return {
             "environment_observation": environment.capabilities(),
             "project_catalog": projects.capabilities(),
             "device_access": {"protocol": 1, "directory_selector": "workspace_name", "absolute_local_directories": True},
+            "operation_scope": scopes.capabilities(),
             "version": __version__, "commit": service.running_commit(__version__), "configuration_sha256": self.config.configuration_sha256(),
             "machines": {name: {**item.model_dump(), "workspace_write_effective": (item.local_access == "full_access") and (item.execution_enabled if item.workspace_write_enabled is None else item.workspace_write_enabled),
                                   "probe_status": "not_probed"} for name, item in self.config.machines.items()},
@@ -164,18 +182,25 @@ class Application:
                        "task_page_bytes": tasks.MAX_PAGE_BYTES, "task_page_entries": tasks.MAX_PAGE_ITEMS,
                        "task_active_operations": tasks.MAX_ACTIVE_OPERATIONS,
                        "task_result_bytes": MAX_TASK_RESULT_BYTES},
-            "boundary": "Native account access, not a sandbox. No live client or tunnel health probe.",
+            "boundary": ("Native account access, not a sandbox, unless a call carries operation_scope. "
+                         "No live client or tunnel health probe."),
         }
 
     def inspect_context(self, machine: str, workspace_name: str, worktree: str = "", task_id: str = "",
                         sections: list[str] | None = None, limit: int = 10,
-                        executables: list[str] | None = None, ports: list[int] | None = None) -> dict:
+                        executables: list[str] | None = None, ports: list[int] | None = None,
+                        operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, worktree=worktree)
         return environment.inspect_context(self, machine, workspace_name, worktree, task_id, sections, limit, executables, ports)
 
     def inspect_workspace(self, machine: str, workspace_name: str,
                           action: Literal["files", "read", "search", "status", "diff", "worktrees"], path: str = ".",
                           offset: int = 0, limit: int = 100, query: str = "", staged: bool = False,
-                          expected_snapshot: str = "", path_glob: str = "", worktree: str = "") -> dict:
+                          expected_snapshot: str = "", path_glob: str = "", worktree: str = "",
+                          operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, [path], worktree)
         return self.machines.inspect_workspace(machine, workspace_name, action, path, offset, limit, query,
                                                staged, expected_snapshot, path_glob, worktree)
 
@@ -192,14 +217,18 @@ class Application:
 
     def read_workspace_file(self, machine: str, workspace_name: str, path: str, offset: int = 0,
                             expected_sha256: str = "", start_line: int | None = None,
-                            line_count: int = 200, worktree: str = "") -> dict:
+                            line_count: int = 200, worktree: str = "", operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, [path], worktree)
         return self.machines.read_workspace_file(machine, workspace_name, path, offset, expected_sha256,
                                                  start_line, line_count, worktree)
 
     def write_workspace_file(self, machine: str, workspace_name: str, path: str, content: str,
                              expected_head_sha: str, expected_sha256: str, change_id: str = "",
                              expected_workspace_identity: str = "", task_context: dict | None = None,
-                             worktree: str = "") -> dict:
+                             worktree: str = "", operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, [path], worktree, write=True)
         with self._admit():
             return self.task_admission.run("write_workspace_file", dict(machine=machine, workspace_name=workspace_name,
                 path=path, content=content, expected_head_sha=expected_head_sha, expected_sha256=expected_sha256,
@@ -209,7 +238,10 @@ class Application:
     def edit_workspace_file(self, machine: str, workspace_name: str, path: str, edits: list[dict],
                             expected_workspace_identity: str, expected_head_sha: str, expected_sha256: str,
                             change_id: str = "", dry_run: bool = False, expected_plan_sha256: str = "",
-                            task_context: dict | None = None, worktree: str = "") -> dict:
+                            task_context: dict | None = None, worktree: str = "",
+                            operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, [path], worktree, write=True)
         arguments = dict(machine=machine, workspace_name=workspace_name, path=path, edits=edits,
             expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
             expected_sha256=expected_sha256, change_id=change_id, dry_run=dry_run, expected_plan_sha256=expected_plan_sha256,
@@ -223,7 +255,10 @@ class Application:
                               expected_workspace_identity: str, expected_head_sha: str, preconditions: list[dict],
                               create_parents: bool = False, change_id: str = "", dry_run: bool = False,
                               expected_plan_sha256: str = "", task_context: dict | None = None,
-                              worktree: str = "") -> dict:
+                              worktree: str = "", operation_scope: dict | None = None) -> dict:
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            affected = workspace.patch_paths(workspace.parse_patch(patch)) + [item["path"] for item in preconditions]
+            self._require_target(scope, machine, workspace_name, affected, worktree, write=True)
         arguments = dict(machine=machine, workspace_name=workspace_name, patch=patch,
             expected_workspace_identity=expected_workspace_identity, expected_head_sha=expected_head_sha,
             preconditions=preconditions, create_parents=create_parents, change_id=change_id, dry_run=dry_run,
@@ -238,13 +273,29 @@ class Application:
 
     def create_worktree(self, machine: str, workspace_name: str, destination: str, base_ref: str,
                         execution_id: str, expected_workspace_identity: str, new_branch: str = "",
-                        worktree: str = "", task_context: dict | None = None) -> dict:
+                        worktree: str = "", task_context: dict | None = None,
+                        operation_scope: dict | None = None) -> dict:
+        request = None
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            self._require_target(scope, machine, workspace_name, worktree=worktree, write=True)
+            target, parent = Path(destination), Path(destination).parent
+            if (not target.is_absolute() or ".." in target.parts or target.name.startswith(".")
+                    or scopes.protected(target)):
+                # Dot-named folders are where tools auto-load configuration and extensions.
+                raise Fault("path_out_of_scope", "Use an absolute, unprotected worktree destination whose name does "
+                            "not start with '.'.", effect="known_no_effect")
+            source = workspace.root_for(workspace.select_worktree(self.config, machine, workspace_name, worktree),
+                                        machine, workspace_name).resolve()
+            for path in (parent, parent.resolve()):
+                scope.require(path)
+                scope.require_worktree_parent(path, source)
+            request = scope.process_request()
         arguments = dict(machine=machine, workspace_name=workspace_name, destination=destination,
                          base_ref=base_ref, new_branch=new_branch, execution_id=execution_id,
                          expected_workspace_identity=expected_workspace_identity, task_id="",
                          **({"worktree": worktree} if worktree else {}))
         with self._admit():
-            result = self.task_admission.run("create_worktree", arguments, task_context)
+            result = self.task_admission.run("create_worktree", arguments, task_context, scope=request)
         return self._execution_task_feedback(machine, result)
 
     def find_tasks(self, query: str = "", anchors: list[str] | None = None, task_id: str = "", offset: int = 0,
@@ -379,10 +430,12 @@ class Application:
             return tasks.save(self.state, task_id, expected_revision, title, body, anchors or [])
 
     def control_task(self, task_id: str, expected_revision: int, expected_plan_revision: int,
-                     expected_epoch: int, update_id: str, transition: dict) -> dict:
+                     expected_epoch: int, update_id: str, transition: dict, operation_scope: dict | None = None) -> dict:
         request = tasks.normalize_control(dict(task_id=task_id, expected_revision=expected_revision,
             expected_plan_revision=expected_plan_revision, expected_epoch=expected_epoch,
             update_id=update_id, transition=transition))
+        if operation_scope is not None and isinstance(request["transition"].get("contract"), dict):
+            self._require_task_targets(request["transition"]["contract"], operation_scope)
         with self._admit():
             view = self.task_admission.control(request)
         self.task_observer.notify()
@@ -439,11 +492,23 @@ class Application:
         if bind_new and bindings:
             contract["github_connections"] = bindings
 
+    def _require_task_targets(self, contract: dict, value: dict) -> None:
+        """Under Selected Projects, every Task contract target is a Full directory."""
+        scopes = {}
+        for target in contract.get("targets", []):
+            machine = target["machine"]
+            if machine not in scopes:
+                scopes[machine] = self._scope(machine, value)
+            self._require_target(scopes[machine], machine, target["workspace"], worktree=target.get("worktree") or "",
+                                 write=True)
+
     def create_task(self, task_id: str, update_id: str, title: str, anchors: list[str], origin: dict,
-                    contract: dict, stages: list[dict]) -> dict:
+                    contract: dict, stages: list[dict], operation_scope: dict | None = None) -> dict:
         # Pure input validation precedes lifecycle initialization; target reads hold no task lock.
         tasks.normalize_create({"task_id": task_id, "update_id": update_id, "title": title,
             "anchors": anchors, "origin": origin, "contract": contract, "stages": stages})
+        if operation_scope is not None:
+            self._require_task_targets(contract, operation_scope)
         with self._admit():
             view = tasks.create(self.state, task_id, update_id, title, anchors, origin, contract, stages,
                                 validate_new=lambda request: self._validate_task_scope(request, bind_new=True))
@@ -456,7 +521,11 @@ class Application:
 
     def start_codex_task(self, machine: str, execution_id: str, cwd: str, goal: str,
                          start_url: str, allowed_origins: list[str], mode: str = "browser", browser: str = "auto",
-                         timeout_seconds: int = 600, expected_head_sha: str = "", task_context: dict | None = None) -> dict:
+                         timeout_seconds: int = 600, expected_head_sha: str = "", task_context: dict | None = None,
+                         operation_scope: dict | None = None) -> dict:
+        if operation_scope is not None:
+            raise Fault("scope_unconfined_capability", "Codex/browser delegation cannot be confined to Selected "
+                        "Projects; it needs explicit device Full Access.", effect="known_no_effect")
         if self.codex is None:
             raise Fault("codex_unavailable", "The Codex adapter is not assembled in this runtime.")
         return self.codex.start(self.config, self.state, self.start_execution, machine, execution_id, cwd,
@@ -472,12 +541,22 @@ class Application:
                         workspace_access: Literal["exclusive", "shared"] = "exclusive",
                         resource_keys: list[str] | None = None, task_id: str = "",
                         termination_grace_seconds: float | None = None, tty: bool = False,
-                        terminal_size: dict | None = None, task_context: dict | None = None) -> dict:
+                        terminal_size: dict | None = None, task_context: dict | None = None,
+                        operation_scope: dict | None = None) -> dict:
+        request = None
+        if (scope := self._scope(machine, operation_scope)) is not None:
+            try:
+                working = Path(cwd).resolve(strict=True)
+            except (OSError, RuntimeError, TypeError) as error:
+                raise Fault("path_out_of_scope", "Use an existing readable directory as cwd.", effect="known_no_effect") from error
+            scope.require(working)
+            request = scope.process_request()
         with self._admit():
             result = self.task_admission.run("start_execution", dict(machine=machine, execution_id=execution_id,
                 cwd=cwd, argv=argv, timeout_seconds=timeout_seconds, expected_head_sha=expected_head_sha,
                 workspace_access=workspace_access, resource_keys=resource_keys, task_id=task_id,
-                termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size), task_context)
+                termination_grace_seconds=termination_grace_seconds, tty=tty, terminal_size=terminal_size),
+                task_context, scope=request)
         return self._execution_task_feedback(machine, result)
 
     def _execution_task_feedback(self, machine: str, result: dict) -> dict:

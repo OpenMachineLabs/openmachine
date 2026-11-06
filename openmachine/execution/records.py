@@ -262,6 +262,21 @@ def reconciled_record(record: dict, evidence: dict, receipt_sha256: str, executi
     return observed
 
 
+SCOPE_KEYS = {"protocol", "authority", "roots", "worktrees", "destination", "backend", "private",
+              "profile_sha256", "effective_scope_sha256", "denials"}
+
+
+def _validate_scope(record: dict) -> None:
+    """A scoped receipt is bound to the exact profile its command started inside."""
+    scope, text = record["scope"], record["sandbox_profile"]
+    if (not isinstance(scope, dict) or set(scope) != SCOPE_KEYS or scope["protocol"] != 1
+            or not isinstance(text, str) or hashlib.sha256(text.encode()).hexdigest() != scope["profile_sha256"]
+            or not isinstance(scope["roots"], list) or not scope["roots"] or not isinstance(scope["worktrees"], list)
+            or record["format_version"] < FORMAT
+            or record.get("private_cleanup", "verified") not in {"verified", "failed"}):
+        raise ValueError("invalid operation scope receipt")
+
+
 def validate_record(record: dict, execution_id: str) -> None:
     """Validate retained format and identity without IO or live process observation."""
     try:
@@ -304,6 +319,8 @@ def validate_record(record: dict, execution_id: str) -> None:
                 _validate_interactive(record)
             except Fault as error:
                 raise ValueError("invalid interactive receipt") from error
+        if "scope" in record or "sandbox_profile" in record:
+            _validate_scope(record)
         if version == CREATION_FORMAT:
             _validate_creation(record)
         elif "worktree_creation" in request or "creation_plan" in record["context"] or "created_worktree" in record["context"]:

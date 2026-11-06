@@ -25,15 +25,16 @@ class ProjectCatalogContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                     return result.structured_content
 
                 capabilities = await call("get_capabilities", {})
-                self.assertEqual(capabilities["project_catalog"]["protocol"], 1)
+                self.assertEqual(capabilities["project_catalog"]["protocol"], 2)
                 self.assertEqual(capabilities["project_catalog"]["transports"], ["local"])
-                self.assertFalse(capabilities["project_catalog"]["register"])
-                roots = await call("inspect_projects", {"machine": "desktop"})
-                self.assertEqual(roots["projects"][0]["kind"], "workspace")
+                self.assertEqual(capabilities["project_catalog"]["actions"], ["root", "list", "inspect"])
+                implicit = await session.call_tool("inspect_projects", {"machine": "desktop"})
+                self.assertEqual(implicit.structured_content["error"]["code"], "invalid_project_request")
                 listing = await call("inspect_projects", scope)
-                target = listing["projects"][0]
-                self.assertEqual(target["kind"], "folder")
+                self.assertEqual(listing["directories"], [{"relative_path": "project", "name": "project"}])
                 self.assertNotIn("private.txt", json.dumps(listing))
+                target = (await call("inspect_projects", scope | {"action": "inspect", "path": "project"}))["project"]
+                self.assertEqual(target["kind"], "folder")
                 selected = await call("inspect_projects", scope | {"action": "inspect", "path": "project",
                     "expected_target_id": target["target_id"]})
                 self.assertEqual(selected["project"], target)

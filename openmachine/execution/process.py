@@ -16,7 +16,10 @@ import time
 
 from openmachine.foundation.sanitize import Fault
 
+from . import seatbelt
+
 MAX_PROCESSES = 65536
+SANDBOX_FAILED = -1  # Pre-exec acknowledgement code distinct from every errno.
 
 
 def boot_identity() -> str:
@@ -142,15 +145,24 @@ class Process:
         self.events = select.kqueue() if sys.platform == "darwin" else None
 
     def launch(self, argv: list[str], cwd: str, owned_fds: tuple[int, ...], *,
-               tty: bool = False, terminal_size: dict | None = None, deadline: float | None = None) -> None:
+               tty: bool = False, terminal_size: dict | None = None, deadline: float | None = None,
+               sandbox: str | None = None, env: dict | None = None) -> None:
+        """sandbox confines the child and its descendants before exec; failure starts nothing."""
         self.tty = tty
         if tty:
-            self._launch_tty(argv, cwd, owned_fds, terminal_size, deadline or time.monotonic() + 15)
+            self._launch_tty(argv, cwd, owned_fds, terminal_size, deadline or time.monotonic() + 15, sandbox, env)
         else:
             # Popen acknowledges exec failure separately from a program exiting 127.
-            self.child = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL,
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          start_new_session=True, pass_fds=owned_fds)
+            try:
+                self.child = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL,
+                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                              start_new_session=True, pass_fds=owned_fds, env=env,
+                                              preexec_fn=None if sandbox is None else lambda: seatbelt.apply(sandbox))
+            except subprocess.SubprocessError as error:
+                if sandbox is None:
+                    raise
+                # Popen reports any pre-exec hook failure this way; the program never ran.
+                raise Fault("scope_backend_failed", "The operation scope could not be applied; no command was launched.") from error
             self.pid = self.session = self.child.pid
             self.output_fd = self.child.stdout.fileno()
             self.spawned = True
@@ -160,7 +172,7 @@ class Process:
             self._watch()
 
     def _launch_tty(self, argv: list[str], cwd: str, owned_fds: tuple[int, ...],
-                    size: dict, deadline: float) -> None:
+                    size: dict, deadline: float, sandbox: str | None, env: dict | None) -> None:
         # Only the fresh single-threaded worker calls this, never the MCP server.
         error_read, error_write = os.pipe()  # CLOEXEC: EOF acknowledges successful exec.
         try:
@@ -178,9 +190,13 @@ class Process:
                 termios.tcsetwinsize(0, (size["rows"], size["cols"]))
                 for fd in owned_fds:
                     os.set_inheritable(fd, True)
-                os.execvpe(argv[0], argv, os.environ)
+                if sandbox is not None:
+                    # The PTY predates the profile, so allow exactly this slave by name.
+                    seatbelt.apply(seatbelt.own_terminal(sandbox, os.ttyname(0)))
+                os.execvpe(argv[0], argv, os.environ if env is None else env)
             except BaseException as error:
-                code = error.errno if isinstance(error, OSError) and error.errno else errno.EINVAL
+                code = (SANDBOX_FAILED if isinstance(error, seatbelt.SandboxError) else
+                        error.errno if isinstance(error, OSError) and error.errno else errno.EINVAL)
                 try:
                     os.write(error_write, struct.pack("!i", code))
                 finally:
@@ -213,6 +229,8 @@ class Process:
                     raise Fault("launch_unverified", "The original PTY launch acknowledgement is incomplete.")
                 self.launch_uncertain = False
                 code = struct.unpack("!i", reported)[0]
+                if code == SANDBOX_FAILED:
+                    raise Fault("scope_backend_failed", "The operation scope could not be applied; no command was launched.")
                 raise OSError(code, os.strerror(code))
             self.spawned = True
             self.launch_uncertain = False

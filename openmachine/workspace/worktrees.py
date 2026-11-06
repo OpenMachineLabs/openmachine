@@ -123,6 +123,11 @@ def _registered(root: Path) -> tuple[list[dict], bytes]:
     return entries, raw
 
 
+def registered_worktrees(root: Path) -> list[dict]:
+    """Git's complete registration list for one repository top level."""
+    return _registered(root)[0]
+
+
 def has_registered_worktrees(root: Path) -> bool:
     """Detect other registered worktrees before removing a root's read grant."""
     try:

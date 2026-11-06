@@ -5,8 +5,10 @@ import itertools
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import stat
+import sys
 from typing import TYPE_CHECKING
 
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, file_parent, file_parts
@@ -24,9 +26,8 @@ MAX_RESULT = 65536
 
 
 def capabilities() -> dict:
-    return {"protocol": 1, "list": True, "inspect": True, "register": False,
-            "transports": ["local"], "max_entries": MAX_SCAN_ENTRIES,
-            "max_page": MAX_PAGE, "max_path_bytes": MAX_PATH,
+    return {"protocol": 2, "actions": ["root", "list", "inspect"], "transports": ["local"],
+            "max_entries": MAX_SCAN_ENTRIES, "max_page": MAX_PAGE, "max_path_bytes": MAX_PATH,
             "max_depth": MAX_DEPTH, "result_bytes": MAX_RESULT}
 
 
@@ -95,13 +96,32 @@ def _target(config: "Settings", machine: str, workspace: str, path: str) -> dict
             "target_id": _digest(observations[1])}
 
 
-def _directories(config: "Settings", machine: str, workspace: str, path: str) -> tuple[list[str], str]:
-    parts = _parts(path)
-    selected = _target(config, machine, workspace, path)
-    root = root_for(config, machine, workspace)
-    rows = []
+def desktop(machine: str) -> dict:
+    """The account's own Desktop, from the account database; never $HOME, Finder or a fallback."""
+    if sys.platform != "darwin":
+        raise Fault("desktop_unsupported", "Desktop-first discovery is available on macOS; navigate explicitly.")
+    path = Path(pwd.getpwuid(os.getuid()).pw_dir) / "Desktop"
     try:
-        with file_parent(root, (*parts, "unused")) as directory:
+        info = os.lstat(path)
+        canonical = path.resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError) as error:
+        raise Fault("desktop_missing", "This account has no Desktop folder; navigate to an explicit directory.") from error
+    except (OSError, RuntimeError) as error:
+        raise Fault("desktop_access_denied", "The OS denied access to the Desktop folder.") from error
+    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or canonical != path):
+        raise Fault("desktop_redirected", "The Desktop folder is linked or redirected; navigate to it explicitly.")
+    return {"protocol": 2, "root": {"machine": machine, "workspace_name": str(path), "relative_path": ".",
+                                    "name": "Desktop"}}
+
+
+def _directories(config: "Settings", machine: str, workspace: str, path: str) -> tuple[list[str], str]:
+    """Direct child directories by lstat only: no recursion, link following, content or Git probe."""
+    parts = _parts(path)
+    rows, identities = [], []
+    try:
+        root = root_for(config, machine, workspace)
+        with file_parent(root, (*parts, "unused"), identities=identities) as directory:
             before = os.fstat(directory)
             with os.scandir(directory) as stream:
                 entries = list(itertools.islice(stream, MAX_SCAN_ENTRIES + 1))
@@ -122,21 +142,24 @@ def _directories(config: "Settings", machine: str, workspace: str, path: str) ->
         if (_identity(before), before.st_mtime_ns, before.st_ctime_ns) != (
                 _identity(after), after.st_mtime_ns, after.st_ctime_ns):
             raise Fault("source_changed", "The directory changed while listing; restart at offset zero.")
+    except PermissionError as error:
+        raise Fault("directory_access_denied", "The OS denied listing this directory.") from error
     except OSError as error:
         raise Fault("project_unavailable", "Directory metadata could not be read safely.") from error
-    if _target(config, machine, workspace, path) != selected:
+    if root_for(config, machine, workspace) != root:
         raise Fault("project_changed", "The listing root changed during observation.")
     rows.sort()
-    return [name for name, _ in rows], _digest([selected["target_id"], rows, before.st_mtime_ns, before.st_ctime_ns])
+    return [name for name, _ in rows], _digest([2, machine, str(root), path, identities, rows,
+                                                before.st_mtime_ns, before.st_ctime_ns])
 
 
 def inspect(config: "Settings", machine: str, workspace_name: str = "", action: str = "list",
             path: str = ".", offset: int = 0, limit: int = MAX_PAGE,
             expected_snapshot: str = "", expected_target_id: str = "") -> dict:
-    """List configured roots or direct child directories; inspect/revalidate one target."""
+    """Resolve the Desktop root, list direct child directories, or inspect/revalidate one target."""
     if config.machine(machine).transport != "local":
-        raise Fault("unsupported_operation", "Project catalog protocol 1 supports local machines only.")
-    if (not isinstance(action, str) or action not in {"list", "inspect"} or not isinstance(workspace_name, str)
+        raise Fault("unsupported_operation", "Project catalog protocol 2 supports local machines only.")
+    if (not isinstance(action, str) or action not in {"root", "list", "inspect"} or not isinstance(workspace_name, str)
             or not all(isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{64})?", value)
                        for value in (expected_snapshot, expected_target_id))):
         raise Fault("invalid_project_request", "Use a catalog action and complete original identity hashes.")
@@ -144,44 +167,31 @@ def inspect(config: "Settings", machine: str, workspace_name: str = "", action: 
     if (type(offset) is not int or not 0 <= offset <= MAX_SCAN_ENTRIES
             or type(limit) is not int or not 1 <= limit <= MAX_PAGE):
         raise Fault("invalid_range", "Use a bounded nonnegative offset and page size from 1 to 50.")
-    if action == "inspect":
+    if action == "root":
+        if workspace_name or path != "." or offset or limit != MAX_PAGE or expected_snapshot or expected_target_id:
+            raise Fault("invalid_project_request", "Root discovery takes no directory, pagination or identity inputs.")
+        result = desktop(machine)
+    elif action == "inspect":
         if not workspace_name or offset or limit != MAX_PAGE or expected_snapshot:
             raise Fault("invalid_project_request", "Inspect requires a workspace and no pagination inputs.")
         target = _target(config, machine, workspace_name, path)
         if expected_target_id and expected_target_id != target["target_id"]:
             raise Fault("project_changed", "The saved target no longer matches; explicit reselection is required.")
-        result = {"protocol": 1, "project": target}
+        result = {"protocol": 2, "project": target}
     else:
-        if expected_target_id or (not workspace_name and path != ".") or (offset and not expected_snapshot):
-            raise Fault("invalid_project_request", "List roots or one workspace directory; echo the snapshot on continuation.")
-        if workspace_name:
-            names, snapshot = _directories(config, machine, workspace_name, path)
-            targets = [(workspace_name, name) for name in names]
-        else:
-            if len(config.workspaces) > MAX_SCAN_ENTRIES:
-                raise Fault("catalog_limit", "Select an explicit configured workspace.")
-            roots = sorted((name, item.root) for name, item in config.workspaces.items() if item.machine == machine)
-            snapshot = _digest([1, machine, roots])
-            targets = [(name, ".") for name, _ in roots]
+        if not workspace_name or expected_target_id or (offset and not expected_snapshot):
+            raise Fault("invalid_project_request", "List one explicit directory; use action root for the Desktop. "
+                        "Echo the snapshot on continuation.")
+        names, snapshot = _directories(config, machine, workspace_name, path)
         if expected_snapshot and expected_snapshot != snapshot:
-            raise Fault("source_changed", "The catalog changed between pages; restart at offset zero.")
-        if offset > len(targets):
-            raise Fault("invalid_range", "The offset exceeds this catalog.")
-        projects = []
-        for workspace, relative in targets[offset:offset + limit]:
-            try:
-                projects.append(_target(config, machine, workspace, relative))
-            except Fault as error:
-                if error.code not in {"project_unavailable", "source_unavailable"}:
-                    raise
-                # Unavailable is not a selectable folder or evidence of absence.
-                projects.append({"machine": machine, "workspace_name": workspace,
-                                 "relative_path": relative, "error": error.code})
-        if workspace_name and _directories(config, machine, workspace_name, path)[1] != snapshot:
-            raise Fault("source_changed", "The catalog changed during inspection; restart at offset zero.")
-        more = offset + len(projects) < len(targets)
-        result = {"protocol": 1, "projects": projects, "snapshot": snapshot, "offset": offset,
-                  "next_offset": offset + len(projects) if more else None, "has_more": more}
+            raise Fault("source_changed", "The directory changed between pages; restart at offset zero.")
+        if offset > len(names):
+            raise Fault("invalid_range", "The offset exceeds this directory listing.")
+        page = names[offset:offset + limit]
+        more = offset + len(page) < len(names)
+        result = {"protocol": 2, "directories": [{"relative_path": name, "name": name.rsplit("/", 1)[-1]} for name in page],
+                  "snapshot": snapshot, "offset": offset,
+                  "next_offset": offset + len(page) if more else None, "has_more": more}
     if len(json.dumps(result, ensure_ascii=True).encode()) > MAX_RESULT:
         raise Fault("catalog_limit", "The metadata response exceeds its byte limit; use a smaller page.")
     return result

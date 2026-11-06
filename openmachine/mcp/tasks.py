@@ -7,8 +7,8 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 from openmachine import tasks
-from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT,
-                                      _reply, _result, _submit_owned)
+from openmachine.mcp.protocol import (READ, WRITE, LOCAL_WRITE, MAX_TASK_WAIT, OperationScope,
+                                      _operation_scope, _reply, _result, _submit_owned)
 
 def register_task_tools(application, guided_tool, waiting):
     @guided_tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
@@ -17,10 +17,12 @@ def register_task_tools(application, guided_tool, waiting):
                     update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
                     title: Annotated[str, Field(min_length=1, max_length=200)],
                     anchors: Annotated[list[str], Field(max_length=16)], origin: tasks.Origin, contract: tasks.Contract,
-                    stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)]) -> CallToolResult:
+                    stages: Annotated[list[tasks.StageDefinition], Field(min_length=1, max_length=16)],
+                    operation_scope: OperationScope | None = None) -> CallToolResult:
         """Create an authorized structured task; preserve readable instructions and inputs with correctly hashed stage sources. Preserve task/update IDs after uncertainty; committed creation is not business permission. Explicit claim/current task_context remain required. Never convert legacy history or supply runtime facts."""
         return _reply(lambda: application.create_task(task_id, update_id, title, anchors, origin.model_dump(),
-                      contract.model_dump(), [stage.model_dump() for stage in stages]), task_output=True)
+                      contract.model_dump(), [stage.model_dump() for stage in stages],
+                      operation_scope=_operation_scope(operation_scope)), task_output=True)
 
     @guided_tool(annotations=WRITE)
     async def control_task(task_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")],
@@ -28,10 +30,12 @@ def register_task_tools(application, guided_tool, waiting):
                            expected_plan_revision: Annotated[int, Field(strict=True, ge=1, le=9007199254740991)],
                            expected_epoch: Annotated[int, Field(strict=True, ge=0, le=9007199254740991)],
                            update_id: Annotated[str, Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")],
-                           transition: tasks.Transition) -> CallToolResult:
+                           transition: tasks.Transition,
+                           operation_scope: OperationScope | None = None) -> CallToolResult:
         """Control the original task using exact task/plan/epoch revisions; retain update_id after uncertainty. Renew the original claim_id/principal/epoch. Expired authority requires a revised contract with fresh evidence. bind_effect_scope needs original normalized arguments and never resolves an unknown effect. Claims grant no permission. Pause blocks new admission; cancellation preserves admitted/unknown effects. Finish requires action, outcome, acceptance references to accepted original evidence and limitations. Inspect returned state and observation blockers."""
         operation = partial(_reply, lambda: application.control_task(task_id, expected_revision,
-            expected_plan_revision, expected_epoch, update_id, transition.model_dump()), task_output=True)
+            expected_plan_revision, expected_epoch, update_id, transition.model_dump(),
+            operation_scope=_operation_scope(operation_scope)), task_output=True)
         return await asyncio.shield(asyncio.wrap_future(_submit_owned(operation)))
 
     @guided_tool(annotations=READ)
