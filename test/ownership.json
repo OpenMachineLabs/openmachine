@@ -121,7 +121,8 @@
       ],
       "tests": [
         "test/component/connections/test_connections.py",
-        "test/component/connections/test_github_web.py"
+        "test/component/connections/test_github_web.py",
+        "test/component/connections/test_github_cloud.py"
       ]
     },
     "credentials": {
@@ -236,7 +237,8 @@
         "integrations/github/connection.py",
         "integrations/github/evidence.py",
         "integrations/github/operations.py",
-        "integrations/github/web_broker.py"
+        "integrations/github/web_broker.py",
+        "integrations/github/cloud.py"
       ],
       "tests": [
         "test/component/github/test_transport.py",
@@ -753,7 +755,8 @@
     ],
     "test/support/connections_cases.py": [
       "test/component/connections/test_connections.py",
-      "test/component/connections/test_github_web.py"
+      "test/component/connections/test_github_web.py",
+      "test/component/connections/test_github_cloud.py"
     ],
     "test/support/continuity_cases.py": [
       "test/component/app/test_initialization.py",
@@ -896,7 +899,8 @@
       "test/component/app/test_writer_reservations.py",
       "test/resilience/execution/test_task_writer_reservations.py",
       "test/component/tasks/test_writer_migration.py",
-      "test/component/app/test_operation_scope.py"
+      "test/component/app/test_operation_scope.py",
+      "test/component/connections/test_github_cloud.py"
     ],
     "test/support/workspace.py": [
       "test/component/service/test_workspace_compatibility.py",

@@ -151,7 +151,7 @@ class _GitHubWebApp:
             return await fail(400, "invalid_github_web_request")
         action = path[len(_WEB_PREFIX):]
         status_match = re.fullmatch(r"status/([0-9a-f]{32})", action)
-        if action not in {"identity", "begin", "complete", "cancel"} and status_match is None:
+        if action not in {"identity", "begin", "complete", "cancel", "cloud-bind"} and status_match is None:
             return await fail(404, "github_web_route_not_found")
         reading = action == "identity" or status_match is not None
         if method != ("GET" if reading else "POST"):
@@ -182,7 +182,7 @@ class _GitHubWebApp:
             else:
                 request = _web_json(bytes(body))
                 handler = {"begin": self.connections.web_begin, "complete": self.connections.web_complete,
-                           "cancel": self.connections.web_cancel}[action]
+                           "cancel": self.connections.web_cancel, "cloud-bind": self.connections.cloud_bind}[action]
                 operation = lambda: handler(request)
         except TimeoutError:
             return await fail(408, "github_web_request_timeout")

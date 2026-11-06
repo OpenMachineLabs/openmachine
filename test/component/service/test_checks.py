@@ -40,7 +40,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
     def test_sqlite_candidate_requires_same_authority_and_supported_actual_engine(self):
         tasks.migrate(self.state)
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (27, "sqlite"))
+        self.assertEqual((proof["state_contract"], proof["task_storage"]["kind"]), (service_state.STATE_CONTRACT, "sqlite"))
         storage = proof["task_storage"]
         for delta in ({"state_contract": 17}, {"task_storage": None},
                       {"task_storage": storage | {"identity": "f" * 32}},
@@ -140,7 +140,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         replace_task_record(self.state, terminal_task_fixture(created["record"]))
         before = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (27, 1, 1))
+        self.assertEqual((proof["state_contract"], proof["task_records"], proof["structured_task_records"]), (service_state.STATE_CONTRACT, 1, 1))
         self.assertEqual(service_checks._candidate_state(
             Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
         for delta in ({"state_contract": 14}, {"structured_task_formats_present": [1, 2]},
@@ -229,7 +229,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         replace_task_record(self.state, value)
         original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [4]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (service_state.STATE_CONTRACT, [4]))
         self.assertEqual(service_checks._candidate_state(
             Path(sys.executable), self.config, self.state, service_state.STATE_CONTRACT), proof)
         for delta in ({"state_contract": 15}, {"structured_task_read_formats": [1, 2, 3]},
@@ -251,7 +251,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         replace_task_record(self.state, value)
         original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [5]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (service_state.STATE_CONTRACT, [5]))
         self.assertIn(5, proof["structured_task_read_formats"])
         for delta in ({"state_contract": 23},
                       {"structured_task_read_formats": [1, 2, 3, 4]},
@@ -272,7 +272,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         replace_task_record(self.state, value)
         original = tasks.read(self.state, "structured-one")["record"]
         proof = service.check_state(self.config, self.state)
-        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (27, [6]))
+        self.assertEqual((proof["state_contract"], proof["structured_task_formats_present"]), (service_state.STATE_CONTRACT, [6]))
         self.assertIn(6, proof["structured_task_read_formats"])
         for delta in ({"state_contract": 25},
                       {"structured_task_read_formats": [1, 2, 3, 4, 5]},

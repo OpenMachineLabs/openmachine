@@ -81,7 +81,17 @@ class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
                 started = await call("start_execution", arguments)
                 self.assertNotIn(started["status"], TERMINAL)
                 record = (await call("read_task", {"task_id": identity}))["record"]
-                paused = (await call("control_task", control(record, "pause", reason="Keep original work while blocking new admission.")))["record"]
+                pause = control(record, "pause", reason="Keep original work while blocking new admission.")
+                result = await client.call_tool("control_task", pause)
+                if result.is_error:
+                    # The observer may publish the original execution's state between
+                    # read and pause. Only this proven pre-effect conflict permits a new intent.
+                    self.assertEqual(result.structured_content["error"]["code"], "task_conflict")
+                    self.assertTrue(result.structured_content["observation_only"])
+                    record = (await call("read_task", {"task_id": identity}))["record"]
+                    paused = (await call("control_task", control(record, "pause", reason=pause["transition"]["reason"])))["record"]
+                else:
+                    paused = result.structured_content["record"]
                 self.assertEqual(paused["control"]["stop_intent"], "pause")
                 self.assertIsNone(paused["handoff"])
             self.stop(self.processes[-1])

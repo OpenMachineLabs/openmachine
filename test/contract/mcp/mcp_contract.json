@@ -130,6 +130,12 @@
       "approval": "Maintainer request on 2026-11-06 authorizes Core operation-scoped filesystem enforcement for Cloud Selected Projects up to a mergeable PR.",
       "base_commit": "da4efd1046d9a8db1002097289e21432063d193b",
       "change": "Add one optional Connector-injected operation_scope object (protocol 1) to the eleven filesystem tools and the root action to inspect_projects. Every other input, default and annotation is unchanged."
+    },
+    {
+      "approval": "https://github.com/OpenMachineLabs/openmachine/issues/246#evidence-and-authorization",
+      "base_commit": "cffec73ba5bc3797b33416b56805a57b54bddfcc",
+      "change": "Add only the optional native/cloud github_source selector to Task contracts, defaulting to native and omitted from native persisted serialization. Cloud Task admission resolves the account default once and retains the existing github_connections binding. Preserve every tool name, annotation and unrelated field. This deliberate expectation follows the approved contract, not regeneration from candidate output.",
+      "issue": "https://github.com/OpenMachineLabs/openmachine/issues/246"
     }
   ],
   "baseline": {
@@ -932,6 +938,15 @@
                 "maxItems": 16,
                 "title": "Tools",
                 "type": "array"
+              },
+              "github_source": {
+                "default": "native",
+                "enum": [
+                  "native",
+                  "cloud"
+                ],
+                "title": "Github Source",
+                "type": "string"
               }
             },
             "required": [
@@ -1623,6 +1638,15 @@
                 "maxItems": 16,
                 "title": "Tools",
                 "type": "array"
+              },
+              "github_source": {
+                "default": "native",
+                "enum": [
+                  "native",
+                  "cloud"
+                ],
+                "title": "Github Source",
+                "type": "string"
               }
             },
             "required": [

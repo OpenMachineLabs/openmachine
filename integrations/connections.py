@@ -86,6 +86,14 @@ class Connections:
     def web_complete(self, request: dict) -> dict:
         return self._web.complete(request)
 
+    def cloud_bind(self, request: dict) -> dict:
+        from integrations.github.cloud import bind
+        return bind(self, request)
+
+    def cloud_default(self) -> str:
+        from integrations.github.cloud import resolve
+        return resolve(self)
+
     def _policy(self, item: Connection, repository: str, write=False):
         config = self._enabled()
         from integrations.github import connection
@@ -329,7 +337,10 @@ class Connections:
                     if item.authorization_revision != expected_revision:
                         raise Fault("integration_connection_changed", "Read the current revision before disconnecting.")
                     item.status = "disconnected"
-                    item.authorization_revision += 1
+                    # A local disable cannot invent a revision of Cloud's authorization.
+                    # Rebinding this same revision remains denied; real reauthorization advances it.
+                    if item.backend != "cloud":
+                        item.authorization_revision += 1
                     for _, attempt in pending:
                         attempt.status, attempt.action = "cancelled", None
                     for attempt in web_pending:
@@ -460,7 +471,7 @@ class Connections:
             raise Fault("integration_connection_changed", "The original authorization revision changed.")
         return item
 
-    def request(self, repository="", *, connection_id="", binding=None, write=False, historical_unbound=False):
+    def request(self, repository="", *, connection_id="", binding=None, write=False, historical_unbound=False, scope=None):
         item = self.select(repository, connection_id=connection_id, binding=binding, write=write, historical_unbound=historical_unbound)
         selected = item.binding()
 
@@ -469,6 +480,14 @@ class Connections:
             try:
                 with self.admit(), _guard(self.state / "locks" / f"credential-{item.id}.lock"):
                     retained = self.select(repository, binding=selected, write=write)
+                    if retained.backend == "cloud":
+                        from integrations.github.cloud import request as cloud_request
+                        preparing = False
+                        try:
+                            return cloud_request(self.state, retained, repository, write, method, endpoint, payload, scope)
+                        except Fault as error:
+                            request_error = error
+                            raise
                     for force in (False, True):
                         current = self._token(retained, force=force)
                         preparing, request_error = False, None

@@ -140,7 +140,7 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         original = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
         _, stop, start = self.ledger_activation_fixture()
         path = self.state / "service/versions" / self.b / "installation.json"
-        save_json(path, service_state._json(path) | {"state_contract": 27})
+        save_json(path, service_state._json(path) | {"state_contract": service_state.STATE_CONTRACT})
         self.assert_fault("task_migration_required", lambda: service_transition._activate(
             self.state, self.record, self.b))
         stop.assert_not_called()
