@@ -66,6 +66,14 @@ class RepositoryChecks(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertTrue(rules.title_errors(title, kind))
 
+    def test_pr_title_fits_the_squash_commit_subject(self):
+        body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
+        fits = "docs(readme): " + "a" * (72 - len("docs(readme): ") - len(" (#250)"))
+        self.assertEqual(rules.metadata_errors({"title": fits, "body": body, "number": 250}, "pr"), [])
+        self.assertEqual(rules.metadata_errors({"title": fits + "a", "body": body, "number": 250}, "pr"),
+                         ["PR title plus its ' (#N)' squash suffix must fit within 72 characters"])
+        self.assertEqual(rules.metadata_errors({"title": fits + "a", "body": body}, "pr"), [])
+
     def test_nonconventional_pr_title_warns_without_blocking(self):
         for title in ("Update README.md", "[SURVEY] research(repo): investigate governance",
                       "docs(repo): update"):
