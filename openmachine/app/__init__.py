@@ -84,10 +84,13 @@ class Application:
         try:
             provider = self._provider()
             locator = arguments.get("locator") or {}
+            object_key = {"comment": "comment_id", "review": "review_id", "release": "release_id"}.get(operation, "")
             transport = self.connections.request(repository, connection_id=selected, binding=binding,
                 write=operation not in {"read", "reconcile"}, historical_unbound=historical_unbound,
                 scope={"operation": operation, "action": arguments.get("action", locator.get("object_type", "")),
                        "number": arguments.get("number", locator.get("number")) or 0,
+                       "object_id": arguments.get(object_key) or 0,
+                       "workflow": arguments.get("workflow", "") if operation == "workflow" else "",
                        "project_number": arguments.get("project_number", locator.get("number") if locator.get("object_type") == "project" else 0) or 0})
 
         except Fault as error:

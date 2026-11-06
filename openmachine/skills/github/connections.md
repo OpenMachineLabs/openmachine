@@ -117,6 +117,11 @@ requests pass through the existing private connector broker and restricted proxy
 Core retains repository policy, GitHub business checks, Tasks and original results.
 A Cloud connection is never represented as a fabricated local keychain credential.
 
+Disconnecting a Cloud connection in Core disables only this local binding. It does
+not remove the account service's association or credentials; use the service's
+account controls for that. An unchanged authorization revision cannot silently
+reactivate the local binding; a verified account reauthorization is required.
+
 For new Cloud-backed Task contracts, `github_source="cloud"` resolves the account
 service's persisted default during new admission and pins `github_connections`.
 Original Task-ID recovery happens first. Changing the default affects new tasks,

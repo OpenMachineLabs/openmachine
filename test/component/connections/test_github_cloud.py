@@ -66,6 +66,25 @@ class CloudConnectionTests(ConnectionCaseFixture, unittest.TestCase):
             self.assertEqual(send.call_args.args[2:6], ("Example/repo", False, "GET", "repos/Example/repo"))
         self.fault("integration_authentication_required", self.app.connections.select)
 
+    def test_cloud_scope_retains_the_original_object_and_workflow_selectors(self):
+        selected = self.app.connections.cloud_bind(self.binding())["connection_id"]
+        cases = [
+            ("comment", {"action": "update", "number": 3, "comment_id": 22}, 22, ""),
+            ("review", {"action": "update", "number": 3, "review_id": 44}, 44, ""),
+            ("release", {"action": "publish", "release_id": 66}, 66, ""),
+            ("workflow", {"action": "dispatch", "workflow": "ci.yml"}, 0, "ci.yml"),
+        ]
+        for operation, arguments, object_id, workflow in cases:
+            with self.subTest(operation=operation), \
+                    patch.object(self.app._provider(), operation,
+                        side_effect=lambda settings, transport, **kwargs: transport("GET", "repos/Example/repo")), \
+                    patch.object(cloud, "request", return_value={"ok": True}) as send:
+                self.app._github_call(operation, {**arguments, "repository": "Example/repo", "connection_id": selected})
+                scope = send.call_args.args[-1]
+                self.assertEqual(scope["operation"], operation)
+                self.assertEqual(scope["number"], arguments.get("number", 0))
+                self.assertEqual((scope["object_id"], scope["workflow"]), (object_id, workflow))
+
     def test_reauthorization_does_not_replace_an_original_task_binding(self):
         request = self.binding()
         result = self.app.connections.cloud_bind(request)
