@@ -682,6 +682,29 @@
       ],
       "boundary_tests": []
     },
+    "minimal_code": {
+      "sources": [
+        "skill-library/minimal-code/README.md",
+        "skill-library/minimal-code/SKILL.md",
+        "skill-library/minimal-code/evals/evals.json",
+        "skill-library/minimal-code/evals/files/bug-fix-in-place/durations.py",
+        "skill-library/minimal-code/evals/files/bug-fix-in-place/test_durations.py",
+        "skill-library/minimal-code/evals/files/issue-without-scope-creep/app.py",
+        "skill-library/minimal-code/evals/files/issue-without-scope-creep/requirements.txt",
+        "skill-library/minimal-code/evals/files/preserve-needed-validation/bank.py",
+        "skill-library/minimal-code/evals/files/preserve-needed-validation/test_bank.py",
+        "skill-library/minimal-code/evals/files/second-format-without-framework/cli.py",
+        "skill-library/minimal-code/evals/files/second-format-without-framework/report.py",
+        "skill-library/minimal-code/evals/files/second-format-without-framework/test_report.py",
+        "skill-library/minimal-code/evals/files/vectorize-with-parity/masked_mean.py",
+        "skill-library/minimal-code/evals/triggers.json",
+        "skill-library/minimal-code/references/ml.md"
+      ],
+      "tests": [
+        "test/skill-library/minimal-code/test_skill.py"
+      ],
+      "boundary_tests": []
+    },
     "project_to_motion": {
       "sources": [],
       "tests": [

@@ -1,0 +1,13 @@
+[
+  {"query": "Fix the off-by-one error in pagination.py so the last page isn't dropped", "should_trigger": true},
+  {"query": "Add a --dry-run flag to our deploy script", "should_trigger": true},
+  {"query": "Refactor the user service so it's easier to extend later", "should_trigger": true},
+  {"query": "Write an implementation plan for adding webhooks to the billing module", "should_trigger": true},
+  {"query": "This function is way too convoluted; simplify it but keep exactly the same behavior", "should_trigger": true},
+  {"query": "Port the CSV loader from pandas to the standard library", "should_trigger": true},
+  {"query": "The last change added a lot of defensive checks and wrappers; clean it up so it reads like normal code", "should_trigger": true},
+  {"query": "Review PR 42 and tell me if it is ready to merge", "should_trigger": false},
+  {"query": "Explain how Python's GIL works", "should_trigger": false},
+  {"query": "Write a blog post about our Q3 launch", "should_trigger": false},
+  {"query": "Regenerate the protobuf stubs after the schema change", "should_trigger": false}
+]
