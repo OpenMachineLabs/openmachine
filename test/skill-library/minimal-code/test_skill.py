@@ -30,9 +30,9 @@ class MinimalCodeSkillTests(unittest.TestCase):
         for case in evals["evals"]:
             with self.subTest(case=case["id"]):
                 self.assertEqual(case["files"], [f"files/{case['id']}"])
-                self.assertTrue((ROOT / "evals" / case["files"][0]).is_dir())
                 self.assertTrue(case["prompt"] and case["expectations"])
-        self.assertEqual(sorted(path.name for path in (ROOT / "evals/files").iterdir()), sorted(ids))
+        projects = [path.name for path in (ROOT / "evals/files").iterdir() if path.is_dir()]
+        self.assertEqual(sorted(projects), sorted(ids))
         triggers = json.loads((ROOT / "evals/triggers.json").read_text())
         self.assertEqual({item["should_trigger"] for item in triggers}, {True, False})
 

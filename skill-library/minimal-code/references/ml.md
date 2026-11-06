@@ -18,9 +18,10 @@ list which of these the change touches and preserve each explicitly:
   and consumers.
 
 Build the smallest correct vertical path with a trustworthy oracle first, such
-as the plain loop or the full uncached computation. Keep the parity check against
-it, including edge cases such as empty masks, as a repository test rather than
-a throwaway script.
+as the plain loop or the full uncached computation. Keep the parity check
+against it, including edge cases such as empty masks, as a repository test
+rather than a throwaway script.
+
 Add caching, batching, fusion or distributed execution only after a current
 caller or measurement requires it. Vectorize Python-side tensor loops when
 semantics are preserved.

@@ -43,7 +43,7 @@
         "All four validations remain with the same exception types",
         "No validation is moved into a decorator, helper class or schema library",
         "No mutation happens before all validations pass",
-        "Says plainly that little can be simplified instead of inventing restructuring"
+        "Limits any simplification to cosmetic changes, such as removing temporary variables, or says the function is already minimal; does not invent restructuring"
       ]
     },
     {
