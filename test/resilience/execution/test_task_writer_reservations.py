@@ -195,7 +195,7 @@ while not Path(request['gate']).exists():
  if time.monotonic()>end: raise RuntimeError('Fixture barrier timeout')
  time.sleep(.01)
 try:
- result=app.write_workspace_file(**request['arguments']); print(json.dumps({'status':result['status']}))
+ result=app.write_workspace_file(**request['arguments']); print(json.dumps({'status':result['status'],'rejection_code':result.get('error')}))
 except Fault as error:
  print(json.dumps({'error':error.code,'effect':error.effect}))
 finally: app.task_observer.stop()
