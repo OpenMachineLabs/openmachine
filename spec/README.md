@@ -1,10 +1,12 @@
 # Spec and Survey Index
 
-This index links original design authority. Issue bodies and linked PRs own
-implementation progress, acceptance and history; avoid mirroring their changing
-status here. Current code and tests describe implemented behavior.
+This optional index lists design Issues for easy reference. Listing is not
+required for approval: a maintainer-approved Spec, including one in another Open
+Machine repository, authorizes its scope without an entry here. Issue bodies and
+linked PRs own implementation progress, acceptance and history; avoid mirroring
+their changing status here. Current code and tests describe implemented behavior.
 
-## Approved Spec references
+## Spec references
 
 | Issue | Binding | Scope |
 | --- | --- | --- |
