@@ -412,10 +412,14 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
                 result = transition._resume_activation(state, selected)
                 _save(state, record, "completed", outcome=result)
             elif _restoring(record, selected := service_state._record(state)):
-                # An interrupted restore repeats idempotently under its original ID.
+                # An interrupted restore repeats idempotently under its original ID,
+                # unless readback proves it already succeeded.
                 _bound(Path(request["config"]), state, selected)
-                result = transition._restore_configuration(state, selected, request["candidate_sha256"],
-                                                           request["config_sha256"], before_change=lambda: None)
+                result = runtime.status(Path(request["config"]), state)
+                if (_digest(Path(request["config"])) != request["candidate_sha256"]
+                        or result["status"] != "ready"):
+                    result = transition._restore_configuration(state, selected, request["candidate_sha256"],
+                                                               request["config_sha256"], before_change=lambda: None)
                 _save(state, record, "completed", outcome=result)
             return
         snapshot = _inputs_unchanged(state, record)

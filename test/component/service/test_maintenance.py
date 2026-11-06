@@ -801,11 +801,22 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.payload, "verify"):
             maintenance.continue_operation(self.config, self.state, record["operation_id"])
             spawn.assert_called_once()
-        result, _, start = self.run_restore(record)
+        result, _, start = self.run_restore(record, status={"status": "blocked"})
         self.assertEqual((result["phase"], result["operation_id"]), ("completed", record["operation_id"]))
         self.assertEqual(self.config.read_bytes(), selected)
         self.assertIsNone(service_state._read_recovery(self.state)["episode"])
         start.assert_called_once()
+
+    def test_completed_restore_with_a_lost_record_completes_by_readback(self):
+        record, selected, _ = self.restore_fixture()
+        self.config.write_bytes(selected)
+        service_state._save_recovery(self.state, None)
+        maintenance._save(self.state, record, "activating", outcome={"activation": {
+            "from": self.a, "previous": None, "basis_sha256": maintenance._activation_basis(service_state._record(self.state))}})
+        result, stop, start = self.run_restore(record, status={"status": "ready"})
+        self.assertEqual((result["phase"], result["outcome"]), ("completed", {"status": "ready"}))
+        stop.assert_not_called()
+        start.assert_not_called()
 
     def test_restore_reports_observed_readiness_after_a_failed_start(self):
         record, selected, _ = self.restore_fixture()
