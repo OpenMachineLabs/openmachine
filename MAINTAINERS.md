@@ -6,9 +6,9 @@ boundaries. External contributors should start with [CONTRIBUTING.md](CONTRIBUTI
 ## Design and scope
 
 Code and tests describe implemented behavior. The [Spec index](spec/README.md)
-links the approved scope and original decision; it is not a second implementation
-status ledger. Avoid unrelated changes, speculative modules and new dependencies
-without a demonstrated need.
+is an optional reference list of design Issues; it is neither an approval
+registry nor an implementation status ledger. Avoid unrelated changes,
+speculative modules and new dependencies without a demonstrated need.
 
 Use the repository's Issue templates according to the work:
 
@@ -23,10 +23,12 @@ Use the repository's Issue templates according to the work:
 | Task | Scoped maintenance, documentation or implementation work |
 
 An implementable Spec records requirements, boundaries, acceptance and relevant
-failure behavior. It becomes approved only with explicit maintainer authorization
-and an approval link recorded as `direct_issue_contract` in
-[spec/README.md](spec/README.md). A sufficiently explicit current user request
-can authorize a small change without another Spec. No draft, Survey, Roadmap or
+failure behavior. It becomes approved with explicit maintainer authorization in
+the Spec, a linked PR or the maintainer's current request; no index entry is
+required. A Spec may live in another Open Machine repository, including a private
+one. A public PR implementing it summarizes the scope it implements and never
+copies private details. A sufficiently explicit current user request can
+authorize a change without another Spec. No draft, Survey, Roadmap or
 Feature Request silently authorizes implementation, production work or purchases.
 
 Store Spec and Survey details in the original GitHub Issues, not duplicate files.

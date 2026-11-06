@@ -10,8 +10,10 @@ repository. A more specific `AGENTS.md`, such as
 Follow the current user request, then the approved design for the requested
 delta. The safety rules below apply regardless of either.
 
-- Approved Specs are linked from the [Spec index](spec/README.md). A
-  sufficiently explicit current user request can authorize a small change.
+- A Spec approved by a maintainer authorizes its scope wherever it lives,
+  including another Open Machine repository. A sufficiently explicit current
+  user request can authorize a change. Listing in the
+  [Spec index](spec/README.md) is optional, not an approval step.
 - Surveys, drafts, Feature Requests, Roadmaps and superseded Specs are evidence,
   not approval. [MAINTAINERS.md](MAINTAINERS.md#design-and-scope) defines each
   Issue type.
