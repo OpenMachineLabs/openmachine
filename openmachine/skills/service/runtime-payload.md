@@ -131,14 +131,19 @@ which records the original operation before independent preparation and invokes
 the verified incoming implementation from retained paths. `prepare-runtime` remains
 a preparation-only primitive; it neither selects a service nor creates update consent.
 
-## Ubuntu payload
+## Portable Linux payload
 
-The same producer supports native Ubuntu 24.04 x86_64 builds, using the Linux
-pins in `scripts/runtime-inputs.json`. Its exact target is
-`{"os":"linux","arch":"x86_64","distribution":"ubuntu","version":"24.04"}`.
-Build on that target; cross-building or substituting macOS input archives is not
-supported. The producer checks the downloaded Python/Git archive digests, retains
-the native layouts, and obtains wheels using the bundled native Python. The
+The same producer supports x86_64 GNU/Linux with glibc 2.34+ and a compatible
+systemd user-service manager, without a distribution-name whitelist. Its exact
+manifest target is `{"os":"linux","arch":"x86_64","libc":"glibc",
+"glibc_minimum":"2.34","service":"systemd-user"}`. The host must meet the
+native ABI and service requirements independently; a matching manifest does not
+prove that every distribution has passed native acceptance.
+
+Use the Linux pins in `scripts/runtime-inputs.json` on a compatible native
+Linux build machine. Cross-building or substituting macOS archives is not
+supported. The producer verifies the Python/Git archive digests, retains native
+layouts, and obtains compatible pinned wheels using the bundled Python. The
 existing macOS target and pins remain unchanged.
 
 The output is an **unsigned local build**. Its manifest SHA256 proves selected
@@ -150,10 +155,13 @@ links before copying or executing the payload. The retained Python, Git and
 wheelhouse support installation without target-side dependency downloads or a
 separate developer Python/Git installation.
 
-The PR and opt-in `linux_native` quality workflow builds the selected candidate and runs
-`NativeFirstUseTests` with a disposable hosted Ubuntu account and private native
-unit. It does not enable linger. This verifies packaged first use, original
-maintenance readback, MCP/file readiness, stop/resume/restart and supervisor-loss
-cleanup. The harness reports available host tools: bundled-tool use is not proof
-that the host has no developer tools or that all network access was denied.
-Mocked macOS tests do not establish native Linux acceptance.
+The opt-in `linux_native` workflow builds the selected candidate and runs
+`NativeFirstUseTests` under disposable non-root hosted accounts on Ubuntu 22.04,
+24.04 and 26.04, each with a private native user unit. It does not enable linger.
+The checks exercise packaged first use, original maintenance readback, MCP/file
+readiness, stop/resume/restart and supervisor-loss cleanup. Their results must
+be read at the exact candidate commit; configuring a runner is not a PASS claim.
+Other distributions require their own native evidence before product support can
+be asserted. The harness reports available host tools: bundled-tool use alone is
+not proof that the host has no developer tools or that all network access was
+denied. Mocked macOS tests do not establish native Linux acceptance.
