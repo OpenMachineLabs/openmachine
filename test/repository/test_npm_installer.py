@@ -37,7 +37,7 @@ class NpmInstallerTests(unittest.TestCase):
         workflow = (root / ".github/workflows/npm-release.yml").read_text()
         step = workflow.split("      - name: Verify registry artifact\n", 1)[1]
         header, body = step.split("        run: |\n", 1)
-        self.assertIn("        timeout-minutes: 10\n", header)
+        self.assertIn("        timeout-minutes: 35\n", header)
         lines = []
         for line in body.splitlines():
             if line and not line.startswith("          "):
@@ -46,7 +46,7 @@ class NpmInstallerTests(unittest.TestCase):
         script = "\n".join(lines)
         for mode, exit_code, attempts, sleeps in (
             ("ready", 0, 1, 0), ("delayed", 0, 3, 2),
-            ("unavailable", 1, 20, 19), ("mismatch", 1, 1, 0), ("fatal", 1, 1, 0),
+            ("unavailable", 1, 60, 59), ("mismatch", 1, 1, 0), ("fatal", 1, 1, 0),
         ):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 work = Path(temporary)
@@ -89,7 +89,7 @@ class NpmInstallerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 self.assertEqual(int((work / "attempts").read_text()), attempts)
                 observed = (work / "sleeps").read_text().splitlines() if (work / "sleeps").exists() else []
-                self.assertEqual(observed, ["15"] * sleeps)
+                self.assertEqual(observed, ["30"] * sleeps)
 
 
 if __name__ == "__main__":
