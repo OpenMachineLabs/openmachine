@@ -798,6 +798,10 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         result, _, start = self.run_restore(record, stop=OSError("lost after the configuration effect"))
         self.assertEqual(result["phase"], "recovery_required")
         start.assert_not_called()
+        # A retryable failure during continuation keeps the applied effect recoverable.
+        with patch.object(service_checks, "activation_safe", side_effect=Fault("resource_busy", "fixture")):
+            result, _, start = self.run_restore(record, status={"status": "blocked"})
+        self.assertEqual((result["phase"], result["reason"]), ("recovery_required", "resource_busy"))
         with patch.object(maintenance, "_spawn") as spawn, patch.object(maintenance.payload, "verify"):
             maintenance.continue_operation(self.config, self.state, record["operation_id"])
             spawn.assert_called_once()
@@ -806,6 +810,9 @@ class ServiceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), selected)
         self.assertIsNone(service_state._read_recovery(self.state)["episode"])
         start.assert_called_once()
+        with patch.object(maintenance.payload, "verify"):
+            self.assert_fault("maintenance_not_continuable",
+                              lambda: maintenance.continue_operation(self.config, self.state, record["operation_id"]))
 
     def test_completed_restore_with_a_lost_record_completes_by_readback(self):
         record, selected, _ = self.restore_fixture()

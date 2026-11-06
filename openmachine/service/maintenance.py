@@ -296,7 +296,8 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         if record["request"]["config"] != str(config_path):
             raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
         if (record["phase"] not in CONTINUABLE and _cutover_selection(state, record) is None
-                and not _restoring(record, service_state._record(state))):
+                and not (record["phase"] in {"activating", "recovery_required"}
+                         and _restoring(record, service_state._record(state)))):
             raise Fault("maintenance_not_continuable", "Preparation or activation may have occurred; read original state without replay.")
         python = sys.executable
         if record["phase"] != "accepted":
@@ -493,6 +494,8 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
     except Fault as error:
         phase = "restored" if error.code == "activation_failed_restored" else (
             "recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
+            # A restore continuation may follow an applied configuration effect.
+            or record["phase"] == "recovery_required" and _restoring(record, service_state._record(state))
             or error.code == "service_output_limit" else
             "deferred" if record["phase"] in {"prepared", "deferred"} and error.code in {
                 "resource_busy", "activation_deferred", "legacy_workspace_busy", "incompatible_remote_state"} else "rejected")
