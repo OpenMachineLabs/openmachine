@@ -1,0 +1,79 @@
+{
+  "skill_name": "minimal-code",
+  "evals": [
+    {
+      "id": "bug-fix-in-place",
+      "files": [
+        "files/bug-fix-in-place"
+      ],
+      "prompt": "Users report that parse_duration('1h30m') in durations.py raises. Fix it. Tests run with `python3 -m unittest`.",
+      "expected_output": "parse_duration accepts compound values like '1h30m' in the same function, keeps raising ValueError for invalid input, and a regression test covers the reported case.",
+      "expectations": [
+        "The fix stays in durations.py without a new module, class, parser object or configuration option",
+        "Invalid input such as '', '5x' and 'm5' still raises ValueError rather than returning a default",
+        "A regression test for '1h30m' is added to the existing test file",
+        "No new third-party dependency is introduced",
+        "The report lists checks as PASS, FAIL or NOT RUN"
+      ]
+    },
+    {
+      "id": "second-format-without-framework",
+      "files": [
+        "files/second-format-without-framework"
+      ],
+      "prompt": "Add CSV export to the report CLI, selected with `--format csv`; JSON stays the default. All rows share the same keys. Tests run with `python3 -m unittest`.",
+      "expected_output": "A small export_csv function using the standard csv module next to export_json, wired to --format with JSON as the default, and one focused test.",
+      "expectations": [
+        "Uses the standard library csv module, not pandas or another new dependency",
+        "Does not add an exporter class hierarchy, registry object, factory or plugin mechanism (a plain dict or if is fine)",
+        "Keeps JSON the default and limits --format to the two supported values",
+        "Adds a test that reads back the written CSV",
+        "Adds at most two focused tests and none for inputs the CLI cannot produce, such as empty rows",
+        "Does not add unrequested formats or options such as delimiter or encoding flags"
+      ]
+    },
+    {
+      "id": "preserve-needed-validation",
+      "files": [
+        "files/preserve-needed-validation"
+      ],
+      "prompt": "transfer() in bank.py feels long. Simplify it. Tests run with `python3 -m unittest`.",
+      "expected_output": "Either a small cosmetic reduction (such as removing the temporary variables) or an explanation that the function is already minimal; every validation and its error type is preserved.",
+      "expectations": [
+        "All four validations remain with the same exception types",
+        "No validation is moved into a decorator, helper class or schema library",
+        "No mutation happens before all validations pass",
+        "Says plainly that little can be simplified instead of inventing restructuring"
+      ]
+    },
+    {
+      "id": "issue-without-scope-creep",
+      "files": [
+        "files/issue-without-scope-creep"
+      ],
+      "prompt": "Our single-instance Flask API's /login endpoint (app.py) is being brute-forced. We want to limit failed login attempts per IP. Draft a GitHub Issue for it and save it as ISSUE.md; do not publish anything.",
+      "expected_output": "A short Issue with outcome, baseline, the /login caller, a concrete limit rule, non-goals and a focused acceptance check, with broader ideas listed as follow-ups.",
+      "expectations": [
+        "States the observable outcome and an acceptance check for /login specifically",
+        "Reuses the existing Redis rather than proposing a new service or dependency",
+        "Lists non-goals such as limiting every endpoint, dashboards or distributed coordination",
+        "Leaves open product decisions (such as the exact threshold or lockout window) explicit instead of adding configuration for every value",
+        "Keeps monitoring, CAPTCHA or account lockout as follow-ups rather than requirements"
+      ]
+    },
+    {
+      "id": "vectorize-with-parity",
+      "files": [
+        "files/vectorize-with-parity"
+      ],
+      "prompt": "Make masked_mean in masked_mean.py faster by removing the Python loop, without changing results.",
+      "expected_output": "A vectorized implementation that keeps the all-masked-row zero result, dtype and device, plus a parity test against the original loop.",
+      "expectations": [
+        "Rows with no true mask values still return zeros, not NaN",
+        "Output dtype and device match the input",
+        "Adds a parity test comparing against the loop version, including an all-masked row",
+        "Does not claim speedups or test results it did not measure or run"
+      ]
+    }
+  ]
+}
