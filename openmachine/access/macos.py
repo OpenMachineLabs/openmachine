@@ -269,6 +269,8 @@ def lifetime_rules(marker: str, runtime: Path) -> str:
         raise ValueError("invalid lifetime marker")
     tree = f"(subpath {_literal(runtime)})"
     return "\n".join([
+        # realpath (tmux resolves TMUX_TMPDIR) must stat the denied parent itself, never list it.
+        f"(allow file-read-metadata (literal {_literal(runtime.parent)}))",
         f"(allow network-bind network-inbound (local unix-socket {tree}))",
         f"(allow network-outbound (remote unix-socket {tree}))",
         '(allow file-ioctl (literal "/dev/ptmx"))',

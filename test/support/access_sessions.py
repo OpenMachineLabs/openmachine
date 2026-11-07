@@ -115,6 +115,9 @@ class SessionFixture(object):
         return bool(state) and not state.startswith("Z")
 
     def beating(self, path):
+        deadline = time.monotonic() + 5
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
         before = path.stat().st_mtime_ns
         time.sleep(0.8)
         return path.stat().st_mtime_ns != before

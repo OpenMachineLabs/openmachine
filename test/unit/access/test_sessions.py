@@ -48,6 +48,7 @@ class LifetimeRuleTests(unittest.TestCase):
         self.assertIn('(allow network-bind network-inbound (local unix-socket (subpath "/var/run/omc/abc")))', text)
         self.assertIn('(allow network-outbound (remote unix-socket (subpath "/var/run/omc/abc")))', text)
         self.assertIn('(allow file-ioctl (literal "/dev/ptmx"))', text)
+        self.assertIn('(allow file-read-metadata (literal "/var/run/omc"))', text)
         self.assertTrue(text.endswith(f'(allow mach-lookup (global-name "{macos.MARKER}{"0" * 32}.a"))\n'
                                       f'(deny mach-lookup (global-name "{macos.MARKER}{"0" * 32}.b"))\n'))
         for marker in ("", "g" * 32, '0" (allow default)'):
