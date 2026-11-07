@@ -14,11 +14,13 @@ import tempfile
 import time
 import uuid
 
-# Restricted homes go under the root-owned sticky /private/tmp, never the real /Users/Shared.
+# Restricted homes go under the root-owned sticky /private/tmp, never the real /Users/Shared, with a name
+# owned by this test process so concurrent runs never share or delete each other's home.
 SHARED = Path("/private/tmp")
-HOME = SHARED / f"openmachine-code-{os.getuid()}" / "home"
+HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
+HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
-        f"sessions.SHARED = Path({str(SHARED)!r}); "
+        f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; "
         "from openmachine.access.__main__ import main; sys.exit(main(sys.argv[1:]))")
 USER = pwd.getpwuid(os.getuid()).pw_name
 
@@ -63,6 +65,12 @@ class SessionFixture(object):
         return self.admit(self.request(lifetime, policy, kind, command, **extra))
 
     def admit(self, value, stdin=b""):
+        process, reply = self.start(value)
+        out, err = process.communicate(stdin, timeout=60)
+        return reply, process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+    def start(self, value):
+        """Launch one channel and return the running launcher with its admission reply."""
         parent, child = socket.socketpair()
         process = subprocess.Popen(self.command("session", "--control-fd", str(child.fileno())),
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -71,8 +79,13 @@ class SessionFixture(object):
         with parent:
             parent.sendall(json.dumps(value).encode() + b"\n")
             reply = json.loads(parent.makefile("rb").readline() or b"{}")
-        out, err = process.communicate(stdin, timeout=60)
-        return reply, process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+        return process, reply
+
+    def wait_for(self, path, seconds=10):
+        deadline = time.monotonic() + seconds
+        while not path.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return path.exists()
 
     def terminal(self, lifetime, typed, until, *, policy="read_only"):
         """Run an interactive shell on a PTY, type input, and read until a computed marker appears."""
@@ -99,7 +112,12 @@ class SessionFixture(object):
                 output += chunk
         return reply, process, master, output.decode(errors="replace")
 
-    def terminate(self, lifetime):
+    def terminate(self, lifetime, *, background=False):
+        if background:
+            process = subprocess.Popen(self.command("terminate"), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            process.stdin.write(json.dumps({"protocol": 1, "lifetime": lifetime}).encode())
+            process.stdin.close()
+            return process
         result = subprocess.run(self.command("terminate"), input=json.dumps({"protocol": 1, "lifetime": lifetime}).encode(),
                                 capture_output=True, timeout=60)
         return json.loads(result.stdout or b"{}"), result.returncode

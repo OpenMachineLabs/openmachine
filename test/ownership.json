@@ -13,6 +13,7 @@
         "test/component/access/test_macos.py",
         "test/component/access/test_sessions.py",
         "test/resilience/access/test_sessions.py",
+        "test/unit/access/test_macos.py",
         "test/unit/access/test_sessions.py"
       ],
       "boundary_tests": [

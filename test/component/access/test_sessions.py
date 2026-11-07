@@ -17,12 +17,13 @@ STICKY_ROOT = Path("/tmp").resolve()  # Root-owned and sticky on macOS and Linux
 
 class PersistentHomeTests(unittest.TestCase):
     def setUp(self):
-        self.home = STICKY_ROOT / f"openmachine-code-{os.getuid()}"
-        shutil.rmtree(self.home, ignore_errors=True)
+        name = f"om-access-component-{os.getpid()}-{{uid}}"  # Owned by this process; never another run's home.
+        self.home = STICKY_ROOT / name.format(uid=os.getuid())
         self.addCleanup(shutil.rmtree, self.home, True)
-        root = patch.object(sessions, "SHARED", STICKY_ROOT)
-        root.start()
-        self.addCleanup(root.stop)
+        for target, value in (("SHARED", STICKY_ROOT), ("HOME_NAME", name)):
+            patcher = patch.object(sessions, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def unsafe(self):
         with self.assertRaises(Fault) as caught:

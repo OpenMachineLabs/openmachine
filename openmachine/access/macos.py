@@ -11,7 +11,7 @@ import re
 import signal
 import sys
 import time
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 from openmachine.foundation.sanitize import Fault
 
@@ -202,6 +202,7 @@ MARKER = "com.openmachine.life."
 _PROC_PIDTBSDINFO = 3
 _STOPPED, _ZOMBIE = 4, 5
 _MAX_PROCESSES = 65536
+_MAX_PASSES = 512
 _SCAN_PAUSE = 0.002
 
 
@@ -279,15 +280,21 @@ def lifetime_rules(marker: str, runtime: Path) -> str:
     ]) + "\n"
 
 
-def birth(pid: int) -> Birth | None:
-    """The live identity of pid, or None once it is gone or a zombie."""
+def _status(pid: int) -> tuple[int, int] | None:
+    """(start time, BSD status) of pid, or None once it is gone."""
     _, _, _, info = _native()
     value = _BSDInfo()
     if info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value):
         return None
-    if value.status == _ZOMBIE:
+    return value.start_sec * 1_000_000 + value.start_usec, value.status
+
+
+def birth(pid: int) -> Birth | None:
+    """The live identity of pid, or None once it is gone or a zombie."""
+    found = _status(pid)
+    if found is None or found[1] == _ZOMBIE:
         return None
-    return Birth(pid, value.start_sec * 1_000_000 + value.start_usec, value.status == _STOPPED)
+    return Birth(pid, found[0], found[1] == _STOPPED)
 
 
 def member(pid: int, marker: str) -> bool | None:
@@ -313,22 +320,38 @@ def pids() -> list[int]:
     return [pid for pid in found[:count] if pid > 1]
 
 
-def members(marker: str) -> tuple[list[Birth], bool]:
-    """Every live member, and whether some process could not be classified during the scan."""
-    found, uncertain = [], False
-    for pid in pids():
-        before = birth(pid) if pid != os.getpid() else None
-        if before is None:
-            continue
-        verdict = member(pid, marker)
-        after = birth(pid)
-        if after is None or after.start != before.start:
-            continue  # It exited or the PID was reused during the check: not running work now.
-        if verdict is None:
-            uncertain = True
-        elif verdict:
-            found.append(before)
-    return found, uncertain
+def members(marker: str, act: Callable[[Birth], None] | None = None) -> tuple[list[Birth], bool]:
+    """Every member, acting on each as soon as it is classified, and whether the scan is incomplete.
+
+    Listing repeats until a whole listing shows no PID that this scan has not already examined. Live work
+    always occupies some PID, so a member that forks and exits between listings shows up as a new PID in the
+    next one, even if it is gone again before it can be classified. PIDs are only reused after the PID space
+    wraps, which a bounded scan does not outlast. A live process that cannot be classified, or no such
+    fixpoint within the pass bound, makes the scan incomplete. Processes of other users are never members:
+    confined work cannot change uid, and they are not inspectable here.
+    """
+    examined, found, uncertain = {os.getpid()}, [], False
+    for _ in range(_MAX_PASSES):
+        fresh = [pid for pid in pids() if pid not in examined]
+        if not fresh:
+            return found, uncertain
+        examined.update(fresh)
+        for pid in fresh:
+            before = _status(pid)
+            if before is None or before[1] == _ZOMBIE:
+                continue
+            verdict = member(pid, marker)
+            after = _status(pid)
+            if after is None or after[0] != before[0] or after[1] == _ZOMBIE:
+                continue  # Gone during the check: anything it forked appears as a new PID later.
+            if verdict is None:
+                uncertain = True
+            elif verdict:
+                item = Birth(pid, before[0], after[1] == _STOPPED)
+                found.append(item)
+                if act is not None:
+                    act(item)
+    return found, True
 
 
 def signal_member(target: Birth, marker: str, signum: int) -> bool:
@@ -346,23 +369,44 @@ def signal_member(target: Birth, marker: str, signum: int) -> bool:
     return True
 
 
+def signal_group(leader: Birth, marker: str, signum: int) -> bool:
+    """Signal a session command's process group, as sshd does, while its leader is verifiably unchanged.
+
+    The group id is the leader's PID and every group member descends from it, so it stays in the lifetime.
+    """
+    if not signal_member(leader, marker, 0):
+        return False
+    try:
+        os.killpg(leader.pid, signum)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def end_lifetime(marker: str, deadline: float) -> None:
-    """Freeze every member, kill them, then require two empty scans and every killed process gone."""
-    while True:
-        found, uncertain = members(marker)
-        running = [item for item in found if not item.stopped]
-        if not running and not uncertain:
-            break
-        for item in running:
+    """Freeze every member, kill them, and accept only complete scans as evidence that none remain.
+
+    Two consecutive complete scans must find every member stopped, then two consecutive complete scans
+    must find none at all, and every killed process must be gone. Anything less raises.
+    """
+    def freeze(item: Birth) -> None:
+        if not item.stopped:
             signal_member(item, marker, signal.SIGSTOP)
+
+    killed = {}
+
+    def kill(item: Birth) -> None:
+        if signal_member(item, marker, signal.SIGKILL):
+            killed[item.pid] = item.start
+
+    clean = 0
+    while clean < 2:
+        found, uncertain = members(marker, freeze)
+        clean = clean + 1 if not uncertain and all(item.stopped for item in found) else 0
         _expire(deadline, "Lifetime members could not all be stopped before the deadline.")
-        time.sleep(_SCAN_PAUSE)
-    killed, empty = {}, 0
+    empty = 0
     while empty < 2:
-        found, uncertain = members(marker)
-        for item in found:
-            if signal_member(item, marker, signal.SIGKILL):
-                killed[item.pid] = item.start
+        found, uncertain = members(marker, kill)
         empty = empty + 1 if not found and not uncertain else 0
         _expire(deadline, "Lifetime members remained after termination.")
         time.sleep(_SCAN_PAUSE)

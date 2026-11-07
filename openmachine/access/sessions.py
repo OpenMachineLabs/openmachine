@@ -34,6 +34,7 @@ PROTOCOL = 1
 MAX_REQUEST = 256 * 1024
 MAX_FRAME = 512 * 1024
 SHARED = Path("/Users/Shared")
+HOME_NAME = "openmachine-code-{uid}"
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server")
 FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2,
@@ -106,7 +107,7 @@ def persistent_home() -> Path:
     if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX:
         raise Fault("persistent_home_unsafe", "The shared parent must be root-owned and protect its entries.",
                     effect="known_no_effect")
-    home = root / f"openmachine-code-{os.getuid()}"
+    home = root / HOME_NAME.format(uid=os.getuid())
     try:
         home.mkdir(mode=0o700)
         created = True
@@ -148,12 +149,14 @@ def _git_identity() -> dict[str, str]:
 
 
 class Lifetime:
-    """Protected supervision metadata under Core state, which every sandbox denies."""
+    """Protected supervision metadata under Core state, which every sandbox denies.
 
-    def __init__(self, state: Path, lifetime: str, *, create: bool = True):
-        self.directory = state / "code" / lifetime
-        if create:
-            private_directory(private_directory(state / "code") / lifetime)
+    Every admission and termination holds the lifetime lock. Terminating retires the id for good: the
+    record stays as a tombstone that refuses later admissions and replays the termination result.
+    """
+
+    def __init__(self, state: Path, lifetime: str):
+        self.directory = private_directory(private_directory(state / "code") / lifetime)
         self.path = self.directory / "record.json"
 
     def read(self) -> dict | None:
@@ -162,12 +165,16 @@ class Lifetime:
         except FileNotFoundError:
             return None
 
+    def admit(self, fresh: dict) -> dict:
+        """The record a new session joins; call with the lock held."""
+        record = self.read() or fresh
+        if record.get("retired"):
+            raise Fault("lifetime_terminated", "This lifetime was terminated; start sessions in a new lifetime.",
+                        effect="known_no_effect")
+        return record
+
     def save(self, record: dict) -> None:
         save_json(self.path, record)
-
-    def forget(self) -> None:
-        for name in ("record.json", "spawner"):
-            (self.directory / name).unlink(missing_ok=True)
 
     def lock(self):
         return lease(self.directory / "lock", wait=True)
@@ -264,6 +271,12 @@ def session(control: int, config_path: Path, state: Path) -> None:
         _reply(control, {"status": "denied", "error": {"code": failure.code, "message": str(failure),
                                                        "effect": failure.effect}})
         os._exit(1)
+    if request.policy != "full_access":
+        _, child, marker, _ = launch
+        # Like sshd: the command's whole process group (its own PID after setsid), never detached sessions.
+        # Installed before the reply, so no forwarded signal can arrive first and end this relay instead.
+        for signum in FORWARDED:
+            signal.signal(signum, lambda number, _: macos.signal_group(child, marker, number))
     _reply(control, {"status": "admitted", "policy": request.policy, "pid": launch[0]})
     os.close(control)
     if request.policy == "full_access":
@@ -272,7 +285,7 @@ def session(control: int, config_path: Path, state: Path) -> None:
             os.execve(program, argv, environment)
         finally:
             os._exit(127)
-    _relay(*launch)
+    _relay(launch[3])
 
 
 # ---- Full Access: ordinary shell, best-effort cleanup -------------------------------------------
@@ -284,7 +297,7 @@ def _admit_full(request: SessionRequest, account, state: Path) -> tuple:
     environment = _environment(request, account)
     lifetime = Lifetime(state, request.lifetime)
     with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": "full_access", "sessions": []}
+        record = lifetime.admit({"format": 1, "policy": "full_access", "sessions": []})
         if record["policy"] != "full_access":
             raise Fault("lifetime_changed", "This lifetime's policy changed; terminate it before admitting sessions.",
                         effect="known_no_effect")
@@ -377,8 +390,8 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     lifetime = Lifetime(state, request.lifetime)
     grant = _grant(request)
     with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant,
-                                     "runtime": str(runtime), "instances": []}
+        record = lifetime.admit({"format": 1, "policy": request.policy, "grant_sha256": grant,
+                                 "runtime": str(runtime), "instances": []})
         if record["policy"] != request.policy or record.get("grant_sha256") != grant:
             raise Fault("lifetime_changed", "This lifetime's policy or scope changed; terminate it before admitting "
                         "sessions.", effect="known_no_effect")
@@ -415,15 +428,13 @@ def started(frame: dict) -> "macos.Birth":
                 "the lifetime before retrying.", effect="effect_unknown")
 
 
-def _relay(_, child: "macos.Birth", marker: str, replies) -> None:
-    """Forward signals to the confined command and leave with its exit status."""
+def _relay(replies) -> None:
+    """Leave with the confined command's exit status; signals are already forwarded."""
     # The channel's EOF belongs to the confined command; never hold its IO open here.
     null = os.open(os.devnull, os.O_RDWR)
     for fd in (0, 1, 2):
         os.dup2(null, fd)
     os.close(null)
-    for signum in FORWARDED:
-        signal.signal(signum, lambda number, _: macos.signal_member(child, marker, number))
     status = _frame(replies).get("exit")
     if not isinstance(status, int):
         os._exit(255)  # The spawner was lost: the command's outcome is unknown.
@@ -657,25 +668,33 @@ def _exec(program, argv, environment, cwd, tty, fds, failure: int, wake: int) ->
 
 
 def terminate(state: Path, raw: bytes) -> dict:
-    """End every process of one lifetime. Restricted cleanup is verified; Full Access is best effort."""
+    """End every process of one lifetime and retire its id. Restricted cleanup is verified; Full Access is
+    best effort. The lock orders this against any admission in progress, and a repeated call replays the
+    result, or retries cleanup that did not verify.
+    """
     request = parse(TerminateRequest, raw)
-    lifetime = Lifetime(state, request.lifetime, create=False)
-    if not lifetime.path.exists():
-        return {"status": "not_found"}
+    lifetime = Lifetime(private_directory(state), request.lifetime)
     with lifetime.lock():
-        record = lifetime.read()
-        if record is None:
-            return {"status": "not_found"}
-        if record["policy"] == "full_access":
+        record = lifetime.read() or {"format": 1, "policy": None}
+        if "result" in record:
+            return record["result"]
+        record["retired"] = True
+        lifetime.save(record)  # From here on no admission can start another command in this lifetime.
+        if record["policy"] is None:
+            result = {"status": "not_found"}
+        elif record["policy"] == "full_access":
             _end_full(record["sessions"])
-            lifetime.forget()
-            return {"status": "termination_unverified", "reason": "full_access_best_effort"}
-        deadline = time.monotonic() + TERMINATE_SECONDS
-        try:
-            for instance in record["instances"]:
-                macos.end_lifetime(instance["marker"], deadline)
-        except Fault as error:
-            return {"status": "termination_unverified", "reason": error.code}
-        shutil.rmtree(record["runtime"], ignore_errors=True)
-        lifetime.forget()
-        return {"status": "verified"}
+            result = {"status": "termination_unverified", "reason": "full_access_best_effort"}
+        else:
+            deadline = time.monotonic() + TERMINATE_SECONDS
+            try:
+                for instance in record["instances"]:
+                    macos.end_lifetime(instance["marker"], deadline)
+            except Fault as error:
+                return {"status": "termination_unverified", "reason": error.code}  # Kept for a retry.
+            shutil.rmtree(record["runtime"], ignore_errors=True)
+            (lifetime.directory / "spawner").unlink(missing_ok=True)
+            result = {"status": "verified"}
+        record["result"] = result
+        lifetime.save(record)
+        return result
