@@ -17,8 +17,8 @@ REPO = {"id": 1392535998, "full_name": "OpenMachineLabs/openmachine"}
 FORK = {"id": 991887, "full_name": "outside/openmachine"}
 
 
-def pull(user=333333, head_repo=REPO, sha=SHA, draft=False):
-    return {"number": 123, "state": "open", "draft": draft, "user": {"id": user},
+def pull(user=333333, head_repo=REPO, sha=SHA, draft=False, number=123):
+    return {"number": number, "state": "open", "draft": draft, "user": {"id": user},
             "head": {"sha": sha, "repo": head_repo},
             "base": {"ref": "main", "repo": REPO}}
 
@@ -96,9 +96,11 @@ class ReviewPolicyTests(unittest.TestCase):
 
 
 class FakeAPI:
-    def __init__(self, pr, reviews=()):
+    def __init__(self, pr, reviews=(), peers=()):
         self.pr = copy.deepcopy(pr)
-        self.votes = list(reviews)
+        self.votes = {pr["number"]: list(reviews)}
+        self.peers = [copy.deepcopy(peer) for peer, _ in peers]
+        self.votes.update({peer["number"]: list(votes) for peer, votes in peers})
         self.writes = []
         self.previous = None
         self.reads = 0
@@ -108,7 +110,13 @@ class FakeAPI:
         return copy.deepcopy(self.pr)
 
     def reviews(self, number):
-        return copy.deepcopy(self.votes)
+        return copy.deepcopy(self.votes[number])
+
+    def open_pulls(self):
+        return copy.deepcopy([self.pr] + self.peers)
+
+    def opens(self):
+        return [p["number"] for p in self.open_pulls()]
 
     def status(self, sha):
         return self.previous
@@ -154,6 +162,40 @@ class GatePublicationTests(unittest.TestCase):
         gate.process(api, 123)
         self.assertEqual(api.writes, [])
 
+    def test_unreviewed_twin_on_same_head_does_not_revoke_approval(self):
+        approved, twin = pull(), pull(head_repo=FORK, number=124)
+        for target, peer in ((approved, twin), (twin, approved)):
+            api = FakeAPI(target, peers=[(peer, [])])
+            api.votes[approved["number"]] = [review()]
+            gate.process(api, target["number"])
+            self.assertEqual(api.writes[0][2], "success")
+
+    def test_change_request_on_twin_with_same_head_blocks(self):
+        twin = pull(head_repo=FORK, number=124)
+        api = FakeAPI(pull(), [review()], [(twin, [review(191080179, "CHANGES_REQUESTED")])])
+        gate.process(api, 123)
+        self.assertEqual(api.writes[0][2], "failure")
+
+    def test_pull_requests_on_other_heads_are_ignored(self):
+        other = pull(sha=NEW_SHA, number=124)
+        api = FakeAPI(pull(), [review()], [(other, [review(191080179, "CHANGES_REQUESTED", NEW_SHA)])])
+        gate.process(api, 123)
+        self.assertEqual(api.writes[0][2], "success")
+
+    def test_every_run_sweeps_all_open_pull_requests(self):
+        api = FakeAPI(pull(), peers=[(pull(sha=NEW_SHA, number=124), [])])
+        original = gate.os.environ.get("GITHUB_EVENT_NAME")
+        try:
+            gate.os.environ["GITHUB_EVENT_NAME"] = "schedule"
+            self.assertEqual(gate.targets({}, api), [123, 124])
+            gate.os.environ["GITHUB_EVENT_NAME"] = "workflow_dispatch"
+            self.assertEqual(gate.targets({"inputs": {"pull_number": "124"}}, api), [124, 123])
+        finally:
+            if original is None:
+                gate.os.environ.pop("GITHUB_EVENT_NAME", None)
+            else:
+                gate.os.environ["GITHUB_EVENT_NAME"] = original
+
     def test_workflow_hints_are_not_authorizations(self):
         api = FakeAPI(pull())
         original = gate.os.environ.get("GITHUB_EVENT_NAME")
@@ -190,6 +232,8 @@ class WorkflowHardeningTests(unittest.TestCase):
         self.assertIn("ref: main", trusted)
         self.assertIn("persist-credentials: false", trusted)
         self.assertIn("python3 scripts/trusted_review_gate.py", trusted)
+        self.assertIn("group: trusted-review-gate", trusted)
+        self.assertIn("cancel-in-progress: false", trusted)
 
 
 if __name__ == "__main__":

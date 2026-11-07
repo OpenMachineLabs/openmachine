@@ -19,6 +19,12 @@ permissions:
   pull-requests: read
   statuses: write
 
+# One evaluation at a time; the queued run re-reads every open PR, so a
+# superseded queued run loses nothing.
+concurrency:
+  group: trusted-review-gate
+  cancel-in-progress: false
+
 jobs:
   publish-maintainer-decision:
     runs-on: ubuntu-24.04
