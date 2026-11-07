@@ -151,6 +151,20 @@ class GatePublicationTests(unittest.TestCase):
         gate.process(api, 123)
         self.assertEqual(api.writes[0][2], "pending")
 
+    def test_status_lookup_returns_newest_record_with_its_creator(self):
+        class RecordedAPI(gate.API):
+            def get(self, path, body=None):
+                self.path = path
+                return [{"context": "other", "state": "failure"},
+                        {"context": gate.CONTEXT, "state": "success",
+                         "creator": {"login": "github-actions[bot]"}},
+                        {"context": gate.CONTEXT, "state": "pending"}]
+        api = RecordedAPI("token")
+        latest = api.status(SHA)
+        self.assertEqual(api.path, f"/repos/{gate.REPO}/commits/{SHA}/statuses?per_page=100")
+        self.assertEqual(latest["state"], "success")
+        self.assertEqual(latest["creator"]["login"], "github-actions[bot]")
+
     def test_superseded_head_is_not_published(self):
         class MovingAPI(FakeAPI):
             def pull(self, number):
