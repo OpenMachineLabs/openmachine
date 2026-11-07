@@ -531,16 +531,20 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) ->
             os._exit(0)
     os.close(ready_write)
     listener.close()
-    os.waitpid(first, 0)
     try:
         # Bounded: this runs under the lifetime lock that terminate needs. A spawner that reports later
         # finds the pipe closed and exits; one stuck inside its sandbox is a member that terminate ends.
-        if not select.select([ready_read], [], [], SPAWN_SECONDS)[0]:
-            raise Fault("lifetime_unverifiable", "The lifetime's spawner did not start in time; nothing was "
-                        "launched.", effect="known_no_effect")
-        reported = os.read(ready_read, 64)  # One short write: atomic on a pipe.
+        reported = (os.read(ready_read, 64)  # One short write: atomic on a pipe.
+                    if select.select([ready_read], [], [], SPAWN_SECONDS)[0] else None)
     finally:
         os.close(ready_read)
+        # The intermediate only forks and exits, so it is done either way. It is still an unreaped child,
+        # so its PID cannot have been reused, and SIGKILL ends it even if it is stopped.
+        os.kill(first, signal.SIGKILL)
+        os.waitpid(first, 0)
+    if reported is None:
+        raise Fault("lifetime_unverifiable", "The lifetime's spawner did not start in time; nothing was launched.",
+                    effect="known_no_effect")
     spawner = _confirm_spawner(reported, marker)
     return {"pid": spawner.pid, "start": spawner.start}
 

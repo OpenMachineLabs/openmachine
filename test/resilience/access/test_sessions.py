@@ -177,6 +177,22 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(macos.members(instance["marker"]), ([], False))
         process.communicate(timeout=10)
 
+    def test_a_stalled_intermediate_does_not_hold_the_lifetime(self):
+        lifetime = self.lifetime()
+        noted = self.state / "intermediate"
+        # The intermediate process stalls before it can fork the spawner.
+        prelude = ("import os, time\nfrom openmachine.access import sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+                   f"def _stall():\n open({str(noted)!r}, 'w').write(str(os.getpid()))\n time.sleep(120)\n"
+                   "os.setsid = _stall\n")
+        started = time.monotonic()
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"), prelude)
+        self.assertEqual(process.wait(timeout=60), 1)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
+        self.assertFalse(self.alive(int(noted.read_text())), "the stalled intermediate is ended")
+        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
+        process.communicate(timeout=10)
+
     def test_a_changed_grant_is_refused_and_a_terminated_lifetime_is_retired(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)
