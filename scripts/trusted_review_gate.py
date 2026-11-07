@@ -103,18 +103,22 @@ class API:
     def reviews(self, number):
         return self.pages(f"/repos/{REPO}/pulls/{number}/reviews")
 
-    def opens(self):
+    def open_pulls(self):
         pulls = self.pages(f"/repos/{REPO}/pulls?state=open&base=main")
-        nums = [uid(p.get("number")) for p in pulls if isinstance(p, dict)]
-        if None in nums or len(nums) != len(pulls):
+        if not all(isinstance(p, dict) and uid(p.get("number")) for p in pulls):
             raise RuntimeError("invalid open PR list")
-        return nums
+        return pulls
+
+    def opens(self):
+        return [p["number"] for p in self.open_pulls()]
 
     def status(self, sha):
-        obj = self.get(f"/repos/{REPO}/commits/{sha}/status")
-        if not isinstance(obj, dict) or not isinstance(obj.get("statuses"), list):
+        # Newest first. The combined /status endpoint omits creators, so it can't dedupe.
+        statuses = self.get(f"/repos/{REPO}/commits/{sha}/statuses?per_page=100")
+        if not isinstance(statuses, list):
             raise RuntimeError("invalid status response")
-        return next((s for s in obj["statuses"] if s.get("context") == CONTEXT), None)
+        return next((s for s in statuses
+                     if isinstance(s, dict) and s.get("context") == CONTEXT), None)
 
     def publish(self, sha, number, state, reason):
         self.get(f"/repos/{REPO}/statuses/{sha}", {
@@ -125,7 +129,7 @@ class API:
 def event_numbers(event, api):
     name = os.environ.get("GITHUB_EVENT_NAME")
     if name == "schedule":
-        return api.opens()
+        return []
     if name == "workflow_dispatch":
         value = (event.get("inputs") or {}).get("pull_number")
         if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,8}", value):
@@ -149,6 +153,24 @@ def event_numbers(event, api):
                    if (n := uid(p.get("number"))) and n < 10**9})[:5]
 
 
+def targets(event, api):
+    """Hinted PRs first, then every open PR, so a superseded queued run loses nothing."""
+    return list(dict.fromkeys(event_numbers(event, api) + api.opens()))
+
+
+# Open PRs sharing a HEAD share one commit status: any block wins, then any approval.
+PRIORITY = ("failure", "error", "success", "pending")
+
+
+def decide_head(api, pr, number, sha):
+    decisions = [decide(pr, api.reviews(number))]
+    for peer in api.open_pulls():
+        head = peer.get("head")
+        if peer["number"] != number and isinstance(head, dict) and head.get("sha") == sha:
+            decisions.append(decide(peer, api.reviews(peer["number"])))
+    return min(decisions, key=lambda decision: PRIORITY.index(decision[0]))
+
+
 def process(api, number):
     pr = api.pull(number)
     base = pr.get("base")
@@ -159,7 +181,7 @@ def process(api, number):
     if not isinstance(sha, str) or not SHA.fullmatch(sha):
         raise RuntimeError("bad HEAD")
     try:
-        state, reason = decide(pr, api.reviews(number))
+        state, reason = decide_head(api, pr, number, sha)
     except (ValueError, RuntimeError):
         state, reason = "error", "Review evidence unavailable"
     refreshed = api.pull(number)
@@ -188,7 +210,7 @@ def main():
         raise ValueError("invalid event")
     api = API(os.environ.get("GH_TOKEN"))
     errors = 0
-    for number in event_numbers(event, api):
+    for number in targets(event, api):
         try:
             process(api, number)
         except (ValueError, RuntimeError) as error:
