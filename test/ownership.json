@@ -4,11 +4,16 @@
     "access": {
       "sources": [
         "openmachine/access/__init__.py",
+        "openmachine/access/__main__.py",
         "openmachine/access/macos.py",
-        "openmachine/access/rules.py"
+        "openmachine/access/rules.py",
+        "openmachine/access/sessions.py"
       ],
       "tests": [
-        "test/component/access/test_macos.py"
+        "test/component/access/test_macos.py",
+        "test/component/access/test_sessions.py",
+        "test/resilience/access/test_sessions.py",
+        "test/unit/access/test_sessions.py"
       ],
       "boundary_tests": [
         "test/component/app/test_operation_scope.py",
@@ -927,6 +932,9 @@
     "test/support/operation_scope.py": [
       "test/component/app/test_operation_scope.py",
       "test/resilience/execution/test_operation_scope.py"
+    ],
+    "test/support/access_sessions.py": [
+      "test/resilience/access/test_sessions.py"
     ]
   }
 }
