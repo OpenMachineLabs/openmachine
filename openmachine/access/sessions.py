@@ -329,8 +329,8 @@ def _pids() -> list[int]:
     return [int(name) for name in os.listdir("/proc") if name.isdecimal()]
 
 
-def _session_members(leader: int, start: int) -> list[int]:
-    """Processes of a recorded session, found only while its leader still verifies.
+def _session_members(leader: int, start: int) -> list[tuple[int, int]]:
+    """(PID, birth) of each process of a recorded session, found only while its leader still verifies.
 
     A session id is a PID number. Once the leader is gone, nothing proves the session never ended and the
     number was not reused by another session, so its remaining processes are left alone: Full Access
@@ -338,22 +338,26 @@ def _session_members(leader: int, start: int) -> list[int]:
     """
     if _birth(leader) != start:
         return []
-    found = []
-    for pid in _pids():
-        try:
-            if pid > 1 and os.getsid(pid) == leader and _birth(leader) == start:
-                found.append(pid)
-        except (ProcessLookupError, PermissionError):
-            continue
-    return found
+    return [(pid, born) for pid in _pids() if pid > 1 and (born := _owned(pid, leader, start)) is not None]
+
+
+def _owned(pid: int, leader: int, start: int) -> int | None:
+    """pid's birth if it is in the verified leader's session right now, observed with an unchanged birth."""
+    try:
+        born = _birth(pid)
+        if born is None or os.getsid(pid) != leader or _birth(pid) != born or _birth(leader) != start:
+            return None
+    except (ProcessLookupError, PermissionError):
+        return None
+    return born
 
 
 def _end_full(sessions: list) -> None:
     for leader, start in sessions:
-        # The leader goes last: it is the anchor that every other signal re-verifies.
-        for pid in sorted(_session_members(leader, start), key=lambda pid: pid == leader):
+        # The leader goes last: it anchors every other target's session.
+        for pid, born in sorted(_session_members(leader, start), key=lambda item: item[0] == leader):
             try:
-                if _birth(leader) == start:
+                if _owned(pid, leader, start) == born:  # Re-verify the actual target right before signalling.
                     os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 continue

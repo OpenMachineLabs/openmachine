@@ -70,6 +70,26 @@ class FullAccessAttributionTests(unittest.TestCase):
     def test_a_live_verified_leader_anchors_its_session_and_is_signalled_last(self):
         self.assertEqual(self.signals({101: 10, 202: 21}, [[101, 10]]), [202, 101])
 
+    def test_a_target_that_changes_after_enumeration_is_never_signalled(self):
+        for name, later in (("reused by another session", {"birth": 99, "sid": 909}), ("exited", {"birth": None, "sid": None})):
+            with self.subTest(target=name):
+                state = {101: {"birth": 10, "sid": 101}, 202: {"birth": 20, "sid": 101}}
+                sent = []
+
+                def getsid(pid):
+                    if state[pid]["sid"] is None:
+                        raise ProcessLookupError(pid)
+                    if pid == 101 and not sent:
+                        state[202] = dict(later)  # 202 changes once enumeration has listed it.
+                    return state[pid]["sid"]
+
+                with (patch.object(sessions_module, "_birth", lambda pid: state[pid]["birth"]),
+                      patch.object(sessions_module, "_pids", lambda: [202, 101]),
+                      patch.object(sessions_module.os, "getsid", getsid),
+                      patch.object(sessions_module.os, "kill", lambda pid, signum: sent.append(pid))):
+                    sessions_module._end_full([[101, 10]])
+                self.assertEqual(sent, [101])
+
     def test_an_unverifiable_leader_never_lets_a_reused_session_id_claim_other_work(self):
         # The recorded session ended; PID/session id 101 was reused, and that new leader exited too.
         self.assertEqual(self.signals({202: 21}, [[101, 10]]), [])
