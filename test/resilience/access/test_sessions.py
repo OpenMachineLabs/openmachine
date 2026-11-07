@@ -113,6 +113,31 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
         self.assertFalse(self.alive(job))
 
+    def test_a_stopped_spawner_bounds_admission_and_terminate_still_verifies(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime)[1], 0)
+        record = self.state / "code" / lifetime / "record.json"
+        [instance] = json.loads(record.read_text())["instances"]
+        # Governed work may signal its own instance, including its spawner.
+        reply, code, _, err = self.session(lifetime, command=f"(sleep 0.3; kill -STOP {instance['pid']}) </dev/null >/dev/null 2>&1 &")
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        deadline = time.monotonic() + 5
+        while not macos.birth(instance["pid"]).stopped and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(macos.birth(instance["pid"]).stopped)
+        ran = HOME / f"{lifetime}.ran"
+        started = time.monotonic()
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"echo x > {ran}"),
+                                    "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
+        self.assertEqual(process.wait(timeout=60), 1)
+        self.assertLess(time.monotonic() - started, 30)
+        # The request may already be queued at the spawner: a retry is not known to be safe.
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
+        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
+        self.assertEqual(macos.members(instance["marker"]), ([], False))
+        process.communicate(timeout=10)  # The channel IO queued at the spawner is released with it.
+        self.assertFalse(ran.exists())
+
     def test_a_changed_grant_is_refused_and_a_terminated_lifetime_is_retired(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)

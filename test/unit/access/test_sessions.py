@@ -59,6 +59,43 @@ class LaunchAcknowledgmentTests(unittest.TestCase):
             self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_unverified", "effect_unknown"))
 
 
+class SpawnerSelfTestTests(unittest.TestCase):
+    """A new instance's spawner is trusted, or killed, only by the birth it reported itself."""
+
+    def confirm(self, reported, births, verdicts):
+        sent = []
+        with (patch.object(macos, "birth", lambda pid: births.pop(0) if births else None),
+              patch.object(macos, "member", lambda pid, marker: verdicts[pid]),
+              patch.object(sessions_module.os, "getpid", return_value=7),
+              patch.object(sessions_module.os, "kill", lambda pid, signum: sent.append(pid))):
+            try:
+                return sessions_module._confirm_spawner(reported, "0" * 32), sent
+            except Fault as error:
+                self.assertEqual((error.code, error.effect), ("lifetime_unverifiable", "known_no_effect"))
+                return None, sent
+
+    def test_a_spawner_that_passes_keeps_its_reported_birth(self):
+        self.assertEqual(self.confirm(b"41 900", [macos.Birth(41, 900)] * 2, {41: True, 7: False}),
+                         (macos.Birth(41, 900), []))
+
+    def test_a_failed_self_test_kills_only_the_same_birth(self):
+        same = macos.Birth(41, 900)
+        for name, births, verdicts, killed in (
+                ("not a member", [same, same], {41: False, 7: False}, [41]),
+                ("supervisor confined too", [same, same, same, same], {41: True, 7: True}, [41]),
+                ("pid reused before the check", [macos.Birth(41, 901)] * 2, {41: False, 7: False}, []),
+                ("pid reused during the check", [same, macos.Birth(41, 901), macos.Birth(41, 901)], {41: True, 7: False}, []),
+                ("pid reused before the kill", [same, macos.Birth(41, 901)], {41: True, 7: True}, []),
+                ("gone", [], {41: None, 7: False}, [])):
+            with self.subTest(case=name):
+                self.assertEqual(self.confirm(b"41 900", list(births), verdicts), (None, killed))
+
+    def test_no_reported_birth_signals_nothing(self):
+        for reported in (b"", b"41", b"41 x", b"41 900 1"):
+            with self.subTest(reported=reported):
+                self.assertEqual(self.confirm(reported, [macos.Birth(41, 900)] * 4, {41: False, 7: False}), (None, []))
+
+
 class FullAccessAttributionTests(unittest.TestCase):
     """Full Access cleanup signals only what a verified session leader still anchors."""
 

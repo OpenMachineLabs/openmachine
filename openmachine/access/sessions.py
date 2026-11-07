@@ -40,6 +40,8 @@ SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/us
 FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2,
              signal.SIGALRM, signal.SIGABRT)
 SPAWN_SECONDS = 5
+# Each launcher step up to the spawner's acknowledgment; longer than one stalled launch the spawner waits out.
+ACKNOWLEDGE_SECONDS = 2 * SPAWN_SECONDS
 TERMINATE_SECONDS = 10
 LifetimeId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 
@@ -422,7 +424,8 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])
     connection.sendall(body)
     replies = connection.makefile("rb")
-    child = started(_frame(replies))
+    child = started(_frame(replies))  # A stopped or wedged spawner times out here: effect unknown.
+    connection.settimeout(None)  # The exit report comes whenever the command ends.
     return child.pid, child, instance["marker"], replies
 
 
@@ -487,11 +490,10 @@ class _Inside:
 def _connect(lifetime: Lifetime, instance: dict) -> socket.socket:
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        connection.settimeout(SPAWN_SECONDS)
+        connection.settimeout(ACKNOWLEDGE_SECONDS)  # Kept until the launch is acknowledged.
         with _Inside(lifetime.directory):
             connection.connect("spawner")
         peer = connection.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID
-        connection.settimeout(None)
     except OSError as error:
         connection.close()
         raise Fault("lifetime_unavailable", "The lifetime's spawner is not reachable.", effect="known_no_effect") from error
@@ -523,16 +525,34 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) ->
     listener.close()
     os.waitpid(first, 0)
     with os.fdopen(ready_read, "rb") as ready:
-        reported = ready.read(32)
-    pid = int(reported) if reported.isdigit() else None
-    current = None if pid is None else macos.birth(pid)
-    if (current is None or macos.member(pid, marker) is not True
-            or macos.member(os.getpid(), marker) is not False):
-        if current is not None:
-            os.kill(pid, signal.SIGKILL)
-        raise Fault("lifetime_unverifiable", "The lifetime boundary failed its native self-test; nothing was launched.",
+        spawner = _confirm_spawner(ready.read(64), marker)
+    return {"pid": spawner.pid, "start": spawner.start}
+
+
+def _confirm_spawner(reported: bytes, marker: str) -> "macos.Birth":
+    """The spawner's self-reported birth, once the native self-test classifies it as a member and this
+    supervisor as not one. A failed self-test kills the spawner only while that same birth still holds."""
+    fields = reported.split()
+    claimed = (macos.Birth(int(fields[0]), int(fields[1]))
+               if len(fields) == 2 and all(field.isdigit() for field in fields) else None)
+
+    def same() -> bool:
+        current = macos.birth(claimed.pid)
+        return current is not None and current.start == claimed.start
+
+    if claimed is None:
+        raise Fault("lifetime_unverifiable", "The lifetime boundary could not be applied; nothing was launched.",
                     effect="known_no_effect")
-    return {"pid": pid, "start": current.start}
+    if (same() and macos.member(claimed.pid, marker) is True and macos.member(os.getpid(), marker) is False
+            and same()):
+        return claimed
+    if same():
+        try:
+            os.kill(claimed.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    raise Fault("lifetime_unverifiable", "The lifetime boundary failed its native self-test; nothing was launched.",
+                effect="known_no_effect")
 
 
 def _become_spawner(listener: socket.socket, ready: int, profile: str) -> None:
@@ -546,11 +566,14 @@ def _become_spawner(listener: socket.socket, ready: int, profile: str) -> None:
                 os.close(fd)
             except OSError:
                 pass
+    own = macos.birth(os.getpid())  # The supervisor checks and signals only this identity, never a bare PID.
     try:
+        if own is None:
+            raise macos.SandboxError("own identity unavailable")
         macos.apply(profile)
     except macos.SandboxError:
         os._exit(1)
-    os.write(ready, str(os.getpid()).encode())
+    os.write(ready, f"{own.pid} {own.start}".encode())
     os.close(ready)
     _serve(listener)
 
@@ -573,7 +596,7 @@ def _serve(listener: socket.socket) -> None:
                 if key.fileobj is listener:
                     connection, _ = listener.accept()
                     try:
-                        pid = _spawn(connection, wake_write)
+                        pid = _spawn(connection)
                         children[pid] = connection
                         selector.register(connection, selectors.EVENT_READ)
                     except (OSError, ValueError, KeyError, TypeError):
@@ -609,7 +632,7 @@ def _serve(listener: socket.socket) -> None:
                     connection.close()
 
 
-def _spawn(connection: socket.socket, wake: int) -> int:
+def _spawn(connection: socket.socket) -> int:
     connection.settimeout(SPAWN_SECONDS)
     header, fds, _, _ = socket.recv_fds(connection, 4, 3)
     try:
@@ -631,31 +654,47 @@ def _spawn(connection: socket.socket, wake: int) -> int:
                 or not isinstance(cwd, str) or not isinstance(tty, bool)):
             raise ValueError("invalid launch frame")
         failure_read, failure_write = os.pipe()  # Close-on-exec: EOF acknowledges a successful exec.
+        gate_read, gate_write = os.pipe()
         pid = os.fork()
         if pid == 0:
-            _exec(program, argv, environment, cwd, tty, fds, failure_write, wake)
+            os.close(gate_write)
+            _exec(program, argv, environment, cwd, tty, fds, failure_write, gate_read)
         os.close(failure_write)
+        os.close(gate_read)
     finally:
         for fd in fds:
             os.close(fd)
+    # The child waits at the gate, so this reads a live, unexec'd child's birth even for a command that
+    # exits at once. Without one, the gate stays shut and nothing runs.
+    current = macos.birth(pid)
+    try:
+        if current is not None:
+            os.write(gate_write, b"\0")
+    except BrokenPipeError:
+        pass  # Killed at the gate; its exit is reported like any other.
+    finally:
+        os.close(gate_write)
     with os.fdopen(failure_read, "rb") as failure:
         reported = failure.read(4)
-    if reported:
+    if reported or current is None:
         os.waitpid(pid, 0)
-        connection.sendall(json.dumps({"errno": struct.unpack("!i", reported)[0]}).encode() + b"\n")
+        code = struct.unpack("!i", reported)[0] if reported else errno.ESRCH
+        connection.sendall(json.dumps({"errno": code}).encode() + b"\n")
         raise OSError("launch failed")
-    current = macos.birth(pid)
-    connection.sendall(json.dumps({"pid": pid, "start": 0 if current is None else current.start}).encode() + b"\n")
+    connection.sendall(json.dumps({"pid": pid, "start": current.start}).encode() + b"\n")
     connection.settimeout(None)
     return pid
 
 
-def _exec(program, argv, environment, cwd, tty, fds, failure: int, wake: int) -> None:
+def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int) -> None:
     try:
         signal.set_wakeup_fd(-1)
         for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGPIPE, signal.SIGCHLD):
             signal.signal(signum, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_SETMASK, set())
+        if os.read(gate, 1) != b"\0":
+            raise OSError(errno.ECANCELED, "launch withdrawn")
+        os.close(gate)
         os.setsid()
         for target, fd in enumerate(fds):
             os.dup2(fd, target)

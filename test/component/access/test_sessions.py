@@ -1,15 +1,19 @@
-"""The persistent restricted-mode home: owner-only, link-free and never rewritten by unconfined code."""
+"""The persistent restricted-mode home, and the spawner's launch acknowledgment."""
 
+import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import sessions
+from openmachine.access import macos, sessions
 from openmachine.foundation.sanitize import Fault
 
 STICKY_ROOT = Path("/tmp").resolve()  # Root-owned and sticky on macOS and Linux.
@@ -61,3 +65,54 @@ class PersistentHomeTests(unittest.TestCase):
             self.unsafe()
         with patch.object(sessions, "SHARED", STICKY_ROOT / "missing-om-root"):
             self.unsafe()
+
+
+@unittest.skipUnless(macos.lifetime_unavailable_reason() is None, "requires the macOS native process interfaces")
+class SpawnAcknowledgmentTests(unittest.TestCase):
+    """The spawner acknowledges a launch with the command's real birth, or proves that nothing ran."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="om-spawn-", dir="/tmp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+
+    def spawn(self, argv, birth):
+        launcher, spawner = socket.socketpair()
+        self.addCleanup(launcher.close)
+        self.addCleanup(spawner.close)
+        body = json.dumps({"program": argv[0], "argv": argv, "env": {}, "cwd": str(self.root), "tty": False}).encode()
+        null = os.open(os.devnull, os.O_RDWR)
+        socket.send_fds(launcher, [struct.pack("!I", len(body))], [null, null, null])
+        os.close(null)
+        launcher.sendall(body)
+        with patch.object(macos, "birth", birth):
+            try:
+                pid = sessions._spawn(spawner)
+            except OSError:
+                pid = None
+        frame = json.loads(launcher.makefile("rb").readline())
+        if pid is not None:
+            os.waitpid(pid, 0)
+        return pid, frame
+
+    def test_a_command_that_exits_at_once_still_reports_its_real_birth(self):
+        real, seen = macos.birth, []
+
+        def slow(pid):
+            time.sleep(0.3)  # Long enough for an ungated child to exec and exit.
+            seen.append(real(pid))
+            return seen[-1]
+
+        pid, frame = self.spawn(["/usr/bin/true"], slow)
+        self.assertIsNotNone(seen[0])
+        self.assertEqual(sessions.started(frame), macos.Birth(pid, seen[0].start))
+
+    def test_an_unreadable_birth_withholds_the_launch(self):
+        ran = self.root / "ran"
+        pid, frame = self.spawn(["/bin/sh", "-c", f"echo x > {ran}"], lambda pid: None)
+        self.assertIsNone(pid)
+        with self.assertRaises(Fault) as caught:
+            sessions.started(frame)
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
+        time.sleep(0.3)
+        self.assertFalse(ran.exists())
