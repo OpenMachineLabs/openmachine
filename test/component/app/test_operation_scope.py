@@ -6,8 +6,8 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from openmachine.app import scope as operation_scope
-from openmachine.execution import seatbelt
+from openmachine.access import macos as seatbelt
+from openmachine.access import rules as operation_scope
 from test.support.operation_scope import ScopeFixture
 from test.support.tasks import task_contract
 
@@ -41,7 +41,7 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
         alias = self.binding(self.dev, "full_access", workspace=self.root, relative="Development")
         self.fault("scope_conflict", lambda: self.read(self.dev, "README", self.scope(self.binding(self.dev, "read_only"), alias)))
         for home in (self.dev, self.core):
-            with self.subTest(home=home), patch.object(operation_scope.execution, "account_home", return_value=home):
+            with self.subTest(home=home), patch.object(operation_scope.macos, "account_home", return_value=home):
                 self.fault("scope_too_broad", lambda: self.read(self.dev, "README"))
         with patch.object(operation_scope, "control_paths", return_value=(self.cloud / "state",)):
             self.fault("scope_conflict", lambda: self.read(self.dev, "README"))
@@ -115,7 +115,7 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
             with self.subTest(parent=parent):
                 self.fault("path_out_of_scope", lambda: core_only.require_worktree_parent(parent, self.core))
         # A repository directly in the home never makes the home a worktree parent.
-        with patch.object(operation_scope.execution, "account_home", return_value=self.dev):
+        with patch.object(operation_scope.macos, "account_home", return_value=self.dev):
             beside_home = operation_scope.compile(self.config, self.state, "local",
                                                   self.scope(self.binding(self.core, "full_access")))
         self.fault("path_out_of_scope", lambda: beside_home.require_worktree_parent(self.dev, self.core))
@@ -134,8 +134,7 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
         for cwd in (self.drive, self.home):
             self.fault("path_out_of_scope", lambda: self.app.start_execution(
                 "local", uuid.uuid4().hex, str(cwd), ["true"], operation_scope=self.scope()))
-        with (patch.object(seatbelt, "unavailable_reason", return_value="platform_unsupported"),
-              patch.object(operation_scope.execution, "seatbelt_unavailable_reason", return_value="platform_unsupported")):
+        with patch.object(seatbelt, "unavailable_reason", return_value="platform_unsupported"):
             capability = self.app.get_capabilities()["operation_scope"]
             self.assertEqual(capability["process"], {"backend": None, "status": "unavailable", "reason": "platform_unsupported"})
             self.fault("scope_unsupported", lambda: self.app.start_execution(

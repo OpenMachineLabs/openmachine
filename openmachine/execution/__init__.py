@@ -1,1 +1,1 @@
-"""Seatbelt confinement and the retained per-execution worker entry."""
+"""Retained per-execution worker entry."""

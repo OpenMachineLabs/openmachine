@@ -1,6 +1,26 @@
 {
   "format": 1,
   "modules": {
+    "access": {
+      "sources": [
+        "openmachine/access/__init__.py",
+        "openmachine/access/__main__.py",
+        "openmachine/access/macos.py",
+        "openmachine/access/rules.py",
+        "openmachine/access/sessions.py"
+      ],
+      "tests": [
+        "test/component/access/test_macos.py",
+        "test/component/access/test_sessions.py",
+        "test/resilience/access/test_sessions.py",
+        "test/unit/access/test_macos.py",
+        "test/unit/access/test_sessions.py"
+      ],
+      "boundary_tests": [
+        "test/component/app/test_operation_scope.py",
+        "test/resilience/execution/test_operation_scope.py"
+      ]
+    },
     "app": {
       "boundary_tests": [
         "test/component/app/test_github_admission.py",
@@ -23,11 +43,9 @@
         "test/resilience/tasks/test_mcp_writer_reservations.py"
       ],
       "sources": [
-        "openmachine/app/__init__.py",
         "openmachine/chat/app/__init__.py",
         "openmachine/chat/app/environment.py",
-        "openmachine/chat/app/machines.py",
-        "openmachine/app/scope.py"
+        "openmachine/chat/app/machines.py"
       ],
       "tests": [
         "test/component/app/test_environment.py",
@@ -169,8 +187,7 @@
         "openmachine/chat/execution/records.py",
         "openmachine/chat/execution/worker.py",
         "openmachine/chat/execution/environment.py",
-        "openmachine/chat/execution/resources.py",
-        "openmachine/execution/seatbelt.py"
+        "openmachine/chat/execution/resources.py"
       ],
       "tests": [
         "test/component/execution/test_admission.py",
@@ -189,7 +206,6 @@
         "test/unit/execution/test_output.py",
         "test/unit/execution/test_records.py",
         "test/component/execution/test_resources.py",
-        "test/component/execution/test_seatbelt.py",
         "test/resilience/execution/test_operation_scope.py"
       ]
     },
@@ -917,6 +933,9 @@
     "test/support/operation_scope.py": [
       "test/component/app/test_operation_scope.py",
       "test/resilience/execution/test_operation_scope.py"
+    ],
+    "test/support/access_sessions.py": [
+      "test/resilience/access/test_sessions.py"
     ]
   }
 }

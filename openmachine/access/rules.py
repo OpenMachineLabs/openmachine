@@ -8,7 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from openmachine.chat import execution, projects, workspace
+from openmachine.access import macos
+from openmachine.chat import projects, workspace
 from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
 from openmachine.foundation.sanitize import Fault
 
@@ -47,8 +48,8 @@ class OperationScope(BaseModel):
 
 
 def capabilities() -> dict:
-    reason = execution.seatbelt_unavailable_reason()
-    process = ({"backend": execution.SEATBELT_BACKEND, "status": "available"} if reason is None else
+    reason = macos.unavailable_reason()
+    process = ({"backend": macos.BACKEND, "status": "available"} if reason is None else
                {"backend": None, "status": "unavailable", "reason": reason})
     return {"protocol": PROTOCOL, "tools": list(TOOLS), "max_roots": MAX_ROOTS, "typed": "core", "process": process}
 
@@ -60,7 +61,7 @@ def _denied(message: str) -> Fault:
 def protected(path: Path) -> bool:
     """Files Git and IDEs execute later outside the sandbox; the process profile denies the same set."""
     return (any(part in PROTECTED_DIRECTORIES for part in path.parts)
-            or re.search(r"(^|/)\.git/" + execution.PROTECTED_GIT + "$", path.as_posix()) is not None)
+            or re.search(r"(^|/)\.git/" + macos.PROTECTED_GIT + "$", path.as_posix()) is not None)
 
 
 @dataclass(frozen=True)
@@ -211,7 +212,7 @@ def compile(config, state: Path, machine: str, value: dict) -> Scope:
     if (any(item.machine != machine for item in model.roots)
             or len({item.target_id for item in model.roots}) != len(model.roots)):
         raise Fault("scope_invalid", "Scope bindings must target this machine and be distinct.", effect="known_no_effect")
-    home = execution.account_home()
+    home = macos.account_home()
     control = control_paths(state)
     roots = []
     for item in model.roots:
@@ -240,5 +241,5 @@ def compile(config, state: Path, machine: str, value: dict) -> Scope:
             if root.mode == "read_only" and other.mode == "full_access" and _inside(root.path, other.path):
                 raise Fault("scope_conflict", "A Read-only directory inside a Full directory cannot restrict it; "
                             "narrow the Full selection instead.", effect="known_no_effect")
-    denied, exceptions = execution.read_denials(home)
+    denied, exceptions = macos.read_denials(home)
     return Scope(model.authority.model_dump(), tuple(roots), control, tuple(denied), tuple(exceptions), home)

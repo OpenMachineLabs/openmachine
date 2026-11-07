@@ -1,12 +1,17 @@
-"""macOS Seatbelt confinement for one scoped operation's launched process tree."""
+"""macOS Seatbelt confinement: Chat's per-operation process trees and Code's persistent lifetimes."""
 
 import ctypes
+import errno
+import functools
 import hashlib
 import os
 from pathlib import Path
 import pwd
 import re
+import signal
 import sys
+import time
+from typing import Callable, NamedTuple
 
 from openmachine.foundation.sanitize import Fault
 
@@ -187,3 +192,230 @@ def apply(text: str) -> None:
     error = ctypes.c_char_p()
     if library.sandbox_init(text.encode(), 0, ctypes.byref(error)) != 0:
         raise SandboxError((error.value or b"sandbox_init failed").decode(errors="replace")[:200])
+
+
+# Code lifetimes. One restricted lifetime instance is one sandbox_init instance: fork, setsid, exec and
+# reparenting cannot leave it, and nested sandboxes, setuid exec and launchd delegation are refused.
+# Each instance's profile ends with two marker rules, so the unsandboxed supervisor can classify any
+# process from outside: a member is sandboxed, allows marker "a" and denies marker "b".
+MARKER = "com.openmachine.life."
+_PROC_PIDTBSDINFO = 3
+_STOPPED, _ZOMBIE = 4, 5
+_MAX_PROCESSES = 65536
+_MAX_PASSES = 512
+_SCAN_PAUSE = 0.002
+
+
+class _BSDInfo(ctypes.Structure):
+    _fields_ = [("flags", ctypes.c_uint32), ("status", ctypes.c_uint32), ("xstatus", ctypes.c_uint32),
+                ("pid", ctypes.c_uint32), ("ppid", ctypes.c_uint32), ("uid", ctypes.c_uint32),
+                ("gid", ctypes.c_uint32), ("ruid", ctypes.c_uint32), ("rgid", ctypes.c_uint32),
+                ("svuid", ctypes.c_uint32), ("svgid", ctypes.c_uint32), ("rfu", ctypes.c_uint32),
+                ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32), ("nfiles", ctypes.c_uint32),
+                ("pgid", ctypes.c_uint32), ("pjobc", ctypes.c_uint32), ("tdev", ctypes.c_uint32),
+                ("tpgid", ctypes.c_uint32), ("nice", ctypes.c_int32), ("start_sec", ctypes.c_uint64),
+                ("start_usec", ctypes.c_uint64)]
+
+
+class Birth(NamedTuple):
+    """A process identity that a reused PID cannot match: PID plus kernel start time."""
+    pid: int
+    start: int
+    stopped: bool = False
+
+
+@functools.cache
+def _native():
+    sandbox = ctypes.CDLL(LIBRARY)
+    check = sandbox.sandbox_check
+    # Fixed arguments only: ctypes passes extra arguments as C variadic arguments.
+    check.argtypes, check.restype = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int], ctypes.c_int
+    no_report = ctypes.c_int.in_dll(sandbox, "SANDBOX_CHECK_NO_REPORT").value
+    system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    listing, info = system.proc_listallpids, system.proc_pidinfo
+    listing.argtypes, listing.restype = [ctypes.c_void_p, ctypes.c_int], ctypes.c_int
+    info.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    info.restype = ctypes.c_int
+    return check, no_report, listing, info
+
+
+def lifetime_unavailable_reason() -> str | None:
+    reason = unavailable_reason()
+    if reason is None:
+        try:
+            _native()
+        except (OSError, AttributeError, ValueError):
+            return "backend_missing"
+    return reason
+
+
+def has_acl(path: Path) -> bool:
+    """Whether path carries an extended ACL; a link is inspected itself, never followed."""
+    if sys.platform != "darwin":
+        return False
+    system = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    system.acl_get_link_np.argtypes, system.acl_get_link_np.restype = [ctypes.c_char_p, ctypes.c_int], ctypes.c_void_p
+    acl = system.acl_get_link_np(os.fsencode(path), 0x100)  # ACL_TYPE_EXTENDED
+    if not acl:
+        if ctypes.get_errno() != errno.ENOENT:
+            raise OSError(ctypes.get_errno(), os.strerror(ctypes.get_errno()), str(path))
+        return False
+    system.acl_free(ctypes.c_void_p(acl))
+    return True
+
+
+def lifetime_rules(marker: str, runtime: Path) -> str:
+    """Append to a Code profile: Unix sockets and new PTYs only in the lifetime's runtime tree (tmux), then markers."""
+    if re.fullmatch(r"[0-9a-f]{32}", marker) is None:
+        raise ValueError("invalid lifetime marker")
+    tree = f"(subpath {_literal(runtime)})"
+    return "\n".join([
+        # realpath (tmux resolves TMUX_TMPDIR) must stat the denied parent itself, never list it.
+        f"(allow file-read-metadata (literal {_literal(runtime.parent)}))",
+        f"(allow network-bind network-inbound (local unix-socket {tree}))",
+        f"(allow network-outbound (remote unix-socket {tree}))",
+        '(allow file-ioctl (literal "/dev/ptmx"))',
+        f'(allow mach-lookup (global-name "{MARKER}{marker}.a"))',
+        f'(deny mach-lookup (global-name "{MARKER}{marker}.b"))',
+    ]) + "\n"
+
+
+def _status(pid: int) -> tuple[int, int] | None:
+    """(start time, BSD status) of pid, or None once it is gone."""
+    _, _, _, info = _native()
+    value = _BSDInfo()
+    if info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value):
+        return None
+    return value.start_sec * 1_000_000 + value.start_usec, value.status
+
+
+def birth(pid: int) -> Birth | None:
+    """The live identity of pid, or None once it is gone or a zombie."""
+    found = _status(pid)
+    if found is None or found[1] == _ZOMBIE:
+        return None
+    return Birth(pid, found[0], found[1] == _STOPPED)
+
+
+def member(pid: int, marker: str) -> bool | None:
+    """True for a process of this lifetime, False for any other, None when it vanished mid-check."""
+    check, no_report, _, _ = _native()
+    sandboxed = check(pid, None, 0)
+    if sandboxed <= 0:
+        return None if sandboxed < 0 else False
+    name = f"{MARKER}{marker}.".encode()
+    allowed = check(pid, b"mach-lookup", 2 | no_report, name + b"a")
+    denied = check(pid, b"mach-lookup", 2 | no_report, name + b"b")
+    if allowed < 0 or denied < 0:
+        return None
+    return allowed == 0 and denied == 1
+
+
+def pids() -> list[int]:
+    _, _, listing, _ = _native()
+    found = (ctypes.c_int * _MAX_PROCESSES)()
+    count = listing(found, ctypes.sizeof(found))
+    if count <= 0 or count >= _MAX_PROCESSES:
+        raise Fault("cleanup_query_failed", "The native process list is unavailable or exceeded its bound.")
+    return [pid for pid in found[:count] if pid > 1]
+
+
+def members(marker: str, act: Callable[[Birth], None] | None = None) -> tuple[list[Birth], bool]:
+    """Every member, acting on each as soon as it is classified, and whether the scan is incomplete.
+
+    Listing repeats until a whole listing shows no PID that this scan has not already examined. Live work
+    always occupies some PID, so a member that forks and exits between listings shows up as a new PID in the
+    next one, even if it is gone again before it can be classified. PIDs are only reused after the PID space
+    wraps, which a bounded scan does not outlast. A live process that cannot be classified, or no such
+    fixpoint within the pass bound, makes the scan incomplete. Processes of other users are never members:
+    confined work cannot change uid, and they are not inspectable here.
+    """
+    examined, found, uncertain = {os.getpid()}, [], False
+    for _ in range(_MAX_PASSES):
+        fresh = [pid for pid in pids() if pid not in examined]
+        if not fresh:
+            return found, uncertain
+        examined.update(fresh)
+        for pid in fresh:
+            before = _status(pid)
+            if before is None or before[1] == _ZOMBIE:
+                continue
+            verdict = member(pid, marker)
+            after = _status(pid)
+            if after is None or after[0] != before[0] or after[1] == _ZOMBIE:
+                continue  # Gone during the check: anything it forked appears as a new PID later.
+            if verdict is None:
+                uncertain = True
+            elif verdict:
+                item = Birth(pid, before[0], after[1] == _STOPPED)
+                found.append(item)
+                if act is not None:
+                    act(item)
+    return found, True
+
+
+def signal_member(target: Birth, marker: str, signum: int) -> bool:
+    """Signal only the same birth identity, and only while it is still a member."""
+    current = birth(target.pid)
+    if current is None or current.start != target.start or member(target.pid, marker) is not True:
+        return False
+    current = birth(target.pid)
+    if current is None or current.start != target.start:
+        return False
+    try:
+        os.kill(target.pid, signum)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def signal_group(leader: Birth, marker: str, signum: int) -> bool:
+    """Signal a session command's process group, as sshd does, while its leader is verifiably unchanged.
+
+    The group id is the leader's PID and every group member descends from it, so it stays in the lifetime.
+    """
+    if not signal_member(leader, marker, 0):
+        return False
+    try:
+        os.killpg(leader.pid, signum)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def end_lifetime(marker: str, deadline: float) -> None:
+    """Freeze every member, kill them, and accept only complete scans as evidence that none remain.
+
+    Two consecutive complete scans must find every member stopped, then two consecutive complete scans
+    must find none at all, and every killed process must be gone. Anything less raises.
+    """
+    def freeze(item: Birth) -> None:
+        if not item.stopped:
+            signal_member(item, marker, signal.SIGSTOP)
+
+    killed = {}
+
+    def kill(item: Birth) -> None:
+        if signal_member(item, marker, signal.SIGKILL):
+            killed[item.pid] = item.start
+
+    clean = 0
+    while clean < 2:
+        found, uncertain = members(marker, freeze)
+        clean = clean + 1 if not uncertain and all(item.stopped for item in found) else 0
+        _expire(deadline, "Lifetime members could not all be stopped before the deadline.")
+    empty = 0
+    while empty < 2:
+        found, uncertain = members(marker, kill)
+        empty = empty + 1 if not found and not uncertain else 0
+        _expire(deadline, "Lifetime members remained after termination.")
+        time.sleep(_SCAN_PAUSE)
+    # A killed process can still be exiting, for example while another process holds its terminal.
+    while any((current := birth(pid)) is not None and current.start == start for pid, start in killed.items()):
+        _expire(deadline, "Terminated lifetime members are still exiting.", code="cleanup_pending")
+        time.sleep(_SCAN_PAUSE * 5)
+
+
+def _expire(deadline: float, message: str, *, code: str = "termination_unverified") -> None:
+    if time.monotonic() >= deadline:
+        raise Fault(code, message)

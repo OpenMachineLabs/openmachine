@@ -16,7 +16,7 @@ import time
 
 from openmachine.foundation.sanitize import Fault
 
-from openmachine.execution import seatbelt
+from openmachine.access import macos as seatbelt
 
 MAX_PROCESSES = 65536
 SANDBOX_FAILED = -1  # Pre-exec acknowledgement code distinct from every errno.

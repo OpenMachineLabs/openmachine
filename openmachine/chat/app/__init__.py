@@ -18,10 +18,10 @@ from openmachine.foundation.files import MAX_SCAN_ENTRIES, MAX_TEXT_FILE, TEXT_P
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
 
-from openmachine.app import scope as scopes
+from openmachine.access import rules as scopes
 from . import environment, task_attention
 from .machines import Machines
-from openmachine.app.scope import OperationScope
+from openmachine.access.rules import OperationScope
 from .task_admission import TaskAdmission
 from .task_observer import TaskObserver
 from .task_receipts import TaskReceipts
