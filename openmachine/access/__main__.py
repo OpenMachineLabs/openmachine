@@ -32,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         result = sessions.terminate(args.state_dir, sys.stdin.buffer.read(sessions.MAX_REQUEST + 1))
     except Fault as error:
         result = {"status": "denied", "error": {"code": error.code, "message": str(error)}}
+    except OSError:
+        # Cleanup may have started; no result was stored, so a repeated call retries it.
+        result = {"status": "termination_unverified", "reason": "termination_error"}
     print(json.dumps(result, sort_keys=True))
     return 0 if result["status"] in {"verified", "not_found"} else 1
 

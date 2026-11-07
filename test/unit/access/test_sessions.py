@@ -1,12 +1,16 @@
 """Code session requests, capabilities and lifetime profile rules."""
 
+import contextlib
+import io
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
 
 from openmachine.access import macos, sessions
 from openmachine.access import sessions as sessions_module
+from openmachine.access import __main__ as entry
 from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
@@ -90,10 +94,37 @@ class FullAccessAttributionTests(unittest.TestCase):
                     sessions_module._end_full([[101, 10]])
                 self.assertEqual(sent, [101])
 
+    def test_a_target_this_user_cannot_signal_does_not_stop_cleanup(self):
+        # Elevated work, such as a sudo child in the session, refuses the signal with EPERM.
+        sent = []
+
+        def kill(pid, signum):
+            if pid == 202:
+                raise PermissionError(1, "Operation not permitted")
+            sent.append(pid)
+
+        with (patch.object(sessions_module, "_birth", lambda pid: {101: 10, 202: 21}.get(pid)),
+              patch.object(sessions_module, "_pids", lambda: [202, 101]),
+              patch.object(sessions_module.os, "getsid", lambda pid: 101),
+              patch.object(sessions_module.os, "kill", kill)):
+            sessions_module._end_full([[101, 10]])
+        self.assertEqual(sent, [101])
+
     def test_an_unverifiable_leader_never_lets_a_reused_session_id_claim_other_work(self):
         # The recorded session ended; PID/session id 101 was reused, and that new leader exited too.
         self.assertEqual(self.signals({202: 21}, [[101, 10]]), [])
         self.assertEqual(self.signals({101: 20, 202: 21}, [[101, 10]]), [])
+
+
+class TerminateEntryTests(unittest.TestCase):
+    def test_an_unexpected_os_error_still_yields_a_structured_unverified_result(self):
+        stdout = io.StringIO()
+        with (patch.object(sessions, "terminate", side_effect=OSError(28, "No space left on device")),
+              patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"protocol": 1, "lifetime": "x"}'))),
+              contextlib.redirect_stdout(stdout)):
+            code = entry.main(["--state-dir", "/nonexistent", "terminate"])
+        self.assertEqual((json.loads(stdout.getvalue()), code),
+                         ({"status": "termination_unverified", "reason": "termination_error"}, 1))
 
 
 class LifetimeRuleTests(unittest.TestCase):

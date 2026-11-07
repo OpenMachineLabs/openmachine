@@ -359,8 +359,8 @@ def _end_full(sessions: list) -> None:
             try:
                 if _owned(pid, leader, start) == born:  # Re-verify the actual target right before signalling.
                     os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                continue
+            except (ProcessLookupError, PermissionError):
+                continue  # Gone, or elevated (sudo) work this user cannot signal: best effort goes on.
 
 
 # ---- Restricted: one Seatbelt instance per lifetime, entered through its spawner ----------------
