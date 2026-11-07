@@ -108,6 +108,12 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(err.count(DENIED), 2, err)
         self.assertFalse((full / ".git/hooks/pre-commit").exists())
         self.assertEqual((read_only / "file.txt").read_text(), "read-only\n")
+        # The live instance is reused, but a replaced directory is never rebound to the old grant.
+        read_only.rename(self.root / "moved")
+        read_only.mkdir()
+        reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
+        self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
+                         ("denied", "scope_target_changed", "known_no_effect", 1, ""))
 
     def test_terminal_loss_leaves_nohup_work_running_until_terminate(self):
         lifetime = self.lifetime()

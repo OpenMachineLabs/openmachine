@@ -259,8 +259,10 @@ def session(control: int, config_path: Path, state: Path) -> None:
             launch = _admit_restricted(request, account, config_path, state)
     except (Fault, OSError, ValueError) as error:
         failure = (error if isinstance(error, Fault) else
-                   Fault("launch_unverified", "The session did not start cleanly; terminate its lifetime if unsure."))
-        _reply(control, {"status": "denied", "error": {"code": failure.code, "message": str(failure)}})
+                   Fault("launch_unverified", "The session did not start cleanly; terminate its lifetime if unsure.",
+                         effect="effect_unknown"))
+        _reply(control, {"status": "denied", "error": {"code": failure.code, "message": str(failure),
+                                                       "effect": failure.effect}})
         os._exit(1)
     _reply(control, {"status": "admitted", "policy": request.policy, "pid": launch[0]})
     os.close(control)
@@ -351,12 +353,12 @@ def _grant(request: SessionRequest) -> str:
                                    sort_keys=True, separators=(",", ":")))
 
 
-def _restricted_profile(request: SessionRequest, config_path: Path, state: Path, runtime: Path, home: Path) -> str:
+def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path) -> str:
     denied, exceptions = macos.read_denials(macos.account_home())
     control = list(dict.fromkeys([*rules.control_paths(state), state]))
     readable, writable = [], [home]
-    if request.scope is not None:
-        mapped = rules.compile(load(config_path), state, request.machine, request.scope).process_request()
+    if scope is not None:
+        mapped = scope.process_request()
         for item in [*mapped["roots"], *mapped["worktrees"]]:
             (writable if item["mode"] == "full_access" else readable).append(Path(item["path"]))
     return macos.profile(readable=readable, writable=writable, private=runtime, control=control,
@@ -368,6 +370,8 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
         raise Fault("scope_unsupported", "Restricted Code sessions need the macOS Seatbelt lifetime backend.",
                     effect="known_no_effect")
     program, argv = _argv(request, account)
+    # Re-verify every selected binding on each admission: a replaced directory is never rebound.
+    scope = None if request.scope is None else rules.compile(load(config_path), state, request.machine, request.scope)
     home = persistent_home()
     runtime = _runtime(request.lifetime)
     lifetime = Lifetime(state, request.lifetime)
@@ -381,7 +385,7 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
         instance = next((item for item in reversed(record["instances"]) if _spawner_alive(item)), None)
         if instance is None:
             # Selected roots and worktrees are fixed when an instance starts; later sessions reuse them.
-            text = _restricted_profile(request, config_path, state, runtime, home)
+            text = _restricted_profile(scope, state, runtime, home)
             instance = _start_spawner(lifetime, text, runtime)
             record["instances"].append(instance)
             lifetime.save(record)
@@ -396,12 +400,19 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])
     connection.sendall(body)
     replies = connection.makefile("rb")
-    started = _frame(replies)
-    if not isinstance(started.get("pid"), int):
-        code = started.get("errno")
-        raise Fault("launch_failed", "The confined command did not start" +
-                    (f": {os.strerror(code)}." if isinstance(code, int) else "."), effect="known_no_effect")
-    return started["pid"], macos.Birth(started["pid"], started["start"]), instance["marker"], replies
+    child = started(_frame(replies))
+    return child.pid, child, instance["marker"], replies
+
+
+def started(frame: dict) -> "macos.Birth":
+    """The spawner's launch acknowledgment. Only an explicit pre-exec errno proves nothing ran."""
+    if isinstance(frame.get("pid"), int) and isinstance(frame.get("start"), int):
+        return macos.Birth(frame["pid"], frame["start"])
+    if isinstance(frame.get("errno"), int):
+        raise Fault("launch_failed", f"The confined command did not start: {os.strerror(frame['errno'])}.",
+                    effect="known_no_effect")
+    raise Fault("launch_unverified", "The launch acknowledgment was lost; the command may be running. Terminate "
+                "the lifetime before retrying.", effect="effect_unknown")
 
 
 def _relay(_, child: "macos.Birth", marker: str, replies) -> None:

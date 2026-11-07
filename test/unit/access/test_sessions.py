@@ -42,6 +42,18 @@ class RequestTests(unittest.TestCase):
                                     "selected_projects": "platform_unsupported"})
 
 
+class LaunchAcknowledgmentTests(unittest.TestCase):
+    def test_only_an_explicit_pre_exec_errno_proves_nothing_ran(self):
+        self.assertEqual(sessions.started({"pid": 41, "start": 7}), macos.Birth(41, 7))
+        with self.assertRaises(Fault) as caught:
+            sessions.started({"errno": 2})
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
+        for frame in ({}, {"pid": "41"}, {"pid": 41}, {"errno": "2"}):
+            with self.subTest(frame=frame), self.assertRaises(Fault) as caught:
+                sessions.started(frame)
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_unverified", "effect_unknown"))
+
+
 class LifetimeRuleTests(unittest.TestCase):
     def test_rules_scope_sockets_and_ptys_to_the_runtime_tree_then_mark_the_instance(self):
         text = macos.lifetime_rules("0" * 32, Path("/var/run/omc/abc"))
