@@ -73,15 +73,20 @@ class SessionFixture(object):
 
     def start(self, value, prelude=""):
         """Launch one channel and return the running launcher with its admission reply."""
+        process, control = self.launch(value, prelude)
+        with control:
+            reply = json.loads(control.makefile("rb").readline() or b"{}")
+        return process, reply
+
+    def launch(self, value, prelude=""):
+        """Send one channel's request without waiting; returns the launcher and its control socket."""
         parent, child = socket.socketpair()
         process = subprocess.Popen(self.command("session", "--control-fd", str(child.fileno()), prelude=prelude),
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    pass_fds=[child.fileno()], start_new_session=True)
         child.close()
-        with parent:
-            parent.sendall(json.dumps(value).encode() + b"\n")
-            reply = json.loads(parent.makefile("rb").readline() or b"{}")
-        return process, reply
+        parent.sendall(json.dumps(value).encode() + b"\n")
+        return process, parent
 
     def wait_for(self, path, seconds=10):
         deadline = time.monotonic() + seconds

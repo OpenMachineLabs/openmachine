@@ -138,6 +138,45 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         process.communicate(timeout=10)  # The channel IO queued at the spawner is released with it.
         self.assertFalse(ran.exists())
 
+    def test_terminate_ends_a_launch_already_in_flight(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime)[1], 0)
+        record = json.loads((self.state / "code" / lifetime / "record.json").read_text())
+        [instance], scratch = record["instances"], Path(record["runtime"]) / "tmp"
+        os.kill(instance["pid"], signal.SIGSTOP)  # Holds the next launch between its send and its acknowledgment.
+        before, ran = len(list(scratch.iterdir())), HOME / f"{lifetime}.ran"
+        process, control = self.launch(self.request(lifetime, "read_only", "exec", f"echo x > {ran}"),
+                                       "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 60\n")
+        self.addCleanup(control.close)
+        deadline = time.monotonic() + 10
+        while len(list(scratch.iterdir())) == before and time.monotonic() < deadline:
+            time.sleep(0.05)  # The launcher makes its TMPDIR after admission, right before it sends.
+        time.sleep(0.5)
+        self.assertIsNone(process.poll(), "the launch must still wait for its acknowledgment")
+        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
+        reply = json.loads(control.makefile("rb").readline() or b"{}")
+        self.assertEqual(process.wait(timeout=30), 1)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
+        self.assertEqual(macos.members(instance["marker"]), ([], False))
+        process.communicate(timeout=10)
+        self.assertFalse(ran.exists())
+
+    def test_a_spawner_that_never_reports_ready_releases_the_lifetime(self):
+        lifetime = self.lifetime()
+        # The spawner enters its sandbox and then stalls before it reports ready.
+        prelude = ("import time\nfrom openmachine.access import macos as _m, sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+                   "_apply = _m.apply\ndef _stall(text):\n _apply(text)\n time.sleep(120)\n_m.apply = _stall\n")
+        started = time.monotonic()
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"), prelude)
+        self.assertEqual(process.wait(timeout=60), 1)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
+        [instance] = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]
+        self.assertTrue(macos.members(instance["marker"])[0], "the stalled spawner is a member")
+        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
+        self.assertEqual(macos.members(instance["marker"]), ([], False))
+        process.communicate(timeout=10)
+
     def test_a_changed_grant_is_refused_and_a_terminated_lifetime_is_retired(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)

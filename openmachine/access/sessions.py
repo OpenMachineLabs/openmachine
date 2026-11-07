@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import select
 import selectors
 import shutil
 import signal
@@ -100,7 +101,11 @@ def parse(model, raw: bytes):
 
 
 def persistent_home() -> Path:
-    """The one owner-only restricted-mode home of this OS user; unconfined code never trusts its contents."""
+    """The one owner-only restricted-mode home of this OS user; unconfined code never trusts its contents.
+
+    Every restricted policy and lifetime shares it, so a later session may run what an earlier one left
+    here, such as shell startup files or cached packages, but only inside the later session's own sandbox.
+    """
     root = SHARED
     try:
         parent = root.lstat()
@@ -153,8 +158,11 @@ def _git_identity() -> dict[str, str]:
 class Lifetime:
     """Protected supervision metadata under Core state, which every sandbox denies.
 
-    Every admission and termination holds the lifetime lock. Terminating retires the id for good: the
-    record stays as a tombstone that refuses later admissions and replays the termination result.
+    Admission holds the lifetime lock while it checks the record and selects or starts an instance, then
+    hands its launch to that instance's spawner. Termination holds it throughout and kills every member,
+    the spawner included, so a launch still in flight either becomes a member that is killed or fails.
+    Terminating retires the id for good: the record stays as a tombstone that refuses later admissions and
+    replays the termination result.
     """
 
     def __init__(self, state: Path, lifetime: str):
@@ -524,8 +532,16 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) ->
     os.close(ready_write)
     listener.close()
     os.waitpid(first, 0)
-    with os.fdopen(ready_read, "rb") as ready:
-        spawner = _confirm_spawner(ready.read(64), marker)
+    try:
+        # Bounded: this runs under the lifetime lock that terminate needs. A spawner that reports later
+        # finds the pipe closed and exits; one stuck inside its sandbox is a member that terminate ends.
+        if not select.select([ready_read], [], [], SPAWN_SECONDS)[0]:
+            raise Fault("lifetime_unverifiable", "The lifetime's spawner did not start in time; nothing was "
+                        "launched.", effect="known_no_effect")
+        reported = os.read(ready_read, 64)  # One short write: atomic on a pipe.
+    finally:
+        os.close(ready_read)
+    spawner = _confirm_spawner(reported, marker)
     return {"pid": spawner.pid, "start": spawner.start}
 
 
@@ -718,8 +734,8 @@ def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int) ->
 
 def terminate(state: Path, raw: bytes) -> dict:
     """End every process of one lifetime and retire its id. Restricted cleanup is verified; Full Access is
-    best effort. The lock orders this against any admission in progress, and a repeated call replays the
-    result, or retries cleanup that did not verify.
+    best effort. The lock orders this against instance selection and start (see Lifetime), and a repeated
+    call replays the result, or retries cleanup that did not verify.
     """
     request = parse(TerminateRequest, raw)
     lifetime = Lifetime(private_directory(state), request.lifetime)
