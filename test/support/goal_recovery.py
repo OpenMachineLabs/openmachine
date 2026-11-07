@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 import uuid
 from integrations import github
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from test.support.tasks import TaskFixture
 from test.support.github_cases import BASE, HEAD, REPO, GitHubCaseFixture, settings
 

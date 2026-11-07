@@ -9,7 +9,7 @@ class ServiceTests(ApplicationAdmissionFixture, unittest.TestCase):
         self.assert_admission_dispatch(('save_task',))
 
     def test_receipt_batch_rejects_invalid_python_ids_before_store_access(self):
-        from openmachine.app import Application
+        from openmachine.chat.app import Application
         from openmachine.foundation.sanitize import Fault
         for values in ([{}], [[]], [True], [], ['a' * 32] * 2):
             with self.subTest(values=values), self.assertRaises(Fault) as caught:
@@ -21,7 +21,7 @@ class ServiceTests(ApplicationAdmissionFixture, unittest.TestCase):
     def test_original_execution_control_sequence_is_not_a_receipt_batch(self):
         from types import SimpleNamespace
         from unittest.mock import Mock, patch
-        from openmachine import app as application
+        from openmachine.chat import app as application
         from openmachine.foundation.sanitize import Fault
 
         task_id, operation_id, execution_id = "original", "a" * 32, "b" * 32

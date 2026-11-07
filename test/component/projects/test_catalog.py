@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from openmachine.config import Machine, Workspace
-from openmachine.projects import catalog
+from openmachine.chat.projects import catalog
 from test.support.workspace import WorkspaceFixture
 
 

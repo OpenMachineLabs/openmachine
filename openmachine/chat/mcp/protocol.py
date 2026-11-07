@@ -7,9 +7,9 @@ from typing import Annotated
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from openmachine import tasks
-from openmachine.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT, MAX_TASK_WAIT
-from openmachine.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, MAX_TASK_RESULT_BYTES, OperationScope, bound_workspace_result
+from openmachine.chat import tasks
+from openmachine.chat.app import DEFAULT_TIMEOUT, MAX_TIMEOUT, MAX_WAIT, MAX_WAITERS, MAX_RESULT_BYTES, bound_output, MAX_CONTROL_SEQ, MAX_INPUT, MAX_TASK_WAIT
+from openmachine.chat.app import MAX_SOURCE, MAX_WORKSPACE_RESULT, MAX_TASK_RESULT_BYTES, OperationScope, bound_workspace_result
 from openmachine.foundation.sanitize import Fault
 
 READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)

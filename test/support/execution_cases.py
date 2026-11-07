@@ -9,8 +9,8 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import execution
-from openmachine.execution import api, logs
+from openmachine.chat import execution
+from openmachine.chat.execution import api, logs
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from test.support.execution import ExecutionFixture

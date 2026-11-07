@@ -6,10 +6,10 @@ import unittest
 from unittest.mock import Mock, patch
 import uuid
 from integrations import github
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import records
+from openmachine.chat.tasks import records
 from test.support.tasks import TaskFixture
 from test.support.goal_recovery import GoalRecoveryFixture
 from test.support.github_cases import BASE, HEAD, MERGE, REPO, ROOT, TREE, GitHubCaseFixture, settings
@@ -50,7 +50,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
                 lambda value, now: value["operations"][0]["locator"].update(number=43), operation_ids=[identity])
         self.assertEqual(caught.exception.code, "task_identity_conflict")
         from pydantic import ValidationError
-        from openmachine.tasks import rows
+        from openmachine.chat.tasks import rows
         with self.assertRaises(ValueError):
             rows.validate_operation(operation, dict(record, format=5))
         with self.assertRaises(ValidationError):
@@ -383,7 +383,7 @@ class GoalRecoveryTests(GoalRecoveryFixture, unittest.TestCase):
     def test_expired_task_authority_cannot_publish_a_goal_witness(self):
         arguments, original = self.lose_ack()
         expiry = self.view()["record"]["contract"]["expires_at_ms"]
-        with patch("openmachine.app.task_attention.now_ms", return_value=expiry):
+        with patch("openmachine.chat.app.task_attention.now_ms", return_value=expiry):
             self.fault("task_authority_expired", self.recover, arguments)
         self.assertNotIn("goal_witnesses", self.view()["record"])
         self.assertEqual(tasks.operation(self.state, "structured-one", original["id"]), original)

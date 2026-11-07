@@ -15,7 +15,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.foundation.sanitize import Fault, redact
 from openmachine.foundation.state import save_json
 

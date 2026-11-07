@@ -7,9 +7,9 @@ from unittest.mock import patch
 import subprocess
 import sys
 import unittest
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import database
+from openmachine.chat.tasks import database
 from test.support.tasks import ContinuityFixture, task_contract
 from test.support.goal_recovery import GoalRecoveryFixture
 from test.support.github_cases import ACTOR, REPO
@@ -22,7 +22,7 @@ class GoalRecoveryResilienceTests(GoalRecoveryFixture, unittest.TestCase):
                          expected_head_sha=self.provider.pr["head"]["sha"],
                          expected_base_sha=self.provider.pr["base"]["sha"],
                          task_context=self.context_for(identity))
-        with patch("openmachine.app.task_admission.TaskAdmission._publish", side_effect=SystemExit(91)):
+        with patch("openmachine.chat.app.task_admission.TaskAdmission._publish", side_effect=SystemExit(91)):
             with self.assertRaises(SystemExit):
                 self.app.github_review_thread(**arguments)
         admitted = tasks.operation(self.state, "structured-one", identity)
@@ -51,10 +51,10 @@ class GoalRecoveryResilienceTests(GoalRecoveryFixture, unittest.TestCase):
         code = '''import json,os,sys
 from pathlib import Path
 from unittest.mock import Mock
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.tasks import database
+from openmachine.chat.tasks import database
 data=json.load(sys.stdin); state=Path(sys.argv[1]); point=sys.argv[2]
 app=create_application(Settings.model_validate(data["config"]),state)
 root="repos/"+data["repository"]
@@ -144,7 +144,7 @@ class StructuredTaskTests(ContinuityFixture, unittest.TestCase):
         self.assertIsNone(value["control"]["owner"])
         self.assertEqual(value["handoff"]["reason"], "plan_ready")
         result = subprocess.run([sys.executable, "-I", "-c",
-            'import json,sys; from pathlib import Path; from openmachine import tasks; print(json.dumps(tasks.read(Path(sys.argv[1]),"structured-one")))',
+            'import json,sys; from pathlib import Path; from openmachine.chat import tasks; print(json.dumps(tasks.read(Path(sys.argv[1]),"structured-one")))',
             str(self.state)], capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         observed = json.loads(result.stdout)
@@ -160,8 +160,8 @@ class StructuredTaskTests(ContinuityFixture, unittest.TestCase):
     def test_real_process_loss_before_and_after_creation_and_admission_commit(self):
         code = '''import json,os,sys
 from pathlib import Path
-from openmachine import tasks
-from openmachine.tasks import database
+from openmachine.chat import tasks
+from openmachine.chat.tasks import database
 request=json.load(sys.stdin)
 state=Path(sys.argv[1])
 point,method=sys.argv[2:4]
@@ -228,8 +228,8 @@ print(json.dumps(result))
     def test_interrupted_initialization_resumes_without_replacing_original_authority(self):
         code = '''import json,os,sys
 from pathlib import Path
-from openmachine import tasks
-from openmachine.tasks import database
+from openmachine.chat import tasks
+from openmachine.chat.tasks import database
 state=Path(sys.argv[1]); point,entry=sys.argv[2:4]
 request=json.load(sys.stdin)
 commit,link,rename,write,truncate=database.commit,os.link,os.rename,os.write,os.ftruncate
@@ -299,7 +299,7 @@ else:
         tasks.create(self.state, request.pop("task_id"), **request)
         code = '''import json,sys
 from pathlib import Path
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.foundation.sanitize import Fault
 state=Path(sys.argv[1])
 identity=sys.argv[2]

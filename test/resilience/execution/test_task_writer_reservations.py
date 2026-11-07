@@ -7,9 +7,9 @@ import time
 import unittest
 import uuid
 
-from openmachine import execution, tasks
+from openmachine.chat import execution, tasks
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace.git import context
+from openmachine.chat.workspace.git import context
 from test.support.tasks import TaskFixture, task_contract
 
 
@@ -185,7 +185,7 @@ class NativeWriterReservationTests(TaskFixture, unittest.TestCase):
         gate = self.root / "go"
         script = '''import json,sys,time
 from pathlib import Path
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
 request=json.loads(sys.argv[1]); app=create_application(Settings.model_validate(request['config']),Path(request['state']))

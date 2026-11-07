@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 from openmachine.foundation.files import MAX_SCAN_ENTRIES, file_parent, file_parts
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace.files import root_for
-from openmachine.workspace.git import context
+from openmachine.chat.workspace.files import root_for
+from openmachine.chat.workspace.git import context
 
 if TYPE_CHECKING:
     from openmachine.config import Settings

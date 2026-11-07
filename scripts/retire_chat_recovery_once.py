@@ -17,8 +17,8 @@ import sqlite3
 import stat
 import tempfile
 
-from openmachine.tasks import database, records, store
-from openmachine.tasks.rows import read_current, task_row
+from openmachine.chat.tasks import database, records, store
+from openmachine.chat.tasks.rows import read_current, task_row
 
 OPAQUE_TABLES = (
     "store", "operations", "task_events", "task_updates",

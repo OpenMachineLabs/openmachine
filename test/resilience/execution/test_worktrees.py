@@ -10,13 +10,13 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.config import Workspace
-from openmachine.execution import api, observation
-from openmachine.execution.records import TERMINAL
+from openmachine.chat.execution import api, observation
+from openmachine.chat.execution.records import TERMINAL
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory
-from openmachine.workspace.git import context
+from openmachine.chat.workspace.git import context
 from test.support.execution_cases import ExecutionCaseFixture
 
 
@@ -150,7 +150,7 @@ class WorktreeExecutionTests(ExecutionCaseFixture, unittest.TestCase):
         moved = self.root / "moved-source"
         self.work.rename(moved)
         try:
-            code = ('import json,sys; from pathlib import Path; from openmachine import execution; '
+            code = ('import json,sys; from pathlib import Path; from openmachine.chat import execution; '
                     'from openmachine.config import Settings; request=json.load(sys.stdin); '
                     'result=execution.create_worktree(Settings.model_validate(request["config"]), '
                     'Path(request["state"]), "local", **request["arguments"]); '

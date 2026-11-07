@@ -4,9 +4,9 @@ import json
 import sys
 import unittest
 import uuid
-from openmachine import execution
-from openmachine.execution.records import TERMINAL
-from openmachine.bootstrap import create_application
+from openmachine.chat import execution
+from openmachine.chat.execution.records import TERMINAL
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.state import lease
 from test.support.continuity_cases import ContinuityCaseFixture
 

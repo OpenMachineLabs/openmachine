@@ -7,10 +7,10 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 
-from openmachine import execution, tasks, workspace
+from openmachine.chat import execution, tasks, workspace
 from openmachine.foundation.sanitize import Fault, PRE_EFFECT_REQUEST_FAILURES
 from openmachine.foundation.state import lease
-from openmachine.tasks import effects, records, transitions
+from openmachine.chat.tasks import effects, records, transitions
 from . import task_attention, task_observation, task_receipts
 
 FILE_METHODS = {"write_workspace_file", "edit_workspace_file", "apply_workspace_patch"}

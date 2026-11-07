@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-from openmachine import workspace
+from openmachine.chat import workspace
 from openmachine.service import checks as service_checks
 from openmachine.service import processes as service_processes
 from test.support.workspace import WorkspaceFixture

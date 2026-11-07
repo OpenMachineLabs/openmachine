@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 
-from .worker import worker
+from openmachine.chat.execution.worker import worker
 
 if __name__ == "__main__":
     worker(Path(sys.argv[1]), *(int(fd) for fd in sys.argv[2:]))

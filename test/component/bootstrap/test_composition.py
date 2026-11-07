@@ -18,7 +18,7 @@ def guarded(name, *args, **kwargs):
         raise AssertionError("Disabled integration imported: " + name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 config = Settings.model_validate({"schema_version": 1, "machines": {"local": {"transport": "local", "local_access": "full_access"}}})
 state = Path(sys.argv[1])
 app = create_application(config, state)

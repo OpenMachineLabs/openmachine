@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 from integrations import codex
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.state import save_json
 from test.support.tasks import TaskFixture
 

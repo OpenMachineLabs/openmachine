@@ -8,12 +8,13 @@ import sys
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import execution, skills, tasks, workspace
-from openmachine.execution.records import TERMINAL
+from openmachine import skills
+from openmachine.chat import execution, tasks, workspace
+from openmachine.chat.execution.records import TERMINAL
 from openmachine.foundation.files import MAX_TEXT_FILE
-from openmachine.tasks import store as task_store
+from openmachine.chat.tasks import store as task_store
 from openmachine.config import SkillSources
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import ContinuityFixture, task_contract, terminal_task_fixture

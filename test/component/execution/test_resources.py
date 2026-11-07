@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.execution import resources
+from openmachine.chat.execution import resources
 from openmachine.foundation.sanitize import Fault
 
 

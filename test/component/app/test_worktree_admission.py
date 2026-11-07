@@ -175,7 +175,7 @@ class WorktreeAdmissionTests(TaskFixture, unittest.TestCase):
         self.git("config", "remote.fixture.promisor", "true")
         with self.creation_owner() as (dispatch, receipts), \
                 patch.object(self.app.machines, "read_workspace_file", side_effect=AssertionError("Unexpected file preflight.")) as file_read, \
-                patch("openmachine.workspace.worktrees.context", side_effect=AssertionError("Unexpected object inspection.")) as object_context:
+                patch("openmachine.chat.workspace.worktrees.context", side_effect=AssertionError("Unexpected object inspection.")) as object_context:
             self.fault("git_config_unavailable", self.app.create_worktree, **arguments)
             file_read.assert_not_called()
             object_context.assert_not_called()

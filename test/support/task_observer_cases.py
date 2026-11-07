@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import ObserverFixture, task_contract, terminal_task_fixture
@@ -24,9 +24,9 @@ class TaskObserverCaseFixture(ObserverFixture):
         payload.write_text(json.dumps({"config": self.config.model_dump(mode="json"), "state": str(self.state)}))
         code = '''import json,os,sys,time
 from pathlib import Path
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
-from openmachine.tasks import database
+from openmachine.chat.tasks import database
 value=json.loads(Path(sys.argv[1]).read_text())
 original=database.commit
 def crash(connection):

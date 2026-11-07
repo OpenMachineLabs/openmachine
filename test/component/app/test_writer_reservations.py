@@ -7,11 +7,11 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from openmachine import execution, tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat import execution, tasks
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import database
-from openmachine.workspace.git import writable_target
+from openmachine.chat.tasks import database
+from openmachine.chat.workspace.git import writable_target
 from test.support.tasks import TaskFixture, task_contract
 
 
@@ -184,7 +184,7 @@ class WriterReservationTests(TaskFixture, unittest.TestCase):
         self.assertFalse((self.work / "result.txt").exists())
 
     def test_partial_publication_abandon_preserves_reservation(self):
-        from openmachine.workspace import changes
+        from openmachine.chat.workspace import changes
         original = changes.publish_file
         def partial(config, machine, workspace, source, desired, temporary, **values):
             if source["path"] == "second.txt":
@@ -221,7 +221,7 @@ class WriterReservationTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.app.write_workspace_file(**self.other())["status"],"applied")
 
     def test_expired_retained_claim_keeps_owner_and_only_lawful_renewal_continues(self):
-        from openmachine.tasks import store
+        from openmachine.chat.tasks import store
         self.app.write_workspace_file(**self.write_arguments())
         record = self.view()["record"]
         owner = record["control"]["owner"]

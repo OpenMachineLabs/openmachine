@@ -5,8 +5,8 @@ from functools import partial
 from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
-from openmachine import tasks
-from openmachine.mcp.protocol import (READ, MAX_SOURCE, ExactEdit, OperationScope, PatchPrecondition,
+from openmachine.chat import tasks
+from openmachine.chat.mcp.protocol import (READ, MAX_SOURCE, ExactEdit, OperationScope, PatchPrecondition,
                                       _operation_scope, _reply, _submit_owned, _task_context)
 
 def register_workspace_tools(application, guided_tool, machine_read, file_write):

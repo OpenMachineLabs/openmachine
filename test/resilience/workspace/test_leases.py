@@ -6,10 +6,10 @@ import sys
 import time
 import unittest
 import uuid
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.config import Workspace
 from openmachine.foundation.state import lease
-from openmachine.execution import api as execution_api
+from openmachine.chat.execution import api as execution_api
 from test.support.workspace import WorkspaceFixture
 
 
@@ -17,7 +17,7 @@ from test.support.workspace import WorkspaceFixture
 class WorkspaceChangeTests(WorkspaceFixture, unittest.TestCase):
     def test_mixed_local_machine_authorities_share_non_git_lease(self):
         from openmachine.config import Machine
-        from openmachine.workspace.git import context, lock_root
+        from openmachine.chat.workspace.git import context, lock_root
         legacy = self.app.start_execution("local", uuid.uuid4().hex, str(self.work),
                                           [sys.executable, "-c", "import time; time.sleep(10)"])
         self.config.machines["whole"] = Machine(

@@ -11,12 +11,12 @@ import threading
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import workspace
+from openmachine.chat import workspace
 from openmachine.config import Machine, Workspace
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
-from openmachine.workspace import changes, change_records, files, git
-from openmachine.execution import api as execution_api
+from openmachine.chat.workspace import changes, change_records, files, git
+from openmachine.chat.execution import api as execution_api
 from test.support.workspace import WorkspaceFixture
 
 

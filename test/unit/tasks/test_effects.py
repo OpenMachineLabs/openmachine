@@ -3,7 +3,7 @@
 from copy import deepcopy
 import unittest
 
-from openmachine.tasks import effects, records
+from openmachine.chat.tasks import effects, records
 
 
 class EffectScopeTests(unittest.TestCase):

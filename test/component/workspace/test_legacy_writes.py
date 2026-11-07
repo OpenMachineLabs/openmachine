@@ -3,7 +3,7 @@
 import hashlib
 import os
 import unittest
-from openmachine import workspace
+from openmachine.chat import workspace
 from openmachine.foundation.files import MAX_TEXT_FILE
 from openmachine.foundation.sanitize import Fault
 from test.support.continuity_cases import ContinuityCaseFixture

@@ -6,8 +6,8 @@ import sys
 import time
 import unittest
 import uuid
-from openmachine import execution
-from openmachine.execution import logs
+from openmachine.chat import execution
+from openmachine.chat.execution import logs
 from openmachine.config import Workspace
 from openmachine.foundation.sanitize import Fault
 from test.support.runtime_cases import RuntimeCaseFixture

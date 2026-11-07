@@ -6,7 +6,8 @@ import sys
 import unittest
 from unittest.mock import call, patch
 import zipfile
-from openmachine import execution, service, tasks
+from openmachine import service
+from openmachine.chat import execution, tasks
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 from openmachine.service import maintenance
@@ -16,7 +17,7 @@ from openmachine.service import install as service_install
 from openmachine.service import runtime as service_runtime
 from openmachine.service import state as service_state
 from openmachine.service import transition as service_transition
-from openmachine.tasks import database as task_database
+from openmachine.chat.tasks import database as task_database
 from test.support.service_cases import ServiceCaseFixture
 from test.support.tasks import write_legacy_checkpoint
 

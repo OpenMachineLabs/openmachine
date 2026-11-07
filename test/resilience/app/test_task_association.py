@@ -3,7 +3,7 @@
 import sys
 import unittest
 import uuid
-from openmachine import execution
+from openmachine.chat import execution
 from test.support.tasks import TaskFixture
 
 

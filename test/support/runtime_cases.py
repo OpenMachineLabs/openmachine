@@ -13,10 +13,10 @@ import tempfile
 import time
 import unittest
 import uuid
-from openmachine import execution, workspace
-from openmachine.execution import logs
-from openmachine.execution.records import TERMINAL
-from openmachine.workspace.git import MAX_READ
+from openmachine.chat import execution, workspace
+from openmachine.chat.execution import logs
+from openmachine.chat.execution.records import TERMINAL
+from openmachine.chat.workspace.git import MAX_READ
 from openmachine.config import Settings, Workspace, load
 from openmachine.foundation.sanitize import Fault, redact
 

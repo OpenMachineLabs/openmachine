@@ -4,10 +4,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 import uuid
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace import files, git
+from openmachine.chat.workspace import files, git
 
 
 class WorkspaceFixture(object):
@@ -58,7 +58,7 @@ class WorkspaceFixture(object):
         return self.state / "workspace-changes" / change_id
 
     def patch_arguments(self, body, *, paths=None, **updates):
-        from openmachine.workspace.patch import parse, paths as touched_paths
+        from openmachine.chat.workspace.patch import parse, paths as touched_paths
         names = paths if paths is not None else touched_paths(parse(body))
         ctx = git.context(self.work)
         preconditions = []

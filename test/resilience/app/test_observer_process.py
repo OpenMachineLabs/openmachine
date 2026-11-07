@@ -5,10 +5,10 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine.app import task_receipts
-from openmachine.tasks import database
-from openmachine import tasks
-from openmachine.bootstrap import create_application
+from openmachine.chat.app import task_receipts
+from openmachine.chat.tasks import database
+from openmachine.chat import tasks
+from openmachine.chat.bootstrap import create_application
 from test.support.task_observer_cases import TaskObserverCaseFixture
 
 

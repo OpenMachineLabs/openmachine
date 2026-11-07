@@ -7,8 +7,9 @@ import sqlite3
 import time
 import unittest
 from unittest.mock import patch
-from openmachine import skills, tasks
-from openmachine.tasks import database, records
+from openmachine import skills
+from openmachine.chat import tasks
+from openmachine.chat.tasks import database, records
 from openmachine.config import SkillSources
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease

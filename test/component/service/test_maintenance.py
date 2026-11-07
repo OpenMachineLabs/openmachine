@@ -7,7 +7,7 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-from openmachine import tasks
+from openmachine.chat import tasks
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json

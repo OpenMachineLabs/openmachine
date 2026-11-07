@@ -10,9 +10,9 @@ import threading
 import unittest
 from unittest.mock import patch
 import uuid
-from openmachine import tasks
-from openmachine.tasks import database, records, store as task_store
-from openmachine.bootstrap import create_application
+from openmachine.chat import tasks
+from openmachine.chat.tasks import database, records, store as task_store
+from openmachine.chat.bootstrap import create_application
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease
 from test.support.tasks import TaskFixture, task_contract
@@ -834,7 +834,7 @@ class TaskAdmissionTests(TaskFixture, unittest.TestCase):
         self.assertEqual(self.task_bytes(), raw)
 
     def test_plan_change_invalidates_dependents_not_independent_acceptance(self):
-        from openmachine.tasks import records, transitions
+        from openmachine.chat.tasks import records, transitions
         sources = [{"locator": "fixture:a", "sha256": "a" * 64}, {"locator": "fixture:b", "sha256": "b" * 64}]
         self.request["contract"]["sources"] = sources
         base = self.request["stages"][0]

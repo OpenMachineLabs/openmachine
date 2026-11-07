@@ -9,7 +9,7 @@ import re
 import stat
 
 from openmachine.foundation.sanitize import Fault
-from openmachine.workspace import worktrees
+from openmachine.chat.workspace import worktrees
 
 MAX_TIMEOUT = 86400
 FORMAT = 5

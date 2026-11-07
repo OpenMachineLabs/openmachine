@@ -13,7 +13,8 @@ from test.support.mcp import MCPFixture
 class MCPContractTests(MCPFixture, unittest.IsolatedAsyncioTestCase):
     async def test_lifecycle_readiness_and_mutation_gate(self):
         self.launch()
-        from openmachine import execution, service
+        from openmachine import service
+        from openmachine.chat import execution
         from openmachine.foundation.sanitize import Fault
         probe = {"workspace": "example", "path": "AGENTS.md"}
         ready = await asyncio.to_thread(service.probe_service, self.state, self.config, probe,

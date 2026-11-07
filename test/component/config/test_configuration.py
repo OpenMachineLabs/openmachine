@@ -58,7 +58,7 @@ class RuntimeTests(RuntimeCaseFixture, unittest.TestCase):
         expected = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertNotEqual(config.configuration_sha256(), expected)
         self.assertIsNone(config.machine("local").local_access)
-        from openmachine.workspace.files import root_for
+        from openmachine.chat.workspace.files import root_for
         with self.assertRaises(Fault) as denied:
             root_for(config, "local", str(self.work))
         self.assertEqual(denied.exception.code, "local_approval_required")

@@ -3,7 +3,7 @@
 from copy import deepcopy
 import unittest
 
-from openmachine.execution.records import validate_record
+from openmachine.chat.execution.records import validate_record
 from openmachine.foundation.sanitize import Fault
 
 

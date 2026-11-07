@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 from integrations import codex
-from openmachine.bootstrap import create_application
+from openmachine.chat.bootstrap import create_application
 from test.support.codex_cases import CodexCaseFixture
 
 

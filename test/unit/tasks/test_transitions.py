@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from openmachine.foundation.sanitize import Fault
-from openmachine.tasks import records, transitions
+from openmachine.chat.tasks import records, transitions
 
 
 class TaskTransitionTests(unittest.TestCase):

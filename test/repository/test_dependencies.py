@@ -19,46 +19,46 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
 
     def test_import_check_rejects_forbidden_edges_and_unowned_modules(self):
         cases = (
-            ("openmachine.projects.catalog", "import openmachine.app", "must not depend"),
-            ("openmachine.projects.catalog", "import integrations.connections", "must not depend"),
-            ("openmachine.foundation.files", "import openmachine.tasks", "must not depend"),
+            ("openmachine.chat.projects.catalog", "import openmachine.chat.app", "must not depend"),
+            ("openmachine.chat.projects.catalog", "import integrations.connections", "must not depend"),
+            ("openmachine.foundation.files", "import openmachine.chat.tasks", "must not depend"),
             ("openmachine.foundation.files", "from ..tasks import read", "must not depend"),
-            ("openmachine.foundation.files", "def read():\n    import openmachine.tasks", "must not depend"),
-            ("openmachine.service", "from openmachine.execution.worker import worker", "must not depend"),
+            ("openmachine.foundation.files", "def read():\n    import openmachine.chat.tasks", "must not depend"),
+            ("openmachine.service", "from openmachine.chat.execution.worker import worker", "must not depend"),
             ("openmachine.service.state", "from . import transition", "must not depend"),
             ("openmachine.service.runtime", "from . import install", "must not depend"),
             ("openmachine.service.processes", "from . import checks", "must not depend"),
             ("openmachine.service.processes", "import openmachine.service.runtime", "must not depend"),
-            ("openmachine.service.transition", "import openmachine.tasks.database", "must not depend"),
-            ("openmachine.service.maintenance", "from openmachine.bootstrap import create_application", "must not depend"),
-            ("openmachine.tasks.index", "from . import store", "must not depend"),
-            ("openmachine.tasks.rows", "import openmachine.tasks.store", "must not depend"),
-            ("openmachine.tasks.rows", "import openmachine.tasks.migration", "must not depend"),
-            ("openmachine.tasks.migration", "import openmachine.tasks.store", "must not depend"),
-            ("openmachine.app.task_receipts", "import openmachine.app.task_admission", "must not depend"),
-            ("openmachine.app.task_receipts", "import openmachine.app.task_observer", "must not depend"),
+            ("openmachine.service.transition", "import openmachine.chat.tasks.database", "must not depend"),
+            ("openmachine.service.maintenance", "from openmachine.chat.bootstrap import create_application", "must not depend"),
+            ("openmachine.chat.tasks.index", "from . import store", "must not depend"),
+            ("openmachine.chat.tasks.rows", "import openmachine.chat.tasks.store", "must not depend"),
+            ("openmachine.chat.tasks.rows", "import openmachine.chat.tasks.migration", "must not depend"),
+            ("openmachine.chat.tasks.migration", "import openmachine.chat.tasks.store", "must not depend"),
+            ("openmachine.chat.app.task_receipts", "import openmachine.chat.app.task_admission", "must not depend"),
+            ("openmachine.chat.app.task_receipts", "import openmachine.chat.app.task_observer", "must not depend"),
             ("integrations.github.connection", "from . import client", "must not depend"),
-            ("openmachine.execution.records", "from openmachine.config import Settings", "must not depend"),
-            ("openmachine.execution.records", "import openmachine.execution.observation", "must not depend"),
-            ("openmachine.execution.observation", "import openmachine.execution.api", "must not depend"),
-            ("openmachine.execution.observation", "import openmachine.execution.worker", "must not depend"),
-            ("openmachine.workspace.preparation", "import openmachine.workspace.change_records", "must not depend"),
-            ("openmachine.workspace.change_schema", "import openmachine.workspace.change_records", "must not depend"),
-            ("openmachine.workspace.change_schema", "import openmachine.workspace.preparation", "must not depend"),
-            ("openmachine.workspace.change_schema", "import openmachine.foundation.state", "must not depend"),
-            ("openmachine.skills.catalog", "from openmachine.app import Application", "must not depend"),
-            ("openmachine.skills.guidance", "import openmachine.server", "must not depend"),
-            ("openmachine.mcp.protocol", "import openmachine.server", "must not depend"),
-            ("openmachine.mcp.connections", "import integrations.connections", "must not depend"),
-            ("openmachine.mcp.workspace", "import openmachine.app.task_admission", "must not depend"),
-            ("integrations.connections", "import openmachine.mcp.protocol", "must not depend"),
+            ("openmachine.chat.execution.records", "from openmachine.config import Settings", "must not depend"),
+            ("openmachine.chat.execution.records", "import openmachine.chat.execution.observation", "must not depend"),
+            ("openmachine.chat.execution.observation", "import openmachine.chat.execution.api", "must not depend"),
+            ("openmachine.chat.execution.observation", "import openmachine.chat.execution.worker", "must not depend"),
+            ("openmachine.chat.workspace.preparation", "import openmachine.chat.workspace.change_records", "must not depend"),
+            ("openmachine.chat.workspace.change_schema", "import openmachine.chat.workspace.change_records", "must not depend"),
+            ("openmachine.chat.workspace.change_schema", "import openmachine.chat.workspace.preparation", "must not depend"),
+            ("openmachine.chat.workspace.change_schema", "import openmachine.foundation.state", "must not depend"),
+            ("openmachine.skills.catalog", "from openmachine.chat.app import Application", "must not depend"),
+            ("openmachine.skills.guidance", "import openmachine.chat.server", "must not depend"),
+            ("openmachine.chat.mcp.protocol", "import openmachine.chat.server", "must not depend"),
+            ("openmachine.chat.mcp.connections", "import integrations.connections", "must not depend"),
+            ("openmachine.chat.mcp.workspace", "import openmachine.chat.app.task_admission", "must not depend"),
+            ("integrations.connections", "import openmachine.chat.mcp.protocol", "must not depend"),
             ("openmachine.new_owner", "import os", "explicit dependency owner"),
             ("openmachine.foundation.files", "from .sanitize import *", "wildcard import"),
-            ("openmachine.foundation.files", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.tasks", "must not depend"),
+            ("openmachine.foundation.files", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.chat.tasks", "must not depend"),
         )
         for module, text, message in cases:
             with self.subTest(module=module, text=text), self.assertRaisesRegex(AssertionError, message):
-                self.assert_import_contract({module: (text, False), "openmachine.tasks.store": ("", False),
+                self.assert_import_contract({module: (text, False), "openmachine.chat.tasks.store": ("", False),
                                              "integrations.github.client": ("", False)})
 
     def test_import_check_detects_cycles_through_reexports_and_local_imports(self):
@@ -75,9 +75,9 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
             "openmachine.foundation.files": ("import os\nfrom typing import TYPE_CHECKING\n"
                                             "if TYPE_CHECKING:\n    import openmachine.config\n"
                                             "import typing\nif typing.TYPE_CHECKING:\n    import mcp", False),
-             "openmachine.cli": ("def main():\n    from openmachine.bootstrap import create_application\n"
-                                "    from openmachine.server import serve", False),
-            "openmachine.execution.worker": ("from openmachine.execution.records import FORMAT", False),
+             "openmachine.cli": ("def main():\n    from openmachine.chat.bootstrap import create_application\n"
+                                "    from openmachine.chat.server import serve", False),
+            "openmachine.chat.execution.worker": ("from openmachine.chat.execution.records import FORMAT", False),
         })
 
 

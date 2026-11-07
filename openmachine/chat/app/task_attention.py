@@ -2,7 +2,7 @@
 
 import time
 
-from openmachine.tasks import records
+from openmachine.chat.tasks import records
 
 HANDOFF_GRACE_MS = 120000
 MAX_WAIT_SECONDS = 30.0

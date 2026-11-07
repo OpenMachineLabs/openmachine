@@ -12,8 +12,8 @@ import unittest
 from unittest.mock import Mock, patch
 import httpx2 as httpx
 from mcp.server.mcpserver.exceptions import ToolError
-from openmachine import server, tasks
-from openmachine.mcp import protocol
+from openmachine.chat import server, tasks
+from openmachine.chat.mcp import protocol
 from openmachine.config import Settings
 
 

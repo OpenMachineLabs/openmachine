@@ -2,7 +2,7 @@
 
 import json
 import unittest
-from openmachine import execution
+from openmachine.chat import execution
 from openmachine.foundation.sanitize import Fault
 
 
