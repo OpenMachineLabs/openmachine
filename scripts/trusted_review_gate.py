@@ -113,10 +113,12 @@ class API:
         return [p["number"] for p in self.open_pulls()]
 
     def status(self, sha):
-        obj = self.get(f"/repos/{REPO}/commits/{sha}/status")
-        if not isinstance(obj, dict) or not isinstance(obj.get("statuses"), list):
+        # Newest first. The combined /status endpoint omits creators, so it can't dedupe.
+        statuses = self.get(f"/repos/{REPO}/commits/{sha}/statuses?per_page=100")
+        if not isinstance(statuses, list):
             raise RuntimeError("invalid status response")
-        return next((s for s in obj["statuses"] if s.get("context") == CONTEXT), None)
+        return next((s for s in statuses
+                     if isinstance(s, dict) and s.get("context") == CONTEXT), None)
 
     def publish(self, sha, number, state, reason):
         self.get(f"/repos/{REPO}/statuses/{sha}", {
