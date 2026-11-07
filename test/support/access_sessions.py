@@ -51,8 +51,10 @@ class SessionFixture(object):
         for name in self.lifetimes:
             self.terminate(name)
 
-    def command(self, *args):
-        return [sys.executable, "-I", "-c", BOOT, "--config", str(self.config), "--state-dir", str(self.state), *args]
+    def command(self, *args, prelude=""):
+        """prelude runs first in the launcher process, for fault injection."""
+        return [sys.executable, "-I", "-c", prelude + BOOT, "--config", str(self.config), "--state-dir",
+                str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
         value = {"protocol": 1, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, **extra}
@@ -69,10 +71,10 @@ class SessionFixture(object):
         out, err = process.communicate(stdin, timeout=60)
         return reply, process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
-    def start(self, value):
+    def start(self, value, prelude=""):
         """Launch one channel and return the running launcher with its admission reply."""
         parent, child = socket.socketpair()
-        process = subprocess.Popen(self.command("session", "--control-fd", str(child.fileno())),
+        process = subprocess.Popen(self.command("session", "--control-fd", str(child.fileno()), prelude=prelude),
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    pass_fds=[child.fileno()], start_new_session=True)
         child.close()

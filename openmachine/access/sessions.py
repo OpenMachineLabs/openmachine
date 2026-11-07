@@ -330,19 +330,18 @@ def _pids() -> list[int]:
 
 
 def _session_members(leader: int, start: int) -> list[int]:
-    """Processes of a recorded session that started no earlier than its leader.
+    """Processes of a recorded session, found only while its leader still verifies.
 
-    A live session keeps its id from being reused, so the id is ignored only when another process now
-    holds the leader's PID. Detached sessions are not found: Full Access cleanup stays unverified.
+    A session id is a PID number. Once the leader is gone, nothing proves the session never ended and the
+    number was not reused by another session, so its remaining processes are left alone: Full Access
+    cleanup never claims work it cannot attribute, and it stays unverified.
     """
-    holder = _birth(leader)
-    if holder is not None and holder != start:
+    if _birth(leader) != start:
         return []
     found = []
     for pid in _pids():
         try:
-            born = _birth(pid)
-            if pid > 1 and born is not None and born >= start and os.getsid(pid) == leader:
+            if pid > 1 and os.getsid(pid) == leader and _birth(leader) == start:
                 found.append(pid)
         except (ProcessLookupError, PermissionError):
             continue
@@ -351,9 +350,11 @@ def _session_members(leader: int, start: int) -> list[int]:
 
 def _end_full(sessions: list) -> None:
     for leader, start in sessions:
-        for pid in _session_members(leader, start):
+        # The leader goes last: it is the anchor that every other signal re-verifies.
+        for pid in sorted(_session_members(leader, start), key=lambda pid: pid == leader):
             try:
-                os.kill(pid, signal.SIGKILL)
+                if _birth(leader) == start:
+                    os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 continue
 
@@ -399,8 +400,12 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
         if instance is None:
             # Selected roots and worktrees are fixed when an instance starts; later sessions reuse them.
             text = _restricted_profile(scope, state, runtime, home)
-            instance = _start_spawner(lifetime, text, runtime)
+            # Publish the marker before anything starts: terminate finds an instance by marker alone, so a
+            # failed save or a lost launcher never leaves a running instance that no record names.
+            instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None}
             record["instances"].append(instance)
+            lifetime.save(record)
+            instance.update(_start_spawner(lifetime, text, runtime, instance["marker"]))
             lifetime.save(record)
     session_tmp = runtime / "tmp" / uuid.uuid4().hex[:8]
     session_tmp.mkdir(mode=0o700)
@@ -453,6 +458,8 @@ def _frame(stream) -> dict:
 
 
 def _spawner_alive(instance: dict) -> bool:
+    if instance["pid"] is None:
+        return False  # Published but never confirmed started.
     current = macos.birth(instance["pid"])
     return (current is not None and current.start == instance["start"]
             and macos.member(instance["pid"], instance["marker"]) is True)
@@ -490,9 +497,8 @@ def _connect(lifetime: Lifetime, instance: dict) -> socket.socket:
     return connection
 
 
-def _start_spawner(lifetime: Lifetime, text: str, runtime: Path) -> dict:
+def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) -> dict:
     """Start one Seatbelt instance whose first process is the spawner; fail closed unless membership verifies."""
-    marker = uuid.uuid4().hex
     profile = text + macos.lifetime_rules(marker, runtime)
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with _Inside(lifetime.directory):
@@ -522,7 +528,7 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path) -> dict:
             os.kill(pid, signal.SIGKILL)
         raise Fault("lifetime_unverifiable", "The lifetime boundary failed its native self-test; nothing was launched.",
                     effect="known_no_effect")
-    return {"marker": marker, "pid": pid, "start": current.start}
+    return {"pid": pid, "start": current.start}
 
 
 def _become_spawner(listener: socket.socket, ready: int, profile: str) -> None:

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from openmachine.access import macos, sessions
+from openmachine.access import sessions as sessions_module
 from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
@@ -52,6 +53,27 @@ class LaunchAcknowledgmentTests(unittest.TestCase):
             with self.subTest(frame=frame), self.assertRaises(Fault) as caught:
                 sessions.started(frame)
             self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_unverified", "effect_unknown"))
+
+
+class FullAccessAttributionTests(unittest.TestCase):
+    """Full Access cleanup signals only what a verified session leader still anchors."""
+
+    def signals(self, births, sessions):
+        sent = []
+        with (patch.object(sessions_module, "_birth", lambda pid: births.get(pid)),
+              patch.object(sessions_module, "_pids", lambda: [101, 202]),
+              patch.object(sessions_module.os, "getsid", lambda pid: 101),
+              patch.object(sessions_module.os, "kill", lambda pid, signum: sent.append(pid))):
+            sessions_module._end_full(sessions)
+        return sent
+
+    def test_a_live_verified_leader_anchors_its_session_and_is_signalled_last(self):
+        self.assertEqual(self.signals({101: 10, 202: 21}, [[101, 10]]), [202, 101])
+
+    def test_an_unverifiable_leader_never_lets_a_reused_session_id_claim_other_work(self):
+        # The recorded session ended; PID/session id 101 was reused, and that new leader exited too.
+        self.assertEqual(self.signals({202: 21}, [[101, 10]]), [])
+        self.assertEqual(self.signals({101: 20, 202: 21}, [[101, 10]]), [])
 
 
 class LifetimeRuleTests(unittest.TestCase):

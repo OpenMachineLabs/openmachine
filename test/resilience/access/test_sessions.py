@@ -78,6 +78,28 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                 self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
                 self.assertFalse(self.beating(beat))
 
+    def test_an_instance_started_but_not_confirmed_is_still_found_by_terminate(self):
+        # The first save that records a started spawner fails, or the launcher dies right there.
+        for name, failure in (("ENOSPC", "raise OSError(28, 'No space left on device')"), ("lost launcher", "os._exit(9)")):
+            with self.subTest(failure=name):
+                lifetime = self.lifetime()
+                prelude = ("import os\nfrom openmachine.access import sessions as _s\n_save = _s.Lifetime.save\n"
+                           "def _fail(self, record):\n"
+                           " if any(item.get('pid') for item in record.get('instances', [])):\n"
+                           f"  {failure}\n _save(self, record)\n_s.Lifetime.save = _fail\n")
+                process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"), prelude)
+                out, _ = process.communicate(timeout=60)
+                self.assertEqual(out, b"")
+                if name == "ENOSPC":
+                    self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
+                else:
+                    self.assertEqual((reply, process.returncode), ({}, 9))
+                [instance] = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]
+                self.assertIsNone(instance["pid"])
+                self.assertTrue(macos.members(instance["marker"])[0], "the started spawner must be running")
+                self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
+                self.assertEqual(macos.members(instance["marker"]), ([], False))
+
     def test_a_lost_spawner_starts_a_new_instance_and_terminate_covers_both(self):
         lifetime = self.lifetime()
         job = int(self.session(lifetime, command=detached("orphan"))[2].split()[-1])
@@ -244,19 +266,28 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 class FullAccessSessionTests(SessionFixture, unittest.TestCase):
     def test_full_access_is_an_ordinary_shell_with_best_effort_cleanup(self):
         lifetime = self.lifetime()
-        reply, code, out, err = self.session(lifetime, "full_access", (
-            "echo HOME=$HOME; sleep 60 </dev/null >/dev/null 2>&1 & echo job=$!"))
-        self.assertEqual((reply["status"], code), ("admitted", 0), err)
-        self.assertIn(f"HOME={Path.home()}", out)
-        job = int(out.split("job=")[1].split()[0])
+        # A live session: its leader still verifies, so its foreground and background work is ended.
+        process, reply = self.start(self.request(lifetime, "full_access", "exec",
+                                                 "echo HOME=$HOME; sleep 60 </dev/null >/dev/null 2>&1 & echo job=$!; wait"))
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertEqual(process.stdout.readline().decode().strip(), f"HOME={Path.home()}")
+        job = int(process.stdout.readline().decode().split("job=")[1])
         self.assertTrue(self.alive(job))
         result, code = self.terminate(lifetime)
         self.assertEqual((result, code), ({"status": "termination_unverified", "reason": "full_access_best_effort"}, 1))
-        deadline = time.monotonic() + 5
-        while self.alive(job) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        process.wait(timeout=20)
         self.assertFalse(self.alive(job))
         self.assertEqual(self.terminate(lifetime), (result, 1))  # Replayed for a lost reply.
+
+    def test_full_access_never_claims_work_its_leader_no_longer_anchors(self):
+        lifetime = self.lifetime()
+        # The shell exits and leaves a job behind; its session id is no longer provably this session's.
+        reply, code, out, _ = self.session(lifetime, "full_access", "sleep 60 </dev/null >/dev/null 2>&1 & echo job=$!")
+        self.assertEqual((reply["status"], code), ("admitted", 0))
+        job = int(out.split("job=")[1].split()[0])
+        self.addCleanup(lambda: self.alive(job) and os.kill(job, signal.SIGKILL))
+        self.assertEqual(self.terminate(lifetime)[0]["status"], "termination_unverified")
+        self.assertTrue(self.alive(job))
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
