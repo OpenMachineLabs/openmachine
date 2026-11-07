@@ -8,7 +8,7 @@ import socket
 import unittest
 import uuid
 
-from openmachine.execution import seatbelt
+from openmachine.access import macos as seatbelt
 from test.support.operation_scope import AUTHORITY, ScopeFixture
 
 DENIED = "Operation not permitted"

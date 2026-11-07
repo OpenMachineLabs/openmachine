@@ -7,7 +7,7 @@ import tempfile
 import time
 from unittest.mock import patch
 
-from openmachine.chat import execution
+from openmachine.access import macos
 from openmachine.chat.bootstrap import create_application
 from openmachine.config import Settings
 from openmachine.chat.execution.records import TERMINAL
@@ -38,7 +38,7 @@ class ScopeFixture(object):
         # Secret-named files: unselected (personal), Read-only (desktop) and Full (core) projects.
         for folder in (self.personal, self.desktop, self.core):
             (folder / ".env").write_text(f"ENV-{folder.name.upper()}\n")
-        home = patch.object(execution, "account_home", return_value=self.home)
+        home = patch.object(macos, "account_home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
         for repo in (self.core, self.cloud, self.desktop):

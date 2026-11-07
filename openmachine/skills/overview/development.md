@@ -13,7 +13,7 @@
 | `chat/execution/` | Original commands, pipe/PTY controls, cleanup, receipts and bounded logs. |
 | `chat/workspace/`, `chat/projects/` | Source/Git observations, preparation, change records and guarded publication. |
 | `chat/tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
-| `app/scope.py`, `execution/seatbelt.py` | Operation scope and Seatbelt confinement used by Chat. |
+| `access/` | Operation scope rules (`rules.py`) and macOS Seatbelt confinement (`macos.py`) shared by Chat and Code. |
 | `service/` | Installation, compatibility/readiness, supervision and activation/restoration. |
 | `foundation/` | Shared IO, private state, locks and safe errors; no domain ownership. |
 | `integrations/` | Complete native GitHub implementation; no second engine. |

@@ -13,7 +13,7 @@ from openmachine.foundation.state import lease, save_json
 from openmachine.chat.workspace.git import capture, context
 from openmachine.chat.workspace import worktrees
 
-from openmachine.execution import seatbelt
+from openmachine.access import macos as seatbelt
 from . import control, logs
 from .logs import MAX_BYTES as MAX_LOG, MAX_READ
 from .process import Process, boot_identity
