@@ -1,6 +1,6 @@
 {
   "name": "openmachine",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "description": "Install and manage Open Machine Core on Apple Silicon Macs",
   "license": "MIT",
   "private": false,
