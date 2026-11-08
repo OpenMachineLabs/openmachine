@@ -157,14 +157,12 @@ def members(marker):
 
 
 def end(marker, seconds=10):
-    """Kill an instance's members until a scan finds none."""
+    """Kill an instance's members until a scan finds none; each kill re-verifies its target's identity."""
     deadline = time.monotonic() + seconds
     while found := members(marker):
         if time.monotonic() > deadline:
             raise AssertionError(f"lifetime members remain: {found}")
         for pid in found:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            if (current := macos.birth(pid)) is not None:
+                macos.signal_member(current, marker, signal.SIGKILL)
         time.sleep(0.05)
