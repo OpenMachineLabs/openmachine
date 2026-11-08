@@ -53,14 +53,12 @@ class SessionFixture(object):
     def end_all(self):
         """Kill what each lifetime left running and remove its runtime tree; Core never ends a lifetime."""
         for name in self.lifetimes:
-            try:
-                record = json.loads((self.state / "code" / name / "record.json").read_text())
-            except FileNotFoundError:
-                continue
-            for instance in record.get("instances", []):
-                end(instance["marker"])
-            if "runtime" in record:
-                shutil.rmtree(record["runtime"], ignore_errors=True)
+            record = self.state / "code" / name / "record.json"
+            if record.exists():
+                for instance in json.loads(record.read_text()).get("instances", []):
+                    end(instance["marker"])
+            if sys.platform == "darwin":
+                shutil.rmtree(macos.user_temp() / "omc" / macos.digest(name)[:12], ignore_errors=True)
 
     def command(self, *args, prelude=""):
         """prelude runs first in the launcher process, for fault injection."""
@@ -159,13 +157,14 @@ def members(marker):
 
 
 def end(marker, seconds=10):
-    """Kill an instance's members until two scans in a row find none."""
-    deadline, empty = time.monotonic() + seconds, 0
-    while empty < 2:
-        found = members(marker)
-        for pid in found:
-            if (current := macos.birth(pid)) is not None:
-                macos.signal_member(current, marker, signal.SIGKILL)
-        empty = 0 if found else empty + 1
-        if found and time.monotonic() > deadline:
+    """Kill an instance's members until a scan finds none."""
+    deadline = time.monotonic() + seconds
+    while found := members(marker):
+        if time.monotonic() > deadline:
             raise AssertionError(f"lifetime members remain: {found}")
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.05)

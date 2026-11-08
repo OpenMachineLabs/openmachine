@@ -15,7 +15,7 @@ SCOPE = {"protocol": 1, "authority": {}, "roots": []}
 
 class RequestTests(unittest.TestCase):
     def parse(self, value):
-        return sessions.parse(sessions.SessionRequest, json.dumps(value).encode())
+        return sessions.parse(json.dumps(value).encode())
 
     def test_a_valid_request_is_typed_and_bounded(self):
         request = self.parse(VALID | {"terminal": {"term": "xterm-256color"}, "environment": {"LANG": "en_US.UTF-8"}})
@@ -34,7 +34,7 @@ class RequestTests(unittest.TestCase):
                     self.parse(VALID | change)
                 self.assertEqual((caught.exception.code, caught.exception.effect), ("request_invalid", "known_no_effect"))
         with self.assertRaises(Fault):
-            sessions.parse(sessions.SessionRequest, b" " * (sessions.MAX_REQUEST + 1))
+            sessions.parse(b" " * (sessions.MAX_REQUEST + 1))
 
     def test_restricted_policies_follow_the_lifetime_backend(self):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):

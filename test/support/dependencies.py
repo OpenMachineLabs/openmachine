@@ -21,7 +21,7 @@ class DependencyFixture(object):
             "openmachine.access.macos": ("openmachine.foundation.sanitize",),
             "openmachine.access.sessions": ("openmachine.access.macos", "openmachine.access.rules", "openmachine.config",
                                             "openmachine.foundation.*", "pydantic"),
-            "openmachine.access.__main__": ("openmachine.access.sessions", "openmachine.config", "openmachine.foundation.sanitize"),
+            "openmachine.access.__main__": ("openmachine.access.sessions", "openmachine.config"),
             "openmachine.chat.execution.environment": ("openmachine.chat.workspace", "openmachine.chat.execution.resources", "openmachine.foundation.*"),
             "openmachine.chat.execution.resources": ("openmachine.foundation.sanitize",),
             "openmachine.execution.__main__": ("openmachine.chat.execution.worker",),

@@ -81,11 +81,11 @@ def capabilities() -> dict:
             "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
 
 
-def parse(model, raw: bytes):
+def parse(raw: bytes) -> SessionRequest:
     if len(raw) > MAX_REQUEST:
         raise Fault("request_invalid", "The access request exceeds its bound.", effect="known_no_effect")
     try:
-        return model.model_validate_json(raw)
+        return SessionRequest.model_validate_json(raw)
     except ValidationError as error:
         raise Fault("request_invalid", "Use access protocol 1 with a valid session request.",
                     effect="known_no_effect") from error
@@ -247,7 +247,7 @@ def session(control: int, config_path: Path, state: Path) -> None:
     Exactly one reply follows the request: denied, or admitted once the command is running.
     """
     try:
-        request = parse(SessionRequest, _read_line(control))
+        request = parse(_read_line(control))
         account = _account(request.user)
         state = private_directory(state)
         if request.policy == "full_access":
@@ -288,13 +288,13 @@ def _admit_full(request: SessionRequest, account, state: Path) -> tuple:
     lifetime = Lifetime(state, request.lifetime)
     with lifetime.lock():
         record = lifetime.read()
-        if record is None:
-            lifetime.save({"format": 1, "policy": "full_access"})
-        elif record["policy"] != "full_access":
+        if record is not None and record["policy"] != "full_access":
             raise Fault("lifetime_changed", "This lifetime's policy changed; start sessions in a new lifetime.",
                         effect="known_no_effect")
-    if os.getsid(0) != os.getpid():
-        os.setsid()
+        if os.getsid(0) != os.getpid():
+            os.setsid()
+        if record is None:
+            lifetime.save({"format": 1, "policy": "full_access"})
     if request.terminal is not None:
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     os.chdir(account.pw_dir)
@@ -333,8 +333,7 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     lifetime = Lifetime(state, request.lifetime)
     grant = _grant(request)
     with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant,
-                                     "runtime": str(runtime), "instances": []}
+        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
         if record["policy"] != request.policy or record.get("grant_sha256") != grant:
             raise Fault("lifetime_changed", "This lifetime's policy or scope changed; start sessions in a new "
                         "lifetime.", effect="known_no_effect")
@@ -461,7 +460,7 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) ->
     listener.close()
     try:
         # Bounded: this runs under the lifetime lock that every admission needs. A spawner that reports
-        # later finds the pipe closed and exits.
+        # too late is never used: its instance stays recorded but unconfirmed.
         reported = (os.read(ready_read, 64)  # One short write: atomic on a pipe.
                     if select.select([ready_read], [], [], SPAWN_SECONDS)[0] else None)
     finally:

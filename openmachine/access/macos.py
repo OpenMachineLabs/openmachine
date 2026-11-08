@@ -272,21 +272,14 @@ def lifetime_rules(marker: str, runtime: Path) -> str:
     ]) + "\n"
 
 
-def _status(pid: int) -> tuple[int, int] | None:
-    """(start time, BSD status) of pid, or None once it is gone."""
-    _, _, info = _native()
-    value = _BSDInfo()
-    if info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value):
-        return None
-    return value.start_sec * 1_000_000 + value.start_usec, value.status
-
-
 def birth(pid: int) -> Birth | None:
     """The live identity of pid, or None once it is gone or a zombie."""
-    found = _status(pid)
-    if found is None or found[1] == _ZOMBIE:
+    _, _, info = _native()
+    value = _BSDInfo()
+    if (info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value)
+            or value.status == _ZOMBIE):
         return None
-    return Birth(pid, found[0])
+    return Birth(pid, value.start_sec * 1_000_000 + value.start_usec)
 
 
 def member(pid: int, marker: str) -> bool | None:

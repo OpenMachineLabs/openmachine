@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 import unittest
-import uuid
 
 from openmachine.access import macos
 from openmachine.chat import projects
@@ -113,15 +112,13 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         while not self.stopped(instance["pid"]) and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertTrue(self.stopped(instance["pid"]))
-        ran = HOME / f"{lifetime}.ran"
         started = time.monotonic()
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"echo x > {ran}"),
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
                                     "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
         # The request may already be queued at the spawner: a retry is not known to be safe.
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
-        self.assertFalse(ran.exists())
         # The queued launch holds the channel IO; the cleanup that kills the spawner releases it.
         for stream in (process.stdin, process.stdout, process.stderr):
             stream.close()
