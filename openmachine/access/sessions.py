@@ -1,4 +1,4 @@
-"""Code SSH sessions: confined launch inside a persistent lifetime, and lifetime termination.
+"""Code SSH sessions: confined launch inside a persistent lifetime.
 
 No Tasks, Executions or receipts. Lifetime records hold only supervision metadata, never commands,
 output or context, and nothing here restarts a command.
@@ -12,7 +12,6 @@ from pathlib import Path
 import pwd
 import select
 import selectors
-import shutil
 import signal
 import socket
 import stat
@@ -20,7 +19,6 @@ import struct
 import subprocess
 import sys
 import termios
-import time
 from typing import Annotated, Literal
 import uuid
 
@@ -43,7 +41,6 @@ FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signa
 SPAWN_SECONDS = 5
 # Each launcher step up to the spawner's acknowledgment; longer than one stalled launch the spawner waits out.
 ACKNOWLEDGE_SECONDS = 2 * SPAWN_SECONDS
-TERMINATE_SECONDS = 10
 LifetimeId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 
 
@@ -77,12 +74,6 @@ class SessionRequest(BaseModel):
         return self
 
 
-class TerminateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    protocol: Literal[1]
-    lifetime: LifetimeId
-
-
 def capabilities() -> dict:
     reason = macos.lifetime_unavailable_reason()
     restricted = "available" if reason is None else reason
@@ -90,13 +81,13 @@ def capabilities() -> dict:
             "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
 
 
-def parse(model, raw: bytes):
+def parse(raw: bytes) -> SessionRequest:
     if len(raw) > MAX_REQUEST:
         raise Fault("request_invalid", "The access request exceeds its bound.", effect="known_no_effect")
     try:
-        return model.model_validate_json(raw)
+        return SessionRequest.model_validate_json(raw)
     except ValidationError as error:
-        raise Fault("request_invalid", "Use access protocol 1 with a valid session or terminate request.",
+        raise Fault("request_invalid", "Use access protocol 1 with a valid session request.",
                     effect="known_no_effect") from error
 
 
@@ -159,10 +150,7 @@ class Lifetime:
     """Protected supervision metadata under Core state, which every sandbox denies.
 
     Admission holds the lifetime lock while it checks the record and selects or starts an instance, then
-    hands its launch to that instance's spawner. Termination holds it throughout and kills every member,
-    the spawner included, so a launch still in flight either becomes a member that is killed or fails.
-    Terminating retires the id for good: the record stays as a tombstone that refuses later admissions and
-    replays the termination result.
+    hands its launch to that instance's spawner.
     """
 
     def __init__(self, state: Path, lifetime: str):
@@ -174,14 +162,6 @@ class Lifetime:
             return json.loads(self.path.read_text())
         except FileNotFoundError:
             return None
-
-    def admit(self, fresh: dict) -> dict:
-        """The record a new session joins; call with the lock held."""
-        record = self.read() or fresh
-        if record.get("retired"):
-            raise Fault("lifetime_terminated", "This lifetime was terminated; start sessions in a new lifetime.",
-                        effect="known_no_effect")
-        return record
 
     def save(self, record: dict) -> None:
         save_json(self.path, record)
@@ -267,7 +247,7 @@ def session(control: int, config_path: Path, state: Path) -> None:
     Exactly one reply follows the request: denied, or admitted once the command is running.
     """
     try:
-        request = parse(SessionRequest, _read_line(control))
+        request = parse(_read_line(control))
         account = _account(request.user)
         state = private_directory(state)
         if request.policy == "full_access":
@@ -276,7 +256,7 @@ def session(control: int, config_path: Path, state: Path) -> None:
             launch = _admit_restricted(request, account, config_path, state)
     except (Fault, OSError, ValueError) as error:
         failure = (error if isinstance(error, Fault) else
-                   Fault("launch_unverified", "The session did not start cleanly; terminate its lifetime if unsure.",
+                   Fault("launch_unverified", "The session did not start cleanly; its command may be running.",
                          effect="effect_unknown"))
         _reply(control, {"status": "denied", "error": {"code": failure.code, "message": str(failure),
                                                        "effect": failure.effect}})
@@ -298,79 +278,27 @@ def session(control: int, config_path: Path, state: Path) -> None:
     _relay(launch[3])
 
 
-# ---- Full Access: ordinary shell, best-effort cleanup -------------------------------------------
+# ---- Full Access: ordinary shell ----------------------------------------------------------------
 
 
 def _admit_full(request: SessionRequest, account, state: Path) -> tuple:
-    """Record this process as a session leader; the caller execs the command in place."""
+    """Make this process a session leader; the caller execs the command in place."""
     program, argv = _argv(request, account)
     environment = _environment(request, account)
     lifetime = Lifetime(state, request.lifetime)
     with lifetime.lock():
-        record = lifetime.admit({"format": 1, "policy": "full_access", "sessions": []})
-        if record["policy"] != "full_access":
-            raise Fault("lifetime_changed", "This lifetime's policy changed; terminate it before admitting sessions.",
+        record = lifetime.read()
+        if record is not None and record["policy"] != "full_access":
+            raise Fault("lifetime_changed", "This lifetime's policy changed; start sessions in a new lifetime.",
                         effect="known_no_effect")
-        record["sessions"] = [item for item in record["sessions"] if _session_members(*item)]
         if os.getsid(0) != os.getpid():
             os.setsid()
-        record["sessions"].append([os.getpid(), _birth(os.getpid())])
-        lifetime.save(record)
+        if record is None:
+            lifetime.save({"format": 1, "policy": "full_access"})
     if request.terminal is not None:
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     os.chdir(account.pw_dir)
     return os.getpid(), program, argv, environment
-
-
-def _birth(pid: int) -> int | None:
-    if sys.platform == "darwin":
-        current = macos.birth(pid)
-        return None if current is None else current.start
-    try:
-        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-    except (FileNotFoundError, ProcessLookupError, IndexError):
-        return None
-    return None if fields[0] == "Z" else int(fields[19])
-
-
-def _pids() -> list[int]:
-    if sys.platform == "darwin":
-        return macos.pids()
-    return [int(name) for name in os.listdir("/proc") if name.isdecimal()]
-
-
-def _session_members(leader: int, start: int) -> list[tuple[int, int]]:
-    """(PID, birth) of each process of a recorded session, found only while its leader still verifies.
-
-    A session id is a PID number. Once the leader is gone, nothing proves the session never ended and the
-    number was not reused by another session, so its remaining processes are left alone: Full Access
-    cleanup never claims work it cannot attribute, and it stays unverified.
-    """
-    if _birth(leader) != start:
-        return []
-    return [(pid, born) for pid in _pids() if pid > 1 and (born := _owned(pid, leader, start)) is not None]
-
-
-def _owned(pid: int, leader: int, start: int) -> int | None:
-    """pid's birth if it is in the verified leader's session right now, observed with an unchanged birth."""
-    try:
-        born = _birth(pid)
-        if born is None or os.getsid(pid) != leader or _birth(pid) != born or _birth(leader) != start:
-            return None
-    except (ProcessLookupError, PermissionError):
-        return None
-    return born
-
-
-def _end_full(sessions: list) -> None:
-    for leader, start in sessions:
-        # The leader goes last: it anchors every other target's session.
-        for pid, born in sorted(_session_members(leader, start), key=lambda item: item[0] == leader):
-            try:
-                if _owned(pid, leader, start) == born:  # Re-verify the actual target right before signalling.
-                    os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                continue  # Gone, or elevated (sudo) work this user cannot signal: best effort goes on.
 
 
 # ---- Restricted: one Seatbelt instance per lifetime, entered through its spawner ----------------
@@ -405,17 +333,16 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     lifetime = Lifetime(state, request.lifetime)
     grant = _grant(request)
     with lifetime.lock():
-        record = lifetime.admit({"format": 1, "policy": request.policy, "grant_sha256": grant,
-                                 "runtime": str(runtime), "instances": []})
+        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
         if record["policy"] != request.policy or record.get("grant_sha256") != grant:
-            raise Fault("lifetime_changed", "This lifetime's policy or scope changed; terminate it before admitting "
-                        "sessions.", effect="known_no_effect")
+            raise Fault("lifetime_changed", "This lifetime's policy or scope changed; start sessions in a new "
+                        "lifetime.", effect="known_no_effect")
         instance = next((item for item in reversed(record["instances"]) if _spawner_alive(item)), None)
         if instance is None:
             # Selected roots and worktrees are fixed when an instance starts; later sessions reuse them.
             text = _restricted_profile(scope, state, runtime, home)
-            # Publish the marker before anything starts: terminate finds an instance by marker alone, so a
-            # failed save or a lost launcher never leaves a running instance that no record names.
+            # Publish the marker before anything starts, so a failed save, a lost launcher or a stalled
+            # spawner never leaves a running instance that no record names.
             instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None}
             record["instances"].append(instance)
             lifetime.save(record)
@@ -444,8 +371,8 @@ def started(frame: dict) -> "macos.Birth":
     if isinstance(frame.get("errno"), int):
         raise Fault("launch_failed", f"The confined command did not start: {os.strerror(frame['errno'])}.",
                     effect="known_no_effect")
-    raise Fault("launch_unverified", "The launch acknowledgment was lost; the command may be running. Terminate "
-                "the lifetime before retrying.", effect="effect_unknown")
+    raise Fault("launch_unverified", "The launch acknowledgment was lost; the command may be running.",
+                effect="effect_unknown")
 
 
 def _relay(replies) -> None:
@@ -532,8 +459,8 @@ def _start_spawner(lifetime: Lifetime, text: str, runtime: Path, marker: str) ->
     os.close(ready_write)
     listener.close()
     try:
-        # Bounded: this runs under the lifetime lock that terminate needs. A spawner that reports later
-        # finds the pipe closed and exits; one stuck inside its sandbox is a member that terminate ends.
+        # Bounded: this runs under the lifetime lock that every admission needs. A spawner that reports
+        # too late is never used: its instance stays recorded but unconfirmed.
         reported = (os.read(ready_read, 64)  # One short write: atomic on a pipe.
                     if select.select([ready_read], [], [], SPAWN_SECONDS)[0] else None)
     finally:
@@ -731,39 +658,3 @@ def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int) ->
             os.write(failure, struct.pack("!i", code))
         finally:
             os._exit(127)
-
-
-# ---- Termination ----------------------------------------------------------------------------------
-
-
-def terminate(state: Path, raw: bytes) -> dict:
-    """End every process of one lifetime and retire its id. Restricted cleanup is verified; Full Access is
-    best effort. The lock orders this against instance selection and start (see Lifetime), and a repeated
-    call replays the result, or retries cleanup that did not verify.
-    """
-    request = parse(TerminateRequest, raw)
-    lifetime = Lifetime(private_directory(state), request.lifetime)
-    with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": None}
-        if "result" in record:
-            return record["result"]
-        record["retired"] = True
-        lifetime.save(record)  # From here on no admission can start another command in this lifetime.
-        if record["policy"] is None:
-            result = {"status": "not_found"}
-        elif record["policy"] == "full_access":
-            _end_full(record["sessions"])
-            result = {"status": "termination_unverified", "reason": "full_access_best_effort"}
-        else:
-            deadline = time.monotonic() + TERMINATE_SECONDS
-            try:
-                for instance in record["instances"]:
-                    macos.end_lifetime(instance["marker"], deadline)
-            except Fault as error:
-                return {"status": "termination_unverified", "reason": error.code}  # Kept for a retry.
-            shutil.rmtree(record["runtime"], ignore_errors=True)
-            (lifetime.directory / "spawner").unlink(missing_ok=True)
-            result = {"status": "verified"}
-        record["result"] = result
-        lifetime.save(record)
-        return result

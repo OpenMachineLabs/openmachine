@@ -7,12 +7,15 @@ import pty
 import pwd
 import select
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+
+from openmachine.access import macos
 
 # Restricted homes go under the root-owned sticky /private/tmp, never the real /Users/Shared, with a name
 # owned by this test process so concurrent runs never share or delete each other's home.
@@ -48,8 +51,14 @@ class SessionFixture(object):
         return name
 
     def end_all(self):
+        """Kill what each lifetime left running and remove its runtime tree; Core never ends a lifetime."""
         for name in self.lifetimes:
-            self.terminate(name)
+            record = self.state / "code" / name / "record.json"
+            if record.exists():
+                for instance in json.loads(record.read_text()).get("instances", []):
+                    end(instance["marker"])
+            if sys.platform == "darwin":
+                shutil.rmtree(macos.user_temp() / "omc" / macos.digest(name)[:12], ignore_errors=True)
 
     def command(self, *args, prelude=""):
         """prelude runs first in the launcher process, for fault injection."""
@@ -119,16 +128,6 @@ class SessionFixture(object):
                 output += chunk
         return reply, process, master, output.decode(errors="replace")
 
-    def terminate(self, lifetime, *, background=False):
-        if background:
-            process = subprocess.Popen(self.command("terminate"), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            process.stdin.write(json.dumps({"protocol": 1, "lifetime": lifetime}).encode())
-            process.stdin.close()
-            return process
-        result = subprocess.run(self.command("terminate"), input=json.dumps({"protocol": 1, "lifetime": lifetime}).encode(),
-                                capture_output=True, timeout=60)
-        return json.loads(result.stdout or b"{}"), result.returncode
-
     def alive(self, pid):
         try:
             os.kill(pid, 0)
@@ -139,6 +138,9 @@ class SessionFixture(object):
         state = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
         return bool(state) and not state.startswith("Z")
 
+    def stopped(self, pid):
+        return subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip().startswith("T")
+
     def beating(self, path):
         deadline = time.monotonic() + 5
         while not path.exists() and time.monotonic() < deadline:
@@ -146,3 +148,21 @@ class SessionFixture(object):
         before = path.stat().st_mtime_ns
         time.sleep(0.8)
         return path.stat().st_mtime_ns != before
+
+
+def members(marker):
+    """PIDs of every process in the lifetime instance with this marker."""
+    listed = subprocess.run(["/bin/ps", "-A", "-o", "pid="], capture_output=True, text=True, check=True).stdout
+    return [pid for pid in map(int, listed.split()) if pid > 1 and macos.member(pid, marker) is True]
+
+
+def end(marker, seconds=10):
+    """Kill an instance's members until a scan finds none; each kill re-verifies its target's identity."""
+    deadline = time.monotonic() + seconds
+    while found := members(marker):
+        if time.monotonic() > deadline:
+            raise AssertionError(f"lifetime members remain: {found}")
+        for pid in found:
+            if (current := macos.birth(pid)) is not None:
+                macos.signal_member(current, marker, signal.SIGKILL)
+        time.sleep(0.05)

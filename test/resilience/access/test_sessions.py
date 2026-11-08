@@ -1,4 +1,4 @@
-"""Real Code sessions: confinement, shared lifetimes, detached work, PTY loss, SFTP and termination."""
+"""Real Code sessions: confinement, shared lifetimes, detached work, PTY loss and SFTP."""
 
 import json
 import os
@@ -10,12 +10,11 @@ import subprocess
 import sys
 import time
 import unittest
-import uuid
 
 from openmachine.access import macos
 from openmachine.chat import projects
 from openmachine.config import load
-from test.support.access_sessions import HOME, SessionFixture
+from test.support.access_sessions import HOME, SessionFixture, members
 
 DENIED = "not permitted"
 
@@ -58,7 +57,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertNotIn(b"private", out)
         self.assertEqual(err.decode().count(DENIED), 2, err)
 
-    def test_detached_work_shares_its_lifetime_until_terminated(self):
+    def test_detached_work_shares_its_lifetime(self):
         first, other = self.lifetime(), self.lifetime()
         reply, code, out, err = self.session(first, command=detached("job"))
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
@@ -69,30 +68,8 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(self.session(first, command=f"kill -0 {job}")[1], 0)
         self.assertNotEqual(self.session(other, command=f"kill -0 {job}")[1], 0)
         self.assertNotEqual(self.session(first, command=f"kill -0 {unrelated.pid}")[1], 0)
-        _, code, out, _ = self.session(other, command=detached("other"))
-        survivor = int(out.split()[-1])
-        self.assertEqual(self.terminate(first), ({"status": "verified"}, 0))
-        self.assertFalse(self.alive(job))
-        self.assertTrue(self.alive(survivor))
-        self.assertTrue(self.alive(unrelated.pid))
-        self.assertEqual(self.terminate(first), ({"status": "verified"}, 0))  # Replayed, never re-run.
-        self.assertEqual(self.terminate(other), ({"status": "verified"}, 0))
-        self.assertFalse(self.alive(survivor))
 
-    def test_terminate_stops_work_that_keeps_forking_and_exiting(self):
-        for setsid in (False, True):
-            with self.subTest(setsid=setsid):
-                lifetime = self.lifetime()
-                beat = HOME / f"{lifetime}.hop"
-                hop = ("import os\nn=0\nwhile True:\n if os.fork(): os._exit(0)\n" + (" os.setsid()\n" if setsid else "")
-                       + f" n+=1\n if n%50==0: open({str(beat)!r},'w').write(str(n))\n")
-                reply, code, _, err = self.session(lifetime, command=f"python3 -c {shlex.quote(hop)} </dev/null >/dev/null 2>&1 &")
-                self.assertEqual((reply["status"], code), ("admitted", 0), err)
-                self.assertTrue(self.beating(beat))
-                self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-                self.assertFalse(self.beating(beat))
-
-    def test_an_instance_started_but_not_confirmed_is_still_found_by_terminate(self):
+    def test_an_instance_started_but_not_confirmed_stays_recorded(self):
         # The first save that records a started spawner fails, or the launcher dies right there.
         for name, failure in (("ENOSPC", "raise OSError(28, 'No space left on device')"), ("lost launcher", "os._exit(9)")):
             with self.subTest(failure=name):
@@ -110,24 +87,20 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                     self.assertEqual((reply, process.returncode), ({}, 9))
                 [instance] = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]
                 self.assertIsNone(instance["pid"])
-                self.assertTrue(macos.members(instance["marker"])[0], "the started spawner must be running")
-                self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-                self.assertEqual(macos.members(instance["marker"]), ([], False))
+                self.assertTrue(members(instance["marker"]), "the started spawner must be running")
 
-    def test_a_lost_spawner_starts_a_new_instance_and_terminate_covers_both(self):
+    def test_a_lost_spawner_starts_a_new_instance(self):
         lifetime = self.lifetime()
-        job = int(self.session(lifetime, command=detached("orphan"))[2].split()[-1])
         record = self.state / "code" / lifetime / "record.json"
+        self.assertEqual(self.session(lifetime)[1], 0)
         spawner = json.loads(record.read_text())["instances"][0]["pid"]
         # Governed work can kill its own spawner; that session's exit is then unknown (255).
         self.assertEqual(self.session(lifetime, command=f"kill -9 {spawner}")[1], 255)
         reply, code, out, _ = self.session(lifetime, command="echo again")
         self.assertEqual((reply["status"], code, out.strip()), ("admitted", 0, "again"))
         self.assertEqual(len(json.loads(record.read_text())["instances"]), 2)
-        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-        self.assertFalse(self.alive(job))
 
-    def test_a_stopped_spawner_bounds_admission_and_terminate_still_verifies(self):
+    def test_a_stopped_spawner_bounds_admission(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)
         record = self.state / "code" / lifetime / "record.json"
@@ -136,44 +109,19 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, code, _, err = self.session(lifetime, command=f"(sleep 0.3; kill -STOP {instance['pid']}) </dev/null >/dev/null 2>&1 &")
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         deadline = time.monotonic() + 5
-        while not macos.birth(instance["pid"]).stopped and time.monotonic() < deadline:
+        while not self.stopped(instance["pid"]) and time.monotonic() < deadline:
             time.sleep(0.05)
-        self.assertTrue(macos.birth(instance["pid"]).stopped)
-        ran = HOME / f"{lifetime}.ran"
+        self.assertTrue(self.stopped(instance["pid"]))
         started = time.monotonic()
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"echo x > {ran}"),
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
                                     "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
         # The request may already be queued at the spawner: a retry is not known to be safe.
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
-        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-        self.assertEqual(macos.members(instance["marker"]), ([], False))
-        process.communicate(timeout=10)  # The channel IO queued at the spawner is released with it.
-        self.assertFalse(ran.exists())
-
-    def test_terminate_ends_a_launch_already_in_flight(self):
-        lifetime = self.lifetime()
-        self.assertEqual(self.session(lifetime)[1], 0)
-        record = json.loads((self.state / "code" / lifetime / "record.json").read_text())
-        [instance], scratch = record["instances"], Path(record["runtime"]) / "tmp"
-        os.kill(instance["pid"], signal.SIGSTOP)  # Holds the next launch between its send and its acknowledgment.
-        before, ran = len(list(scratch.iterdir())), HOME / f"{lifetime}.ran"
-        process, control = self.launch(self.request(lifetime, "read_only", "exec", f"echo x > {ran}"),
-                                       "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 60\n")
-        self.addCleanup(control.close)
-        deadline = time.monotonic() + 10
-        while len(list(scratch.iterdir())) == before and time.monotonic() < deadline:
-            time.sleep(0.05)  # The launcher makes its TMPDIR after admission, right before it sends.
-        time.sleep(0.5)
-        self.assertIsNone(process.poll(), "the launch must still wait for its acknowledgment")
-        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-        reply = json.loads(control.makefile("rb").readline() or b"{}")
-        self.assertEqual(process.wait(timeout=30), 1)
-        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
-        self.assertEqual(macos.members(instance["marker"]), ([], False))
-        process.communicate(timeout=10)
-        self.assertFalse(ran.exists())
+        # The queued launch holds the channel IO; the cleanup that kills the spawner releases it.
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
 
     def test_a_spawner_that_never_reports_ready_releases_the_lifetime(self):
         lifetime = self.lifetime()
@@ -186,10 +134,9 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
         [instance] = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]
-        self.assertTrue(macos.members(instance["marker"])[0], "the stalled spawner is a member")
-        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
-        self.assertEqual(macos.members(instance["marker"]), ([], False))
+        self.assertTrue(members(instance["marker"]), "the stalled spawner is a member")
         process.communicate(timeout=10)
+        self.assertEqual(self.session(lifetime, command="echo again")[1:3], (0, "again\n"))
 
     def test_a_stalled_intermediate_does_not_hold_the_lifetime(self):
         lifetime = self.lifetime()
@@ -204,37 +151,17 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
         self.assertFalse(self.alive(int(noted.read_text())), "the stalled intermediate is ended")
-        self.assertEqual(self.terminate(lifetime), ({"status": "verified"}, 0))
         process.communicate(timeout=10)
+        self.assertEqual(self.session(lifetime, command="echo again")[1:3], (0, "again\n"))
 
-    def test_a_changed_grant_is_refused_and_a_terminated_lifetime_is_retired(self):
-        lifetime = self.lifetime()
-        self.assertEqual(self.session(lifetime)[1], 0)
-        reply, code, _, _ = self.session(lifetime, "full_access")
-        self.assertEqual((reply["error"]["code"], code), ("lifetime_changed", 1))
-        self.assertEqual(self.terminate(lifetime)[0], {"status": "verified"})
-        for policy in ("read_only", "full_access"):
-            reply, code, out, _ = self.session(lifetime, policy, "echo ran")
-            self.assertEqual((reply["error"]["code"], reply["error"]["effect"], code, out),
-                             ("lifetime_terminated", "known_no_effect", 1, ""))
-
-    def test_terminate_waits_for_an_admission_in_progress_and_retires_the_id(self):
-        from openmachine.foundation.state import lease, private_directory
-        for lifetime, existing in ((self.lifetime(), False), (self.lifetime(), True)):
-            with self.subTest(existing=existing):
-                job = int(self.session(lifetime, command=detached("held"))[2].split()[-1]) if existing else None
-                directory = private_directory(private_directory(self.state / "code") / lifetime)
-                with lease(directory / "lock", wait=True):  # Stands in for an admission holding the lock.
-                    pending = self.terminate(lifetime, background=True)
-                    time.sleep(1)
-                    self.assertIsNone(pending.poll(), "terminate must not answer while an admission is in progress")
-                result = json.loads(pending.stdout.read())
-                pending.wait(timeout=60)
-                self.assertEqual(result, {"status": "verified" if existing else "not_found"})
-                if existing:
-                    self.assertFalse(self.alive(job))
-                reply, code, out, _ = self.session(lifetime, command="echo ran")
-                self.assertEqual((reply["error"]["code"], code, out), ("lifetime_terminated", 1, ""))
+    def test_a_changed_policy_is_refused_in_either_direction(self):
+        for first, then in (("read_only", "full_access"), ("full_access", "read_only")):
+            with self.subTest(first=first):
+                lifetime = self.lifetime()
+                self.assertEqual(self.session(lifetime, first)[1], 0)
+                reply, code, out, _ = self.session(lifetime, then, "echo ran")
+                self.assertEqual((reply["error"]["code"], reply["error"]["effect"], code, out),
+                                 ("lifetime_changed", "known_no_effect", 1, ""))
 
     def test_forwarded_signals_reach_the_command_group_but_not_detached_work(self):
         lifetime = self.lifetime()
@@ -258,8 +185,6 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                     time.sleep(0.05)
                 self.assertFalse(self.alive(child))
         self.assertTrue(self.alive(kept))
-        self.assertEqual(self.terminate(lifetime)[0], {"status": "verified"})
-        self.assertFalse(self.alive(kept))
 
     def test_selected_projects_write_only_full_roots_outside_protected_paths(self):
         full, read_only = self.root / "full", self.root / "read-only"
@@ -290,7 +215,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
                          ("denied", "scope_target_changed", "known_no_effect", 1, ""))
 
-    def test_terminal_loss_leaves_nohup_work_running_until_terminate(self):
+    def test_terminal_loss_leaves_nohup_work_running(self):
         lifetime = self.lifetime()
         beat = HOME / f"pty-{lifetime}.beat"
         reply, process, master, output = self.terminal(lifetime, (
@@ -301,8 +226,6 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         os.close(master)  # PTY loss: the shell gets SIGHUP, the nohup job keeps running.
         process.wait(timeout=20)
         self.assertTrue(self.beating(beat))
-        self.assertEqual(self.terminate(lifetime)[0], {"status": "verified"})
-        self.assertFalse(self.beating(beat))
 
     def test_a_tmux_style_server_lives_in_the_lifetime_namespace(self):
         lifetime = self.lifetime()
@@ -316,20 +239,16 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         client = "import os,socket; socket.socket(socket.AF_UNIX).connect(os.environ['TMUX_TMPDIR']+'/server'); print('reached')"
         self.assertIn("reached", self.session(lifetime, command=f"python3 -c {shlex.quote(client)}")[2])
         self.assertNotIn("reached", self.session(self.lifetime(), command=f"python3 -c {shlex.quote(client)}")[2])
-        self.assertEqual(self.terminate(lifetime)[0], {"status": "verified"})
-        self.assertFalse(self.beating(HOME / "mux.beat"))
 
     @unittest.skipUnless(shutil.which("tmux", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin"),
                          "tmux is not installed")
-    def test_real_tmux_survives_sessions_and_ends_with_the_lifetime(self):
+    def test_real_tmux_survives_sessions_in_its_lifetime(self):
         lifetime = self.lifetime()
         reply, code, _, err = self.session(lifetime, command=f"tmux new-session -d -s om 'while :; do date > $HOME/tmux.beat; sleep 0.2; done'")
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertTrue(self.beating(HOME / "tmux.beat"))
         self.assertIn("om", self.session(lifetime, command="tmux ls")[2])
         self.assertNotEqual(self.session(self.lifetime(), command="tmux ls")[1], 0)
-        self.assertEqual(self.terminate(lifetime)[0], {"status": "verified"})
-        self.assertFalse(self.beating(HOME / "tmux.beat"))
 
     @unittest.skipUnless(Path("/usr/bin/sftp").exists(), "requires the OpenSSH sftp client")
     def test_sftp_runs_the_server_inside_the_sandbox(self):
@@ -358,30 +277,9 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
 
 class FullAccessSessionTests(SessionFixture, unittest.TestCase):
-    def test_full_access_is_an_ordinary_shell_with_best_effort_cleanup(self):
-        lifetime = self.lifetime()
-        # A live session: its leader still verifies, so its foreground and background work is ended.
-        process, reply = self.start(self.request(lifetime, "full_access", "exec",
-                                                 "echo HOME=$HOME; sleep 60 </dev/null >/dev/null 2>&1 & echo job=$!; wait"))
-        self.assertEqual(reply["status"], "admitted", reply)
-        self.assertEqual(process.stdout.readline().decode().strip(), f"HOME={Path.home()}")
-        job = int(process.stdout.readline().decode().split("job=")[1])
-        self.assertTrue(self.alive(job))
-        result, code = self.terminate(lifetime)
-        self.assertEqual((result, code), ({"status": "termination_unverified", "reason": "full_access_best_effort"}, 1))
-        process.wait(timeout=20)
-        self.assertFalse(self.alive(job))
-        self.assertEqual(self.terminate(lifetime), (result, 1))  # Replayed for a lost reply.
-
-    def test_full_access_never_claims_work_its_leader_no_longer_anchors(self):
-        lifetime = self.lifetime()
-        # The shell exits and leaves a job behind; its session id is no longer provably this session's.
-        reply, code, out, _ = self.session(lifetime, "full_access", "sleep 60 </dev/null >/dev/null 2>&1 & echo job=$!")
-        self.assertEqual((reply["status"], code), ("admitted", 0))
-        job = int(out.split("job=")[1].split()[0])
-        self.addCleanup(lambda: self.alive(job) and os.kill(job, signal.SIGKILL))
-        self.assertEqual(self.terminate(lifetime)[0]["status"], "termination_unverified")
-        self.assertTrue(self.alive(job))
+    def test_full_access_is_an_ordinary_shell(self):
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
+        self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={Path.home()}\n"), err)
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()

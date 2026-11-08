@@ -8,10 +8,8 @@ import os
 from pathlib import Path
 import pwd
 import re
-import signal
 import sys
-import time
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
 from openmachine.foundation.sanitize import Fault
 
@@ -200,10 +198,7 @@ def apply(text: str) -> None:
 # process from outside: a member is sandboxed, allows marker "a" and denies marker "b".
 MARKER = "com.openmachine.life."
 _PROC_PIDTBSDINFO = 3
-_STOPPED, _ZOMBIE = 4, 5
-_MAX_PROCESSES = 65536
-_MAX_PASSES = 512
-_SCAN_PAUSE = 0.002
+_ZOMBIE = 5
 
 
 class _BSDInfo(ctypes.Structure):
@@ -221,7 +216,6 @@ class Birth(NamedTuple):
     """A process identity that a reused PID cannot match: PID plus kernel start time."""
     pid: int
     start: int
-    stopped: bool = False
 
 
 @functools.cache
@@ -231,12 +225,10 @@ def _native():
     # Fixed arguments only: ctypes passes extra arguments as C variadic arguments.
     check.argtypes, check.restype = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int], ctypes.c_int
     no_report = ctypes.c_int.in_dll(sandbox, "SANDBOX_CHECK_NO_REPORT").value
-    system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
-    listing, info = system.proc_listallpids, system.proc_pidinfo
-    listing.argtypes, listing.restype = [ctypes.c_void_p, ctypes.c_int], ctypes.c_int
+    info = ctypes.CDLL("/usr/lib/libSystem.B.dylib").proc_pidinfo
     info.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
     info.restype = ctypes.c_int
-    return check, no_report, listing, info
+    return check, no_report, info
 
 
 def lifetime_unavailable_reason() -> str | None:
@@ -280,26 +272,19 @@ def lifetime_rules(marker: str, runtime: Path) -> str:
     ]) + "\n"
 
 
-def _status(pid: int) -> tuple[int, int] | None:
-    """(start time, BSD status) of pid, or None once it is gone."""
-    _, _, _, info = _native()
-    value = _BSDInfo()
-    if info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value):
-        return None
-    return value.start_sec * 1_000_000 + value.start_usec, value.status
-
-
 def birth(pid: int) -> Birth | None:
     """The live identity of pid, or None once it is gone or a zombie."""
-    found = _status(pid)
-    if found is None or found[1] == _ZOMBIE:
+    _, _, info = _native()
+    value = _BSDInfo()
+    if (info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value)
+            or value.status == _ZOMBIE):
         return None
-    return Birth(pid, found[0], found[1] == _STOPPED)
+    return Birth(pid, value.start_sec * 1_000_000 + value.start_usec)
 
 
 def member(pid: int, marker: str) -> bool | None:
     """True for a process of this lifetime, False for any other, None when it vanished mid-check."""
-    check, no_report, _, _ = _native()
+    check, no_report, _ = _native()
     sandboxed = check(pid, None, 0)
     if sandboxed <= 0:
         return None if sandboxed < 0 else False
@@ -309,49 +294,6 @@ def member(pid: int, marker: str) -> bool | None:
     if allowed < 0 or denied < 0:
         return None
     return allowed == 0 and denied == 1
-
-
-def pids() -> list[int]:
-    _, _, listing, _ = _native()
-    found = (ctypes.c_int * _MAX_PROCESSES)()
-    count = listing(found, ctypes.sizeof(found))
-    if count <= 0 or count >= _MAX_PROCESSES:
-        raise Fault("cleanup_query_failed", "The native process list is unavailable or exceeded its bound.")
-    return [pid for pid in found[:count] if pid > 1]
-
-
-def members(marker: str, act: Callable[[Birth], None] | None = None) -> tuple[list[Birth], bool]:
-    """Every member, acting on each as soon as it is classified, and whether the scan is incomplete.
-
-    Listing repeats until a whole listing shows no PID that this scan has not already examined. Live work
-    always occupies some PID, so a member that forks and exits between listings shows up as a new PID in the
-    next one, even if it is gone again before it can be classified. PIDs are only reused after the PID space
-    wraps, which a bounded scan does not outlast. A live process that cannot be classified, or no such
-    fixpoint within the pass bound, makes the scan incomplete. Processes of other users are never members:
-    confined work cannot change uid, and they are not inspectable here.
-    """
-    examined, found, uncertain = {os.getpid()}, [], False
-    for _ in range(_MAX_PASSES):
-        fresh = [pid for pid in pids() if pid not in examined]
-        if not fresh:
-            return found, uncertain
-        examined.update(fresh)
-        for pid in fresh:
-            before = _status(pid)
-            if before is None or before[1] == _ZOMBIE:
-                continue
-            verdict = member(pid, marker)
-            after = _status(pid)
-            if after is None or after[0] != before[0] or after[1] == _ZOMBIE:
-                continue  # Gone during the check: anything it forked appears as a new PID later.
-            if verdict is None:
-                uncertain = True
-            elif verdict:
-                item = Birth(pid, before[0], after[1] == _STOPPED)
-                found.append(item)
-                if act is not None:
-                    act(item)
-    return found, True
 
 
 def signal_member(target: Birth, marker: str, signum: int) -> bool:
@@ -381,41 +323,3 @@ def signal_group(leader: Birth, marker: str, signum: int) -> bool:
     except ProcessLookupError:
         return False
     return True
-
-
-def end_lifetime(marker: str, deadline: float) -> None:
-    """Freeze every member, kill them, and accept only complete scans as evidence that none remain.
-
-    Two consecutive complete scans must find every member stopped, then two consecutive complete scans
-    must find none at all, and every killed process must be gone. Anything less raises.
-    """
-    def freeze(item: Birth) -> None:
-        if not item.stopped:
-            signal_member(item, marker, signal.SIGSTOP)
-
-    killed = {}
-
-    def kill(item: Birth) -> None:
-        if signal_member(item, marker, signal.SIGKILL):
-            killed[item.pid] = item.start
-
-    clean = 0
-    while clean < 2:
-        found, uncertain = members(marker, freeze)
-        clean = clean + 1 if not uncertain and all(item.stopped for item in found) else 0
-        _expire(deadline, "Lifetime members could not all be stopped before the deadline.")
-    empty = 0
-    while empty < 2:
-        found, uncertain = members(marker, kill)
-        empty = empty + 1 if not found and not uncertain else 0
-        _expire(deadline, "Lifetime members remained after termination.")
-        time.sleep(_SCAN_PAUSE)
-    # A killed process can still be exiting, for example while another process holds its terminal.
-    while any((current := birth(pid)) is not None and current.start == start for pid, start in killed.items()):
-        _expire(deadline, "Terminated lifetime members are still exiting.", code="cleanup_pending")
-        time.sleep(_SCAN_PAUSE * 5)
-
-
-def _expire(deadline: float, message: str, *, code: str = "termination_unverified") -> None:
-    if time.monotonic() >= deadline:
-        raise Fault(code, message)
