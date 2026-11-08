@@ -13,7 +13,7 @@
 | `chat/execution/` | Original commands, pipe/PTY controls, cleanup, receipts and bounded logs. |
 | `chat/workspace/`, `chat/projects/` | Source/Git observations, preparation, change records and guarded publication. |
 | `chat/tasks/` | Canonical schemas, pure transitions, lookup and legacy checkpoint integrity. |
-| `access/` | Operation scope rules (`rules.py`), macOS Seatbelt confinement and lifetimes (`macos.py`) shared by Chat and Code; Code SSH session launch and termination (`sessions.py`). |
+| `access/` | Operation scope rules (`rules.py`), macOS Seatbelt confinement and lifetimes (`macos.py`) shared by Chat and Code; Code SSH session launch (`sessions.py`). |
 | `service/` | Installation, compatibility/readiness, supervision and activation/restoration. |
 | `foundation/` | Shared IO, private state, locks and safe errors; no domain ownership. |
 | `integrations/` | Complete native GitHub implementation; no second engine. |
@@ -25,8 +25,8 @@ observation facts, and `task_attention.py` derives bounded foreground stop views
 Service remains independent of consuming applications. Existing
 `python -m openmachine.execution` and `python -m openmachine.service check-state`
 entries remain intact. `python -I -m openmachine.access` is the one Code launch
-boundary for the Go host: `capabilities`, `session` and `terminate`, with no MCP,
-Tasks or receipts.
+boundary for the Go host: `capabilities` and `session`, with no MCP, Tasks or
+receipts.
 
 Dependencies point inward. Execution uses `workspace.git` only for identity;
 workspace and tasks do not import each other. Each device uses its own native capability
