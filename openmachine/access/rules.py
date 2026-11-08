@@ -188,8 +188,9 @@ class Scope:
 
 
 def control_paths(state: Path) -> tuple[Path, ...]:
-    """Core/Connector configuration and state; denied to scoped work even inside a grant."""
-    candidates = [state, DEFAULT_CONFIG.parent, DEFAULT_STATE, DEFAULT_STATE.parent / "openmachine-connector"]
+    """Core, Connector and Code host configuration and state; denied to scoped work even inside a grant."""
+    candidates = [state, DEFAULT_CONFIG.parent, DEFAULT_STATE, DEFAULT_STATE.parent / "openmachine-connector",
+                  DEFAULT_STATE.parent / "openmachine-code"]
     found = []
     for path in candidates:
         resolved = Path(os.path.realpath(path))

@@ -44,6 +44,20 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertGreaterEqual(err.count(DENIED), 3, err)
         self.assertFalse((outside / "x").exists())
 
+    def test_the_code_host_state_is_a_control_path(self):
+        """The Go Code host keeps its host key, network keys and socket beside Core's state; no session reads it."""
+        default = self.root / "home/.local/state/openmachine"
+        code = default.parent / "openmachine-code"
+        code.mkdir(parents=True, mode=0o700)
+        (code / "host").write_text("private\n")
+        prelude = f"from openmachine.access import rules; rules.DEFAULT_STATE = rules.Path({str(default)!r}); "
+        process, reply = self.start(self.request(self.lifetime(), "read_only", "exec", f"cat {code}/host; ls {code}"),
+                                    prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertNotIn(b"private", out)
+        self.assertEqual(err.decode().count(DENIED), 2, err)
+
     def test_detached_work_shares_its_lifetime_until_terminated(self):
         first, other = self.lifetime(), self.lifetime()
         reply, code, out, err = self.session(first, command=detached("job"))
