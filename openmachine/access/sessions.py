@@ -10,8 +10,10 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import select
 import selectors
+import shutil
 import signal
 import socket
 import stat
@@ -34,6 +36,7 @@ MAX_REQUEST = 256 * 1024
 MAX_FRAME = 512 * 1024
 SHARED = Path("/Users/Shared")
 HOME_NAME = "openmachine-code-{uid}"
+CLIENT_NAME = "client"  # Core's copy of the host's om-code lives in user_temp()/omc/CLIENT_NAME
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server")
 FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2,
@@ -47,6 +50,40 @@ LifetimeId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 class Terminal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     term: Annotated[str, Field(pattern=r"^[A-Za-z0-9._+-]{1,64}$")]
+
+
+# A session's routing to its host's GitHub broker: these exact variables, the broker on loopback, Git
+# keys scoped to that broker, and values bounded to printable text.
+BROKER = r"http://127\.0\.0\.1:[1-9][0-9]{0,4}"
+GITHUB_COUNT = 9
+
+
+class GitHub(BaseModel):
+    """The host's Git routing for one session, and its om-code client, which restricted sessions run as
+    Core's copy (github_client in capabilities)."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    environment: Annotated[dict[str, Annotated[str, Field(pattern=r"^[\x20-\x7e]{0,1024}$")]],
+                           Field(min_length=5, max_length=3 + 2 * GITHUB_COUNT)]
+    client: Annotated[str, Field(min_length=2, max_length=1024)]
+
+    @model_validator(mode="after")
+    def _routing(self):
+        environment, broker = self.environment, self.environment.get("OM_CODE_BROKER", "")
+        count = environment.get("GIT_CONFIG_COUNT", "")
+        if (not re.fullmatch(BROKER, broker) or int(broker.rsplit(":", 1)[1]) > 65535
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment.get("OM_CODE_CAPABILITY", ""))
+                or not re.fullmatch(f"[1-{GITHUB_COUNT}]", count)):
+            raise ValueError("github routing needs a loopback broker, a capability and a Git configuration count")
+        pairs = [(f"GIT_CONFIG_KEY_{index}", f"GIT_CONFIG_VALUE_{index}") for index in range(int(count))]
+        if set(environment) != {"OM_CODE_BROKER", "OM_CODE_CAPABILITY", "GIT_CONFIG_COUNT", *(name for pair in pairs for name in pair)}:
+            raise ValueError("github routing carries exactly its own variables")
+        scoped = re.compile(rf"url\.{re.escape(broker)}/[\x21-\x7e]*\.insteadOf|(credential|http)\.{re.escape(broker)}\.[A-Za-z]{{1,32}}")
+        if not all(scoped.fullmatch(environment[key]) for key, _ in pairs):
+            raise ValueError("github routing configures only its broker")
+        if (not os.path.isabs(self.client) or os.path.normpath(self.client) != self.client
+                or any(char in self.client for char in ':\0"\\') or any(ord(char) < 32 or ord(char) == 127 for char in self.client)):
+            raise ValueError("github routing names its client by an exact absolute path")
+        return self
 
 
 class SessionRequest(BaseModel):
@@ -64,6 +101,7 @@ class SessionRequest(BaseModel):
     environment: Annotated[dict[Annotated[str, Field(pattern=r"^(LANG|LC_[A-Z]{1,32})$")],
                                 Annotated[str, Field(pattern=r"^[A-Za-z0-9._@-]{0,128}$")]],
                            Field(max_length=32)] = {}
+    github: GitHub | None = None
 
     @model_validator(mode="after")
     def _consistent(self):
@@ -77,8 +115,11 @@ class SessionRequest(BaseModel):
 def capabilities() -> dict:
     reason = macos.lifetime_unavailable_reason()
     restricted = "available" if reason is None else reason
-    return {"protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"],
-            "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
+    value = {"protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "available",
+             "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
+    if reason is None:
+        value["github_client"] = str(_stable_client())  # what restricted sessions' Git routing runs
+    return value
 
 
 def parse(raw: bytes) -> SessionRequest:
@@ -217,12 +258,56 @@ def _system_path() -> str:
     return ":".join(dict.fromkeys(entries)) or DEFAULT_PATH
 
 
-def _environment(request: SessionRequest, account: pwd.struct_passwd) -> dict:
-    environment = {"PATH": _system_path() if sys.platform == "darwin" else DEFAULT_PATH, "USER": account.pw_name,
+def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Path | None = None) -> dict:
+    path = _system_path() if sys.platform == "darwin" else DEFAULT_PATH
+    if client is not None:
+        path += ":" + str(client.parent)  # so the session finds om-code by name
+    environment = {"PATH": path, "USER": account.pw_name,
                    "LOGNAME": account.pw_name, "SHELL": account.pw_shell or "/bin/sh", "HOME": account.pw_dir}
     if request.terminal is not None:
         environment["TERM"] = request.terminal.term
     return environment | request.environment
+
+
+def _client(request: SessionRequest) -> Path | None:
+    """The host's om-code client: an executable regular file at its own physical path. The file and its
+    directory belong to root or this user, with no group or other write and no ACL, and lie outside the
+    persistent home and every restricted runtime tree, where restricted work could replace what Full
+    sessions run."""
+    if request.github is None:
+        return None
+    client = Path(request.github.client)
+    restricted = [SHARED / HOME_NAME.format(uid=os.getuid())] + ([macos.user_temp() / "omc"] if sys.platform == "darwin" else [])
+    try:
+        info, parent = client.lstat(), client.parent.lstat()
+        valid = (stat.S_ISREG(info.st_mode) and os.path.realpath(client) == str(client) and os.access(client, os.X_OK)
+                 and all(item.st_uid in (0, os.getuid()) and not item.st_mode & 0o022 for item in (info, parent))
+                 and not macos.has_acl(client) and not macos.has_acl(client.parent) and not _within(client, restricted))
+    except OSError as error:
+        raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
+    if not valid:
+        raise Fault("github_client_invalid", "The om-code client must be an executable file only its owner can change, "
+                    "outside the persistent home and Core's runtime trees.", effect="known_no_effect")
+    return client
+
+
+def _within(client: Path, roots: list[Path]) -> bool:
+    """Whether the client lies in one of roots, by physical identity, so no case or link spelling escapes.
+    A root that is a link holds nothing: another user may plant one in /Users/Shared, and Core writes
+    through none. A client that vanished meanwhile is refused with no effect."""
+    identities = set()
+    for root in roots:
+        try:
+            info = root.lstat()
+        except OSError:
+            continue  # An absent root holds nothing.
+        if stat.S_ISDIR(info.st_mode):
+            identities.add((info.st_dev, info.st_ino))
+    try:
+        ancestry = [os.stat(item) for item in [client, *client.parents]]
+    except OSError as error:
+        raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
+    return any((item.st_dev, item.st_ino) in identities for item in ancestry)
 
 
 def _reply(control: int, value: dict) -> None:
@@ -284,7 +369,7 @@ def session(control: int, config_path: Path, state: Path) -> None:
 def _admit_full(request: SessionRequest, account, state: Path) -> tuple:
     """Make this process a session leader; the caller execs the command in place."""
     program, argv = _argv(request, account)
-    environment = _environment(request, account)
+    environment = _environment(request, account, _client(request)) | (request.github.environment if request.github else {})
     lifetime = Lifetime(state, request.lifetime)
     with lifetime.lock():
         record = lifetime.read()
@@ -318,7 +403,44 @@ def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path,
         for item in [*mapped["roots"], *mapped["worktrees"]]:
             (writable if item["mode"] == "full_access" else readable).append(Path(item["path"]))
     return macos.profile(readable=readable, writable=writable, private=runtime, control=control,
-                         denied=denied, exceptions=exceptions)
+                         denied=denied, exceptions=exceptions, executable=_stable_client())
+
+
+def _stable_client() -> Path:
+    """Core's copy of the host's om-code, the one client every restricted instance may run. Restricted
+    work cannot write here, and an update replaces the file in place, so it needs no new instance."""
+    return macos.user_temp() / "omc" / CLIENT_NAME / "om-code"
+
+
+def _install(client: Path) -> Path:
+    """Refresh the stable copy when the host's client changed (an update installs a new file, so size or
+    modification time differ): written whole and synced, then put in place atomically, so sessions
+    running the old copy are unaffected."""
+    stable = _stable_client()
+    try:
+        with open(client, "rb") as source:
+            info = os.fstat(source.fileno())
+            try:
+                current = stable.lstat()
+                if stat.S_ISREG(current.st_mode) and (current.st_size, current.st_mtime_ns) == (info.st_size, info.st_mtime_ns):
+                    return stable
+            except FileNotFoundError:
+                pass
+            staged = private_directory(private_directory(stable.parent.parent) / stable.parent.name) / f".{uuid.uuid4().hex}"
+            try:
+                with open(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700), "wb") as copy:
+                    shutil.copyfileobj(source, copy)
+                    os.fchmod(copy.fileno(), 0o755)
+                    copy.flush()
+                    os.fsync(copy.fileno())
+                os.utime(staged, ns=(info.st_atime_ns, info.st_mtime_ns))
+                os.replace(staged, stable)
+            finally:
+                staged.unlink(missing_ok=True)
+    except (OSError, Fault) as error:
+        raise Fault("github_client_invalid", "Core could not keep its copy of the om-code client.",
+                    effect="known_no_effect") from error
+    return stable
 
 
 def _admit_restricted(request: SessionRequest, account, config_path: Path, state: Path) -> tuple:
@@ -328,6 +450,8 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     program, argv = _argv(request, account)
     # Re-verify every selected binding on each admission: a replaced directory is never rebound.
     scope = None if request.scope is None else rules.compile(load(config_path), state, request.machine, request.scope)
+    client = _client(request)
+    stable = _install(client) if client else None
     home = persistent_home()
     runtime = _runtime(request.lifetime)
     lifetime = Lifetime(state, request.lifetime)
@@ -337,23 +461,31 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
         if record["policy"] != request.policy or record.get("grant_sha256") != grant:
             raise Fault("lifetime_changed", "This lifetime's policy or scope changed; start sessions in a new "
                         "lifetime.", effect="known_no_effect")
-        instance = next((item for item in reversed(record["instances"]) if _spawner_alive(item)), None)
+        # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
+        # instance may run Core's copy of om-code, except instances started before that copy existed: a
+        # routed session starts a new instance once there, which cannot see the earlier one's jobs.
+        newest = record["instances"][-1] if record["instances"] else None
+        usable = newest and _spawner_alive(newest) and (stable is None or newest.get("client") == str(stable))
+        instance = newest if usable else None
         if instance is None:
             # Selected roots and worktrees are fixed when an instance starts; later sessions reuse them.
             text = _restricted_profile(scope, state, runtime, home)
             # Publish the marker before anything starts, so a failed save, a lost launcher or a stalled
             # spawner never leaves a running instance that no record names.
-            instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None}
+            instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None, "client": str(_stable_client())}
             record["instances"].append(instance)
             lifetime.save(record)
             instance.update(_start_spawner(lifetime, text, runtime, instance["marker"]))
             lifetime.save(record)
-    session_tmp = runtime / "tmp" / uuid.uuid4().hex[:8]
-    session_tmp.mkdir(mode=0o700)
-    environment = macos.environment(_environment(request, account), home) | request.environment | {
-        # zsh writes here-documents under TMPPREFIX (default /tmp/zsh), not TMPDIR.
-        "TMPDIR": str(session_tmp) + "/", "TMPPREFIX": str(session_tmp / "zsh"), "TMUX_TMPDIR": str(runtime / "tmux")}
-    connection = _connect(lifetime, instance)
+        session_tmp = runtime / "tmp" / uuid.uuid4().hex[:8]
+        session_tmp.mkdir(mode=0o700)
+        environment = macos.environment(_environment(request, account, stable), home) | request.environment | (
+            request.github.environment if request.github else {}) | {
+            # zsh writes here-documents under TMPPREFIX (default /tmp/zsh), not TMPDIR.
+            "TMPDIR": str(session_tmp) + "/", "TMPPREFIX": str(session_tmp / "zsh"), "TMUX_TMPDIR": str(runtime / "tmux")}
+        # Connect before another admission can start a newer instance, which rebinds the socket; a
+        # connection made first still reaches its own spawner.
+        connection = _connect(lifetime, instance)
     body = json.dumps({"program": program, "argv": argv, "env": environment, "cwd": str(home / "home"),
                        "tty": request.terminal is not None}).encode()
     socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])

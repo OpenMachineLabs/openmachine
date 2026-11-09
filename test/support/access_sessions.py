@@ -22,8 +22,10 @@ from openmachine.access import macos
 SHARED = Path("/private/tmp")
 HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
 HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
+# Core's copy of om-code is per user too; each test process keeps its own.
+CLIENT_NAME = f"client-{os.getpid()}"
 BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
-        f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; "
+        f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; sessions.CLIENT_NAME = {CLIENT_NAME!r}; "
         "from openmachine.access.__main__ import main; sys.exit(main(sys.argv[1:]))")
 USER = pwd.getpwuid(os.getuid()).pw_name
 
@@ -44,6 +46,8 @@ class SessionFixture(object):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(HOME.parent, ignore_errors=True)
+        if sys.platform == "darwin":
+            shutil.rmtree(macos.user_temp() / "omc" / CLIENT_NAME, ignore_errors=True)
 
     def lifetime(self):
         name = "t" + uuid.uuid4().hex[:12]

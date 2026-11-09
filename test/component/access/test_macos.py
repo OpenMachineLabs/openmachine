@@ -65,6 +65,20 @@ class ProfileTests(unittest.TestCase):
         self.assertNotIn("appleevents", text.lower())
         self.assertIn('(allow file-read* file-write* (literal "/dev/ttys004"))', seatbelt.own_terminal(text, "/dev/ttys004"))
 
+    def test_only_the_named_executable_runs_inside_a_denied_area(self):
+        client, denied = self.root / "home/Library/om/om-code", self.root / "home/Library"
+        with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
+            plain = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
+                                     denied=[denied], exceptions=[])
+            text = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
+                                    denied=[denied], exceptions=[], executable=client)
+        allow = f'(allow file-read* process-exec (literal "{client}"))'
+        self.assertNotIn("literal \"" + str(client), plain)
+        lines = text.splitlines()
+        self.assertLess(lines.index(f'(deny file-read* process-exec (subpath "{denied}") (subpath "{self.root / "T"}"))'),
+                        lines.index(allow))
+        self.assertEqual(lines[-1], f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))')
+
     def test_protected_git_files_cover_worktrees_and_submodules_but_not_refs(self):
         pattern = re.compile("^/r" + seatbelt.PROTECTED_REGEX)
         for path in (".git/hooks", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir",
