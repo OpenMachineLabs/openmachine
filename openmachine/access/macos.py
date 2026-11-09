@@ -44,8 +44,12 @@ PROTECTED_REGEX = r"^(/.*)?/\.git(/" + PROTECTED_GIT + ")?$"
 PROTECTED_IDE_REGEX = r"^(/.*)?/\.(vscode|idea)(/.*)?$"
 # Where nested Git dirs live, and the data directories Git itself creates in one, relative to it.
 NESTED_GIT_REGEX = r"^(/.*)?/\.git/(modules|worktrees)(/.*)?$"
-GIT_DATA = r"(objects|refs|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)(/.*)?"
+GIT_DATA = (r"(objects|refs|reftable|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)"
+            r"(/.*)?")
 MAX_NESTED_GIT = 512
+# A rule that names an operation is not overridden by a later rule that matches it only by a wildcard, so
+# every denial that must win names the write operations that allowances before it name.
+WRITES = "file-write* file-write-create file-write-data file-write-unlink"
 
 
 class SandboxError(Exception):
@@ -146,7 +150,8 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
 
     For the same operation Seatbelt applies the last matching rule, so each later block narrows or
     re-allows the one before it and the protected and control denials come last. A later broader
-    operation (file-read*) does not override an earlier narrower denial (file-read-data).
+    operation (file-read*, file-write*) does not override an earlier rule that names a narrower one
+    (file-read-data, file-write-create), so those denials name the narrower operations too.
 
     Protected names are denied wherever the profile allows writes, private trees included: renaming a
     directory moves everything inside it without checking those paths. So a nested Git dir must also stay
@@ -213,8 +218,8 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         registrations = f"^{_regex(common)}/worktrees"
         lines.append(f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}(/.*)?$")))')
     lines += [
-        # After the exceptions above, so that none of them re-allows a protected name.
-        f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
+        # After the exceptions above and naming their operations, so that none of them re-allows a protected name.
+        f'(deny {WRITES} (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
         # Removing a worktree's or submodule's .git file only unlinks it: nothing can take its place.
         rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
         "(deny file-clone (vnode-type DIRECTORY))",
@@ -226,8 +231,8 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
                   f"(deny file-write-unlink (literal {_literal(common / 'worktrees')}))"]
         existing = _directories(common / "worktrees")
         if existing:
-            lines.append(f"(deny file-write* {_filters('subpath', existing)})")
-    lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
+            lines.append(f"(deny {WRITES} {_filters('subpath', existing)})")
+    lines.append(f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 
 

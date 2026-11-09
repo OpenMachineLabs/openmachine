@@ -263,6 +263,9 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                    f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"',
                    # A HEAD in a name directory would make a later instance treat it as a Git dir.
                    f'echo "ref: refs/heads/main" > {full}/.git/modules/vendor/HEAD',
+                   # Protected files are not replaced by unlinking and creating them or by renaming over them.
+                   f"cd {full}/.git/modules/vendor/objects/ext && rm config && echo '[core]' > config",
+                   f"cd {full}/.git/worktrees/linked && echo /tmp > staged && mv staged commondir",
                    # Nothing outside the Full roots changes.
                    *(f"rm {repository}/sub/.git" for repository in (read_only, unselected)),
                    f"mkdir {read_only}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]

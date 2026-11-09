@@ -5,6 +5,7 @@ from pathlib import Path
 import pty
 import shutil
 import socket
+import subprocess
 import unittest
 import uuid
 
@@ -182,10 +183,27 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         for repository in (self.desktop, unselected):  # Read-only and unselected repositories
             self.git(repository, *submodule, "add", "-q", str(inner), "sub")
             self.git(repository, "commit", "-q", "-m", "Submodule")
-        modules = self.core / ".git/modules/vendor/objects/ext"
-        configs = [modules / "config", modules / "modules/deps/refs/inner/config", self.core / ".git/worktrees/core-linked/commondir",
-                   self.core / ".git/worktrees/core-linked/modules/vendor/objects/ext/config"]
+        # A submodule whose refs use the reftable format, where Git supports it.
+        reftable = subprocess.run(["git", "init", "-q", "--ref-format=reftable", str(self.root / "reftable-probe")],
+                                  capture_output=True).returncode == 0
+        if reftable:
+            self.git(self.core, "-c", "init.defaultRefFormat=reftable", *submodule, "add", "-q", str(inner), "rt")
+            self.git(self.core, "commit", "-q", "-m", "Reftable submodule")
+        modules, registration = self.core / ".git/modules/vendor/objects/ext", self.core / ".git/worktrees/core-linked"
+        configs = [self.core / ".git/config", modules / "config", modules / "modules/deps/refs/inner/config",
+                   registration / "commondir", registration / "modules/vendor/objects/ext/config"]
         before = [path.read_bytes() for path in configs]
+        # Protected files are never replaced, by unlinking and creating them or by renaming over them.
+        replaced = ["cd .git/modules/vendor/objects/ext && rm config && echo '[core]' > config",
+                    "cd .git/modules/vendor/objects/ext && echo '[core]' > staged && mv staged config",
+                    "cd .git/modules/vendor/objects/ext/modules/deps/refs/inner && rm config && echo '[core]' > config",
+                    "cd .git/modules/vendor/objects/ext && echo x > staged && mv staged hooks/post-checkout",
+                    "cd .git/worktrees/core-linked && rm commondir && echo ../.. > commondir",
+                    "cd .git/worktrees/core-linked && echo /tmp > staged && mv staged commondir",
+                    "cd .git/worktrees/core-linked && echo '[core]' > staged && mv staged config.worktree",
+                    "cd .git && cp config staged && rm config && mv staged config"]
+        if os.path.exists(str(self.root).upper()):  # The volume folds case and the Kelvin sign onto k.
+            replaced.append("cd .git/worktrees/core-linked && echo '[core]' > \"config.wor$(printf '\\342\\204\\252')tree\"")
         # Each command runs under a newly built profile, so a HEAD planted in a name directory would make the
         # next profile treat that directory as a Git dir.
         refused = ['echo "ref: refs/heads/main" > .git/modules/vendor/HEAD',
@@ -196,7 +214,8 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
                    "mv .git/worktrees/core-linked moved", "mkdir .git/worktrees/forged", "ln -s /tmp .git/worktrees/forged",
                    'echo "[core]" >> .git/worktrees/core-linked/modules/vendor/objects/ext/config',
                    *(f"rm {repository}/sub/.git" for repository in (self.desktop, unselected)),
-                   f"mkdir {self.desktop}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
+                   f"mkdir {self.desktop}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz",
+                   *replaced]
         for script in refused:
             result = self.shell(script)
             self.assertEqual(result["status"], "failed", script)
@@ -204,13 +223,15 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         self.assertEqual([path.read_bytes() for path in configs], before)
         for path in (self.core / "moved", self.core / ".git/modules/vendor/objects/other", self.core / ".git/worktrees/forged",
                      self.core / ".git/modules/vendor/HEAD", self.core / ".git/modules/vendor/objects/HEAD",
+                     modules / "hooks/post-checkout", registration / "config.worktree",
                      self.desktop / ".git/modules/sub/objects/zz", unselected / ".git/modules/sub/refs/zz"):
             self.assertFalse(os.path.lexists(path), path)
         self.assertTrue(all(os.path.lexists(path / "sub/.git") for path in (self.desktop, unselected)))
         # Git still works inside them: commits and gc create and remove their data directories.
+        inside = "ext ext/inner rt" if reftable else "ext ext/inner"
         allowed = self.run_scoped(["/usr/bin/env", *IDENTITY, "/bin/sh", "-c",
-                                   "for repository in ext ext/inner; do echo edit >> $repository/file.txt && "
-                                   "git -C $repository commit -qam inside || exit 1; done && git -C ext/inner gc -q && "
+                                   f"for repository in {inside}; do echo edit >> $repository/file.txt && "
+                                   "git -C $repository commit -qam inside && git -C $repository gc -q || exit 1; done && "
                                    "git rm -qf ext && git commit -qm removed"])
         self.assertEqual(allowed["status"], "succeeded", allowed["output"])
         self.assertIn("commit: inside", (modules / "modules/deps/refs/inner/logs/HEAD").read_text())

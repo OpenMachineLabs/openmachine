@@ -68,15 +68,17 @@ class ProfileTests(unittest.TestCase):
         self.assertIn(f'(allow file-read* file-read-data file-write* process-exec (subpath "{writable}")', text)
         # Git rules hold in every writable place, private trees included, after every write allow. Nested Git
         # areas deny every kind of entry; each exception also requires a writable root, and protected names
-        # are denied after the exceptions.
-        protected = f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))'
+        # are denied after the exceptions, naming each operation they allow.
+        protected = (f'(deny {seatbelt.WRITES} (regex #"{seatbelt.PROTECTED_REGEX}") '
+                     f'(regex #"{seatbelt.PROTECTED_IDE_REGEX}"))')
         freeze = f'(deny file-write-create file-write-unlink (regex #"{seatbelt.NESTED_GIT_REGEX}"))'
         self.assertGreater(lines.index(freeze), lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
         inside = (f'(require-any (subpath "{writable}") (subpath "{worktree}") '
                   f'(subpath "{self.root / "T/openmachine-scope/exec"}"))')
         tail = [protected,
                 rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
-                "(deny file-clone (vnode-type DIRECTORY))", f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))']
+                "(deny file-clone (vnode-type DIRECTORY))",
+                f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))']
         self.assertEqual(lines[lines.index(freeze):], [freeze, *tail])
         self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
         # Files and data directories only inside the nested Git dirs that exist, never beside or in place of them.
@@ -108,7 +110,12 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(added[start + 7:], [
             f'(allow file-write-create (require-all {inside} (literal "{self.root / "Dev (1)+x/new/.git"}")))',
             added[start + 8], f'(deny file-write-unlink (literal "{registrations}"))',
-            f'(deny file-write* (subpath "{registrations / "wt"}"))', tail[-1]])
+            f'(deny {seatbelt.WRITES} (subpath "{registrations / "wt"}"))', tail[-1]])
+        # A later wildcard denial does not override an allowance that names an operation, so the denials
+        # name every write operation that any allowance names.
+        named = {operation for line in added if line.startswith("(allow")
+                 for operation in re.findall(r"file-write-[a-z]+", line)}
+        self.assertLessEqual(named, set(seatbelt.WRITES.split()))
         new, commondir = (re.search(r'#"([^"]+)"', line).group(1) for line in (added[start + 3], added[start + 8]))
         self.assertTrue(inside in added[start + 3] and inside in added[start + 8])
         for path in (registrations, registrations / "new", registrations / "new/HEAD", registrations / "new/logs/refs"):
