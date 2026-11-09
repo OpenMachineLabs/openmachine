@@ -43,6 +43,64 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertGreaterEqual(err.count(DENIED), 3, err)
         self.assertFalse((outside / "x").exists())
 
+    def routing(self, client):
+        broker = "http://127.0.0.1:41234"
+        return {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
+                "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
+
+    def clients(self):
+        """Two om-code clients, each beside another program, in a directory the profile denies."""
+        denied, clients = self.root / "denied", []
+        for name in ("a", "b"):
+            (denied / name).mkdir(parents=True, mode=0o755)
+            for program in ("om-code", "other"):
+                path = denied / name / program
+                path.write_text(f"#!/bin/sh\necho {program}-{name} \"$@\"\n")
+                path.chmod(0o755)
+            clients.append(denied / name / "om-code")
+        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
+        return clients, prelude
+
+    def test_github_routing_reaches_the_session_and_only_its_client_runs(self):
+        (first, second), prelude = self.clients()
+        lifetime = self.lifetime()
+        command = (f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; "
+                   f"{first.parent}/other; {second}")
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", command, github=self.routing(first)), prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        out, err = out.decode(), err.decode()
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
+        self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
+        self.assertRegex(out, rf"PATH=\S+:{first.parent}\n")
+        self.assertIn("om-code-a hi", out)
+        self.assertNotIn("other-a", out)
+        self.assertEqual(err.count(DENIED), 2, err)
+        # Another client, as after an om-code update, runs in a new instance of the same lifetime.
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"om-code; {first}", github=self.routing(second)),
+                                    prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertIn(b"om-code-b", out)
+        self.assertEqual(err.decode().count(DENIED), 1, err)
+        record = json.loads((self.state / "code" / lifetime / "record.json").read_text())
+        self.assertEqual([item.get("client") for item in record["instances"]], [str(first), str(second)])
+        # Without routing a session runs neither client and sees none of its variables.
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"env | grep -c OM_CODE; {first}"), prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        self.assertEqual((reply["status"], out.decode().split()[0]), ("admitted", "0"), reply)
+        self.assertIn(DENIED, err.decode())
+
+    def test_a_client_restricted_work_could_replace_is_refused(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime)[0]["status"], "admitted")  # Core creates the persistent home
+        client = HOME / "om-code"
+        client.write_text("#!/bin/sh\n")
+        client.chmod(0o755)
+        reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))
+        self.assertEqual((reply["status"], reply["error"]["code"]), ("denied", "github_client_invalid"), reply)
+
     def test_the_code_host_state_is_a_control_path(self):
         """The Go Code host keeps its host key, network keys and socket beside Core's state; no session reads it."""
         default = self.root / "home/.local/state/openmachine"
@@ -277,6 +335,19 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
 
 class FullAccessSessionTests(SessionFixture, unittest.TestCase):
+    def test_github_routing_reaches_a_full_session(self):
+        client = self.root / "bin/om-code"
+        client.parent.mkdir(mode=0o755)
+        client.write_text("#!/bin/sh\necho client \"$@\"\n")
+        client.chmod(0o755)
+        broker = "http://127.0.0.1:41234"
+        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1048576"}}
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_CODE_BROKER $GIT_CONFIG_KEY_0; om-code ok",
+                                             github=github)
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        self.assertEqual(out.splitlines(), [f"{broker} http.{broker}.postBuffer", "client ok"])
+
     def test_full_access_is_an_ordinary_shell(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
         self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={Path.home()}\n"), err)

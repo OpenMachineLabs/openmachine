@@ -11,6 +11,12 @@ from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
 SCOPE = {"protocol": 1, "authority": {}, "roots": []}
+BROKER = "http://127.0.0.1:41234"
+ROUTING = {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
+           "GIT_CONFIG_KEY_0": f"url.{BROKER}/github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
+           "GIT_CONFIG_KEY_1": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_1": "",
+           "GIT_CONFIG_KEY_2": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_2": "!'/opt/om/om-code' git-credential"}
+GITHUB = {"environment": ROUTING, "client": "/opt/om/om-code"}
 
 
 class RequestTests(unittest.TestCase):
@@ -36,11 +42,33 @@ class RequestTests(unittest.TestCase):
         with self.assertRaises(Fault):
             sessions.parse(b" " * (sessions.MAX_REQUEST + 1))
 
+    def test_github_routing_carries_exactly_its_variables_with_bounded_values(self):
+        self.assertEqual(self.parse(VALID | {"github": GITHUB}).github.environment, ROUTING)
+        self.assertIsNone(self.parse(VALID).github)
+        changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_CODE_OTHER": "x"}, {"OM_CODE_BROKER": "http://localhost:41234"},
+                   {"OM_CODE_BROKER": "https://127.0.0.1:41234"}, {"OM_CODE_BROKER": "http://127.0.0.1:0"},
+                   {"OM_CODE_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"},
+                   {"GIT_CONFIG_KEY_0": "core.fsmonitor"}, {"GIT_CONFIG_KEY_0": "credential.helper"},
+                   {"GIT_CONFIG_KEY_0": "url.https://example.com/.insteadOf"}, {"GIT_CONFIG_KEY_1": f"credential.{BROKER}x.helper"},
+                   {"GIT_CONFIG_VALUE_0": "line\nbreak"}, {"GIT_CONFIG_VALUE_0": "x" * 1025}, {"GIT_CONFIG_KEY_9": "x"}]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(Fault) as caught:
+                self.parse(VALID | {"github": GITHUB | {"environment": ROUTING | change}})
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("request_invalid", "known_no_effect"))
+        missing = dict(ROUTING)
+        del missing["GIT_CONFIG_VALUE_2"]
+        for github in ({"environment": missing, "client": "/opt/om/om-code"}, GITHUB | {"client": "om-code"},
+                       GITHUB | {"client": "/opt/om/../om-code"}, GITHUB | {"client": "/opt/o:m/om-code"},
+                       GITHUB | {"client": "/opt/om/om-code\0"}, GITHUB | {"extra": 1}):
+            with self.subTest(github=github), self.assertRaises(Fault):
+                self.parse(VALID | {"github": github})
+
     def test_restricted_policies_follow_the_lifetime_backend(self):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             policies = sessions.capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "selected_projects": "platform_unsupported"})
+        self.assertEqual(sessions.capabilities()["github"], "available")
 
 
 class LaunchAcknowledgmentTests(unittest.TestCase):

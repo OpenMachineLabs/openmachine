@@ -67,6 +67,49 @@ class PersistentHomeTests(unittest.TestCase):
             self.unsafe()
 
 
+class GitHubClientTests(unittest.TestCase):
+    """The om-code client a session may run is one file that only root or this user can replace."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="om-client-", dir="/tmp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.client = self.root / "bin/om-code"
+        self.client.parent.mkdir(mode=0o755)
+        self.client.write_text("#!/bin/sh\n")
+        self.client.chmod(0o755)
+
+    def check(self, client):
+        request = sessions.parse(json.dumps({"protocol": 1, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
+            "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "http://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
+                       "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.http://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
+        return sessions._client(request)
+
+    def refused(self, client):
+        with self.assertRaises(Fault) as caught:
+            self.check(client)
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("github_client_invalid", "known_no_effect"))
+
+    def test_an_owned_executable_at_its_physical_path_is_accepted(self):
+        self.assertEqual(self.check(self.client), self.client)
+
+    def test_writable_linked_missing_or_shared_clients_are_refused(self):
+        link = self.root / "link"
+        link.symlink_to(self.client)
+        self.refused(link)
+        self.refused(self.root / "missing")
+        self.client.chmod(0o775)
+        self.refused(self.client)
+        self.client.chmod(0o644)
+        self.refused(self.client)
+        self.client.chmod(0o755)
+        self.client.parent.chmod(0o777)
+        self.refused(self.client)
+        self.client.parent.chmod(0o755)
+        with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
+            self.refused(self.client)  # inside the persistent home, which restricted work may write
+
+
 @unittest.skipUnless(macos.lifetime_unavailable_reason() is None, "requires the macOS native process interfaces")
 class SpawnAcknowledgmentTests(unittest.TestCase):
     """The spawner acknowledges a launch with the command's real birth, or proves that nothing ran."""
