@@ -46,7 +46,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertFalse((outside / "x").exists())
 
     def routing(self, client):
-        broker = "http://127.0.0.1:41234"
+        broker = "https://127.0.0.1:41234"
         return {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
                 "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
                 "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
@@ -84,7 +84,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         # The session runs Core's copy by name, never the host's file, and cannot replace the copy.
         out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; {first}; "
                                  f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
-        self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
+        self.assertIn("OM_CODE_BROKER=https://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
         self.assertRegex(out, rf"PATH=\S+:{stable.parent}\n")
         self.assertIn("om-code-a hi", out)
@@ -482,7 +482,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         client.parent.mkdir(mode=0o755)
         client.write_text("#!/bin/sh\necho client \"$@\"\n")
         client.chmod(0o755)
-        broker = "http://127.0.0.1:41234"
+        broker = "https://127.0.0.1:41234"
         github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1048576"}}
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_CODE_BROKER $GIT_CONFIG_KEY_0; om-code ok",
@@ -500,7 +500,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         self.assertFalse(HOME.parent.exists() or HOME.parent.is_symlink())
         HOME.parent.symlink_to(self.root)
         self.addCleanup(HOME.parent.unlink)
-        broker = "http://127.0.0.1:41234"
+        broker = "https://127.0.0.1:41234"
         github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}
         reply, code, out, err = self.session(self.lifetime(), "full_access", "om-code", github=github)

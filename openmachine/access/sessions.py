@@ -52,10 +52,11 @@ class Terminal(BaseModel):
     term: Annotated[str, Field(pattern=r"^[A-Za-z0-9._+-]{1,64}$")]
 
 
-# A session's routing to its host's GitHub broker: these exact variables, the broker on loopback, Git
-# keys scoped to that broker, and values bounded to printable text.
-BROKER = r"http://127\.0\.0\.1:[1-9][0-9]{0,4}"
-GITHUB_COUNT = 9
+# A session's routing to its host's GitHub broker: these exact variables, the broker on loopback over TLS
+# (the routing pins its key, so whatever else holds the port after the broker fails Git closed), Git keys
+# scoped to that broker, and values bounded to printable text.
+BROKER = r"https://127\.0\.0\.1:[1-9][0-9]{0,4}"
+GITHUB_COUNT = 11
 
 
 class GitHub(BaseModel):
@@ -72,7 +73,7 @@ class GitHub(BaseModel):
         count = environment.get("GIT_CONFIG_COUNT", "")
         if (not re.fullmatch(BROKER, broker) or int(broker.rsplit(":", 1)[1]) > 65535
                 or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment.get("OM_CODE_CAPABILITY", ""))
-                or not re.fullmatch(f"[1-{GITHUB_COUNT}]", count)):
+                or not re.fullmatch(r"[1-9][0-9]?", count) or int(count) > GITHUB_COUNT):
             raise ValueError("github routing needs a loopback broker, a capability and a Git configuration count")
         pairs = [(f"GIT_CONFIG_KEY_{index}", f"GIT_CONFIG_VALUE_{index}") for index in range(int(count))]
         if set(environment) != {"OM_CODE_BROKER", "OM_CODE_CAPABILITY", "GIT_CONFIG_COUNT", *(name for pair in pairs for name in pair)}:
@@ -115,7 +116,8 @@ class SessionRequest(BaseModel):
 def capabilities() -> dict:
     reason = macos.lifetime_unavailable_reason()
     restricted = "available" if reason is None else reason
-    value = {"protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "available",
+    # github names the routing form Core takes, so a host and Core that disagree on it route nothing.
+    value = {"protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "https",
              "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
     if reason is None:
         value["github_client"] = str(_stable_client())  # what restricted sessions' Git routing runs

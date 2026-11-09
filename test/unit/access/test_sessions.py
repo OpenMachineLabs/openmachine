@@ -11,7 +11,7 @@ from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
 SCOPE = {"protocol": 1, "authority": {}, "roots": []}
-BROKER = "http://127.0.0.1:41234"
+BROKER = "https://127.0.0.1:41234"
 ROUTING = {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
            "GIT_CONFIG_KEY_0": f"url.{BROKER}/github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
            "GIT_CONFIG_KEY_1": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_1": "",
@@ -45,9 +45,9 @@ class RequestTests(unittest.TestCase):
     def test_github_routing_carries_exactly_its_variables_with_bounded_values(self):
         self.assertEqual(self.parse(VALID | {"github": GITHUB}).github.environment, ROUTING)
         self.assertIsNone(self.parse(VALID).github)
-        changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_CODE_OTHER": "x"}, {"OM_CODE_BROKER": "http://localhost:41234"},
-                   {"OM_CODE_BROKER": "https://127.0.0.1:41234"}, {"OM_CODE_BROKER": "http://127.0.0.1:0"},
-                   {"OM_CODE_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"},
+        changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_CODE_OTHER": "x"}, {"OM_CODE_BROKER": "https://localhost:41234"},
+                   {"OM_CODE_BROKER": "http://127.0.0.1:41234"}, {"OM_CODE_BROKER": "https://127.0.0.1:0"},
+                   {"OM_CODE_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"}, {"GIT_CONFIG_COUNT": "03"},
                    {"GIT_CONFIG_KEY_0": "core.fsmonitor"}, {"GIT_CONFIG_KEY_0": "credential.helper"},
                    {"GIT_CONFIG_KEY_0": "url.https://example.com/.insteadOf"}, {"GIT_CONFIG_KEY_1": f"credential.{BROKER}x.helper"},
                    {"GIT_CONFIG_VALUE_0": "line\nbreak"}, {"GIT_CONFIG_VALUE_0": "x" * 1025}, {"GIT_CONFIG_KEY_9": "x"}]
@@ -63,11 +63,22 @@ class RequestTests(unittest.TestCase):
                        GITHUB | {"extra": 1}):
             with self.subTest(github=github), self.assertRaises(Fault):
                 self.parse(VALID | {"github": github})
-        for port in ("65535", "65536"):
-            broker = f"http://127.0.0.1:{port}"
+        # A broker elsewhere than loopback over TLS is refused even when every key names it.
+        for broker, accepted in (("https://127.0.0.1:65535", True), ("https://127.0.0.1:65536", False),
+                                 ("http://127.0.0.1:41234", False)):
             github = GITHUB | {"environment": {name: value.replace(BROKER, broker) for name, value in ROUTING.items()}}
-            if port == "65535":
+            if accepted:
                 self.assertEqual(self.parse(VALID | {"github": github}).github.environment["OM_CODE_BROKER"], broker)
+            else:
+                with self.subTest(broker=broker), self.assertRaises(Fault):
+                    self.parse(VALID | {"github": github})
+        # Up to eleven Git entries: the host's pinned-key routing needs all of them.
+        for count in (11, 12):
+            entries = {f"GIT_CONFIG_{kind}_{index}": f"http.{BROKER}.sslVerify" if kind == "KEY" else "false"
+                       for index in range(count) for kind in ("KEY", "VALUE")}
+            github = GITHUB | {"environment": {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": str(count)} | entries}
+            if count == 11:
+                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["GIT_CONFIG_COUNT"], "11")
             else:
                 with self.assertRaises(Fault):
                     self.parse(VALID | {"github": github})
@@ -77,7 +88,7 @@ class RequestTests(unittest.TestCase):
             policies = sessions.capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "selected_projects": "platform_unsupported"})
-        self.assertEqual(sessions.capabilities()["github"], "available")
+        self.assertEqual(sessions.capabilities()["github"], "https")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             self.assertNotIn("github_client", sessions.capabilities())
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
