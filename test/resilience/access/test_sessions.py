@@ -14,7 +14,7 @@ import unittest
 from openmachine.access import macos
 from openmachine.chat import projects
 from openmachine.config import load
-from test.support.access_sessions import HOME, SessionFixture, members
+from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
 
@@ -74,7 +74,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         return [item.get("client") for item in json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]]
 
     def stable(self):
-        return macos.user_temp() / "omc/client/om-code"
+        return macos.user_temp() / "omc" / CLIENT_NAME / "om-code"
 
     def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
         (first, second), prelude = self.clients()

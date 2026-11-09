@@ -36,6 +36,7 @@ MAX_REQUEST = 256 * 1024
 MAX_FRAME = 512 * 1024
 SHARED = Path("/Users/Shared")
 HOME_NAME = "openmachine-code-{uid}"
+CLIENT_NAME = "client"  # Core's copy of the host's om-code lives in user_temp()/omc/CLIENT_NAME
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server")
 FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2,
@@ -413,7 +414,7 @@ def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path,
 def _stable_client() -> Path:
     """Core's copy of the host's om-code, the one client every restricted instance may run. Restricted
     work cannot write here, and an update replaces the file in place, so it needs no new instance."""
-    return macos.user_temp() / "omc" / "client" / "om-code"
+    return macos.user_temp() / "omc" / CLIENT_NAME / "om-code"
 
 
 def _install(client: Path) -> Path:
