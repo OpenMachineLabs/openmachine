@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import stat
 import sys
 from typing import NamedTuple
 
@@ -41,10 +42,10 @@ PROTECTED_GIT = r"((modules|worktrees)/.+/)?(hooks(/.*)?|config(\.worktree)?|com
 # Any .git entry (a repository, or a worktree or submodule link) and those files inside one, at any path.
 PROTECTED_REGEX = r"^(/.*)?/\.git(/" + PROTECTED_GIT + ")?$"
 PROTECTED_IDE_REGEX = r"^(/.*)?/\.(vscode|idea)(/.*)?$"
-# Where nested Git dirs live, and the data directories Git itself creates inside them.
+# Where nested Git dirs live, and the data directories Git itself creates in one, relative to it.
 NESTED_GIT_REGEX = r"^(/.*)?/\.git/(modules|worktrees)(/.*)?$"
-GIT_DATA_REGEX = (r"^(/.*)?/\.git/(modules|worktrees)/.+/"
-                  r"(objects|refs|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)(/.*)?$")
+GIT_DATA = r"(objects|refs|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)(/.*)?"
+MAX_NESTED_GIT = 512
 
 
 class SandboxError(Exception):
@@ -100,6 +101,45 @@ def _filters(kind: str, paths: list[Path]) -> str:
     return " ".join(f"({kind} {_literal(path)})" for path in paths)
 
 
+def _directories(path: Path) -> list[Path]:
+    """Real subdirectories of a real directory; links are never followed."""
+    try:
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            return []
+        with os.scandir(path) as entries:
+            return sorted(path / entry.name for entry in entries if entry.is_dir(follow_symlinks=False))
+    except OSError:
+        return []
+
+
+def nested_git_dirs(git_dir: Path) -> list[Path]:
+    """The worktree and submodule Git dirs below a .git directory, as they exist now.
+
+    Git keeps worktrees in worktrees/<name> and submodules in modules/<name>, where a name may span
+    directories, and refuses to nest one submodule's Git dir inside another's; each keeps its own
+    worktrees and modules. A Git dir is a directory holding a HEAD file. The search is bounded.
+    """
+    found, pending, visited = [], [git_dir], 0
+    while pending and len(found) < MAX_NESTED_GIT and visited < 8 * MAX_NESTED_GIT:
+        current = pending.pop()
+        candidates = _directories(current / "worktrees")
+        names = _directories(current / "modules")
+        while names and visited < 8 * MAX_NESTED_GIT:
+            visited += 1
+            directory = names.pop()
+            try:
+                held = stat.S_ISREG((directory / "HEAD").lstat().st_mode)
+            except OSError:
+                held = False
+            if held:
+                candidates.append(directory)
+            else:
+                names.extend(_directories(directory))
+        found += candidates
+        pending += candidates
+    return found[:MAX_NESTED_GIT]
+
+
 def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
             denied: list[Path], exceptions: list[Path], checkout: tuple[Path, Path] | None = None) -> str:
     """Generate one profile: read the machine except denied areas, write only granted roots.
@@ -110,8 +150,10 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
 
     Protected names are denied wherever the profile allows writes, private trees included: renaming a
     directory moves everything inside it without checking those paths. So a nested Git dir must also stay
-    in place, and a directory is never cloned. checkout is the destination and common Git dir of Core's
-    own git worktree add, which alone creates that worktree's .git file and its new registration.
+    in place, and a directory is never cloned. The profile follows the nested Git dirs of each writable
+    root's .git as they exist when it is built; later ones stay fully denied. checkout is the destination
+    and common Git dir of Core's own git worktree add, which alone creates that worktree's .git file and
+    its new registration.
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
@@ -147,26 +189,37 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         lines.append(f"(allow file-read* file-read-data process-exec {_filters('subpath', readable)})")
     lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
+    # Every exception below also requires a writable root, so it never re-allows a path outside one.
+    inside = f"(require-any {_filters('subpath', writable + [private])})"
     lines += [
         f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
-        # Nested Git dirs stay in place: no directory or link there is renamed, removed or made, except
-        # the data directories Git manages inside them.
+        # Nested Git dirs stay in place: no directory or link there is renamed, removed or made.
         f'(deny file-write-create file-write-unlink (require-all (regex #"{NESTED_GIT_REGEX}") '
         "(vnode-type DIRECTORY SYMLINK)))",
-        f'(allow file-write-create file-write-unlink (require-all (regex #"{GIT_DATA_REGEX}") (vnode-type DIRECTORY)))',
         # Removing a worktree's or submodule's .git file only unlinks it: nothing can take its place.
-        r'(allow file-write-unlink (require-all (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
+        rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
         "(deny file-clone (vnode-type DIRECTORY))",
     ]
+    # Git creates data directories only inside the nested Git dirs that exist now, never in their place;
+    # a name alone cannot tell them apart, since a submodule's name may hold any of those words.
+    data = []
+    for path in (path for root in writable for path in nested_git_dirs(root / ".git")):
+        try:
+            data.append(f'(regex #"^{_regex(path)}/{GIT_DATA}$")')
+        except Fault:
+            continue  # A Git dir the profile cannot name stays fully denied.
+    if data:
+        lines.append(f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type DIRECTORY) "
+                     f"(require-any {' '.join(data)})))")
     if checkout is not None:
         destination, common = checkout
         registrations = f"^{_regex(common)}/worktrees"
         # A failed add removes its new link and registration again.
         lines += [
-            f"(allow file-write-create (literal {_literal(destination / '.git')}))",
-            f'(allow file-write-create file-write-unlink (require-all (regex #"{registrations}(/[^/]+)?$") '
-            "(vnode-type DIRECTORY)))",
-            f'(allow file-write-create file-write-unlink (regex #"{registrations}/[^/]+/commondir$"))',
+            f"(allow file-write-create (require-all {inside} (literal {_literal(destination / '.git')})))",
+            f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type DIRECTORY) "
+            f'(regex #"{registrations}(/[^/]+(/{GIT_DATA})?)?$")))',
+            f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}/[^/]+/commondir$")))',
         ]
     lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"

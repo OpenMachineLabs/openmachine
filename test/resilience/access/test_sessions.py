@@ -220,23 +220,31 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
         """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
         full, plain, remote = self.root / "full", self.root / "plain", self.root / "plain/remote.git"
-        nested = full / "vendor/lib"
+        nested, source, read_only, unselected = full / "vendor/lib", self.root / "source", self.root / "read-only", self.root / "other"
         for path in (nested, plain):
             path.mkdir(parents=True)
-        git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null"]
-        for repository, name in ((full, "file.txt"), (nested, "lib.txt")):
+        git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null",
+               "-c", "protocol.file.allow=always"]
+        for repository, name in ((full, "file.txt"), (nested, "lib.txt"), (source, "file.txt"), (read_only, "file.txt"),
+                                 (unselected, "file.txt")):
+            repository.mkdir(exist_ok=True)
             (repository / name).write_text("x\n")
             subprocess.run([*git, "-C", str(repository), "init", "-q", "-b", "main"], check=True)
             subprocess.run([*git, "-C", str(repository), "add", name], check=True)
             subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Fixture"], check=True)
+        # A submodule whose valid name holds a Git data directory name; Read-only and unselected ones too.
+        for repository, name, path in ((full, "vendor/objects/ext", "ext"), (read_only, "sub", "sub"), (unselected, "sub", "sub")):
+            subprocess.run([*git, "-C", str(repository), "submodule", "add", "-q", "--name", name, str(source), path], check=True)
+            subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Submodule"], check=True)
         subprocess.run([*git, "init", "-q", "--bare", str(remote)], check=True)
         subprocess.run([*git, "-C", str(full), "worktree", "add", "-q", "-b", "linked", str(self.root / "linked")], check=True)
-        protected = [full / ".git/config", nested / ".git/config", full / ".git/worktrees/linked/commondir"]
+        protected = [full / ".git/config", nested / ".git/config", full / ".git/worktrees/linked/commondir",
+                     full / ".git/modules/vendor/objects/ext/config"]
         config = [path.read_bytes() for path in protected]
         settings = load(self.config)
-        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": "full_access",
+        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
                   "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
-                 for path in (full, plain)]
+                 for path, mode in ((full, "full_access"), (plain, "full_access"), (read_only, "read_only"))]
         scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
                                                                "grant_revision": 1, "session_generation": 0}}
         lifetime = self.lifetime()
@@ -251,7 +259,11 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                    # and a worktree registration stays in place.
                    *(f't="${{TMPDIR%/}}/moved"; mv {path} "$t" && {{ echo "[core]" >> "$t/.git/config"; s=$?; '
                      f'mv "$t" {path}; exit $s; }}' for path in (full, nested)),
-                   f'mv {full}/.git/worktrees/linked "${{TMPDIR%/}}/moved"']
+                   f'mv {full}/.git/worktrees/linked "${{TMPDIR%/}}/moved"',
+                   f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"',
+                   # Nothing outside the Full roots changes.
+                   *(f"rm {repository}/sub/.git" for repository in (read_only, unselected)),
+                   f"mkdir {read_only}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
         for command in refused:
             reply, code, _, err = self.session(lifetime, "selected_projects", command, machine="local", scope=scope)
             self.assertEqual(reply["status"], "admitted", reply)
@@ -260,13 +272,16 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual([path.read_bytes() for path in protected], config)
         for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree"):
             self.assertFalse(os.path.lexists(path / ".git"), path)
-        self.assertFalse(os.path.lexists(nested / ".git-old"))
+        self.assertFalse(any(os.path.lexists(path) for path in (nested / ".git-old", read_only / ".git/modules/sub/objects/zz",
+                                                                 unselected / ".git/modules/sub/refs/zz")))
+        self.assertTrue(all(os.path.lexists(path / "sub/.git") for path in (read_only, unselected)))
         worktrees = subprocess.run([*git, "-C", str(full), "worktree", "list"], capture_output=True, text=True).stdout
         self.assertNotIn(str(plain / "worktree"), worktrees)
         reply, code, out, err = self.session(lifetime, "selected_projects", (
             f"cd {full} && export {IDENTITY} && echo edit >> file.txt && git commit -qam pushed && "
-            f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && git push -q {remote} main && "
-            f"git fetch -q {remote} main && git log --oneline -1 FETCH_HEAD"), machine="local", scope=scope)
+            f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && echo edit >> ext/file.txt && "
+            f"git -C ext commit -qam inside && git push -q {remote} main && git fetch -q {remote} main && "
+            f"git log --oneline -1 FETCH_HEAD"), machine="local", scope=scope)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertIn("pushed", out)
 
