@@ -117,6 +117,7 @@ class GitHubClientTests(unittest.TestCase):
         with patch.object(macos, "user_temp", return_value=self.root):
             self.refused(runtime)  # inside a restricted runtime tree
             self.assertEqual(self.check(self.client), self.client)
+        self.addCleanup(subprocess.run, ["/bin/chmod", "-N", str(self.client)], check=False)
         subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(self.client)], check=True)
         self.refused(self.client)
         subprocess.run(["/bin/chmod", "-N", str(self.client)], check=True)

@@ -284,16 +284,23 @@ def _client(request: SessionRequest) -> Path | None:
     return client
 
 
-def _within(path: Path, roots: list[Path]) -> bool:
-    """Whether path lies in one of roots, by physical identity, so no case or link spelling escapes."""
+def _within(client: Path, roots: list[Path]) -> bool:
+    """Whether the client lies in one of roots, by physical identity, so no case or link spelling escapes.
+    A root that is a link holds nothing: another user may plant one in /Users/Shared, and Core writes
+    through none. A client that vanished meanwhile is refused with no effect."""
     identities = set()
     for root in roots:
         try:
-            info = root.stat()
+            info = root.lstat()
         except OSError:
             continue  # An absent root holds nothing.
-        identities.add((info.st_dev, info.st_ino))
-    return any((item.st_dev, item.st_ino) in identities for item in map(os.stat, [path, *path.parents]))
+        if stat.S_ISDIR(info.st_mode):
+            identities.add((info.st_dev, info.st_ino))
+    try:
+        ancestry = [os.stat(item) for item in [client, *client.parents]]
+    except OSError as error:
+        raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
+    return any((item.st_dev, item.st_ino) in identities for item in ancestry)
 
 
 def _reply(control: int, value: dict) -> None:

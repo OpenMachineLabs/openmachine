@@ -76,14 +76,17 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_github_routing_reaches_the_session_and_only_its_client_runs(self):
         (first, second), prelude = self.clients()
         lifetime = self.lifetime()
+        # The session may run its client, never replace it: no hard link into its home, no write.
         out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; "
-                                 f"{first.parent}/other; {second}", prelude, first)
+                                 f"{first.parent}/other; {second}; ln {first} $HOME/linked; echo x >> {first}", prelude, first)
         self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
         self.assertRegex(out, rf"PATH=\S+:{first.parent}\n")
         self.assertIn("om-code-a hi", out)
         self.assertNotIn("other-a", out)
-        self.assertEqual(err.count(DENIED), 2, err)
+        self.assertEqual(err.count(DENIED), 4, err)
+        self.assertFalse((HOME / "linked").exists())
+        self.assertNotIn("x", first.read_text().split())
         # A session without routing (as SFTP) runs in the client's instance and sees none of its
         # variables; the client's next session still reaches that instance's spawner.
         self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
@@ -112,6 +115,38 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.admitted(lifetime, f"kill -9 {spawner}", prelude)
         self.assertEqual(self.admitted(lifetime, "echo again", prelude)[0], "again\n")
         self.assertEqual(self.instances(lifetime), [None, str(first), None])
+
+    def test_an_admission_connects_before_a_newer_instance_rebinds_the_socket(self):
+        (first, second), prelude = self.clients()
+        lifetime = self.lifetime()
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        # This admission pauses under the lifetime lock, just before it connects; meanwhile another
+        # client's session waits for the lock, then starts a newer instance that rebinds the socket.
+        pause = ("import time\nfrom openmachine.access import sessions as _s\n_connect = _s._connect\n"
+                 "def _paused(lifetime, instance):\n time.sleep(3)\n return _connect(lifetime, instance)\n"
+                 "_s._connect = _paused\n")
+        paused, control = self.launch(self.request(lifetime, "read_only", "exec", "om-code x", github=self.routing(first)),
+                                      prelude + pause)
+        time.sleep(1)
+        self.assertIn("om-code-b y", self.admitted(lifetime, "om-code y", prelude, second)[0])
+        with control:
+            reply = json.loads(control.makefile("rb").readline() or b"{}")
+        out, _ = paused.communicate(timeout=60)
+        self.assertEqual(reply.get("status"), "admitted", reply)
+        self.assertIn("om-code-a x", out.decode())
+
+    def test_a_client_removed_while_an_admission_waits_has_no_effect(self):
+        """As when an update removes an old client: it passed its check, then vanished before the profile."""
+        (first, _), prelude = self.clients()
+        lifetime = self.lifetime()
+        remove = ("from openmachine.access import sessions as _s\n_profile = _s._restricted_profile\n"
+                  "def _removed(scope, state, runtime, home, client):\n client.unlink()\n"
+                  " return _profile(scope, state, runtime, home, client)\n_s._restricted_profile = _removed\n")
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran", github=self.routing(first)),
+                                    prelude + remove)
+        out, _ = process.communicate(timeout=60)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"], out), ("github_client_invalid", "known_no_effect", b""))
+        self.assertFalse((self.state / "code" / lifetime / "record.json").exists())
 
     def test_a_client_restricted_work_could_replace_is_refused(self):
         lifetime = self.lifetime()
@@ -368,6 +403,22 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
                                              github=github)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertEqual(out.splitlines(), [f"{broker} http.{broker}.postBuffer", "client ok"])
+
+    def test_a_link_at_the_persistent_home_name_never_refuses_a_full_session(self):
+        """/Users/Shared is world-writable and sticky: another local user may create this user's home name
+        as a link, here to an ancestor of the client, before any restricted session creates the home."""
+        client = self.root / "bin/om-code"
+        client.parent.mkdir(mode=0o755)
+        client.write_text("#!/bin/sh\necho client\n")
+        client.chmod(0o755)
+        self.assertFalse(HOME.parent.exists() or HOME.parent.is_symlink())
+        HOME.parent.symlink_to(self.root)
+        self.addCleanup(HOME.parent.unlink)
+        broker = "http://127.0.0.1:41234"
+        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "om-code", github=github)
+        self.assertEqual((reply["status"], code, out), ("admitted", 0, "client\n"), err)
 
     def test_full_access_is_an_ordinary_shell(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
