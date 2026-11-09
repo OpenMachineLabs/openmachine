@@ -62,35 +62,56 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
         return clients, prelude
 
+    def admitted(self, lifetime, command, prelude, client=None):
+        """Run one Read Only exec, routed to client when one is named; returns its stdout and stderr."""
+        extra = {"github": self.routing(client)} if client else {}
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", command, **extra), prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(reply["status"], "admitted", reply)
+        return out.decode(), err.decode()
+
+    def instances(self, lifetime):
+        return [item.get("client") for item in json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]]
+
     def test_github_routing_reaches_the_session_and_only_its_client_runs(self):
         (first, second), prelude = self.clients()
         lifetime = self.lifetime()
-        command = (f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; "
-                   f"{first.parent}/other; {second}")
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", command, github=self.routing(first)), prelude=prelude)
-        out, err = process.communicate(timeout=60)
-        out, err = out.decode(), err.decode()
-        self.assertEqual(reply["status"], "admitted", reply)
+        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; "
+                                 f"{first.parent}/other; {second}", prelude, first)
         self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
         self.assertRegex(out, rf"PATH=\S+:{first.parent}\n")
         self.assertIn("om-code-a hi", out)
         self.assertNotIn("other-a", out)
         self.assertEqual(err.count(DENIED), 2, err)
-        # Another client, as after an om-code update, runs in a new instance of the same lifetime.
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"om-code; {first}", github=self.routing(second)),
-                                    prelude=prelude)
-        out, err = process.communicate(timeout=60)
-        self.assertEqual(reply["status"], "admitted", reply)
-        self.assertIn(b"om-code-b", out)
-        self.assertEqual(err.decode().count(DENIED), 1, err)
-        record = json.loads((self.state / "code" / lifetime / "record.json").read_text())
-        self.assertEqual([item.get("client") for item in record["instances"]], [str(first), str(second)])
-        # Without routing a session runs neither client and sees none of its variables.
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", f"env | grep -c OM_CODE; {first}"), prelude=prelude)
-        out, err = process.communicate(timeout=60)
-        self.assertEqual((reply["status"], out.decode().split()[0]), ("admitted", "0"), reply)
-        self.assertIn(DENIED, err.decode())
+        # A session without routing (as SFTP) runs in the client's instance and sees none of its
+        # variables; the client's next session still reaches that instance's spawner.
+        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        # Another client, as after an om-code update, runs in a new instance of the same lifetime and never
+        # the earlier client; sessions without routing then run in that newest instance.
+        out, err = self.admitted(lifetime, f"om-code; {first}", prelude, second)
+        self.assertIn("om-code-b", out)
+        self.assertEqual(err.count(DENIED), 1, err)
+        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
+        self.assertIn("om-code-b", self.admitted(lifetime, "om-code", prelude, second)[0])
+        self.assertEqual(self.instances(lifetime), [str(first), str(second)])
+
+    def test_only_the_newest_instance_admits(self):
+        """Every instance binds the lifetime's one spawner socket, so an older live one is unreachable."""
+        (first, _), prelude = self.clients()
+        lifetime = self.lifetime()
+        # An unrouted session (as SFTP) may start the lifetime; the first routed one then starts a newer
+        # instance that allows its client, where later sessions of either kind run.
+        self.admitted(lifetime, "true", prelude)
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.admitted(lifetime, "true", prelude)
+        self.assertEqual(self.instances(lifetime), [None, str(first)])
+        # Once the newest spawner is lost, the next session starts another instance, though an older one lives.
+        spawner = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"][-1]["pid"]
+        self.admitted(lifetime, f"kill -9 {spawner}", prelude)
+        self.assertEqual(self.admitted(lifetime, "echo again", prelude)[0], "again\n")
+        self.assertEqual(self.instances(lifetime), [None, str(first), None])
 
     def test_a_client_restricted_work_could_replace_is_refused(self):
         lifetime = self.lifetime()

@@ -96,9 +96,9 @@ def _filters(kind: str, paths: list[Path]) -> str:
 
 
 def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
-            denied: list[Path], exceptions: list[Path], executables: list[Path] = ()) -> str:
+            denied: list[Path], exceptions: list[Path], executable: Path | None = None) -> str:
     """Generate one profile: read the machine except denied areas, write only granted roots, and run
-    only the named executables inside a denied area.
+    only the named executable inside a denied area.
 
     For the same operation Seatbelt applies the last matching rule, so each later block narrows or
     re-allows the one before it and the protected and control denials come last. A later broader
@@ -129,8 +129,8 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     ]
     if exceptions:
         lines.append(f"(allow file-read* process-exec {_filters('subpath', exceptions)})")
-    if executables:
-        lines.append(f"(allow file-read* process-exec {_filters('literal', list(executables))})")
+    if executable is not None:
+        lines.append(f"(allow file-read* process-exec {_filters('literal', [executable])})")
     # A later file-read* does not override a file-read-data denial, so the selected roots below
     # re-allow file-read-data by name. Only regular files match by name: SDK directories called
     # "credentials" stay listable.

@@ -109,6 +109,27 @@ class GitHubClientTests(unittest.TestCase):
         with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
             self.refused(self.client)  # inside the persistent home, which restricted work may write
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS keeps restricted runtime trees and ACLs")
+    def test_clients_where_restricted_work_writes_are_refused_by_physical_identity(self):
+        runtime = self.root / "omc/abc/om-code"
+        runtime.parent.mkdir(parents=True, mode=0o755)
+        shutil.copy(self.client, runtime)
+        with patch.object(macos, "user_temp", return_value=self.root):
+            self.refused(runtime)  # inside a restricted runtime tree
+            self.assertEqual(self.check(self.client), self.client)
+        subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(self.client)], check=True)
+        self.refused(self.client)
+        subprocess.run(["/bin/chmod", "-N", str(self.client)], check=True)
+        if (self.root / "BIN").exists():  # a case-insensitive volume, as macOS uses by default
+            with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "BIN"):
+                self.refused(self.client)
+        # A restricted profile also refuses a client inside its writable roots, here the home.
+        with self.assertRaises(Fault) as caught:
+            sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root, self.client)
+        self.assertEqual(caught.exception.code, "github_client_invalid")
+        text = sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home", self.client)
+        self.assertIn(f'(allow file-read* process-exec (literal "{self.client}"))', text)
+
 
 @unittest.skipUnless(macos.lifetime_unavailable_reason() is None, "requires the macOS native process interfaces")
 class SpawnAcknowledgmentTests(unittest.TestCase):

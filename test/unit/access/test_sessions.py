@@ -59,9 +59,18 @@ class RequestTests(unittest.TestCase):
         del missing["GIT_CONFIG_VALUE_2"]
         for github in ({"environment": missing, "client": "/opt/om/om-code"}, GITHUB | {"client": "om-code"},
                        GITHUB | {"client": "/opt/om/../om-code"}, GITHUB | {"client": "/opt/o:m/om-code"},
-                       GITHUB | {"client": "/opt/om/om-code\0"}, GITHUB | {"extra": 1}):
+                       GITHUB | {"client": "/opt/om/om-code\0"}, GITHUB | {"client": "/opt/om/om-code\x7f"},
+                       GITHUB | {"extra": 1}):
             with self.subTest(github=github), self.assertRaises(Fault):
                 self.parse(VALID | {"github": github})
+        for port in ("65535", "65536"):
+            broker = f"http://127.0.0.1:{port}"
+            github = GITHUB | {"environment": {name: value.replace(BROKER, broker) for name, value in ROUTING.items()}}
+            if port == "65535":
+                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["OM_CODE_BROKER"], broker)
+            else:
+                with self.assertRaises(Fault):
+                    self.parse(VALID | {"github": github})
 
     def test_restricted_policies_follow_the_lifetime_backend(self):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):

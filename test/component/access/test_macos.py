@@ -65,13 +65,13 @@ class ProfileTests(unittest.TestCase):
         self.assertNotIn("appleevents", text.lower())
         self.assertIn('(allow file-read* file-write* (literal "/dev/ttys004"))', seatbelt.own_terminal(text, "/dev/ttys004"))
 
-    def test_only_the_named_executables_run_inside_a_denied_area(self):
+    def test_only_the_named_executable_runs_inside_a_denied_area(self):
         client, denied = self.root / "home/Library/om/om-code", self.root / "home/Library"
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             plain = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
                                      denied=[denied], exceptions=[])
             text = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
-                                    denied=[denied], exceptions=[], executables=[client])
+                                    denied=[denied], exceptions=[], executable=client)
         allow = f'(allow file-read* process-exec (literal "{client}"))'
         self.assertNotIn("literal \"" + str(client), plain)
         lines = text.splitlines()
