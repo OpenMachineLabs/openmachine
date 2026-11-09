@@ -41,8 +41,11 @@ Machine state, nor the contents of secret-named files (`.env*`, `*.key`, `*.p12`
 roots; a selected root re-allows reading inside those areas. They may write
 only Full roots, their registered worktrees and a private per-execution `HOME`,
 `TMPDIR` and caches. `cwd` may be any readable directory. Git
-hooks/config/`commondir`, a writable root's own `.git` entry, `.vscode`/`.idea`,
-agent sockets and other terminals stay unavailable. The network is not restricted.
+hooks/config/`commondir`, `.vscode`/`.idea`, agent sockets and other terminals stay
+unavailable. No `.git` entry can be created or replaced anywhere, and submodule and
+worktree Git dirs stay in place: `git init`, `git clone` without `--bare`, `git
+worktree add` and submodule setup fail, so create worktrees with `create_worktree`.
+The network is not restricted.
 `EPERM` ("Operation not permitted") on a denied area, a write outside Full roots or
 a protected file is a scope denial and names no path (`denials=not_observable`).
 Never retry it without scope or through another tool; only a Cloud owner grant

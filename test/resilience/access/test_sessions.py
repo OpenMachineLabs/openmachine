@@ -17,6 +17,8 @@ from openmachine.config import load
 from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
+IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
+            "GIT_COMMITTER_EMAIL=fixture@example.invalid")
 
 
 def detached(name):
@@ -336,6 +338,82 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
         self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
                          ("denied", "scope_target_changed", "known_no_effect", 1, ""))
+
+    def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
+        """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
+        full, plain, remote = self.root / "full", self.root / "plain", self.root / "plain/remote.git"
+        nested, source, read_only, unselected = full / "vendor/lib", self.root / "source", self.root / "read-only", self.root / "other"
+        for path in (nested, plain):
+            path.mkdir(parents=True)
+        git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null",
+               "-c", "protocol.file.allow=always"]
+        for repository, name in ((full, "file.txt"), (nested, "lib.txt"), (source, "file.txt"), (read_only, "file.txt"),
+                                 (unselected, "file.txt")):
+            repository.mkdir(exist_ok=True)
+            (repository / name).write_text("x\n")
+            subprocess.run([*git, "-C", str(repository), "init", "-q", "-b", "main"], check=True)
+            subprocess.run([*git, "-C", str(repository), "add", name], check=True)
+            subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Fixture"], check=True)
+        # A submodule whose valid name holds a Git data directory name; Read-only and unselected ones too.
+        for repository, name, path in ((full, "vendor/objects/ext", "ext"), (read_only, "sub", "sub"), (unselected, "sub", "sub")):
+            subprocess.run([*git, "-C", str(repository), "submodule", "add", "-q", "--name", name, str(source), path], check=True)
+            subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Submodule"], check=True)
+        subprocess.run([*git, "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run([*git, "-C", str(full), "worktree", "add", "-q", "-b", "linked", str(self.root / "linked")], check=True)
+        protected = [full / ".git/config", nested / ".git/config", full / ".git/worktrees/linked/commondir",
+                     full / ".git/modules/vendor/objects/ext/config"]
+        config = [path.read_bytes() for path in protected]
+        settings = load(self.config)
+        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
+                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                 for path, mode in ((full, "full_access"), (plain, "full_access"), (read_only, "read_only"))]
+        scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
+                                                               "grant_revision": 1, "session_generation": 0}}
+        lifetime = self.lifetime()
+        refused = [f"mkdir -p {full}/new/.git", f"mkdir {plain}/.git",
+                   f"mkdir {full}/file && echo 'gitdir: /tmp/x' > {full}/file/.git",
+                   f"mkdir {full}/renamed && echo 'gitdir: /tmp/x' > {full}/staged && mv {full}/staged {full}/renamed/.git",
+                   f"mv {nested}/.git {nested}/.git-old", f"cd {full} && git worktree add -q {plain}/worktree",
+                   # The persistent home or the lifetime's temp could otherwise carry one in by a directory rename.
+                   'mkdir "$HOME/carried" && mkdir "$HOME/carried/.git"',
+                   'mkdir "${TMPDIR%/}/carried" && mkdir "${TMPDIR%/}/carried/.git"',
+                   # A repository, a selected root itself included, keeps its protected files when moved out,
+                   # and a worktree registration stays in place.
+                   *(f't="${{TMPDIR%/}}/moved"; mv {path} "$t" && {{ echo "[core]" >> "$t/.git/config"; s=$?; '
+                     f'mv "$t" {path}; exit $s; }}' for path in (full, nested)),
+                   f'mv {full}/.git/worktrees/linked "${{TMPDIR%/}}/moved"',
+                   f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"',
+                   # A HEAD in a name directory would make a later instance treat it as a Git dir.
+                   f'echo "ref: refs/heads/main" > {full}/.git/modules/vendor/HEAD',
+                   # Protected files are not replaced by unlinking and creating them or by renaming over them.
+                   f"cd {full}/.git/modules/vendor/objects/ext && rm config && echo '[core]' > config",
+                   f"cd {full}/.git/worktrees/linked && echo /tmp > staged && mv staged commondir",
+                   # Nothing outside the Full roots changes.
+                   *(f"rm {repository}/sub/.git" for repository in (read_only, unselected)),
+                   f"mkdir {read_only}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
+        # The last command runs in a new lifetime, whose instance builds its own profile.
+        for command, session_lifetime in [*((command, lifetime) for command in refused),
+                                          (f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"', self.lifetime())]:
+            reply, code, _, err = self.session(session_lifetime, "selected_projects", command, machine="local", scope=scope)
+            self.assertEqual(reply["status"], "admitted", reply)
+            self.assertNotEqual(code, 0, command)
+            self.assertIn(DENIED, err, command)
+        self.assertFalse(os.path.lexists(full / ".git/modules/vendor/HEAD"))
+        self.assertEqual([path.read_bytes() for path in protected], config)
+        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree"):
+            self.assertFalse(os.path.lexists(path / ".git"), path)
+        self.assertFalse(any(os.path.lexists(path) for path in (nested / ".git-old", read_only / ".git/modules/sub/objects/zz",
+                                                                 unselected / ".git/modules/sub/refs/zz")))
+        self.assertTrue(all(os.path.lexists(path / "sub/.git") for path in (read_only, unselected)))
+        worktrees = subprocess.run([*git, "-C", str(full), "worktree", "list"], capture_output=True, text=True).stdout
+        self.assertNotIn(str(plain / "worktree"), worktrees)
+        reply, code, out, err = self.session(lifetime, "selected_projects", (
+            f"cd {full} && export {IDENTITY} && echo edit >> file.txt && git commit -qam pushed && "
+            f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && echo edit >> ext/file.txt && "
+            f"git -C ext commit -qam inside && git push -q {remote} main && git fetch -q {remote} main && "
+            f"git log --oneline -1 FETCH_HEAD"), machine="local", scope=scope)
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        self.assertIn("pushed", out)
 
     def test_terminal_loss_leaves_nohup_work_running(self):
         lifetime = self.lifetime()
