@@ -287,7 +287,7 @@ def _client(request: SessionRequest) -> Path | None:
         raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
     if not valid:
         raise Fault("github_client_invalid", "The om-code client must be an executable file only its owner can change, "
-                    "outside every area restricted work writes.", effect="known_no_effect")
+                    "outside the persistent home and Core's runtime trees.", effect="known_no_effect")
     return client
 
 
