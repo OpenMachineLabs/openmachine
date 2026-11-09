@@ -35,12 +35,16 @@ SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.
 SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
 SECRET_FILE_REGEX = r"^(/.*)?/(" + SECRET_FILES + r")$"
 KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
-# Git files that later run code outside any sandbox, relative to a .git directory: hooks,
-# configuration and the commondir redirects of the repository, its worktrees and its submodules.
-PROTECTED_GIT = r"(modules/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir|worktrees/[^/]+/(config\.worktree|commondir))"
+# Git files that later run code outside any sandbox, relative to a .git directory: hooks, configuration
+# and commondir redirects of the repository and of every worktree and submodule Git dir nested in it.
+PROTECTED_GIT = r"((modules|worktrees)/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir)"
 # Any .git entry (a repository, or a worktree or submodule link) and those files inside one, at any path.
 PROTECTED_REGEX = r"^(/.*)?/\.git(/" + PROTECTED_GIT + ")?$"
 PROTECTED_IDE_REGEX = r"^(/.*)?/\.(vscode|idea)(/.*)?$"
+# Where nested Git dirs live, and the data directories Git itself creates inside them.
+NESTED_GIT_REGEX = r"^(/.*)?/\.git/(modules|worktrees)(/.*)?$"
+GIT_DATA_REGEX = (r"^(/.*)?/\.git/(modules|worktrees)/.+/"
+                  r"(objects|refs|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)(/.*)?$")
 
 
 class SandboxError(Exception):
@@ -104,10 +108,10 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     re-allows the one before it and the protected and control denials come last. A later broader
     operation (file-read*) does not override an earlier narrower denial (file-read-data).
 
-    Protected names are denied wherever the profile allows writes, private trees included: renaming or
-    cloning a directory moves everything inside it without checking those paths. checkout is the
-    destination and common Git dir of Core's own git worktree add, which alone creates that worktree's
-    .git file and the commondir of its new registration.
+    Protected names are denied wherever the profile allows writes, private trees included: renaming a
+    directory moves everything inside it without checking those paths. So a nested Git dir must also stay
+    in place, and a directory is never cloned. checkout is the destination and common Git dir of Core's
+    own git worktree add, which alone creates that worktree's .git file and its new registration.
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
@@ -143,12 +147,27 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         lines.append(f"(allow file-read* file-read-data process-exec {_filters('subpath', readable)})")
     lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
-    lines.append(f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))')
+    lines += [
+        f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
+        # Nested Git dirs stay in place: no directory or link there is renamed, removed or made, except
+        # the data directories Git manages inside them.
+        f'(deny file-write-create file-write-unlink (require-all (regex #"{NESTED_GIT_REGEX}") '
+        "(vnode-type DIRECTORY SYMLINK)))",
+        f'(allow file-write-create file-write-unlink (require-all (regex #"{GIT_DATA_REGEX}") (vnode-type DIRECTORY)))',
+        # Removing a worktree's or submodule's .git file only unlinks it: nothing can take its place.
+        r'(allow file-write-unlink (require-all (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
+        "(deny file-clone (vnode-type DIRECTORY))",
+    ]
     if checkout is not None:
-        # Create only: existing registrations' commondirs stay unchanged. A failed add removes its link.
         destination, common = checkout
-        lines.append(f"(allow file-write-create file-write-unlink (literal {_literal(destination / '.git')}))")
-        lines.append(f'(allow file-write-create (regex #"^{_regex(common)}/worktrees/[^/]+/commondir$"))')
+        registrations = f"^{_regex(common)}/worktrees"
+        # A failed add removes its new link and registration again.
+        lines += [
+            f"(allow file-write-create (literal {_literal(destination / '.git')}))",
+            f'(allow file-write-create file-write-unlink (require-all (regex #"{registrations}(/[^/]+)?$") '
+            "(vnode-type DIRECTORY)))",
+            f'(allow file-write-create file-write-unlink (regex #"{registrations}/[^/]+/commondir$"))',
+        ]
     lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 

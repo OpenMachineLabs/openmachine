@@ -60,17 +60,30 @@ class ProfileTests(unittest.TestCase):
         secret = lines.index(f'(deny file-read-data (regex #"{seatbelt.SECRET_DIRECTORY_REGEX}"))')
         self.assertLess(secret, lines.index(f'(allow file-read* file-read-data process-exec (subpath "{readable}"))'))
         self.assertIn(f'(allow file-read* file-read-data file-write* process-exec (subpath "{writable}")', text)
-        # Protected names hold in every writable place, private trees included, after every write allow.
-        protected = f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))'
-        self.assertEqual(lines[-2:], [protected, f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))'])
+        # Git rules hold in every writable place, private trees included, after every write allow.
+        git = lines.index(f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))')
+        self.assertGreater(git, lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
+        self.assertEqual(lines[git + 1:], [
+            f'(deny file-write-create file-write-unlink (require-all (regex #"{seatbelt.NESTED_GIT_REGEX}") '
+            "(vnode-type DIRECTORY SYMLINK)))",
+            f'(allow file-write-create file-write-unlink (require-all (regex #"{seatbelt.GIT_DATA_REGEX}") (vnode-type DIRECTORY)))',
+            r'(allow file-write-unlink (require-all (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
+            "(deny file-clone (vnode-type DIRECTORY))",
+            f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))'])
         self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
-        # Only Core's own worktree creation may create its new link and registration commondir.
-        *_, denial, link, registration, last = checkout.splitlines()
-        self.assertEqual((denial, last), (protected, lines[-1]))
-        self.assertEqual(link, f'(allow file-write-create file-write-unlink (literal "{self.root / "Dev (1)+x/new/.git"}"))')
-        commondir = re.fullmatch(r'\(allow file-write-create \(regex #"(.+)"\)\)', registration).group(1)
-        self.assertRegex(str(writable / ".git/worktrees/new/commondir"), commondir)
-        for path in (writable / ".git/worktrees/new/gitdir", writable / ".git/commondir", worktree / ".git/worktrees/x/commondir"):
+        # Only Core's own worktree creation may create its new link and registration, after the Git rules.
+        added = checkout.splitlines()
+        self.assertEqual((added[:-4], added[-1]), (lines[:-1], lines[-1]))
+        self.assertEqual(added[-4], f'(allow file-write-create (literal "{self.root / "Dev (1)+x/new/.git"}"))')
+        self.assertIn("(vnode-type DIRECTORY)", added[-3])
+        directories, commondir = (re.search(r'#"([^"]+)"', line).group(1) for line in added[-3:-1])
+        registrations = writable / ".git/worktrees"
+        for path in (registrations, registrations / "new"):
+            self.assertRegex(str(path), directories)
+        self.assertRegex(str(registrations / "new/commondir"), commondir)
+        for path in (registrations / "new/logs", worktree / ".git/worktrees", writable / ".git/modules/x"):
+            self.assertNotRegex(str(path), directories)
+        for path in (registrations / "new/gitdir", writable / ".git/commondir", worktree / ".git/worktrees/x/commondir"):
             self.assertNotRegex(str(path), commondir)
         self.assertNotIn("SecurityServer", text)
         self.assertNotIn("appleevents", text.lower())
@@ -80,6 +93,7 @@ class ProfileTests(unittest.TestCase):
         pattern = re.compile(seatbelt.PROTECTED_REGEX)
         for path in (".git", "sub/.git", ".git/hooks", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree",
                      ".git/commondir", ".git/worktrees/wt/config.worktree", ".git/worktrees/wt/commondir",
+                     ".git/worktrees/wt/config", ".git/worktrees/wt/hooks/pre-commit", ".git/worktrees/wt/modules/lib/config",
                      ".git/modules/lib/config", ".git/modules/a/b/hooks/post-checkout", ".git/modules/lib/config.worktree",
                      ".git/modules/lib/worktrees/wt/commondir", "sub/.git/config"):
             self.assertRegex("/r/" + path, pattern)
@@ -87,6 +101,18 @@ class ProfileTests(unittest.TestCase):
                      ".git/info/exclude", ".git/objects/ab/cd", "config", "hooks/x", ".gitconfig", ".gitmodules",
                      ".github/hooks/x", "bare.git/config"):
             self.assertNotRegex("/r/" + path, pattern)
+
+    def test_nested_git_dirs_stay_in_place_while_git_manages_their_data(self):
+        nested, data = re.compile(seatbelt.NESTED_GIT_REGEX), re.compile(seatbelt.GIT_DATA_REGEX)
+        for path in (".git/modules", ".git/modules/lib", ".git/modules/a/b", ".git/worktrees", ".git/worktrees/wt",
+                     ".git/worktrees/wt/modules/lib", ".git/modules/lib/worktrees/wt"):
+            self.assertRegex("/r/" + path, nested)
+            self.assertNotRegex("/r/" + path, data)
+        for path in (".git/modules/lib/objects/ab", ".git/modules/a/b/refs/heads/x", ".git/worktrees/wt/rebase-merge",
+                     ".git/worktrees/wt/logs/refs", ".git/worktrees/wt/modules/lib/objects/pack"):
+            self.assertRegex("/r/" + path, data)
+        for path in (".git", ".git/objects/ab", ".git/refs/heads", "src/modules/x", ".git-modules/x"):
+            self.assertNotRegex("/r/" + path, nested)
 
     def test_secret_names_skip_public_certificates_and_sdk_directories(self):
         directories, files = re.compile(seatbelt.SECRET_DIRECTORY_REGEX), re.compile(seatbelt.SECRET_FILE_REGEX)

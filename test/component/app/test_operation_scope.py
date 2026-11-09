@@ -85,10 +85,13 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
             change_id=uuid.uuid4().hex, operation_scope=self.scope()))
 
     def test_protected_files_match_the_process_profile(self):
-        profile = re.compile(f"{seatbelt.PROTECTED_REGEX}|{seatbelt.PROTECTED_IDE_REGEX}")
+        # Seatbelt matches these names case-insensitively, as the volume resolves them.
+        profile = re.compile(f"{seatbelt.PROTECTED_REGEX}|{seatbelt.PROTECTED_IDE_REGEX}", re.IGNORECASE)
         for path in (".git", "sub/.git", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir",
-                     ".git/worktrees/wt/config.worktree", ".git/worktrees/wt/commondir", ".git/modules/lib/hooks/post-checkout",
-                     ".git/modules/lib/config", ".vscode/tasks.json", "a/.idea/x"):
+                     ".git/worktrees/wt/config.worktree", ".git/worktrees/wt/commondir", ".git/worktrees/wt/config",
+                     ".git/worktrees/wt/modules/lib/config", ".git/modules/lib/hooks/post-checkout", ".git/modules/lib/config",
+                     ".vscode/tasks.json", "a/.idea/x", ".GIT/CONFIG", "sub/.Git", ".VSCODE/tasks.json", ".vſcode/x",
+                     ".git/hooKs/x"):
             self.assertTrue(operation_scope.protected(self.core / path), path)
             self.assertRegex(str(self.core / path), profile)
         for path in ("file.txt", ".git/refs/heads/config", ".git/info/exclude", ".git/worktrees/wt/gitdir", "config",

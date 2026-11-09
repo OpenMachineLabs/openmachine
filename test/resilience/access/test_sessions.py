@@ -230,7 +230,9 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
             subprocess.run([*git, "-C", str(repository), "add", name], check=True)
             subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Fixture"], check=True)
         subprocess.run([*git, "init", "-q", "--bare", str(remote)], check=True)
-        config = (full / ".git/config").read_bytes(), (nested / ".git/config").read_bytes()
+        subprocess.run([*git, "-C", str(full), "worktree", "add", "-q", "-b", "linked", str(self.root / "linked")], check=True)
+        protected = [full / ".git/config", nested / ".git/config", full / ".git/worktrees/linked/commondir"]
+        config = [path.read_bytes() for path in protected]
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": "full_access",
                   "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
@@ -243,19 +245,24 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                    f"mkdir {full}/renamed && echo 'gitdir: /tmp/x' > {full}/staged && mv {full}/staged {full}/renamed/.git",
                    f"mv {nested}/.git {nested}/.git-old", f"cd {full} && git worktree add -q {plain}/worktree",
                    # The persistent home or the lifetime's temp could otherwise carry one in by a directory rename.
-                   'mkdir -p "$HOME/carried/.git"', 'mkdir -p "${TMPDIR%/}/carried/.git"',
-                   # A repository, a selected root itself included, keeps its protected files when moved out.
+                   'mkdir "$HOME/carried" && mkdir "$HOME/carried/.git"',
+                   'mkdir "${TMPDIR%/}/carried" && mkdir "${TMPDIR%/}/carried/.git"',
+                   # A repository, a selected root itself included, keeps its protected files when moved out,
+                   # and a worktree registration stays in place.
                    *(f't="${{TMPDIR%/}}/moved"; mv {path} "$t" && {{ echo "[core]" >> "$t/.git/config"; s=$?; '
-                     f'mv "$t" {path}; exit $s; }}' for path in (full, nested))]
+                     f'mv "$t" {path}; exit $s; }}' for path in (full, nested)),
+                   f'mv {full}/.git/worktrees/linked "${{TMPDIR%/}}/moved"']
         for command in refused:
             reply, code, _, err = self.session(lifetime, "selected_projects", command, machine="local", scope=scope)
             self.assertEqual(reply["status"], "admitted", reply)
             self.assertNotEqual(code, 0, command)
             self.assertIn(DENIED, err, command)
-        self.assertEqual(((full / ".git/config").read_bytes(), (nested / ".git/config").read_bytes()), config)
-        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried"):
+        self.assertEqual([path.read_bytes() for path in protected], config)
+        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree"):
             self.assertFalse(os.path.lexists(path / ".git"), path)
         self.assertFalse(os.path.lexists(nested / ".git-old"))
+        worktrees = subprocess.run([*git, "-C", str(full), "worktree", "list"], capture_output=True, text=True).stdout
+        self.assertNotIn(str(plain / "worktree"), worktrees)
         reply, code, out, err = self.session(lifetime, "selected_projects", (
             f"cd {full} && export {IDENTITY} && echo edit >> file.txt && git commit -qam pushed && "
             f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && git push -q {remote} main && "
