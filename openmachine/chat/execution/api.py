@@ -189,7 +189,8 @@ def _inside(path: Path, other: Path) -> bool:
     return path == other or path.is_relative_to(other)
 
 
-def _sandbox(scope: dict, state: Path, execution_id: str, working: Path) -> tuple[dict, str]:
+def _sandbox(scope: dict, state: Path, execution_id: str, working: Path,
+             creation_plan: dict | None) -> tuple[dict, str]:
     """Compile one immutable profile and receipt; the command starts only inside it."""
     reason = seatbelt.unavailable_reason()
     if reason is not None:
@@ -198,8 +199,10 @@ def _sandbox(scope: dict, state: Path, execution_id: str, working: Path) -> tupl
     trees = scope["worktrees"]
     readable = [Path(item["path"]) for item in [*scope["roots"], *trees] if item["mode"] == "read_only"]
     writable = [Path(item["path"]) for item in [*scope["roots"], *trees] if item["mode"] == "full_access"]
-    if scope["destination"]:
-        writable.append(Path(scope["destination"]))
+    checkout = None
+    if creation_plan is not None:
+        checkout = (Path(scope["destination"]), Path(creation_plan["common_dir"]))
+        writable.append(checkout[0])
     control = list(dict.fromkeys([*(Path(path) for path in scope["control"]), state]))
     denied, exceptions = ([Path(path) for path in scope[key]] for key in ("denied", "exceptions"))
     if (any(_inside(working, path) for path in control) or not any(_inside(working, path) for path in readable + writable)
@@ -208,7 +211,7 @@ def _sandbox(scope: dict, state: Path, execution_id: str, working: Path) -> tupl
                     effect="known_no_effect")
     private = seatbelt.private_directory(execution_id)
     text = seatbelt.profile(readable=readable, writable=writable, private=private, control=control,
-                            denied=denied, exceptions=exceptions)
+                            denied=denied, exceptions=exceptions, checkout=checkout)
     effective = {"roots": scope["roots"], "worktrees": trees, "destination": scope["destination"]}
     receipt = {"protocol": 1, "authority": scope["authority"], **effective, "backend": seatbelt.BACKEND,
                "private": str(private), "profile_sha256": seatbelt.digest(text),
@@ -243,7 +246,7 @@ def _admit(config: "Settings", state: Path, machine: str, execution_id: str,
                     raise Fault("control_owner_mismatch", "Preserve the existing control endpoint; no command was launched.")
             if validate_new is not None:
                 validate_new()  # Only new admissions need controller reference validation.
-            sandbox = None if scope is None else _sandbox(scope, state, execution_id, working)
+            sandbox = None if scope is None else _sandbox(scope, state, execution_id, working, creation_plan)
             if creation_plan is not None:
                 worktrees.ensure_local_objects(working)
             observed = context(working)

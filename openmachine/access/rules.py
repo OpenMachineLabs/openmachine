@@ -61,7 +61,7 @@ def _denied(message: str) -> Fault:
 def protected(path: Path) -> bool:
     """Files Git and IDEs execute later outside the sandbox; the process profile denies the same set."""
     return (any(part in PROTECTED_DIRECTORIES for part in path.parts)
-            or re.search(r"(^|/)\.git/" + macos.PROTECTED_GIT + "$", path.as_posix()) is not None)
+            or re.search(r"(^|/)\.git(/" + macos.PROTECTED_GIT + ")?$", path.as_posix()) is not None)
 
 
 @dataclass(frozen=True)

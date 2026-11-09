@@ -36,10 +36,11 @@ SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SEC
 SECRET_FILE_REGEX = r"^(/.*)?/(" + SECRET_FILES + r")$"
 KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
 # Git files that later run code outside any sandbox, relative to a .git directory: hooks,
-# configuration and the commondir redirect of the repository, its worktrees and its submodules.
-PROTECTED_GIT = r"(modules/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir|worktrees/[^/]+/config\.worktree)"
-PROTECTED_REGEX = r"(/.*)?/\.git/" + PROTECTED_GIT + "$"
-PROTECTED_IDE_REGEX = r"(/.*)?/\.(vscode|idea)(/.*)?$"
+# configuration and the commondir redirects of the repository, its worktrees and its submodules.
+PROTECTED_GIT = r"(modules/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir|worktrees/[^/]+/(config\.worktree|commondir))"
+# Any .git entry (a repository, or a worktree or submodule link) and those files inside one, at any path.
+PROTECTED_REGEX = r"^(/.*)?/\.git(/" + PROTECTED_GIT + ")?$"
+PROTECTED_IDE_REGEX = r"^(/.*)?/\.(vscode|idea)(/.*)?$"
 
 
 class SandboxError(Exception):
@@ -96,12 +97,17 @@ def _filters(kind: str, paths: list[Path]) -> str:
 
 
 def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
-            denied: list[Path], exceptions: list[Path]) -> str:
+            denied: list[Path], exceptions: list[Path], checkout: tuple[Path, Path] | None = None) -> str:
     """Generate one profile: read the machine except denied areas, write only granted roots.
 
     For the same operation Seatbelt applies the last matching rule, so each later block narrows or
     re-allows the one before it and the protected and control denials come last. A later broader
     operation (file-read*) does not override an earlier narrower denial (file-read-data).
+
+    Protected names are denied wherever the profile allows writes, private trees included: renaming or
+    cloning a directory moves everything inside it without checking those paths. checkout is the
+    destination and common Git dir of Core's own git worktree add, which alone creates that worktree's
+    .git file and the commondir of its new registration.
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
@@ -137,17 +143,12 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         lines.append(f"(allow file-read* file-read-data process-exec {_filters('subpath', readable)})")
     lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
-    for root in writable:
-        lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_REGEX}"))')
-        lines.append(f'(deny file-write* (regex #"^{_regex(root)}{PROTECTED_IDE_REGEX}"))')
-        git = root / ".git"
-        if os.path.lexists(git):
-            # Renaming, replacing or repointing .git would carry hooks and config out of the regex.
-            lines.append(f"(deny file-write* (literal {_literal(git)}))")
-        if git.is_dir() and not git.is_symlink():
-            # Existing worktrees' commondir redirects; new registrations still create theirs.
-            lines.extend(f"(deny file-write* (literal {_literal(path)}))"
-                         for path in sorted(git.glob("worktrees/*/commondir")))
+    lines.append(f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))')
+    if checkout is not None:
+        # Create only: existing registrations' commondirs stay unchanged. A failed add removes its link.
+        destination, common = checkout
+        lines.append(f"(allow file-write-create file-write-unlink (literal {_literal(destination / '.git')}))")
+        lines.append(f'(allow file-write-create (regex #"^{_regex(common)}/worktrees/[^/]+/commondir$"))')
     lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 

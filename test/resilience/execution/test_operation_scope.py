@@ -72,9 +72,9 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
             self.assertEqual(result["status"], "failed", script)
             self.assertNotIn("SECRET", result["output"], script)
         forged = self.shell(f"mkdir .git/worktrees && mkdir .git/worktrees/forged && cd .git/worktrees/forged && "
-                            f"echo {self.personal}/.git > gitdir && echo ../.. > commondir && "
-                            f"echo 'ref: refs/heads/main' > HEAD && touch locked")
+                            f"echo {self.personal}/.git > gitdir && echo 'ref: refs/heads/main' > HEAD && touch locked")
         self.assertEqual(forged["status"], "succeeded", forged["output"])
+        self.assertIn(DENIED, self.shell("echo ../.. > .git/worktrees/forged/commondir")["output"])
         widened = self.shell(f"echo x > {self.personal}/owned")
         self.assertIn(DENIED, widened["output"])
         self.assertNotIn(str(self.personal), {item["path"] for item in widened["scope"]["worktrees"]})
@@ -110,6 +110,52 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         shutil.copy("/usr/bin/true", tool)
         refused = self.run_scoped([str(tool)])
         self.assertEqual((refused["status"], refused["command"]["spawned"], refused["error"]), ("failed", False, "PermissionError"))
+
+    def test_git_entries_cannot_be_created_moved_or_replaced_wherever_commands_write(self):
+        """Any .git entry selects the configuration and hooks that unsandboxed Git later runs."""
+        plain, nested = self.dev / "plain", self.core / "vendor" / "lib"
+        plain.mkdir()
+        nested.mkdir(parents=True)
+        (nested / "lib.txt").write_text("lib\n")
+        self.git(nested, "init", "-q", "-b", "main")
+        self.git(nested, "add", "lib.txt")
+        self.git(nested, "commit", "-q", "-m", "Nested")
+        config = (nested / ".git/config").read_bytes()
+        scope = self.scope(self.binding(self.dev, "read_only"), self.binding(self.core, "full_access"),
+                           self.binding(plain, "full_access"))
+        refused = [
+            # New repositories and links: nested, at a Full root without one, linked or renamed into place.
+            (self.core, "mkdir -p new/.git"), (plain, "mkdir .git"),
+            (self.core, "mkdir file && echo 'gitdir: /tmp/x' > file/.git"),
+            (self.core, "mkdir symlink && ln -s /tmp/x symlink/.git"),
+            (self.core, "mkdir renamed && echo 'gitdir: /tmp/x' > staged && mv staged renamed/.git"),
+            (self.core, "git worktree add -q ../plain/worktree"),
+            # Replacing one, or preparing one in the private temp to carry in by renaming its parent.
+            (self.core, "mv vendor/lib/.git vendor/lib/.git-old"), (self.core, 'mkdir -p "${TMPDIR%/}/carried/.git"'),
+            # A repository moved into the private temp keeps its protected files there.
+            (self.core, 't="${TMPDIR%/}"; mv vendor/lib "$t/lib" && { echo "[core]" >> "$t/lib/.git/config"; s=$?; '
+                        'mv "$t/lib" vendor/lib; exit $s; }')]
+        if os.path.exists(str(self.root).upper()):  # A case-insensitive volume resolves .GIT as .git.
+            refused.append((self.core, "mkdir upper && mkdir upper/.GIT"))
+        for cwd, script in refused:
+            result = self.run_scoped(["/bin/sh", "-c", script], cwd, scope=scope)
+            self.assertEqual(result["status"], "failed", script)
+            self.assertIn(DENIED, result["output"], script)
+        for path in (*(self.core / name for name in ("new", "file", "symlink", "renamed", "upper")), plain):
+            self.assertFalse(os.path.lexists(path / ".git"), path)
+        self.assertFalse(os.path.lexists(nested / ".git-old"))
+        self.assertEqual((nested / ".git/config").read_bytes(), config)
+        self.assertNotIn(str(plain / "worktree"), self.git(self.core, "worktree", "list"))
+        self.git(self.root, "init", "-q", "--bare", str(plain / "remote.git"))
+        allowed = self.run_scoped(["/usr/bin/env", "GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid",
+                                   "GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid", "/bin/sh", "-c",
+                                   "echo edit >> file.txt && git commit -qam pushed && echo edit >> vendor/lib/lib.txt && "
+                                   "git -C vendor/lib commit -qam nested && git push -q ../plain/remote.git main && "
+                                   "git fetch -q ../plain/remote.git main && git log --oneline -1 FETCH_HEAD"], scope=scope)
+        self.assertEqual(allowed["status"], "succeeded", allowed["output"])
+        self.assertIn("pushed", allowed["output"])
+        self.assertIn("pushed", self.git(plain / "remote.git", "log", "--oneline", "-1", "main"))
+        self.assertIn("nested", self.git(nested, "log", "--oneline", "-1"))
 
     def test_development_tools_use_private_runtime_paths(self):
         (self.cloud / "test_fixture.py").write_text(

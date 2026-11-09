@@ -17,6 +17,8 @@ from openmachine.config import load
 from test.support.access_sessions import HOME, SessionFixture, members
 
 DENIED = "not permitted"
+IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
+            "GIT_COMMITTER_EMAIL=fixture@example.invalid")
 
 
 def detached(name):
@@ -214,6 +216,52 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
         self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
                          ("denied", "scope_target_changed", "known_no_effect", 1, ""))
+
+    def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
+        """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
+        full, plain, remote = self.root / "full", self.root / "plain", self.root / "plain/remote.git"
+        nested = full / "vendor/lib"
+        for path in (nested, plain):
+            path.mkdir(parents=True)
+        git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null"]
+        for repository, name in ((full, "file.txt"), (nested, "lib.txt")):
+            (repository / name).write_text("x\n")
+            subprocess.run([*git, "-C", str(repository), "init", "-q", "-b", "main"], check=True)
+            subprocess.run([*git, "-C", str(repository), "add", name], check=True)
+            subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Fixture"], check=True)
+        subprocess.run([*git, "init", "-q", "--bare", str(remote)], check=True)
+        config = (full / ".git/config").read_bytes(), (nested / ".git/config").read_bytes()
+        settings = load(self.config)
+        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": "full_access",
+                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                 for path in (full, plain)]
+        scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
+                                                               "grant_revision": 1, "session_generation": 0}}
+        lifetime = self.lifetime()
+        refused = [f"mkdir -p {full}/new/.git", f"mkdir {plain}/.git",
+                   f"mkdir {full}/file && echo 'gitdir: /tmp/x' > {full}/file/.git",
+                   f"mkdir {full}/renamed && echo 'gitdir: /tmp/x' > {full}/staged && mv {full}/staged {full}/renamed/.git",
+                   f"mv {nested}/.git {nested}/.git-old", f"cd {full} && git worktree add -q {plain}/worktree",
+                   # The persistent home or the lifetime's temp could otherwise carry one in by a directory rename.
+                   'mkdir -p "$HOME/carried/.git"', 'mkdir -p "${TMPDIR%/}/carried/.git"',
+                   # A repository, a selected root itself included, keeps its protected files when moved out.
+                   *(f't="${{TMPDIR%/}}/moved"; mv {path} "$t" && {{ echo "[core]" >> "$t/.git/config"; s=$?; '
+                     f'mv "$t" {path}; exit $s; }}' for path in (full, nested))]
+        for command in refused:
+            reply, code, _, err = self.session(lifetime, "selected_projects", command, machine="local", scope=scope)
+            self.assertEqual(reply["status"], "admitted", reply)
+            self.assertNotEqual(code, 0, command)
+            self.assertIn(DENIED, err, command)
+        self.assertEqual(((full / ".git/config").read_bytes(), (nested / ".git/config").read_bytes()), config)
+        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried"):
+            self.assertFalse(os.path.lexists(path / ".git"), path)
+        self.assertFalse(os.path.lexists(nested / ".git-old"))
+        reply, code, out, err = self.session(lifetime, "selected_projects", (
+            f"cd {full} && export {IDENTITY} && echo edit >> file.txt && git commit -qam pushed && "
+            f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && git push -q {remote} main && "
+            f"git fetch -q {remote} main && git log --oneline -1 FETCH_HEAD"), machine="local", scope=scope)
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        self.assertIn("pushed", out)
 
     def test_terminal_loss_leaves_nohup_work_running(self):
         lifetime = self.lifetime()

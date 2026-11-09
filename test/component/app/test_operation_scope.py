@@ -2,6 +2,7 @@
 
 import copy
 import os
+import re
 import unittest
 from unittest.mock import patch
 import uuid
@@ -84,11 +85,16 @@ class ScopeAdmissionTests(ScopeFixture, unittest.TestCase):
             change_id=uuid.uuid4().hex, operation_scope=self.scope()))
 
     def test_protected_files_match_the_process_profile(self):
-        for path in (".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir", ".git/worktrees/wt/config.worktree",
-                     ".git/modules/lib/hooks/post-checkout", ".git/modules/lib/config", ".vscode/tasks.json", "a/.idea/x"):
+        profile = re.compile(f"{seatbelt.PROTECTED_REGEX}|{seatbelt.PROTECTED_IDE_REGEX}")
+        for path in (".git", "sub/.git", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir",
+                     ".git/worktrees/wt/config.worktree", ".git/worktrees/wt/commondir", ".git/modules/lib/hooks/post-checkout",
+                     ".git/modules/lib/config", ".vscode/tasks.json", "a/.idea/x"):
             self.assertTrue(operation_scope.protected(self.core / path), path)
-        for path in ("file.txt", ".git/refs/heads/config", ".git/info/exclude", "config", ".gitconfig"):
+            self.assertRegex(str(self.core / path), profile)
+        for path in ("file.txt", ".git/refs/heads/config", ".git/info/exclude", ".git/worktrees/wt/gitdir", "config",
+                     ".gitconfig", ".github/x"):
             self.assertFalse(operation_scope.protected(self.core / path), path)
+            self.assertNotRegex(str(self.core / path), profile)
 
     def test_only_reciprocal_worktrees_inherit_full_access(self):
         real = self.dev / "core-wt"

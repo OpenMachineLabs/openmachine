@@ -32,13 +32,17 @@ class ProfileTests(unittest.TestCase):
         readable, writable, worktree = self.root / "Dev (1)+x", self.root / "Dev (1)+x/core", self.root / "wt"
         for path in (writable, worktree):
             path.mkdir(parents=True)
-        (worktree / ".git").write_text("gitdir: elsewhere\n")
-        (writable / ".git/worktrees/wt").mkdir(parents=True)
-        (writable / ".git/worktrees/wt/commondir").write_text("../..\n")
+        arguments = dict(readable=[readable], writable=[writable, worktree], private=self.root / "T/openmachine-scope/exec",
+                         control=[self.root / "state"], denied=[self.root / "home/Library"],
+                         exceptions=[self.root / "home/Library/Developer"])
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
-            text = seatbelt.profile(readable=[readable], writable=[writable, worktree], private=self.root / "T/openmachine-scope/exec",
-                                    control=[self.root / "state"], denied=[self.root / "home/Library"],
-                                    exceptions=[self.root / "home/Library/Developer"])
+            text = seatbelt.profile(**arguments)
+            # Protection is by name: Git entries that exist when the profile is built change nothing.
+            (worktree / ".git").write_text("gitdir: elsewhere\n")
+            (writable / ".git/worktrees/wt").mkdir(parents=True)
+            (writable / ".git/worktrees/wt/commondir").write_text("../..\n")
+            self.assertEqual(seatbelt.profile(**arguments), text)
+            checkout = seatbelt.profile(**arguments, checkout=(self.root / "Dev (1)+x/new", writable / ".git"))
             with self.assertRaises(Fault) as caught:
                 seatbelt.profile(readable=[self.root / 'quote"d'], writable=[writable], private=self.root, control=[],
                                  denied=[], exceptions=[])
@@ -56,23 +60,32 @@ class ProfileTests(unittest.TestCase):
         secret = lines.index(f'(deny file-read-data (regex #"{seatbelt.SECRET_DIRECTORY_REGEX}"))')
         self.assertLess(secret, lines.index(f'(allow file-read* file-read-data process-exec (subpath "{readable}"))'))
         self.assertIn(f'(allow file-read* file-read-data file-write* process-exec (subpath "{writable}")', text)
-        self.assertEqual(lines[-1], f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))')
-        self.assertIn(r"Dev \(1\)\+x/core" + seatbelt.PROTECTED_REGEX, text)
-        for path in (worktree / ".git", writable / ".git", writable / ".git/worktrees/wt/commondir"):
-            self.assertIn(f'(deny file-write* (literal "{path}"))', text)
-        self.assertNotIn(f'(literal "{readable / ".git"}")', text)
+        # Protected names hold in every writable place, private trees included, after every write allow.
+        protected = f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))'
+        self.assertEqual(lines[-2:], [protected, f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))'])
+        self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
+        # Only Core's own worktree creation may create its new link and registration commondir.
+        *_, denial, link, registration, last = checkout.splitlines()
+        self.assertEqual((denial, last), (protected, lines[-1]))
+        self.assertEqual(link, f'(allow file-write-create file-write-unlink (literal "{self.root / "Dev (1)+x/new/.git"}"))')
+        commondir = re.fullmatch(r'\(allow file-write-create \(regex #"(.+)"\)\)', registration).group(1)
+        self.assertRegex(str(writable / ".git/worktrees/new/commondir"), commondir)
+        for path in (writable / ".git/worktrees/new/gitdir", writable / ".git/commondir", worktree / ".git/worktrees/x/commondir"):
+            self.assertNotRegex(str(path), commondir)
         self.assertNotIn("SecurityServer", text)
         self.assertNotIn("appleevents", text.lower())
         self.assertIn('(allow file-read* file-write* (literal "/dev/ttys004"))', seatbelt.own_terminal(text, "/dev/ttys004"))
 
-    def test_protected_git_files_cover_worktrees_and_submodules_but_not_refs(self):
-        pattern = re.compile("^/r" + seatbelt.PROTECTED_REGEX)
-        for path in (".git/hooks", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree", ".git/commondir",
-                     ".git/worktrees/wt/config.worktree", ".git/modules/lib/config", ".git/modules/a/b/hooks/post-checkout",
-                     ".git/modules/lib/config.worktree", ".git/modules/lib/worktrees/wt/config.worktree", "sub/.git/config"):
+    def test_protected_names_cover_git_entries_worktrees_and_submodules_but_not_refs(self):
+        pattern = re.compile(seatbelt.PROTECTED_REGEX)
+        for path in (".git", "sub/.git", ".git/hooks", ".git/hooks/pre-commit", ".git/config", ".git/config.worktree",
+                     ".git/commondir", ".git/worktrees/wt/config.worktree", ".git/worktrees/wt/commondir",
+                     ".git/modules/lib/config", ".git/modules/a/b/hooks/post-checkout", ".git/modules/lib/config.worktree",
+                     ".git/modules/lib/worktrees/wt/commondir", "sub/.git/config"):
             self.assertRegex("/r/" + path, pattern)
         for path in (".git/config.lock", ".git/refs/heads/config", ".git/refs/heads/hooks/x", ".git/worktrees/wt/gitdir",
-                     ".git/info/exclude", "config", "hooks/x", ".gitconfig"):
+                     ".git/info/exclude", ".git/objects/ab/cd", "config", "hooks/x", ".gitconfig", ".gitmodules",
+                     ".github/hooks/x", "bare.git/config"):
             self.assertNotRegex("/r/" + path, pattern)
 
     def test_secret_names_skip_public_certificates_and_sdk_directories(self):
