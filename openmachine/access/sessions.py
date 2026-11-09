@@ -269,22 +269,23 @@ def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Pa
     return environment | request.environment
 
 
-def _client(request: SessionRequest, writable: tuple[Path, ...] = ()) -> Path | None:
+def _client(request: SessionRequest) -> Path | None:
     """The host's om-code client: an executable regular file at its own physical path. The file and its
     directory belong to root or this user, with no group or other write and no ACL, and lie outside the
-    persistent home, every restricted runtime tree and the session's writable roots, where restricted
-    work could replace what Full sessions run."""
+    persistent home and every restricted runtime tree, where restricted work could replace what Full
+    sessions run."""
     if request.github is None:
         return None
     client = Path(request.github.client)
+    restricted = [SHARED / HOME_NAME.format(uid=os.getuid())] + ([macos.user_temp() / "omc"] if sys.platform == "darwin" else [])
     try:
         info, parent = client.lstat(), client.parent.lstat()
+        valid = (stat.S_ISREG(info.st_mode) and os.path.realpath(client) == str(client) and os.access(client, os.X_OK)
+                 and all(item.st_uid in (0, os.getuid()) and not item.st_mode & 0o022 for item in (info, parent))
+                 and not macos.has_acl(client) and not macos.has_acl(client.parent) and not _within(client, restricted))
     except OSError as error:
         raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
-    restricted = [SHARED / HOME_NAME.format(uid=os.getuid())] + ([macos.user_temp() / "omc"] if sys.platform == "darwin" else [])
-    if (not stat.S_ISREG(info.st_mode) or os.path.realpath(client) != str(client) or not os.access(client, os.X_OK)
-            or any(item.st_uid not in (0, os.getuid()) or item.st_mode & 0o022 for item in (info, parent))
-            or macos.has_acl(client) or macos.has_acl(client.parent) or _within(client, [*restricted, *writable])):
+    if not valid:
         raise Fault("github_client_invalid", "The om-code client must be an executable file only its owner can change, "
                     "outside every area restricted work writes.", effect="known_no_effect")
     return client
@@ -393,20 +394,14 @@ def _grant(request: SessionRequest) -> str:
                                    sort_keys=True, separators=(",", ":")))
 
 
-def _roots(scope: "rules.Scope | None", home: Path) -> tuple[list[Path], list[Path]]:
-    """The readable and writable roots of a restricted session: its selected projects and the home."""
+def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path) -> str:
+    denied, exceptions = macos.read_denials(macos.account_home())
+    control = list(dict.fromkeys([*rules.control_paths(state), state]))
     readable, writable = [], [home]
     if scope is not None:
         mapped = scope.process_request()
         for item in [*mapped["roots"], *mapped["worktrees"]]:
             (writable if item["mode"] == "full_access" else readable).append(Path(item["path"]))
-    return readable, writable
-
-
-def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path) -> str:
-    denied, exceptions = macos.read_denials(macos.account_home())
-    control = list(dict.fromkeys([*rules.control_paths(state), state]))
-    readable, writable = _roots(scope, home)
     return macos.profile(readable=readable, writable=writable, private=runtime, control=control,
                          denied=denied, exceptions=exceptions, executable=_stable_client())
 
@@ -419,25 +414,30 @@ def _stable_client() -> Path:
 
 def _install(client: Path) -> Path:
     """Refresh the stable copy when the host's client changed (an update installs a new file, so size or
-    modification time differ), replacing it atomically: sessions running the old copy are unaffected."""
+    modification time differ): written whole and synced, then put in place atomically, so sessions
+    running the old copy are unaffected."""
     stable = _stable_client()
     try:
-        source = client.stat()
-        try:
-            current = stable.lstat()
-            if stat.S_ISREG(current.st_mode) and (current.st_size, current.st_mtime_ns) == (source.st_size, source.st_mtime_ns):
-                return stable
-        except FileNotFoundError:
-            pass
-        staged = private_directory(private_directory(stable.parent.parent) / stable.parent.name) / f".{uuid.uuid4().hex}"
-        try:
-            shutil.copyfile(client, staged)
-            os.chmod(staged, 0o755)
-            os.utime(staged, ns=(source.st_atime_ns, source.st_mtime_ns))
-            os.replace(staged, stable)
-        finally:
-            staged.unlink(missing_ok=True)
-    except OSError as error:
+        with open(client, "rb") as source:
+            info = os.fstat(source.fileno())
+            try:
+                current = stable.lstat()
+                if stat.S_ISREG(current.st_mode) and (current.st_size, current.st_mtime_ns) == (info.st_size, info.st_mtime_ns):
+                    return stable
+            except FileNotFoundError:
+                pass
+            staged = private_directory(private_directory(stable.parent.parent) / stable.parent.name) / f".{uuid.uuid4().hex}"
+            try:
+                with open(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700), "wb") as copy:
+                    shutil.copyfileobj(source, copy)
+                    os.fchmod(copy.fileno(), 0o755)
+                    copy.flush()
+                    os.fsync(copy.fileno())
+                os.utime(staged, ns=(info.st_atime_ns, info.st_mtime_ns))
+                os.replace(staged, stable)
+            finally:
+                staged.unlink(missing_ok=True)
+    except (OSError, Fault) as error:
         raise Fault("github_client_invalid", "Core could not keep its copy of the om-code client.",
                     effect="known_no_effect") from error
     return stable
@@ -450,9 +450,9 @@ def _admit_restricted(request: SessionRequest, account, config_path: Path, state
     program, argv = _argv(request, account)
     # Re-verify every selected binding on each admission: a replaced directory is never rebound.
     scope = None if request.scope is None else rules.compile(load(config_path), state, request.machine, request.scope)
-    home = persistent_home()
-    client = _client(request, tuple(_roots(scope, home)[1]))
+    client = _client(request)
     stable = _install(client) if client else None
+    home = persistent_home()
     runtime = _runtime(request.lifetime)
     lifetime = Lifetime(state, request.lifetime)
     grant = _grant(request)

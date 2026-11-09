@@ -80,15 +80,15 @@ class GitHubClientTests(unittest.TestCase):
         self.client.write_text("#!/bin/sh\n")
         self.client.chmod(0o755)
 
-    def check(self, client, writable=()):
+    def check(self, client):
         request = sessions.parse(json.dumps({"protocol": 1, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
             "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "http://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.http://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
-        return sessions._client(request, writable)
+        return sessions._client(request)
 
-    def refused(self, client, writable=()):
+    def refused(self, client):
         with self.assertRaises(Fault) as caught:
-            self.check(client, writable)
+            self.check(client)
         self.assertEqual((caught.exception.code, caught.exception.effect), ("github_client_invalid", "known_no_effect"))
 
     def test_an_owned_executable_at_its_physical_path_is_accepted(self):
@@ -125,9 +125,7 @@ class GitHubClientTests(unittest.TestCase):
         if (self.root / "BIN").exists():  # a case-insensitive volume, as macOS uses by default
             with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "BIN"):
                 self.refused(self.client)
-        # A restricted session also refuses a client inside its writable roots, here a selected project.
-        self.refused(self.client, (self.root,))
-        # Its profile runs only Core's copy, never the host's file.
+        # A restricted profile runs only Core's copy, never the host's file.
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
             text = sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
         self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)

@@ -131,11 +131,12 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         record.write_text(json.dumps(value))
         # This admission pauses under the lifetime lock, just before it connects; meanwhile a routed
         # session waits for the lock, then starts a newer instance that rebinds the socket.
+        holding = self.root / "holding"
         pause = ("import time\nfrom openmachine.access import sessions as _s\n_connect = _s._connect\n"
-                 "def _paused(lifetime, instance):\n time.sleep(3)\n return _connect(lifetime, instance)\n"
-                 "_s._connect = _paused\n")
+                 f"def _paused(lifetime, instance):\n open({str(holding)!r}, 'w').close()\n time.sleep(3)\n"
+                 " return _connect(lifetime, instance)\n_s._connect = _paused\n")
         paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
-        time.sleep(1)
+        self.assertTrue(self.wait_for(holding))  # it holds the lifetime lock
         self.assertIn("om-code-a y", self.admitted(lifetime, "om-code y", prelude, first)[0])
         with control:
             reply = json.loads(control.makefile("rb").readline() or b"{}")
