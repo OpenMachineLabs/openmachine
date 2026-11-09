@@ -73,80 +73,87 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def instances(self, lifetime):
         return [item.get("client") for item in json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]]
 
-    def test_github_routing_reaches_the_session_and_only_its_client_runs(self):
+    def stable(self):
+        return macos.user_temp() / "omc/client/om-code"
+
+    def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
         (first, second), prelude = self.clients()
-        lifetime = self.lifetime()
-        # The session may run its client, never replace it: no hard link into its home, no write.
-        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; "
-                                 f"{first.parent}/other; {second}; ln {first} $HOME/linked; echo x >> {first}", prelude, first)
+        lifetime, stable = self.lifetime(), self.stable()
+        # The session runs Core's copy by name, never the host's file, and cannot replace the copy.
+        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; {first}; "
+                                 f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
         self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
-        self.assertRegex(out, rf"PATH=\S+:{first.parent}\n")
+        self.assertRegex(out, rf"PATH=\S+:{stable.parent}\n")
         self.assertIn("om-code-a hi", out)
         self.assertNotIn("other-a", out)
         self.assertEqual(err.count(DENIED), 4, err)
         self.assertFalse((HOME / "linked").exists())
-        self.assertNotIn("x", first.read_text().split())
-        # A session without routing (as SFTP) runs in the client's instance and sees none of its
-        # variables; the client's next session still reaches that instance's spawner.
+        self.assertNotIn("x", stable.read_text().split())
+        # After the host's client changes, as after an om-code update, sessions run the new copy in the
+        # same instance, where a job started before the change can still be signaled.
+        job = self.admitted(lifetime, detached("routed"), prelude, first)[0].strip()
+        out, err = self.admitted(lifetime, f"om-code; kill -0 {job} && echo signaled", prelude, second)
+        self.assertEqual(out.split(), ["om-code-b", "signaled"], err)
+        # A session without routing (as SFTP) shares that instance and sees none of the variables.
         self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
-        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
-        # Another client, as after an om-code update, runs in a new instance of the same lifetime and never
-        # the earlier client; sessions without routing then run in that newest instance.
-        out, err = self.admitted(lifetime, f"om-code; {first}", prelude, second)
-        self.assertIn("om-code-b", out)
-        self.assertEqual(err.count(DENIED), 1, err)
-        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
-        self.assertIn("om-code-b", self.admitted(lifetime, "om-code", prelude, second)[0])
-        self.assertEqual(self.instances(lifetime), [str(first), str(second)])
+        self.assertEqual(self.instances(lifetime), [str(stable)])
 
     def test_only_the_newest_instance_admits(self):
         """Every instance binds the lifetime's one spawner socket, so an older live one is unreachable."""
         (first, _), prelude = self.clients()
-        lifetime = self.lifetime()
-        # An unrouted session (as SFTP) may start the lifetime; the first routed one then starts a newer
-        # instance that allows its client, where later sessions of either kind run.
+        lifetime, stable = self.lifetime(), str(self.stable())
         self.admitted(lifetime, "true", prelude)
         self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertEqual(self.instances(lifetime), [stable])
+        # An instance from before Core kept its copy cannot run it: unrouted sessions still use it, and
+        # the first routed one starts a new instance.
+        record = self.state / "code" / lifetime / "record.json"
+        value = json.loads(record.read_text())
+        del value["instances"][-1]["client"]
+        record.write_text(json.dumps(value))
         self.admitted(lifetime, "true", prelude)
-        self.assertEqual(self.instances(lifetime), [None, str(first)])
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertEqual(self.instances(lifetime), [None, stable])
         # Once the newest spawner is lost, the next session starts another instance, though an older one lives.
-        spawner = json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"][-1]["pid"]
+        spawner = json.loads(record.read_text())["instances"][-1]["pid"]
         self.admitted(lifetime, f"kill -9 {spawner}", prelude)
         self.assertEqual(self.admitted(lifetime, "echo again", prelude)[0], "again\n")
-        self.assertEqual(self.instances(lifetime), [None, str(first), None])
+        self.assertEqual(self.instances(lifetime), [None, stable, stable])
 
     def test_an_admission_connects_before_a_newer_instance_rebinds_the_socket(self):
-        (first, second), prelude = self.clients()
+        (first, _), prelude = self.clients()
         lifetime = self.lifetime()
-        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
-        # This admission pauses under the lifetime lock, just before it connects; meanwhile another
-        # client's session waits for the lock, then starts a newer instance that rebinds the socket.
+        self.admitted(lifetime, "true", prelude)
+        record = self.state / "code" / lifetime / "record.json"
+        value = json.loads(record.read_text())
+        del value["instances"][-1]["client"]  # an instance from before Core kept its copy
+        record.write_text(json.dumps(value))
+        # This admission pauses under the lifetime lock, just before it connects; meanwhile a routed
+        # session waits for the lock, then starts a newer instance that rebinds the socket.
         pause = ("import time\nfrom openmachine.access import sessions as _s\n_connect = _s._connect\n"
                  "def _paused(lifetime, instance):\n time.sleep(3)\n return _connect(lifetime, instance)\n"
                  "_s._connect = _paused\n")
-        paused, control = self.launch(self.request(lifetime, "read_only", "exec", "om-code x", github=self.routing(first)),
-                                      prelude + pause)
+        paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
         time.sleep(1)
-        self.assertIn("om-code-b y", self.admitted(lifetime, "om-code y", prelude, second)[0])
+        self.assertIn("om-code-a y", self.admitted(lifetime, "om-code y", prelude, first)[0])
         with control:
             reply = json.loads(control.makefile("rb").readline() or b"{}")
         out, _ = paused.communicate(timeout=60)
-        self.assertEqual(reply.get("status"), "admitted", reply)
-        self.assertIn("om-code-a x", out.decode())
+        self.assertEqual((reply.get("status"), out), ("admitted", b"paused\n"), reply)
 
-    def test_a_client_removed_while_an_admission_waits_has_no_effect(self):
-        """As when an update removes an old client: it passed its check, then vanished before the profile."""
-        (first, _), prelude = self.clients()
+    def test_a_client_removed_before_core_copies_it_has_no_effect(self):
+        """As when an update removes an old client: it passed its check, then vanished before the copy."""
+        (first, second), prelude = self.clients()
         lifetime = self.lifetime()
-        remove = ("from openmachine.access import sessions as _s\n_profile = _s._restricted_profile\n"
-                  "def _removed(scope, state, runtime, home, client):\n client.unlink()\n"
-                  " return _profile(scope, state, runtime, home, client)\n_s._restricted_profile = _removed\n")
+        self.admitted(lifetime, "true", prelude, second)  # Core holds a copy of another client
+        remove = ("from openmachine.access import sessions as _s\n_install = _s._install\n"
+                  "def _removed(client):\n client.unlink()\n return _install(client)\n_s._install = _removed\n")
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran", github=self.routing(first)),
                                     prelude + remove)
         out, _ = process.communicate(timeout=60)
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"], out), ("github_client_invalid", "known_no_effect", b""))
-        self.assertFalse((self.state / "code" / lifetime / "record.json").exists())
+        self.assertEqual(self.instances(lifetime), [str(self.stable())])
 
     def test_a_client_restricted_work_could_replace_is_refused(self):
         lifetime = self.lifetime()

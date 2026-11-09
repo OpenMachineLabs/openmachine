@@ -78,6 +78,11 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "selected_projects": "platform_unsupported"})
         self.assertEqual(sessions.capabilities()["github"], "available")
+        with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
+            self.assertNotIn("github_client", sessions.capabilities())
+        with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
+                patch.object(macos, "user_temp", return_value=Path("/private/var/folders/x/T")):
+            self.assertEqual(sessions.capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
 
 
 class LaunchAcknowledgmentTests(unittest.TestCase):

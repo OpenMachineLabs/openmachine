@@ -27,8 +27,9 @@ Service remains independent of consuming applications. Existing
 entries remain intact. `python -I -m openmachine.access` is the one Code launch
 boundary for the Go host: `capabilities` and `session`, with no MCP, Tasks or
 receipts. A session may carry the host's GitHub routing (`github`, which
-`capabilities` lists): its exact variables, and exec of the one named om-code
-client even inside a denied area.
+`capabilities` lists): its exact variables and the host's om-code, which
+restricted sessions run as Core's copy at `github_client`, so an update starts
+no new instance.
 
 Dependencies point inward. Execution uses `workspace.git` only for identity;
 workspace and tasks do not import each other. Each device uses its own native capability

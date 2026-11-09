@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -79,15 +80,15 @@ class GitHubClientTests(unittest.TestCase):
         self.client.write_text("#!/bin/sh\n")
         self.client.chmod(0o755)
 
-    def check(self, client):
+    def check(self, client, writable=()):
         request = sessions.parse(json.dumps({"protocol": 1, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
             "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "http://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.http://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
-        return sessions._client(request)
+        return sessions._client(request, writable)
 
-    def refused(self, client):
+    def refused(self, client, writable=()):
         with self.assertRaises(Fault) as caught:
-            self.check(client)
+            self.check(client, writable)
         self.assertEqual((caught.exception.code, caught.exception.effect), ("github_client_invalid", "known_no_effect"))
 
     def test_an_owned_executable_at_its_physical_path_is_accepted(self):
@@ -124,12 +125,31 @@ class GitHubClientTests(unittest.TestCase):
         if (self.root / "BIN").exists():  # a case-insensitive volume, as macOS uses by default
             with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "BIN"):
                 self.refused(self.client)
-        # A restricted profile also refuses a client inside its writable roots, here the home.
-        with self.assertRaises(Fault) as caught:
-            sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root, self.client)
-        self.assertEqual(caught.exception.code, "github_client_invalid")
-        text = sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home", self.client)
-        self.assertIn(f'(allow file-read* process-exec (literal "{self.client}"))', text)
+        # A restricted session also refuses a client inside its writable roots, here a selected project.
+        self.refused(self.client, (self.root,))
+        # Its profile runs only Core's copy, never the host's file.
+        with patch.object(macos, "user_temp", return_value=self.root / "T"):
+            text = sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
+        self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)
+        self.assertNotIn(str(self.client), text)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Core keeps its copy in the macOS user temporary directory")
+    def test_core_keeps_one_copy_and_replaces_it_in_place_when_the_client_changes(self):
+        with patch.object(macos, "user_temp", return_value=self.root / "T"):
+            stable = sessions._install(self.client)
+            copied = stable.stat()
+            self.assertEqual((stable, stable.read_text(), stat.S_IMODE(copied.st_mode)),
+                             (self.root / "T/omc/client/om-code", "#!/bin/sh\n", 0o755))
+            self.assertEqual(sessions._install(self.client).stat().st_ino, copied.st_ino)  # unchanged: kept
+            update = self.root / "next/om-code"  # as an update installs a new file elsewhere
+            update.parent.mkdir(mode=0o755)
+            update.write_text("#!/bin/sh\necho next\n")
+            self.assertEqual(sessions._install(update), stable)
+            self.assertEqual((stable.read_text(), [p.name for p in stable.parent.iterdir()]), ("#!/bin/sh\necho next\n", ["om-code"]))
+            update.unlink()  # removed meanwhile, as by a later update
+            with self.assertRaises(Fault) as caught:
+                sessions._install(update)
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("github_client_invalid", "known_no_effect"))
 
 
 @unittest.skipUnless(macos.lifetime_unavailable_reason() is None, "requires the macOS native process interfaces")
