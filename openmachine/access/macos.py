@@ -151,9 +151,9 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     Protected names are denied wherever the profile allows writes, private trees included: renaming a
     directory moves everything inside it without checking those paths. So a nested Git dir must also stay
     in place, and a directory is never cloned. The profile follows the nested Git dirs of each writable
-    root's .git as they exist when it is built; later ones stay fully denied. checkout is the destination
-    and common Git dir of Core's own git worktree add, which alone creates that worktree's .git file and
-    its new registration.
+    root's .git as they exist when it is built; later ones stay fully denied, and restricted work cannot
+    make a directory there look like one. checkout is the destination and common Git dir of Core's own
+    git worktree add, which alone creates that worktree's .git file and its new registration.
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
@@ -191,36 +191,42 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
     # Every exception below also requires a writable root, so it never re-allows a path outside one.
     inside = f"(require-any {_filters('subpath', writable + [private])})"
+    # Nested Git dirs stay in place and nothing is made beside them: in .git/modules and .git/worktrees, only
+    # files in the nested Git dirs that exist now, and their data directories, change. Which directories
+    # those are is never read from a name, since a submodule's name may hold any word.
+    lines.append(f'(deny file-write-create file-write-unlink (regex #"{NESTED_GIT_REGEX}"))')
+    known = []
+    for path in (path for root in writable for path in nested_git_dirs(root / ".git")):
+        try:
+            known.append(_regex(path))
+        except Fault:
+            continue  # A Git dir the profile cannot name stays fully denied.
+    if known:
+        files = " ".join(f'(regex #"^{path}/[^/]+$")' for path in known)
+        data = " ".join(f'(regex #"^{path}/{GIT_DATA}$")' for path in known)
+        lines += [f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type REGULAR-FILE) "
+                  f"(require-any {files})))",
+                  f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type REGULAR-FILE DIRECTORY) "
+                  f"(require-any {data})))"]
+    if checkout is not None:
+        destination, common = checkout
+        registrations = f"^{_regex(common)}/worktrees"
+        lines.append(f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}(/.*)?$")))')
     lines += [
+        # After the exceptions above, so that none of them re-allows a protected name.
         f'(deny file-write* (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
-        # Nested Git dirs stay in place: no directory or link there is renamed, removed or made.
-        f'(deny file-write-create file-write-unlink (require-all (regex #"{NESTED_GIT_REGEX}") '
-        "(vnode-type DIRECTORY SYMLINK)))",
         # Removing a worktree's or submodule's .git file only unlinks it: nothing can take its place.
         rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
         "(deny file-clone (vnode-type DIRECTORY))",
     ]
-    # Git creates data directories only inside the nested Git dirs that exist now, never in their place;
-    # a name alone cannot tell them apart, since a submodule's name may hold any of those words.
-    data = []
-    for path in (path for root in writable for path in nested_git_dirs(root / ".git")):
-        try:
-            data.append(f'(regex #"^{_regex(path)}/{GIT_DATA}$")')
-        except Fault:
-            continue  # A Git dir the profile cannot name stays fully denied.
-    if data:
-        lines.append(f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type DIRECTORY) "
-                     f"(require-any {' '.join(data)})))")
     if checkout is not None:
-        destination, common = checkout
-        registrations = f"^{_regex(common)}/worktrees"
-        # A failed add removes its new link and registration again.
-        lines += [
-            f"(allow file-write-create (require-all {inside} (literal {_literal(destination / '.git')})))",
-            f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type DIRECTORY) "
-            f'(regex #"{registrations}(/[^/]+(/{GIT_DATA})?)?$")))',
-            f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}/[^/]+/commondir$")))',
-        ]
+        # Only the new registration: a failed add removes it and the new link again.
+        lines += [f"(allow file-write-create (require-all {inside} (literal {_literal(destination / '.git')})))",
+                  f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}/[^/]+/commondir$")))',
+                  f"(deny file-write-unlink (literal {_literal(common / 'worktrees')}))"]
+        existing = _directories(common / "worktrees")
+        if existing:
+            lines.append(f"(deny file-write* {_filters('subpath', existing)})")
     lines.append(f"(deny file-read* file-write* process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 

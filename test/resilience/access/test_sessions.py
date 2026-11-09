@@ -261,14 +261,19 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                      f'mv "$t" {path}; exit $s; }}' for path in (full, nested)),
                    f'mv {full}/.git/worktrees/linked "${{TMPDIR%/}}/moved"',
                    f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"',
+                   # A HEAD in a name directory would make a later instance treat it as a Git dir.
+                   f'echo "ref: refs/heads/main" > {full}/.git/modules/vendor/HEAD',
                    # Nothing outside the Full roots changes.
                    *(f"rm {repository}/sub/.git" for repository in (read_only, unselected)),
                    f"mkdir {read_only}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
-        for command in refused:
-            reply, code, _, err = self.session(lifetime, "selected_projects", command, machine="local", scope=scope)
+        # The last command runs in a new lifetime, whose instance builds its own profile.
+        for command, session_lifetime in [*((command, lifetime) for command in refused),
+                                          (f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"', self.lifetime())]:
+            reply, code, _, err = self.session(session_lifetime, "selected_projects", command, machine="local", scope=scope)
             self.assertEqual(reply["status"], "admitted", reply)
             self.assertNotEqual(code, 0, command)
             self.assertIn(DENIED, err, command)
+        self.assertFalse(os.path.lexists(full / ".git/modules/vendor/HEAD"))
         self.assertEqual([path.read_bytes() for path in protected], config)
         for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree"):
             self.assertFalse(os.path.lexists(path / ".git"), path)

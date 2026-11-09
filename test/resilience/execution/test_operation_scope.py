@@ -186,7 +186,11 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
         configs = [modules / "config", modules / "modules/deps/refs/inner/config", self.core / ".git/worktrees/core-linked/commondir",
                    self.core / ".git/worktrees/core-linked/modules/vendor/objects/ext/config"]
         before = [path.read_bytes() for path in configs]
-        refused = ["mv .git/modules/vendor/objects/ext moved", "mv .git/modules/vendor/objects moved",
+        # Each command runs under a newly built profile, so a HEAD planted in a name directory would make the
+        # next profile treat that directory as a Git dir.
+        refused = ['echo "ref: refs/heads/main" > .git/modules/vendor/HEAD',
+                   'echo "ref: refs/heads/main" > .git/modules/vendor/objects/HEAD', "touch .git/worktrees/x",
+                   "mv .git/modules/vendor/objects/ext moved", "mv .git/modules/vendor/objects moved",
                    "mv .git/modules/vendor/objects/ext/modules/deps/refs/inner moved",
                    't="${TMPDIR%/}"; mv .git/modules/vendor/objects/ext "$t/ext"', "mkdir .git/modules/vendor/objects/other",
                    "mv .git/worktrees/core-linked moved", "mkdir .git/worktrees/forged", "ln -s /tmp .git/worktrees/forged",
@@ -199,6 +203,7 @@ class NativeScopeTests(ScopeFixture, unittest.TestCase):
             self.assertIn(DENIED, result["output"], script)
         self.assertEqual([path.read_bytes() for path in configs], before)
         for path in (self.core / "moved", self.core / ".git/modules/vendor/objects/other", self.core / ".git/worktrees/forged",
+                     self.core / ".git/modules/vendor/HEAD", self.core / ".git/modules/vendor/objects/HEAD",
                      self.desktop / ".git/modules/sub/objects/zz", unselected / ".git/modules/sub/refs/zz"):
             self.assertFalse(os.path.lexists(path), path)
         self.assertTrue(all(os.path.lexists(path / "sub/.git") for path in (self.desktop, unselected)))

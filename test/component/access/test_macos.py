@@ -66,44 +66,56 @@ class ProfileTests(unittest.TestCase):
         secret = lines.index(f'(deny file-read-data (regex #"{seatbelt.SECRET_DIRECTORY_REGEX}"))')
         self.assertLess(secret, lines.index(f'(allow file-read* file-read-data process-exec (subpath "{readable}"))'))
         self.assertIn(f'(allow file-read* file-read-data file-write* process-exec (subpath "{writable}")', text)
-        # Git rules hold in every writable place, private trees included, after every write allow; each
-        # exception also requires a writable root.
-        git = lines.index(f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))')
-        self.assertGreater(git, lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
+        # Git rules hold in every writable place, private trees included, after every write allow. Nested Git
+        # areas deny every kind of entry; each exception also requires a writable root, and protected names
+        # are denied after the exceptions.
+        protected = f'(deny file-write* (regex #"{seatbelt.PROTECTED_REGEX}") (regex #"{seatbelt.PROTECTED_IDE_REGEX}"))'
+        freeze = f'(deny file-write-create file-write-unlink (regex #"{seatbelt.NESTED_GIT_REGEX}"))'
+        self.assertGreater(lines.index(freeze), lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
         inside = (f'(require-any (subpath "{writable}") (subpath "{worktree}") '
                   f'(subpath "{self.root / "T/openmachine-scope/exec"}"))')
-        self.assertEqual(lines[git + 1:], [
-            f'(deny file-write-create file-write-unlink (require-all (regex #"{seatbelt.NESTED_GIT_REGEX}") '
-            "(vnode-type DIRECTORY SYMLINK)))",
-            rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
-            "(deny file-clone (vnode-type DIRECTORY))",
-            f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))'])
+        tail = [protected,
+                rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
+                "(deny file-clone (vnode-type DIRECTORY))", f'(deny file-read* file-write* process-exec (subpath "{self.root / "state"}"))']
+        self.assertEqual(lines[lines.index(freeze):], [freeze, *tail])
         self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
-        # Data directories only inside the nested Git dirs that exist, never in their place.
+        # Files and data directories only inside the nested Git dirs that exist, never beside or in place of them.
         found = nested.splitlines()
-        self.assertEqual(found[:-2] + found[-1:], lines)
-        self.assertTrue(found[-2].startswith(f"(allow file-write-create file-write-unlink (require-all {inside} "
-                                             "(vnode-type DIRECTORY) (require-any "))
-        data = [re.compile(pattern) for pattern in re.findall(r'#"([^"]+)"', found[-2])]
+        start = found.index(freeze)
+        self.assertEqual((found[:start], found[start + 3:]), (lines[:lines.index(freeze)], tail))
+        files, data = found[start + 1:start + 3]
+        self.assertTrue(files.startswith(f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type REGULAR-FILE) "))
+        self.assertTrue(data.startswith(f"(allow file-write-create file-write-unlink (require-all {inside} "
+                                        "(vnode-type REGULAR-FILE DIRECTORY) "))
+        files, data = ([re.compile(pattern) for pattern in re.findall(r'#"([^"]+)"', line)] for line in (files, data))
+        for path in ("worktrees/wt/HEAD", "worktrees/wt/index.lock", "modules/vendor/objects/lib/HEAD"):
+            self.assertTrue(any(pattern.match(str(writable / ".git" / path)) for pattern in files), path)
         for path in ("worktrees/wt/logs", "worktrees/wt/rebase-merge", "modules/vendor/objects/lib/objects/ab",
                      "modules/vendor/objects/lib/refs/heads/x"):
             self.assertTrue(any(pattern.match(str(writable / ".git" / path)) for pattern in data), path)
+        # A planted HEAD would make a name directory look like a Git dir to the next profile.
+        for path in ("modules/HEAD", "modules/vendor/HEAD", "modules/vendor/objects/HEAD", "worktrees/x",
+                     "modules/vendor/objects/lib/modules/x/HEAD", "worktrees/new/HEAD"):
+            self.assertFalse(any(pattern.match(str(writable / ".git" / path)) for pattern in files + data), path)
         for path in ("worktrees/wt", "worktrees/new/logs", "modules/vendor", "modules/vendor/objects",
                      "modules/vendor/objects/lib", "modules/vendor/objects/other", "modules/vendor/objects/lib/modules/x"):
             self.assertFalse(any(pattern.match(str(writable / ".git" / path)) for pattern in data), path)
-        # Only Core's own worktree creation may create its new link and registration, after the Git rules.
+        # Only Core's own worktree creation may make its new registration and link; existing ones stay unchanged.
         added = checkout.splitlines()
-        self.assertEqual((added[:-4], added[-1]), (found[:-1], found[-1]))
-        link, directories, commondir = added[-4:-1]
-        self.assertEqual(link, f'(allow file-write-create (require-all {inside} (literal "{self.root / "Dev (1)+x/new/.git"}")))')
-        self.assertTrue(inside in directories and inside in commondir and "(vnode-type DIRECTORY)" in directories)
-        directories, commondir = (re.search(r'#"([^"]+)"', line).group(1) for line in (directories, commondir))
         registrations = writable / ".git/worktrees"
-        for path in (registrations, registrations / "new", registrations / "new/logs/refs"):
-            self.assertRegex(str(path), directories)
+        self.assertEqual(added[:start + 3], found[:start + 3])
+        self.assertEqual(added[start + 4:start + 7], tail[:3])
+        self.assertEqual(added[start + 7:], [
+            f'(allow file-write-create (require-all {inside} (literal "{self.root / "Dev (1)+x/new/.git"}")))',
+            added[start + 8], f'(deny file-write-unlink (literal "{registrations}"))',
+            f'(deny file-write* (subpath "{registrations / "wt"}"))', tail[-1]])
+        new, commondir = (re.search(r'#"([^"]+)"', line).group(1) for line in (added[start + 3], added[start + 8]))
+        self.assertTrue(inside in added[start + 3] and inside in added[start + 8])
+        for path in (registrations, registrations / "new", registrations / "new/HEAD", registrations / "new/logs/refs"):
+            self.assertRegex(str(path), new)
         self.assertRegex(str(registrations / "new/commondir"), commondir)
-        for path in (registrations / "new/other", worktree / ".git/worktrees", writable / ".git/modules/x"):
-            self.assertNotRegex(str(path), directories)
+        for path in (worktree / ".git/worktrees", writable / ".git/modules/x"):
+            self.assertNotRegex(str(path), new)
         for path in (registrations / "new/gitdir", writable / ".git/commondir", worktree / ".git/worktrees/x/commondir"):
             self.assertNotRegex(str(path), commondir)
         self.assertNotIn("SecurityServer", text)
