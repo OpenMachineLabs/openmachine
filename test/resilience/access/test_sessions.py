@@ -14,7 +14,7 @@ import unittest
 from openmachine.access import macos
 from openmachine.chat import projects
 from openmachine.config import load
-from test.support.access_sessions import HOME, SessionFixture, members
+from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
@@ -44,6 +44,128 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertIn(f"HOME={HOME}", out)
         self.assertGreaterEqual(err.count(DENIED), 3, err)
         self.assertFalse((outside / "x").exists())
+
+    def routing(self, client):
+        broker = "http://127.0.0.1:41234"
+        return {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
+                "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
+
+    def clients(self):
+        """Two om-code clients, each beside another program, in a directory the profile denies."""
+        denied, clients = self.root / "denied", []
+        for name in ("a", "b"):
+            (denied / name).mkdir(parents=True, mode=0o755)
+            for program in ("om-code", "other"):
+                path = denied / name / program
+                path.write_text(f"#!/bin/sh\necho {program}-{name} \"$@\"\n")
+                path.chmod(0o755)
+            clients.append(denied / name / "om-code")
+        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
+        return clients, prelude
+
+    def admitted(self, lifetime, command, prelude, client=None):
+        """Run one Read Only exec, routed to client when one is named; returns its stdout and stderr."""
+        extra = {"github": self.routing(client)} if client else {}
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", command, **extra), prelude=prelude)
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(reply["status"], "admitted", reply)
+        return out.decode(), err.decode()
+
+    def instances(self, lifetime):
+        return [item.get("client") for item in json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]]
+
+    def stable(self):
+        return macos.user_temp() / "omc" / CLIENT_NAME / "om-code"
+
+    def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
+        (first, second), prelude = self.clients()
+        lifetime, stable = self.lifetime(), self.stable()
+        # The session runs Core's copy by name, never the host's file, and cannot replace the copy.
+        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; {first}; "
+                                 f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
+        self.assertIn("OM_CODE_BROKER=http://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
+        self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
+        self.assertRegex(out, rf"PATH=\S+:{stable.parent}\n")
+        self.assertIn("om-code-a hi", out)
+        self.assertNotIn("other-a", out)
+        self.assertEqual(err.count(DENIED), 4, err)
+        self.assertFalse((HOME / "linked").exists())
+        self.assertNotIn("x", stable.read_text().split())
+        # After the host's client changes, as after an om-code update, sessions run the new copy in the
+        # same instance, where a job started before the change can still be signaled.
+        job = self.admitted(lifetime, detached("routed"), prelude, first)[0].strip()
+        out, err = self.admitted(lifetime, f"om-code; kill -0 {job} && echo signaled", prelude, second)
+        self.assertEqual(out.split(), ["om-code-b", "signaled"], err)
+        # A session without routing (as SFTP) shares that instance and sees none of the variables.
+        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
+        self.assertEqual(self.instances(lifetime), [str(stable)])
+
+    def test_only_the_newest_instance_admits(self):
+        """Every instance binds the lifetime's one spawner socket, so an older live one is unreachable."""
+        (first, _), prelude = self.clients()
+        lifetime, stable = self.lifetime(), str(self.stable())
+        self.admitted(lifetime, "true", prelude)
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertEqual(self.instances(lifetime), [stable])
+        # An instance from before Core kept its copy cannot run it: unrouted sessions still use it, and
+        # the first routed one starts a new instance.
+        record = self.state / "code" / lifetime / "record.json"
+        value = json.loads(record.read_text())
+        del value["instances"][-1]["client"]
+        record.write_text(json.dumps(value))
+        self.admitted(lifetime, "true", prelude)
+        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertEqual(self.instances(lifetime), [None, stable])
+        # Once the newest spawner is lost, the next session starts another instance, though an older one lives.
+        spawner = json.loads(record.read_text())["instances"][-1]["pid"]
+        self.admitted(lifetime, f"kill -9 {spawner}", prelude)
+        self.assertEqual(self.admitted(lifetime, "echo again", prelude)[0], "again\n")
+        self.assertEqual(self.instances(lifetime), [None, stable, stable])
+
+    def test_an_admission_connects_before_a_newer_instance_rebinds_the_socket(self):
+        (first, _), prelude = self.clients()
+        lifetime = self.lifetime()
+        self.admitted(lifetime, "true", prelude)
+        record = self.state / "code" / lifetime / "record.json"
+        value = json.loads(record.read_text())
+        del value["instances"][-1]["client"]  # an instance from before Core kept its copy
+        record.write_text(json.dumps(value))
+        # This admission pauses under the lifetime lock, just before it connects; meanwhile a routed
+        # session waits for the lock, then starts a newer instance that rebinds the socket.
+        holding = self.root / "holding"
+        pause = ("import time\nfrom openmachine.access import sessions as _s\n_connect = _s._connect\n"
+                 f"def _paused(lifetime, instance):\n open({str(holding)!r}, 'w').close()\n time.sleep(3)\n"
+                 " return _connect(lifetime, instance)\n_s._connect = _paused\n")
+        paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
+        self.assertTrue(self.wait_for(holding))  # it holds the lifetime lock
+        self.assertIn("om-code-a y", self.admitted(lifetime, "om-code y", prelude, first)[0])
+        with control:
+            reply = json.loads(control.makefile("rb").readline() or b"{}")
+        out, _ = paused.communicate(timeout=60)
+        self.assertEqual((reply.get("status"), out), ("admitted", b"paused\n"), reply)
+
+    def test_a_client_removed_before_core_copies_it_has_no_effect(self):
+        """As when an update removes an old client: it passed its check, then vanished before the copy."""
+        (first, second), prelude = self.clients()
+        lifetime = self.lifetime()
+        self.admitted(lifetime, "true", prelude, second)  # Core holds a copy of another client
+        remove = ("from openmachine.access import sessions as _s\n_install = _s._install\n"
+                  "def _removed(client):\n client.unlink()\n return _install(client)\n_s._install = _removed\n")
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran", github=self.routing(first)),
+                                    prelude + remove)
+        out, _ = process.communicate(timeout=60)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"], out), ("github_client_invalid", "known_no_effect", b""))
+        self.assertEqual(self.instances(lifetime), [str(self.stable())])
+
+    def test_a_client_restricted_work_could_replace_is_refused(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime)[0]["status"], "admitted")  # Core creates the persistent home
+        client = HOME / "om-code"
+        client.write_text("#!/bin/sh\n")
+        client.chmod(0o755)
+        reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))
+        self.assertEqual((reply["status"], reply["error"]["code"]), ("denied", "github_client_invalid"), reply)
 
     def test_the_code_host_state_is_a_control_path(self):
         """The Go Code host keeps its host key, network keys and socket beside Core's state; no session reads it."""
@@ -355,6 +477,35 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
 
 class FullAccessSessionTests(SessionFixture, unittest.TestCase):
+    def test_github_routing_reaches_a_full_session(self):
+        client = self.root / "bin/om-code"
+        client.parent.mkdir(mode=0o755)
+        client.write_text("#!/bin/sh\necho client \"$@\"\n")
+        client.chmod(0o755)
+        broker = "http://127.0.0.1:41234"
+        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1048576"}}
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_CODE_BROKER $GIT_CONFIG_KEY_0; om-code ok",
+                                             github=github)
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        self.assertEqual(out.splitlines(), [f"{broker} http.{broker}.postBuffer", "client ok"])
+
+    def test_a_link_at_the_persistent_home_name_never_refuses_a_full_session(self):
+        """/Users/Shared is world-writable and sticky: another local user may create this user's home name
+        as a link, here to an ancestor of the client, before any restricted session creates the home."""
+        client = self.root / "bin/om-code"
+        client.parent.mkdir(mode=0o755)
+        client.write_text("#!/bin/sh\necho client\n")
+        client.chmod(0o755)
+        self.assertFalse(HOME.parent.exists() or HOME.parent.is_symlink())
+        HOME.parent.symlink_to(self.root)
+        self.addCleanup(HOME.parent.unlink)
+        broker = "http://127.0.0.1:41234"
+        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "om-code", github=github)
+        self.assertEqual((reply["status"], code, out), ("admitted", 0, "client\n"), err)
+
     def test_full_access_is_an_ordinary_shell(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
         self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={Path.home()}\n"), err)
