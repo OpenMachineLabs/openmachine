@@ -213,7 +213,6 @@
       "test/component/service/test_install.py",
       "test/component/service/test_maintenance.py",
       "test/component/service/test_payload.py",
-      "test/component/service/test_payload_builder.py",
       "test/resilience/service/test_maintenance_process.py"
     ],
     "test/support/repository.py": [

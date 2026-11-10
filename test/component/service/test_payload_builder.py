@@ -6,11 +6,16 @@ import runpy
 import subprocess
 import sys
 import tarfile
+import tempfile
 import unittest
-from test.support.payload_cases import PayloadCaseFixture
 
 
-class PayloadTests(PayloadCaseFixture, unittest.TestCase):
+class PayloadBuilderTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="om-builder-", dir="/tmp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+
     def test_producer_refuses_product_signing_options(self):
         script = Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"
         result = subprocess.run([
