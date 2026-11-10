@@ -57,6 +57,16 @@ Merge, release, deployment, repository access changes and auto-merge require
 separate explicit authority and current native GitHub policy checks. Do not
 rewrite published history just to satisfy a presentation convention.
 
+## Versions and tags
+
+The repository has one version, in `openmachine/__init__.py`; the Python
+package and the Go module in `connector/` share it. A release tags one commit
+with both `vX.Y.Z` and `connector/vX.Y.Z`, never one without the other: Go
+reads only the second, as it requires for a module in a subdirectory. Never
+move or delete a release tag; the Go module proxy keeps what it first saw. A
+major version of 2 or more would also change the Go module path to
+`.../connector/vN`.
+
 ## Release notes
 
 Publishing a release needs the separate authority above. Draft notes with only
