@@ -179,6 +179,21 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
             with self.subTest(full=full), self.assertRaisesRegex(ValueError, "no retained behavior coverage"):
                 runner.make_plan(self.root, self.base, full=full)
 
+    def test_a_baseline_may_name_a_layer_the_runner_retired(self):
+        retired = "test/contract/old/test_old.py"
+        self.write(retired, self.files["test/unit/github/test_values.py"])
+        self.write("openmachine/old.py", "VALUE = 1\n")
+        self.manifest["modules"]["old"] = {"sources": ["openmachine/old.py"], "tests": [retired], "boundary_tests": []}
+        self.save_manifest()
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD")
+        for path in (retired, "openmachine/old.py"):
+            (self.root / path).unlink()
+        del self.manifest["modules"]["old"]
+        self.save_manifest()
+        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.assertIn("test/unit/github/test_values.py", runner.make_plan(self.root, self.base)["tests"])
+
     def test_retiring_a_whole_owner_needs_no_coverage_for_what_it_deleted(self):
         (self.root / "openmachine/execution.py").unlink()
         (self.root / "test/resilience/execution/test_process.py").unlink()

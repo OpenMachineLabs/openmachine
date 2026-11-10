@@ -17,9 +17,9 @@ import uuid
 
 from openmachine.access import macos
 
-# Restricted homes go under the root-owned sticky /private/tmp, never the real /Users/Shared, with a name
+# Restricted homes go under the root-owned sticky temp directory, never the real /Users/Shared, with a name
 # owned by this test process so concurrent runs never share or delete each other's home.
-SHARED = Path("/private/tmp")
+SHARED = Path("/private/tmp" if sys.platform == "darwin" else "/tmp")
 HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
 HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 # Core's copy of om-code is per user too; each test process keeps its own.
