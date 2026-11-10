@@ -4,7 +4,7 @@
 
 ### One agent. Every machine. Real execution.
 
-**An open-source platform that lets your coding agent work on every machine you own.**
+**Let your coding agent work on every machine you own, with the access you choose.**
 
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/Website-openmachine.app-141414?style=flat-square" alt="Website"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
@@ -26,8 +26,9 @@ Your coding agent already works on this machine. Open Machine lets it work on
 all of them: train on the GPU machine, build on the workstation, test on the
 spare Mac, with each machine's results coming back to you.
 
-**Yours, end to end.** Machines connect peer-to-peer over encrypted WireGuard,
-built on Tailscale. You choose how far the agent reaches on each machine, and
+**Under your control.** Machines connect peer-to-peer over encrypted WireGuard,
+using the open-source Tailscale client with Open Machine's own coordination
+server and relays. You choose how far the agent reaches on each machine, and
 GitHub tokens never sit on your machines.
 
 <p align="center">
@@ -35,6 +36,9 @@ GitHub tokens never sit on your machines.
 </p>
 
 ## Quick start
+
+Open Machine runs on Macs with Apple Silicon (macOS 13 or later) today; Linux,
+Windows and iOS are coming.
 
 1. [Download](https://openmachine.app/download) the app and sign in on each machine.
 2. Choose access per machine: **Read only**, **Selected projects** or **Full access**.
@@ -47,9 +51,9 @@ GitHub tokens never sit on your machines.
 ## How it fits together
 
 - **App**: signs each machine in and keeps it reachable.
-- **Console**: your machines, members and access, in one place.
+- **Console**: your machines, their access, plugins and GitHub, in one place.
 - **Network**: a private WireGuard network between your machines.
-- **Core** (this repository): starts the agent's work on each machine with the access you chose.
+- **Core** (this repository, open source): starts the agent's work on each machine with the access you chose.
 
 ## Contributors
 
