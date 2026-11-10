@@ -20,8 +20,9 @@ installation. Failed state and original IDs are retained with the exact CLI
 replies for diagnosis; successful runs remove only their own fixtures.
 
 The native case is skipped unless explicitly enabled. It proves a fresh local
-installation, not Code sessions, Cloud authorization or signed distribution. Reuse unchanged passing evidence; reserve
-those separate acceptance checks for changes that need them.
+installation, not Code sessions, Cloud authorization or signed distribution.
+Reuse unchanged passing evidence; reserve those separate acceptance checks for
+changes that need them.
 
 ## Choose the required scope
 

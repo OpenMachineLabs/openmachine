@@ -13,6 +13,7 @@
       ],
       "tests": [
         "test/component/access/test_catalog.py",
+        "test/component/access/test_git.py",
         "test/component/access/test_macos.py",
         "test/component/access/test_rules.py",
         "test/component/access/test_sessions.py",

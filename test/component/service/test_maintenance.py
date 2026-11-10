@@ -66,6 +66,11 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
                          {"status": "rejected", "reason": "selection_changed", "admitted": False, "operation_id": SECOND})
         self.assertFalse(maintenance._operation_path(self.state, SECOND).exists())
 
+    def test_install_and_update_refuse_an_invalid_configuration(self):
+        self.config.write_text("schema_version = 1\n" + TEXT)
+        self.assertEqual(self.manage("install", identity=FIRST, source=self.source, sha256=self.digest)["reason"], "invalid_config")
+        self.assertFalse(maintenance._operation_path(self.state, FIRST).exists())
+
     def test_install_needs_clean_state_and_happens_once(self):
         (self.state / "unrelated").mkdir()
         self.assertEqual(self.manage("install", identity=FIRST, source=self.source, sha256=self.digest)["reason"],

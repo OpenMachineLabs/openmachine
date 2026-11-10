@@ -310,6 +310,10 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
         (self.work / "folder").mkdir()
         folder = self.binding(self.work, relative="folder")
         self.assertEqual(self.reply({"action": "validate", "projects": [folder]}), {"protocol": 2, "validated": [folder]})
+        # A binding overlapping the state directory Core was given is refused, as sessions refuse it.
+        (self.state / "selected").mkdir(parents=True)
+        inside = self.binding(self.state / "selected")
+        self.assertEqual(self.reply({"action": "validate", "projects": [inside]}), {"error": {"code": "target_unverified"}})
 
     def test_error_codes_map_to_the_owner_actionable_set(self):
         passed = ["desktop_missing", "desktop_redirected", "desktop_access_denied", "desktop_unsupported", "directory_access_denied"]
@@ -322,7 +326,8 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
                 self.assertEqual(self.reply({"action": "root"}), {"error": {"code": expected}})
 
     def test_invalid_requests_configuration_and_the_64_kib_bounds(self):
-        for raw in (b"", b"\xff", b"[]", b'{"action": "validate"}', b'{"unexpected": 1}', b'{"offset": "1"}', b"[" * 60000,
+        for raw in (b"", b"\xff", b"[]", b'{"action": "validate"}', b'{"action": "validate", "projects": [], "x": 1}',
+                    b'{"unexpected": 1}', b'{"offset": "1"}', b"[" * 60000,
                     b'{"action": "inspect", "machine": "local", "workspace_name": "/", "offset": "0"}',
                     json.dumps({"action": "validate", "projects": [{}] * 33}).encode(), b" " * 65537):
             with self.subTest(raw=raw[:40]):

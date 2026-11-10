@@ -105,7 +105,7 @@ formal Spec sections or English. The source checker preserves secret-boundary,
 link and file hygiene checks. PR section names are presentation advice, not
 proof of acceptance.
 
-CI jobs run on GitHub-hosted Ubuntu 24.04 with pinned actions. Quality checks
+Quality CI jobs run on GitHub-hosted Ubuntu 24.04 with pinned actions. Quality checks
 use read-only permissions and cannot run candidate code under write-privileged
 `pull_request_target`. Metadata-only changes must not cancel, replace or mask
 code verification. Only separate trusted default-branch automations perform

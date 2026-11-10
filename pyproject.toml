@@ -14,8 +14,5 @@ dependencies = ["pydantic==2.13.5"]
 [tool.hatch.build.targets.wheel]
 packages = ["openmachine"]
 
-[tool.hatch.build.targets.sdist]
-include = ["/openmachine", "/pyproject.toml", "/README.md", "/LICENSE"]
-
 [tool.hatch.version]
 path = "openmachine/__init__.py"
