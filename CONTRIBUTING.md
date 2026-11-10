@@ -109,7 +109,7 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 The configuration holds one machine, `[machines.local]` with `transport = "local"`.
 Desktop installs and updates Core from a verified offline runtime payload that
 `scripts/build_runtime_payload.py` assembles. The README artwork in `assets/` is
-self-contained SVG with CSS animation and no scripts.
+the banner PNG and self-contained SVGs animated with CSS, with no scripts.
 
 Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`
 and `openmachine.config`. Source moves never move persistent state or replace
