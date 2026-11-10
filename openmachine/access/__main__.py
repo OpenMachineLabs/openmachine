@@ -68,7 +68,8 @@ def catalog_reply(config_path: Path, state: Path, raw: bytes) -> dict:
         code = error.code
         return {"error": {"code": code if code in PASSED else "target_unverified"
                           if code in CHANGED or code.startswith("scope_") else "catalog_unavailable"}}
-    except (ValueError, RecursionError, OSError):
+    except (ValueError, RecursionError, OSError, KeyError):
+        # KeyError: the account has no passwd record.
         return {"error": {"code": "catalog_unavailable"}}
 
 

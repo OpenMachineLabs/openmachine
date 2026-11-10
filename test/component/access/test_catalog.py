@@ -354,6 +354,8 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
                     self.assertEqual(len(json.dumps(reply).encode()) + 1, 65536)
         with patch.object(catalog, "inspect", side_effect=FileNotFoundError):
             self.assertEqual(self.reply({"action": "root"}), {"error": {"code": "catalog_unavailable"}})
+        with patch.object(catalog, "inspect", side_effect=KeyError("uid")):
+            self.assertEqual(self.reply({"action": "root"}), {"error": {"code": "catalog_unavailable"}})
 
     def test_launcher_reads_stdin_and_exits_zero_for_results_and_errors(self):
         for request, key in (({"action": "inspect", "machine": "local", "workspace_name": str(self.work)}, "project"),

@@ -21,7 +21,7 @@ MAX_OPERATIONS = 128
 UNPREPARED = {"accepted", "retaining", "retained", "preparing"}
 PHASES = UNPREPARED | {"prepared", "activating", "completed", "rejected", "recovery_required"}
 TERMINAL = {"completed", "rejected"}
-CONTINUABLE = {"accepted", "retained", "prepared"}
+CONTINUABLE = {"accepted", "retained", "prepared", "activating"}
 CAPABILITIES = ["status", "configure", "configure:verify_existing", "install", "update", "update:selection_consent",
                 "operation", "continue"]
 
@@ -198,6 +198,11 @@ def submit(config_path: Path, state: Path, action: Literal["install", "update"],
         return {"status": "accepted", "operation": record}
 
 
+def _activated(state: Path, target: str) -> bool:
+    """Whether the one atomic selection write already names this operation's installation."""
+    return os.path.lexists(state / "service/service.json") and service_state._record(state)["current"] == target
+
+
 def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
     with lease(state / "service/operation.lock", create=False) as lock:
         record = _read(state, identity)
@@ -235,9 +240,13 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         if record["phase"] == "retained":
             record = _save(state, record, "preparing")
             record = _save(state, record, "prepared", prepared=install.prepare(state, retained, request["payload_sha256"]))
+        target = record["prepared"]["identity"]
+        # An interrupted activation is settled from the selection it would have written, never replayed blindly.
+        if record["phase"] == "activating" and _activated(state, target):
+            _save(state, record, "completed", outcome={"current": target})
+            return
         _unchanged(state, request)
         record = _save(state, record, "activating")
-        target = record["prepared"]["identity"]
         if request["action"] == "install":
             transition.register(Path(request["config"]), state, target)
         else:
@@ -248,8 +257,9 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
                  or error.code == "service_output_limit" else "rejected")
         _save(state, record, phase, reason=error.code)
     except OSError:
-        # Filesystem acknowledgement loss can follow a completed atomic effect.
-        _save(state, record, "recovery_required", reason="maintenance_effect_unverified")
+        # Filesystem acknowledgement loss can follow a completed atomic effect; continue settles an activation.
+        _save(state, record, "activating" if record["phase"] == "activating" else "recovery_required",
+              reason="maintenance_effect_unverified")
 
 
 def observe(config_path: Path, state: Path) -> dict:

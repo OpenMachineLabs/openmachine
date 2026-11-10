@@ -122,7 +122,32 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
         self.manage("install", identity=SECOND, source=self.source, sha256=self.digest)
         with patch.object(transition, "register", side_effect=OSError("fixture")):
             lost = self.complete(SECOND)
-        self.assertEqual((lost["phase"], lost["reason"]), ("recovery_required", "maintenance_effect_unverified"))
+        self.assertEqual((lost["phase"], lost["reason"]), ("activating", "maintenance_effect_unverified"))
+        self.assertEqual(self.manage("operation", identity=SECOND)["status"], "continuation_required")
+
+    def test_continue_settles_an_interrupted_activation_from_the_selection(self):
+        self.install()
+        second = self.next_payload()
+        selection = self.manage("status")["selection_sha256"]
+        self.manage("update", identity=SECOND, source=self.source, sha256=second, expected_selection_sha256=selection)
+        # The process died after recording activation, before the selection moved: activation runs once.
+        with patch.object(transition, "select", side_effect=SystemExit), self.assertRaises(SystemExit):
+            self.complete(SECOND)
+        self.assertEqual(self.manage("operation", identity=SECOND)["status"], "continuation_required")
+        with lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, SECOND, lock.fileno())
+        self.assertEqual((self.record(SECOND)["phase"], self.manage("status")["current"]), ("completed", second))
+        # It died after the selection moved: continuing completes the record and never selects again.
+        record = maintenance._save(self.state, self.record(SECOND), "activating", outcome=None)
+        with patch.object(transition, "select") as select, lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, SECOND, lock.fileno())
+        select.assert_not_called()
+        self.assertEqual(self.record(SECOND)["phase"], "completed")
+        # Another writer moved the selection elsewhere: the operation is not rebased.
+        maintenance._save(self.state, record, "activating", outcome=None)
+        with patch.object(maintenance, "_activated", return_value=False), lease(self.state / "service/operation.lock") as lock:
+            maintenance.run_operation(self.state, SECOND, lock.fileno())
+        self.assertEqual((self.record(SECOND)["phase"], self.record(SECOND)["reason"]), ("recovery_required", "maintenance_input_changed"))
 
     def test_a_selection_changed_after_admission_is_not_rebased(self):
         self.install()
