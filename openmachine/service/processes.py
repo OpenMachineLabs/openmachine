@@ -1,4 +1,4 @@
-"""Bounded service subprocess execution shared by readiness and lifecycle callers."""
+"""Bounded subprocess execution for installation."""
 
 import os
 import selectors

@@ -21,7 +21,7 @@ class RepositoryFixture:
             "test/unit/github/test_values.py": "import unittest\n\nclass Values(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(1, 1)\n",
             "test/component/github/test_calls.py": "import unittest\n\nclass Calls(unittest.TestCase):\n    def test_call(self):\n        self.assertEqual(1, 1)\n",
             "test/resilience/execution/test_process.py": "import unittest\n\nclass Process(unittest.TestCase):\n    def test_process(self):\n        self.assertEqual(1, 1)\n",
-            "test/contract/mcp/github/test_dispatch.py": "import unittest\n\nclass Dispatch(unittest.TestCase):\n    def test_dispatch(self):\n        self.assertEqual(1, 1)\n",
+            "test/component/server/test_dispatch.py": "import unittest\n\nclass Dispatch(unittest.TestCase):\n    def test_dispatch(self):\n        self.assertEqual(1, 1)\n",
             "test/repository/test_rules.py": "import unittest\n\nclass Rules(unittest.TestCase):\n    def test_rules(self):\n        self.assertEqual(1, 1)\n",
             "test/support/wire.py": '"""Fixture helper."""\n',
         }
@@ -33,7 +33,7 @@ class RepositoryFixture:
                 "github": {
                     "sources": ["openmachine/github.py"],
                     "tests": ["test/unit/github/test_values.py", "test/component/github/test_calls.py"],
-                    "boundary_tests": ["test/contract/mcp/github/test_dispatch.py"],
+                    "boundary_tests": ["test/component/server/test_dispatch.py"],
                 },
                 "execution": {
                     "sources": ["openmachine/execution.py"],
@@ -41,13 +41,13 @@ class RepositoryFixture:
                 },
                 "server": {
                     "sources": ["openmachine/server.py"],
-                    "tests": ["test/contract/mcp/github/test_dispatch.py"], "boundary_tests": [],
+                    "tests": ["test/component/server/test_dispatch.py"], "boundary_tests": [],
                 },
                 "repository": {
                     "sources": [], "tests": ["test/repository/test_rules.py"], "boundary_tests": [],
                 },
             },
-            "support": {"test/support/wire.py": ["test/contract/mcp/github/test_dispatch.py"]},
+            "support": {"test/support/wire.py": ["test/component/server/test_dispatch.py"]},
         }
         self.save_manifest()
         self.commit("test(fixture): establish a complete ownership baseline")

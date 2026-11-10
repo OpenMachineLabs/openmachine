@@ -42,20 +42,6 @@ def run(argv: list[str], env: dict[str, str]) -> None:
     subprocess.run(argv, cwd="/", env=env, stdin=subprocess.DEVNULL, check=True, timeout=300)
 
 
-def git_entry(root: Path) -> None:
-    """Dugite's native Git needs explicit, relocatable helper and template paths."""
-    (root / "bin").mkdir(exist_ok=True)
-    entry = root / "bin/git"
-    entry.write_text('''#!/bin/sh
-set -eu
-root=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")/../git" && pwd)
-export GIT_EXEC_PATH="$root/libexec/git-core"
-export GIT_TEMPLATE_DIR="$root/share/git-core/templates"
-exec "$root/bin/git" "$@"
-''')
-    entry.chmod(0o755)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
@@ -85,15 +71,11 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=False)
     cache = args.cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    for name, item in inputs.items():
-        archive = cache / (item["sha256"] + ".tar.gz")
-        fetch(item, archive)
-        destination = output if name == "python" else output / "git"
-        destination.mkdir(exist_ok=True)
-        extract(archive, destination)
-    git_entry(output)
+    archive = cache / (inputs["python"]["sha256"] + ".tar.gz")
+    fetch(inputs["python"], archive)
+    extract(archive, output)
     python = str(output / "python/bin/python3")
-    env = payload.environment(output)
+    env = payload.environment()
     wheels = output / "wheels"
     wheels.mkdir()
     shutil.copyfile(requirements, output / "requirements.lock")
@@ -110,8 +92,7 @@ def main() -> None:
          "--no-deps", "--only-binary=:all:", "--no-compile", "-r", str(output / "requirements.lock"),
          "openmachine==" + version], env)
     run([python, "-I", "-B", "-m", "pip", "check"], env)
-    run([python, "-I", "-B", "-m", "openmachine.cli", "--version"], env)
-    run([str(output / "bin/git"), "--version"], env)
+    run([python, "-I", "-B", "-m", "openmachine.access", "capabilities"], env)
     # Generated entry-point scripts contain the build path. The relocatable
     # bootstrap uses python -m; the final venv creates its own correct entries.
     for entry in set((output / "python/bin").iterdir()) - original_entries:
@@ -122,11 +103,7 @@ def main() -> None:
         "# Runtime inputs\n\n"
         "Python: python-build-standalone " + inputs["python"]["build"] +
         "; retain python/lib/python3.13/LICENSE.txt and all bundled dependency licenses.\n\n"
-        "Git: dugite-native " + inputs["git"]["build"] +
-        "; retain git/libexec/git-core/NOTICE. Git is GPL-2.0.\n\n"
-        "Source and build recipes: https://github.com/astral-sh/python-build-standalone/tree/" + inputs["python"]["build"] +
-        " and https://github.com/desktop/dugite-native/tree/v2.53.0-3.\n"
-        "Git source: https://github.com/git/git/tree/v2.53.0.\n\n"
+        "Source and build recipe: https://github.com/astral-sh/python-build-standalone/tree/" + inputs["python"]["build"] + ".\n\n"
         "Original input URLs/digests are in manifest.json. Dependency licenses remain in their wheels "
         "and installed distribution metadata. Product publication must fulfill the corresponding-source "
         "and notice obligations for all bundled components; this assembly is not signed product acceptance.\n")

@@ -1,12 +1,13 @@
-"""Tests for service behavior at the component layer."""
+"""The runtime payload: a complete manifest binds every byte, and retention never replaces a copy."""
 
 import hashlib
 import os
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
+
 from openmachine.foundation.state import private_directory
-from openmachine.service import checks, install, payload, processes
+from openmachine.service import payload
 from test.support.payload_cases import PayloadCaseFixture
 
 
@@ -27,6 +28,17 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         file.chmod(0o644)
         file.unlink()
         self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.digest))
+        file.write_bytes(original)
+        # A complete manifest still needs every required member.
+        for name in ("requirements.lock", "THIRD_PARTY_NOTICES.md"):
+            with self.subTest(name=name):
+                member = self.source / name
+                content = member.read_bytes()
+                member.unlink()
+                self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.seal()))
+                member.write_bytes(content)
+                member.chmod(0o644)
+                self.digest = self.seal()
 
     def test_manifest_and_target_rejection_before_copy_or_execution(self):
         path = self.source / "manifest.json"
@@ -45,15 +57,15 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
             digest = self.seal()
             self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, digest))
         self.manifest["target"] = dict(payload.TARGET)
+        # The payload bundles no Git: a manifest that declares one is not this format.
+        self.manifest["git"] = dict(self.manifest["python"])
+        self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.seal()))
+        del self.manifest["git"]
         digest = self.seal()
         with patch.object(payload.platform, "machine", return_value="x86_64"):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
         with patch.object(payload.platform, "mac_ver", return_value=("12.7", (), "")):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
-        with patch.object(processes, "run") as run:
-            self.fault("invalid_runtime_payload", lambda: install.prepare_payload(self.config, self.state, self.source, "0" * 64))
-            run.assert_not_called()
-        self.assertFalse((self.state / "service").exists())
 
     def test_escaping_links_special_files_and_limits_are_rejected(self):
         link = self.source / "python/bin/python3"

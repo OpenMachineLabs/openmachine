@@ -2,8 +2,8 @@
 
 ## Isolated macOS first-use check
 
-For a native installation/startup change, opt in with an explicitly trusted,
-owner-built payload and its reviewed manifest digest:
+For a native installation change, opt in with an explicitly trusted, owner-built
+payload and its reviewed manifest digest:
 
 ```sh
 OM_NATIVE_FIRST_USE=1 \
@@ -13,18 +13,16 @@ OM_NATIVE_PAYLOAD_SHA256=reviewed_manifest_sha256 \
   test.resilience.service.test_maintenance_process.NativeFirstUseTests
 ```
 
-This uses the current GUI account with a fresh temporary project, configuration,
-state directory and distinct LaunchAgent. It checks offline installation,
-original-operation readback, explicit Start, verified Ready and Stop. It does not
-change the account's default installation, grant commands or writes, or require
-switching macOS users. Stage timings are printed; failed state and original IDs
-are retained with the exact CLI replies for diagnosis. Successful runs unload
-their service and remove only their own fixtures.
+This uses a fresh temporary configuration and state directory. It checks
+`configure`, offline installation, original-operation readback, `status` and the
+installed access launcher's `capabilities`. It does not change the account's
+installation. Failed state and original IDs are retained with the exact CLI
+replies for diagnosis; successful runs remove only their own fixtures.
 
-The native case is skipped unless explicitly enabled. It proves fresh local
-configuration, not new macOS privacy permissions, login-session behavior, Cloud
-authorization or signed distribution. Reuse unchanged passing evidence; reserve
-those separate acceptance checks for changes that need them.
+The native case is skipped unless explicitly enabled. It proves a fresh local
+installation, not Code sessions, Cloud authorization or signed distribution.
+Reuse unchanged passing evidence; reserve those separate acceptance checks for
+changes that need them.
 
 ## Choose the required scope
 
@@ -32,7 +30,7 @@ Use the owning module during development, then verify the complete changed
 candidate before requesting review or merge:
 
 ```sh
-python3 scripts/run_tests.py --module github --layer unit
+python3 scripts/run_tests.py --module access --layer unit
 python3 scripts/run_tests.py --base origin/main --plan
 python3 scripts/run_tests.py --base origin/main
 python3 scripts/premerge.py --base origin/main
@@ -58,10 +56,9 @@ environment. An explicit module or layer with no tests is an error.
 
 `premerge.py` requires a clean committed worktree. It uses the same selector and
 runner as development and CI, checks whitespace and repository rules before
-installing dependencies, builds the direct and sdist-derived candidate wheels,
-compares their canonical Skill package bytes, and runs the required test files
-once against the installed direct wheel outside the checkout. Its import check ensures product modules come
-from that wheel. Repository tests remain dependency-free, and the test package
+installing dependencies, builds the candidate wheel and runs the required test
+files once against it, installed outside the checkout. Its import check ensures
+product modules come from that wheel. Repository tests remain dependency-free, and the test package
 is loaded without putting the checkout ahead of the installed product.
 
 All entry points report environment preparation and test-layer timings, test
@@ -106,7 +103,6 @@ on pull-request events, and the final commit landing on main is checked on push.
 | `unit/<module>/` | Pure parsing, validation, transformations and state decisions; no real server, process lifecycle or timed waiting. |
 | `component/<module>/` | Module behavior with local files, state stores and application collaborators. |
 | `skill-library/<skill-name>/` | Standalone Skill behavior tests; keep each Skill in its own named folder, with exact paths in `ownership.json`. |
-| `contract/mcp/<module>/` | Wire encoding, catalog/schema, routing, result and error boundaries. |
 | `resilience/<module>/` | Real owned processes, crash/restart, cancellation, lost replies and retained-state recovery. |
 | `repository/` | Repository hygiene, dependency direction, test selection and runner behavior. |
 | `support/` | Shared fixtures with explicit consumers; no TestCase subclasses or test methods. |
@@ -121,22 +117,18 @@ The selector adds those concrete tests once; it does not recursively expand an
 import graph or run every consumer module. Shared foundation, configuration and
 application changes must name the affected consumer boundaries in the manifest.
 
-All runtime, YAML bindings and Markdown under `openmachine/skills/` are canonical
-shipped inputs owned by `skills`. Each has an exact ownership entry. Editing a
-guide selects installed resource and MCP navigation coverage, including rebuilding
-the wheel, even though its content is Markdown.
-
 A changed test runs that test directly. Shared fixture changes run their declared
 consumers, including consumers reached through another helper; package initializer
 changes include the affected package's tests and fixture consumers. Changed
 ownership entries select the union of old and new mappings. Deleted or renamed
 sources use the baseline and current manifests together.
 
-Every changed or deleted source must retain its own mapped coverage. Removing
-an entire owner while changing another module cannot borrow that other module's
-tests as proof. When retiring an owner, keep its retained absence or replacement
-boundary explicitly registered until the design change is accepted. Full mode
-does not bypass missing ownership or retained-coverage checks.
+Every changed or deleted source of a surviving module must retain its own mapped
+coverage; it cannot borrow another module's tests as proof. Retiring a whole owner
+removes its sources, its tests and its manifest entry together, and what it
+deleted then needs no coverage: no behavior remains. Anything it leaves behind is
+unowned and fails. Full mode does not bypass missing ownership or
+retained-coverage checks.
 
 Keep each assertion with the module and layer that own its risk. Tests import
 shared fixtures from `test.support`, never another test case. Split mixed files
@@ -154,58 +146,21 @@ client acceptance.
 ## Compatibility and packaging
 
 The import check owns every installed production module and checks absolute,
-relative, function-local and re-export edges plus cycles. Type-only imports do not
-pull unexpected runtime dependencies into unrelated owners. Explicit checks do not model all
-implicit initialization/dynamic imports; isolated assembly/archive startup and
-full-source review cover those limits. Do not add a dynamic import to evade them.
+relative, function-local and re-export edges plus cycles. It also holds the
+access launcher to `openmachine`, `openmachine.access`, `openmachine.foundation`
+and `openmachine.config`. Type-only imports do not pull unexpected runtime
+dependencies into unrelated owners. Explicit checks do not model all implicit
+initialization/dynamic imports; full-source review covers those limits. Do not
+add a dynamic import to evade them.
 
-The installed runner builds both wheel and sdist-derived wheel in its existing
-temporary environment and compares every canonical Skill `.py`, `.yaml` and `.md`
-file with source bytes. Missing, extra, changed, duplicate and retired `_skills`
-resources fail the gate. Installed resource coverage compares the installed copy
-with the same source. Behavioral tests execute once after this payload parity
-check. Preserve the console and execution/service module entrypoints..
-New source members change artifact hashes, not protocol/state semantics by assertion.
-
-Use independently installed old/new readers against disposable original records:
-legacy and structured tasks including terminal-only data, workspace formats 1/2,
-execution/control receipts, managed recovery and retired Events archives. Check exact bytes,
-identity and outcome before/after; missing/unsupported history must not become an
-empty store, replay or permissive rollback. A matching version string alone is not
-an artifact identity. State/lock paths, inode ownership and acquisition order are
-compatibility contracts, not cosmetic implementation details.
-
-## Frozen MCP contract
-
-[contract/mcp/mcp_contract.json](contract/mcp/mcp_contract.json) retains the released baseline
-and explicitly approved schema deltas. It is an independent expected catalog, not
-regenerated from a candidate to hide drift. Compare GitHub enabled/disabled configurations and both supported protocols without normalizing actual results.
-Duplicate tools, pagination, changed annotations or missing fields are failures.
-Discovery contacts no GitHub host. Existing behavior checks own results/errors,
-limits, source integrity and lifecycle semantics not captured by schema snapshots.
-
-An authorized contract change requires exact baseline/candidate provenance and
-review of its deliberate fixture delta. Internal file moves require no fixture
-change. Deleting a duplicate test requires an explicit retained-coverage map;
-keep unique fault, corruption, permission, control and restart scenarios. The
-retired `gh`-CLI outage fixture is covered by native HTTP fault/size/diagnostic
-checks in `test/component/github/test_transport.py`, native GitHub typed-boundary
-tests, `test_tool_contract_without_github`, and installed-candidate catalog discovery.
-`test/component/connections/test_connections.py` covers passive historical gh
-records, explicit retirement errors and rejection of native account substitution.
+Preserve the `openmachine.access`, `openmachine.cli` and
+`openmachine.service.maintenance` module entry points: the Code host, Desktop and
+the pinned management entry run them. State and lock paths, file ownership and
+the original-operation records are compatibility contracts.
 
 ## Evidence boundaries
 
-Mocked launchctl is not native service acceptance; private-socket SDK sessions are
-not real client conversations; simulated native transport is not live-device evidence.
-A true transition uses distinct immutable candidates, preserved original workers/
-records/configuration and verified restoration or explicit uncertainty. Run such
-checks only on authorized disposable resources, never production services or NAS/GPU
-workloads. Quiescent SDK upgrades remain stop -> upgrade -> original read -> resume,
-not a blanket zero-downtime promise. Preserve original target session/linger policy.
-
-Work Events delivery and discovery probes are removed. The installed MCP checks
-reject Events methods on both supported protocols and retain the frozen ordinary
-tool catalog. Service tests preserve an inert private archive and reject missing,
-unsafe or reactivating readers. Existing absent-caller, claim, no-replay and restart
-checks retain ordinary Chat task-continuation coverage without an Events adapter.
+Disposable state and short owned processes are not native acceptance. Restricted
+session tests need macOS Seatbelt; on other hosts they are skipped, not passed.
+Run installation checks only on authorized disposable resources, never against
+an account's real Core state.

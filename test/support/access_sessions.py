@@ -17,9 +17,9 @@ import uuid
 
 from openmachine.access import macos
 
-# Restricted homes go under the root-owned sticky /private/tmp, never the real /Users/Shared, with a name
+# Restricted homes go under the root-owned sticky temp directory, never the real /Users/Shared, with a name
 # owned by this test process so concurrent runs never share or delete each other's home.
-SHARED = Path("/private/tmp")
+SHARED = Path("/private/tmp" if sys.platform == "darwin" else "/tmp")
 HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
 HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 # Core's copy of om-code is per user too; each test process keeps its own.
@@ -38,8 +38,7 @@ class SessionFixture(object):
         self.state = self.root / "state"
         self.state.mkdir(mode=0o700)
         self.config = self.root / "config.toml"
-        self.config.write_text('schema_version = 1\n\n[machines.local]\ntransport = "local"\nlocal_access = "full_access"\n'
-                               'execution_enabled = true\nworkspace_write_enabled = true\n')
+        self.config.write_text('[machines.local]\ntransport = "local"\n')
         self.lifetimes = set()
         self.addCleanup(self.end_all)
 

@@ -5,228 +5,47 @@
       "sources": [
         "openmachine/access/__init__.py",
         "openmachine/access/__main__.py",
+        "openmachine/access/catalog.py",
+        "openmachine/access/git.py",
         "openmachine/access/macos.py",
         "openmachine/access/rules.py",
         "openmachine/access/sessions.py"
       ],
       "tests": [
+        "test/component/access/test_catalog.py",
+        "test/component/access/test_git.py",
         "test/component/access/test_macos.py",
+        "test/component/access/test_rules.py",
         "test/component/access/test_sessions.py",
         "test/resilience/access/test_sessions.py",
         "test/unit/access/test_sessions.py"
       ],
-      "boundary_tests": [
-        "test/component/app/test_operation_scope.py",
-        "test/resilience/execution/test_operation_scope.py"
-      ]
-    },
-    "app": {
-      "boundary_tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_task_admission.py",
-        "test/component/app/test_task_observer.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/component/server/test_mcp_workspace.py",
-        "test/contract/mcp/environment/test_context.py",
-        "test/contract/mcp/server/test_catalog.py",
-        "test/contract/mcp/tasks/test_schema.py",
-        "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/resilience/tasks/test_mcp_restart.py",
-        "test/component/projects/test_catalog.py",
-        "test/contract/mcp/projects/test_catalog.py",
-        "test/component/workspace/test_reads.py",
-        "test/contract/mcp/execution/test_schema.py",
-        "test/contract/mcp/workspace/test_reads.py",
-        "test/component/app/test_writer_reservations.py",
-        "test/resilience/execution/test_task_writer_reservations.py",
-        "test/resilience/tasks/test_mcp_writer_reservations.py"
-      ],
-      "sources": [
-        "openmachine/chat/app/__init__.py",
-        "openmachine/chat/app/environment.py",
-        "openmachine/chat/app/machines.py"
-      ],
-      "tests": [
-        "test/component/app/test_environment.py",
-        "test/component/app/test_execution_dispatch.py",
-        "test/component/app/test_github_dispatch.py",
-        "test/component/app/test_initialization.py",
-        "test/component/app/test_lifecycle.py",
-        "test/component/app/test_task_dispatch.py",
-        "test/component/app/test_workspace_dispatch.py",
-        "test/resilience/app/test_legacy_execution.py",
-        "test/resilience/app/test_mcp_workflows.py",
-        "test/component/app/test_target_environment.py",
-        "test/component/app/test_operation_scope.py"
-      ]
-    },
-    "bootstrap": {
-      "boundary_tests": [
-        "test/component/app/test_initialization.py",
-        "test/component/app/test_lifecycle.py",
-        "test/component/codex/test_discovery.py",
-        "test/component/connections/test_connections.py",
-        "test/contract/mcp/server/test_catalog.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/github/test_mcp_connection.py",
-        "test/resilience/service_runtime/test_mcp_listener.py"
-      ],
-      "sources": [
-        "integrations/__init__.py",
-        "openmachine/chat/bootstrap.py"
-      ],
-      "tests": [
-        "test/component/bootstrap/test_composition.py"
-      ]
+      "boundary_tests": []
     },
     "cli": {
-      "boundary_tests": [
-        "test/resilience/service_checks/test_mcp_readiness.py",
-        "test/resilience/service_runtime/test_mcp_listener.py"
-      ],
       "sources": [
         "openmachine/cli.py"
       ],
       "tests": [
-        "test/component/cli/test_commands.py",
-        "test/component/cli/test_management.py",
-        "test/component/cli/test_startup.py"
-      ]
-    },
-    "codex": {
-      "boundary_tests": [],
-      "sources": [
-        "integrations/codex.py"
+        "test/component/cli/test_management.py"
       ],
-      "tests": [
-        "test/component/codex/test_discovery.py",
-        "test/resilience/codex/test_delegation.py",
-        "test/resilience/codex/test_mcp_adapter.py"
+      "boundary_tests": [
+        "test/component/service/test_maintenance.py"
       ]
     },
     "config": {
-      "boundary_tests": [
-        "test/component/app/test_github_dispatch.py",
-        "test/component/bootstrap/test_composition.py",
-        "test/component/cli/test_commands.py",
-        "test/component/cli/test_management.py",
-        "test/contract/mcp/server/test_catalog.py",
-        "test/contract/mcp/server/test_transport.py",
-        "test/contract/mcp/server/test_updates.py",
-        "test/component/projects/test_catalog.py"
-      ],
       "sources": [
         "openmachine/config.py"
       ],
       "tests": [
-        "test/component/config/test_configuration.py",
-        "test/unit/config/test_github.py"
-      ]
-    },
-    "connections": {
+        "test/component/config/test_configuration.py"
+      ],
       "boundary_tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_github_dispatch.py",
-        "test/component/service/test_checks.py",
-        "test/resilience/github/test_mcp_connection.py",
-        "test/contract/mcp/server/test_github_web.py"
-      ],
-      "sources": [
-        "integrations/connections.py",
-        "integrations/connection_state.py",
-        "integrations/github/web_authorization.py"
-      ],
-      "tests": [
-        "test/component/connections/test_connections.py",
-        "test/component/connections/test_github_web.py",
-        "test/component/connections/test_github_cloud.py"
-      ]
-    },
-    "credentials": {
-      "boundary_tests": [
-        "test/component/connections/test_connections.py",
-        "test/resilience/github/test_mcp_connection.py",
-        "test/unit/github/test_device_protocol.py",
-        "test/component/connections/test_github_web.py",
-        "test/unit/github/test_web_tokens.py",
-        "test/component/github/test_web_broker.py",
-        "test/contract/mcp/server/test_github_web.py"
-      ],
-      "sources": [
-        "integrations/credentials.py"
-      ],
-      "tests": []
-    },
-    "execution": {
-      "boundary_tests": [
-        "test/component/app/test_execution_dispatch.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/component/server/test_mcp_admission.py",
-        "test/component/service/test_checks.py",
-        "test/component/service/test_rebootless_upgrade.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/app/test_task_execution.py",
-        "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/component/app/test_target_environment.py",
-        "test/component/app/test_writer_reservations.py",
-        "test/resilience/execution/test_task_writer_reservations.py",
-        "test/resilience/tasks/test_mcp_writer_reservations.py"
-      ],
-      "sources": [
-        "openmachine/execution/__init__.py",
-        "openmachine/chat/execution/__init__.py",
-        "openmachine/execution/__main__.py",
-        "openmachine/chat/execution/api.py",
-        "openmachine/chat/execution/control.py",
-        "openmachine/chat/execution/logs.py",
-        "openmachine/chat/execution/observation.py",
-        "openmachine/chat/execution/process.py",
-        "openmachine/chat/execution/records.py",
-        "openmachine/chat/execution/worker.py",
-        "openmachine/chat/execution/environment.py",
-        "openmachine/chat/execution/resources.py"
-      ],
-      "tests": [
-        "test/component/execution/test_admission.py",
-        "test/component/execution/test_logs.py",
-        "test/component/execution/test_presentation.py",
-        "test/component/execution/test_records.py",
-        "test/component/execution/test_validation.py",
-        "test/contract/mcp/execution/test_schema.py",
-        "test/resilience/execution/test_api.py",
-        "test/resilience/execution/test_interactive.py",
-        "test/resilience/execution/test_mcp_restart.py",
-        "test/resilience/execution/test_mcp_sessions.py",
-        "test/resilience/execution/test_mcp_waiting.py",
-        "test/resilience/execution/test_process.py",
-        "test/resilience/execution/test_worktrees.py",
-        "test/unit/execution/test_output.py",
-        "test/unit/execution/test_records.py",
-        "test/component/execution/test_resources.py",
-        "test/resilience/execution/test_operation_scope.py"
+        "test/component/access/test_catalog.py",
+        "test/component/service/test_maintenance.py"
       ]
     },
     "foundation": {
-      "boundary_tests": [
-        "test/component/execution/test_logs.py",
-        "test/component/execution/test_presentation.py",
-        "test/component/github/test_transport.py",
-        "test/component/service/test_state.py",
-        "test/component/tasks/test_legacy.py",
-        "test/component/tasks/test_store.py",
-        "test/component/workspace/test_changes.py",
-        "test/component/workspace/test_patch.py",
-        "test/component/workspace/test_reads.py",
-        "test/resilience/execution/test_process.py",
-        "test/resilience/tasks/test_persistence.py",
-        "test/unit/github/test_operations.py",
-        "test/unit/github/test_projects.py",
-        "test/unit/github/test_releases.py",
-        "test/component/projects/test_catalog.py",
-        "test/resilience/execution/test_operation_scope.py"
-      ],
       "sources": [
         "openmachine/__init__.py",
         "openmachine/foundation/__init__.py",
@@ -234,56 +53,18 @@
         "openmachine/foundation/sanitize.py",
         "openmachine/foundation/state.py"
       ],
-      "tests": [
-        "test/unit/foundation/test_sanitize.py"
-      ]
-    },
-    "github": {
+      "tests": [],
       "boundary_tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_github_dispatch.py",
-        "test/unit/config/test_github.py",
-        "test/component/connections/test_github_web.py",
-        "test/contract/mcp/server/test_github_web.py"
-      ],
-      "sources": [
-        "integrations/github/__init__.py",
-        "integrations/github/actions.py",
-        "integrations/github/auth.py",
-        "integrations/github/client.py",
-        "integrations/github/connection.py",
-        "integrations/github/evidence.py",
-        "integrations/github/operations.py",
-        "integrations/github/web_broker.py",
-        "integrations/github/cloud.py"
-      ],
-      "tests": [
-        "test/component/github/test_transport.py",
-        "test/contract/mcp/github/test_scope.py",
-        "test/resilience/github/test_mcp_connection.py",
-        "test/unit/github/test_device_protocol.py",
-        "test/unit/github/test_operations.py",
-        "test/unit/github/test_projects.py",
-        "test/unit/github/test_releases.py",
-        "test/unit/github/test_actions.py",
-        "test/unit/github/test_web_tokens.py",
-        "test/component/github/test_web_broker.py"
+        "test/component/access/test_catalog.py",
+        "test/component/access/test_sessions.py",
+        "test/component/service/test_maintenance.py",
+        "test/component/service/test_payload.py"
       ]
     },
     "repository": {
       "boundary_tests": [],
       "sources": [
         ".github/workflows/auto-metadata.yml",
-        ".github/workflows/npm-package.yml",
-        "assets/openmachine-banner.png",
-        "assets/openmachine-workflow.png",
-        "npm/README.md",
-        "npm/bin/openmachine.cjs",
-        "npm/lib/cli.cjs",
-        "npm/lib/runtime.cjs",
-        "npm/package.json",
-        "npm/scripts/assert-payload.cjs",
-        "npm/scripts/package.cjs",
         "scripts/auto_metadata.py",
         "scripts/check_repository.py",
         "scripts/premerge.py",
@@ -291,397 +72,93 @@
         ".github/workflows/review-policy-signal.yml",
         ".github/workflows/trusted-review-gate.yml",
         "scripts/trusted_review_gate.py",
-        "test/repository/npm_installer.test.cjs",
         ".github/CODEOWNERS",
-        "npm/THIRD_PARTY.md",
-        "npm/release-sources.json",
-        "npm/scripts/verify-release-sources.cjs",
-        "scripts/prepare_npm_release_sources.py",
-        ".github/workflows/npm-release.yml"
+        ".github/workflows/runtime-payload.yml",
+        "assets/openmachine-banner.png",
+        "assets/openmachine-hero.svg",
+        "assets/button-download-light.svg",
+        "assets/button-download-dark.svg",
+        "assets/button-console-light.svg",
+        "assets/button-console-dark.svg",
+        "assets/button-website-light.svg",
+        "assets/button-website-dark.svg"
       ],
       "tests": [
         "test/repository/test_auto_metadata.py",
         "test/repository/test_dependencies.py",
-        "test/repository/test_npm_installer.py",
         "test/repository/test_premerge.py",
         "test/repository/test_repository.py",
         "test/repository/test_runner.py",
         "test/repository/test_trusted_review_gate.py"
       ]
     },
-    "server": {
-      "boundary_tests": [
-        "test/contract/mcp/execution/test_schema.py",
-        "test/contract/mcp/github/test_scope.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/contract/mcp/tasks/test_schema.py",
-        "test/contract/mcp/workspace/test_edits.py",
-        "test/contract/mcp/workspace/test_patch.py",
-        "test/contract/mcp/workspace/test_reads.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/execution/test_mcp_sessions.py",
-        "test/resilience/github/test_mcp_connection.py",
-        "test/contract/mcp/projects/test_catalog.py"
-      ],
-      "sources": [
-        "openmachine/chat/__init__.py",
-        "openmachine/chat/mcp/__init__.py",
-        "openmachine/chat/mcp/connections.py",
-        "openmachine/chat/mcp/environment.py",
-        "openmachine/chat/mcp/execution.py",
-        "openmachine/chat/mcp/protocol.py",
-        "openmachine/chat/mcp/tasks.py",
-        "openmachine/chat/mcp/workspace.py",
-        "openmachine/chat/server.py",
-        "openmachine/chat/github_web_http.py"
-      ],
-      "tests": [
-        "test/component/server/test_mcp_admission.py",
-        "test/component/server/test_mcp_workspace.py",
-        "test/contract/mcp/environment/test_context.py",
-        "test/contract/mcp/server/test_catalog.py",
-        "test/contract/mcp/server/test_transport.py",
-        "test/unit/server/test_mcp_reply.py",
-        "test/contract/mcp/server/test_updates.py",
-        "test/contract/mcp/server/test_github_web.py"
-      ]
-    },
-    "service_checks": {
-      "boundary_tests": [
-        "test/component/service/test_maintenance.py",
-        "test/component/service/test_transition.py",
-        "test/resilience/execution/test_process.py",
-        "test/component/connections/test_github_web.py",
-        "test/component/cli/test_startup.py",
-        "test/component/tasks/test_writer_migration.py"
-      ],
-      "sources": [
-        "openmachine/service/__init__.py",
-        "openmachine/service/__main__.py",
-        "openmachine/service/checks.py"
-      ],
-      "tests": [
-        "test/component/service/test_checks.py",
-        "test/component/service/test_rebootless_upgrade.py",
-        "test/component/service/test_workspace_compatibility.py",
-        "test/resilience/service_checks/test_mcp_readiness.py"
-      ]
-    },
     "service_install": {
-      "boundary_tests": [
-        "test/component/service/test_maintenance.py",
-        "test/component/service/test_transition.py"
-      ],
       "sources": [
         "openmachine/service/install.py"
       ],
       "tests": [
-        "test/component/service/test_install.py",
-        "test/component/service/test_install_payload.py"
+        "test/component/service/test_install.py"
+      ],
+      "boundary_tests": [
+        "test/component/service/test_maintenance.py"
       ]
     },
     "service_maintenance": {
-      "boundary_tests": [
-        "test/component/cli/test_management.py",
-        "test/component/cli/test_startup.py"
-      ],
       "sources": [
+        "openmachine/service/__init__.py",
         "openmachine/service/maintenance.py"
       ],
       "tests": [
         "test/component/service/test_maintenance.py",
-        "test/component/service/test_management_cli.py",
         "test/resilience/service/test_maintenance_process.py"
+      ],
+      "boundary_tests": [
+        "test/component/cli/test_management.py"
       ]
     },
     "service_payload": {
-      "boundary_tests": [
-        "test/component/service/test_install_payload.py"
-      ],
       "sources": [
         "openmachine/service/payload.py",
-        "scripts/build_runtime_payload.py"
+        "scripts/build_runtime_payload.py",
+        "scripts/runtime-inputs.json"
       ],
       "tests": [
         "test/component/service/test_payload.py",
         "test/component/service/test_payload_builder.py"
+      ],
+      "boundary_tests": [
+        "test/component/service/test_install.py",
+        "test/component/service/test_maintenance.py"
       ]
     },
     "service_processes": {
-      "boundary_tests": [
-        "test/component/service/test_checks.py",
-        "test/component/service/test_install.py",
-        "test/component/service/test_maintenance.py",
-        "test/component/service/test_runtime.py",
-        "test/component/service/test_transition.py",
-        "test/resilience/service/test_maintenance_process.py"
-      ],
       "sources": [
         "openmachine/service/processes.py"
       ],
       "tests": [
         "test/resilience/service/test_subprocess.py"
-      ]
-    },
-    "service_runtime": {
+      ],
       "boundary_tests": [
-        "test/component/service/test_maintenance.py",
-        "test/component/service/test_transition.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/component/cli/test_startup.py"
-      ],
-      "sources": [
-        "openmachine/service/runtime.py"
-      ],
-      "tests": [
-        "test/component/service/test_runtime.py",
-        "test/resilience/service_runtime/test_mcp_listener.py"
+        "test/component/service/test_install.py"
       ]
     },
     "service_state": {
-      "boundary_tests": [
-        "test/component/app/test_lifecycle.py",
-        "test/component/service/test_checks.py",
-        "test/component/service/test_maintenance.py",
-        "test/component/service/test_management_cli.py",
-        "test/component/service/test_transition.py",
-        "test/component/connections/test_github_web.py",
-        "test/component/cli/test_startup.py"
-      ],
       "sources": [
         "openmachine/service/state.py"
       ],
-      "tests": [
-        "test/component/service/test_state.py"
+      "tests": [],
+      "boundary_tests": [
+        "test/component/service/test_install.py",
+        "test/component/service/test_maintenance.py"
       ]
     },
     "service_transition": {
-      "boundary_tests": [
-        "test/component/service/test_maintenance.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/service_checks/test_mcp_readiness.py"
-      ],
       "sources": [
         "openmachine/service/transition.py"
       ],
-      "tests": [
-        "test/component/service/test_transition.py"
-      ]
-    },
-    "skills": {
+      "tests": [],
       "boundary_tests": [
-        "test/component/bootstrap/test_composition.py",
-        "test/contract/mcp/server/test_catalog.py"
-      ],
-      "sources": [
-        "openmachine/skills/README.md",
-        "openmachine/skills/__init__.py",
-        "openmachine/skills/bindings.yaml",
-        "openmachine/skills/browser/SKILL.md",
-        "openmachine/skills/browser/reference.md",
-        "openmachine/skills/catalog.py",
-        "openmachine/skills/environment/SKILL.md",
-        "openmachine/skills/execution/SKILL.md",
-        "openmachine/skills/execution/terminal.md",
-        "openmachine/skills/github/SKILL.md",
-        "openmachine/skills/github/attribution.md",
-        "openmachine/skills/github/connections.md",
-        "openmachine/skills/github/reference.md",
-        "openmachine/skills/github/uncertainty.md",
-        "openmachine/skills/guidance.py",
-        "openmachine/skills/overview/SKILL.md",
-        "openmachine/skills/overview/development.md",
-        "openmachine/skills/overview/setup.md",
-        "openmachine/skills/reader.py",
-        "openmachine/skills/service/SKILL.md",
-        "openmachine/skills/service/management.md",
-        "openmachine/skills/service/product-management.md",
-        "openmachine/skills/service/runtime-payload.md",
-        "openmachine/skills/tasks/SKILL.md",
-        "openmachine/skills/tasks/continue.md",
-        "openmachine/skills/tasks/control.md",
-        "openmachine/skills/tasks/create.md",
-        "openmachine/skills/tasks/maintenance.md",
-        "openmachine/skills/tasks/verify.md",
-        "openmachine/skills/workspace/SKILL.md",
-        "openmachine/skills/workspace/files.md",
-        "openmachine/skills/workspace/worktrees.md"
-      ],
-      "tests": [
-        "test/component/skills/test_packaging.py",
-        "test/component/skills/test_resources.py"
-      ]
-    },
-    "task_admission": {
-      "boundary_tests": [
-        "test/component/app/test_execution_dispatch.py",
-        "test/component/app/test_github_dispatch.py",
-        "test/component/app/test_task_dispatch.py",
-        "test/component/app/test_workspace_dispatch.py",
-        "test/resilience/app/test_mcp_workflows.py",
-        "test/resilience/tasks/test_mcp_restart.py"
-      ],
-      "sources": [
-        "openmachine/chat/app/task_admission.py"
-      ],
-      "tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_scoped_supervision.py",
-        "test/component/app/test_task_admission.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_task_association.py",
-        "test/resilience/app/test_task_execution.py"
-      ]
-    },
-    "task_attention": {
-      "boundary_tests": [
-        "test/component/app/test_task_admission.py"
-      ],
-      "sources": [
-        "openmachine/chat/app/task_attention.py"
-      ],
-      "tests": [
-        "test/component/app/test_task_attention.py",
-        "test/contract/mcp/tasks/test_attention.py"
-      ]
-    },
-    "task_observer": {
-      "boundary_tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_scoped_supervision.py",
-        "test/component/app/test_task_admission.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_task_execution.py"
-      ],
-      "sources": [
-        "openmachine/chat/app/task_observation.py",
-        "openmachine/chat/app/task_observer.py"
-      ],
-      "tests": [
-        "test/component/app/test_task_observer.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/app/test_observer_process.py"
-      ]
-    },
-    "task_receipts": {
-      "boundary_tests": [
-        "test/component/app/test_github_admission.py",
-        "test/component/app/test_scoped_supervision.py",
-        "test/component/app/test_task_admission.py",
-        "test/component/app/test_task_observer.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/app/test_observer_process.py",
-        "test/resilience/app/test_task_execution.py"
-      ],
-      "sources": [
-        "openmachine/chat/app/task_receipts.py"
-      ],
-      "tests": []
-    },
-    "tasks": {
-      "boundary_tests": [
-        "test/component/app/test_environment.py",
-        "test/component/app/test_scoped_supervision.py",
-        "test/component/app/test_task_admission.py",
-        "test/component/app/test_task_dispatch.py",
-        "test/component/app/test_task_observer.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/component/service/test_checks.py",
-        "test/component/service/test_transition.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/app/test_mcp_observer.py",
-        "test/resilience/workspace/test_mcp_patch_restart.py"
-      ],
-      "sources": [
-        "openmachine/chat/tasks/__init__.py",
-        "openmachine/chat/tasks/database.py",
-        "openmachine/chat/tasks/effects.py",
-        "openmachine/chat/tasks/index.py",
-        "openmachine/chat/tasks/migration.py",
-        "openmachine/chat/tasks/records.py",
-        "openmachine/chat/tasks/rows.py",
-        "openmachine/chat/tasks/store.py",
-        "openmachine/chat/tasks/transitions.py",
-        "scripts/retire_chat_recovery_once.py"
-      ],
-      "tests": [
-        "test/component/tasks/test_legacy.py",
-        "test/component/tasks/test_store.py",
-        "test/contract/mcp/tasks/test_schema.py",
-        "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/resilience/tasks/test_mcp_restart.py",
-        "test/resilience/tasks/test_persistence.py",
-        "test/unit/tasks/test_effects.py",
-        "test/unit/tasks/test_transitions.py",
-        "test/component/app/test_writer_reservations.py",
-        "test/resilience/execution/test_task_writer_reservations.py",
-        "test/resilience/tasks/test_mcp_writer_reservations.py",
-        "test/component/tasks/test_writer_migration.py"
-      ]
-    },
-    "workspace": {
-      "boundary_tests": [
-        "test/component/app/test_environment.py",
-        "test/component/app/test_workspace_dispatch.py",
-        "test/component/app/test_worktree_admission.py",
-        "test/component/server/test_mcp_workspace.py",
-        "test/component/service/test_workspace_compatibility.py",
-        "test/contract/mcp/tasks/test_admission.py",
-        "test/resilience/app/test_mcp_admission.py",
-        "test/resilience/execution/test_worktrees.py",
-        "test/resilience/tasks/test_mcp_legacy_workflow.py",
-        "test/component/app/test_target_environment.py",
-        "test/component/projects/test_catalog.py",
-        "test/component/app/test_writer_reservations.py",
-        "test/resilience/execution/test_task_writer_reservations.py",
-        "test/resilience/tasks/test_mcp_writer_reservations.py"
-      ],
-      "sources": [
-        "openmachine/chat/workspace/__init__.py",
-        "openmachine/chat/workspace/change_records.py",
-        "openmachine/chat/workspace/change_schema.py",
-        "openmachine/chat/workspace/changes.py",
-        "openmachine/chat/workspace/files.py",
-        "openmachine/chat/workspace/git.py",
-        "openmachine/chat/workspace/inspect.py",
-        "openmachine/chat/workspace/patch.py",
-        "openmachine/chat/workspace/preparation.py",
-        "openmachine/chat/workspace/worktrees.py",
-        "openmachine/chat/workspace/signals.py"
-      ],
-      "tests": [
-        "test/component/workspace/test_changes.py",
-        "test/component/workspace/test_inspection.py",
-        "test/component/workspace/test_legacy_writes.py",
-        "test/component/workspace/test_patch.py",
-        "test/component/workspace/test_reads.py",
-        "test/component/workspace/test_worktrees.py",
-        "test/contract/mcp/workspace/test_edits.py",
-        "test/contract/mcp/workspace/test_patch.py",
-        "test/contract/mcp/workspace/test_reads.py",
-        "test/resilience/workspace/test_leases.py",
-        "test/resilience/workspace/test_legacy_lock.py",
-        "test/resilience/workspace/test_mcp_edit_restart.py",
-        "test/resilience/workspace/test_mcp_patch_restart.py"
-      ]
-    },
-    "service_updates": {
-      "sources": [
-        "openmachine/service/updates.py"
-      ],
-      "tests": [
-        "test/component/service/test_updates.py"
-      ],
-      "boundary_tests": [
-        "test/contract/mcp/server/test_updates.py"
+        "test/component/service/test_maintenance.py"
       ]
     },
     "anthropic_illustrations": {
@@ -731,210 +208,28 @@
         "test/skill-library/project-to-motion/test_retired_skill.py"
       ],
       "boundary_tests": []
-    },
-    "projects": {
-      "boundary_tests": [
-        "test/contract/mcp/server/test_catalog.py"
-      ],
-      "sources": [
-        "openmachine/chat/projects/__init__.py",
-        "openmachine/chat/projects/catalog.py",
-        "openmachine/chat/mcp/projects.py"
-      ],
-      "tests": [
-        "test/component/projects/test_catalog.py",
-        "test/contract/mcp/projects/test_catalog.py"
-      ]
-    },
-    "ssh": {
-      "sources": [],
-      "tests": [],
-      "boundary_tests": [
-        "test/component/config/test_configuration.py",
-        "test/component/projects/test_catalog.py",
-        "test/contract/mcp/server/test_catalog.py"
-      ]
     }
   },
   "support": {
-    "test/contract/mcp/mcp_contract.json": [
-      "test/contract/mcp/server/test_catalog.py"
-    ],
-    "test/support/application_admission.py": [
-      "test/component/app/test_execution_dispatch.py",
-      "test/component/app/test_github_dispatch.py",
-      "test/component/app/test_lifecycle.py",
-      "test/component/app/test_task_dispatch.py",
-      "test/component/app/test_workspace_dispatch.py"
-    ],
-    "test/support/codex_cases.py": [
-      "test/component/codex/test_discovery.py",
-      "test/resilience/codex/test_delegation.py"
-    ],
-    "test/support/connections_cases.py": [
-      "test/component/connections/test_connections.py",
-      "test/component/connections/test_github_web.py",
-      "test/component/connections/test_github_cloud.py"
-    ],
-    "test/support/continuity_cases.py": [
-      "test/component/app/test_initialization.py",
-      "test/component/skills/test_resources.py",
-      "test/component/tasks/test_legacy.py",
-      "test/component/workspace/test_legacy_writes.py",
-      "test/resilience/app/test_legacy_execution.py",
-      "test/resilience/workspace/test_legacy_lock.py"
+    "test/support/access_sessions.py": [
+      "test/resilience/access/test_sessions.py"
     ],
     "test/support/dependencies.py": [
       "test/repository/test_dependencies.py"
     ],
-    "test/support/execution.py": [
-      "test/component/execution/test_presentation.py",
-      "test/component/execution/test_records.py",
-      "test/component/execution/test_validation.py",
-      "test/resilience/app/test_task_execution.py",
-      "test/resilience/execution/test_interactive.py",
-      "test/resilience/execution/test_process.py",
-      "test/resilience/execution/test_worktrees.py"
-    ],
-    "test/support/execution_cases.py": [
-      "test/component/execution/test_presentation.py",
-      "test/component/execution/test_records.py",
-      "test/component/execution/test_validation.py",
-      "test/resilience/execution/test_process.py",
-      "test/resilience/execution/test_worktrees.py"
-    ],
-    "test/support/github_cases.py": [
-      "test/unit/github/test_actions.py",
-      "test/component/app/test_github_admission.py",
-      "test/component/github/test_transport.py",
-      "test/component/tasks/test_store.py",
-      "test/resilience/tasks/test_persistence.py",
-      "test/unit/github/test_operations.py",
-      "test/unit/github/test_projects.py",
-      "test/unit/github/test_releases.py"
-    ],
-    "test/support/goal_recovery.py": [
-      "test/component/app/test_github_admission.py",
-      "test/component/github/test_transport.py",
-      "test/component/tasks/test_store.py",
-      "test/resilience/tasks/test_persistence.py"
-    ],
-    "test/support/mcp.py": [
-      "test/component/server/test_mcp_workspace.py",
-      "test/contract/mcp/environment/test_context.py",
-      "test/contract/mcp/execution/test_schema.py",
-      "test/contract/mcp/github/test_scope.py",
-      "test/contract/mcp/server/test_catalog.py",
-      "test/contract/mcp/server/test_transport.py",
-      "test/contract/mcp/tasks/test_admission.py",
-      "test/contract/mcp/tasks/test_attention.py",
-      "test/contract/mcp/tasks/test_schema.py",
-      "test/contract/mcp/workspace/test_edits.py",
-      "test/contract/mcp/workspace/test_patch.py",
-      "test/contract/mcp/workspace/test_reads.py",
-      "test/resilience/app/test_mcp_admission.py",
-      "test/resilience/app/test_mcp_observer.py",
-      "test/resilience/app/test_mcp_workflows.py",
-      "test/resilience/codex/test_mcp_adapter.py",
-      "test/resilience/execution/test_mcp_restart.py",
-      "test/resilience/execution/test_mcp_sessions.py",
-      "test/resilience/execution/test_mcp_waiting.py",
-      "test/resilience/github/test_mcp_connection.py",
-      "test/resilience/service_checks/test_mcp_readiness.py",
-      "test/resilience/service_runtime/test_mcp_listener.py",
-      "test/resilience/tasks/test_mcp_legacy_workflow.py",
-      "test/resilience/tasks/test_mcp_restart.py",
-      "test/resilience/workspace/test_mcp_edit_restart.py",
-      "test/resilience/workspace/test_mcp_patch_restart.py",
-      "test/contract/mcp/server/test_updates.py",
-      "test/contract/mcp/server/test_github_web.py",
-      "test/contract/mcp/projects/test_catalog.py",
-      "test/resilience/tasks/test_mcp_writer_reservations.py"
-    ],
     "test/support/payload_cases.py": [
-      "test/component/service/test_install_payload.py",
+      "test/component/service/test_install.py",
+      "test/component/service/test_maintenance.py",
       "test/component/service/test_payload.py",
-      "test/component/service/test_payload_builder.py"
+      "test/resilience/service/test_maintenance_process.py"
     ],
     "test/support/repository.py": [
       "test/repository/test_premerge.py",
       "test/repository/test_runner.py"
     ],
-    "test/support/runtime_cases.py": [
-      "test/component/bootstrap/test_composition.py",
-      "test/component/cli/test_commands.py",
-      "test/component/config/test_configuration.py",
-      "test/component/execution/test_admission.py",
-      "test/component/execution/test_logs.py",
-      "test/component/service/test_rebootless_upgrade.py",
-      "test/component/workspace/test_inspection.py",
-      "test/resilience/execution/test_api.py"
-    ],
     "test/support/service_cases.py": [
-      "test/component/cli/test_management.py",
-      "test/component/service/test_checks.py",
-      "test/component/service/test_install.py",
       "test/component/service/test_maintenance.py",
-      "test/component/service/test_management_cli.py",
-      "test/component/service/test_runtime.py",
-      "test/component/service/test_state.py",
-      "test/component/service/test_transition.py",
-      "test/resilience/service/test_maintenance_process.py",
-      "test/resilience/service/test_subprocess.py"
-    ],
-    "test/support/task_observer_cases.py": [
-      "test/component/app/test_task_observer.py",
-      "test/resilience/app/test_observer_process.py"
-    ],
-    "test/support/tasks.py": [
-      "test/component/app/test_environment.py",
-      "test/component/app/test_github_admission.py",
-      "test/component/app/test_initialization.py",
-      "test/component/app/test_lifecycle.py",
-      "test/component/app/test_scoped_supervision.py",
-      "test/component/app/test_task_admission.py",
-      "test/component/app/test_task_attention.py",
-      "test/component/app/test_task_observer.py",
-      "test/component/app/test_worktree_admission.py",
-      "test/component/codex/test_discovery.py",
-      "test/component/connections/test_connections.py",
-      "test/component/service/test_checks.py",
-      "test/component/service/test_transition.py",
-      "test/component/skills/test_resources.py",
-      "test/component/tasks/test_legacy.py",
-      "test/component/tasks/test_store.py",
-      "test/component/workspace/test_legacy_writes.py",
-      "test/resilience/app/test_legacy_execution.py",
-      "test/resilience/app/test_observer_process.py",
-      "test/resilience/app/test_task_association.py",
-      "test/resilience/app/test_task_execution.py",
-      "test/resilience/codex/test_delegation.py",
-      "test/resilience/tasks/test_persistence.py",
-      "test/resilience/workspace/test_legacy_lock.py",
-      "test/component/app/test_target_environment.py",
-      "test/component/connections/test_github_web.py",
-      "test/component/github/test_transport.py",
-      "test/component/app/test_writer_reservations.py",
-      "test/resilience/execution/test_task_writer_reservations.py",
-      "test/component/tasks/test_writer_migration.py",
-      "test/component/app/test_operation_scope.py",
-      "test/component/connections/test_github_cloud.py"
-    ],
-    "test/support/workspace.py": [
-      "test/component/service/test_workspace_compatibility.py",
-      "test/component/workspace/test_changes.py",
-      "test/component/workspace/test_patch.py",
-      "test/component/workspace/test_reads.py",
-      "test/component/workspace/test_worktrees.py",
-      "test/resilience/workspace/test_leases.py",
-      "test/component/projects/test_catalog.py"
-    ],
-    "test/support/operation_scope.py": [
-      "test/component/app/test_operation_scope.py",
-      "test/resilience/execution/test_operation_scope.py"
-    ],
-    "test/support/access_sessions.py": [
-      "test/resilience/access/test_sessions.py"
+      "test/resilience/service/test_maintenance_process.py"
     ]
   }
 }

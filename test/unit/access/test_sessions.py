@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+import openmachine
 from openmachine.access import macos, sessions
 from openmachine.access import sessions as sessions_module
 from openmachine.foundation.sanitize import Fault
@@ -82,6 +83,11 @@ class RequestTests(unittest.TestCase):
             else:
                 with self.assertRaises(Fault):
                     self.parse(VALID | {"github": github})
+
+    def test_capabilities_report_the_core_version_om_code_records(self):
+        version = sessions.capabilities()["version"]
+        self.assertEqual(version, openmachine.__version__)
+        self.assertRegex(version, r"^[0-9A-Za-z.+-]{1,32}$")
 
     def test_restricted_policies_follow_the_lifetime_backend(self):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):

@@ -105,7 +105,7 @@ formal Spec sections or English. The source checker preserves secret-boundary,
 link and file hygiene checks. PR section names are presentation advice, not
 proof of acceptance.
 
-CI jobs run on GitHub-hosted Ubuntu 24.04 with pinned actions. Quality checks
+Quality CI jobs run on GitHub-hosted Ubuntu 24.04 with pinned actions. Quality checks
 use read-only permissions and cannot run candidate code under write-privileged
 `pull_request_target`. Metadata-only changes must not cancel, replace or mask
 code verification. Only separate trusted default-branch automations perform
@@ -120,6 +120,6 @@ required checks and community links before relying on them; documentation alone
 does not enable repository settings. See [SECURITY.md](SECURITY.md) and
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-Publishing any npm package additionally requires the exact artifact, provenance,
-clean-user native acceptance and third-party redistribution review described in
-[npm/README.md](npm/README.md) and [npm/THIRD_PARTY.md](npm/THIRD_PARTY.md).
+The manual `runtime-payload` workflow builds an unsigned, attested runtime payload
+for review. Shipping one in a product needs the release authority above, its
+reviewed manifest digest and the third-party notices it carries.

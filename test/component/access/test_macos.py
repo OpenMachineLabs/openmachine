@@ -32,9 +32,9 @@ class ProfileTests(unittest.TestCase):
         readable, writable, worktree = self.root / "Dev (1)+x", self.root / "Dev (1)+x/core", self.root / "wt"
         for path in (writable, worktree):
             path.mkdir(parents=True)
-        arguments = dict(readable=[readable], writable=[writable, worktree], private=self.root / "T/openmachine-scope/exec",
+        arguments = dict(readable=[readable], writable=[writable, worktree], private=self.root / "T/omc/lifetime",
                          control=[self.root / "state"], denied=[self.root / "home/Library"],
-                         exceptions=[self.root / "home/Library/Developer"])
+                         exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om-code")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(**arguments)
             # Protection is by name: a .git file changes nothing, and nested Git dirs that exist gain only
@@ -48,16 +48,15 @@ class ProfileTests(unittest.TestCase):
                 (path / "HEAD").write_text("ref: refs/heads/main\n")
             nested = seatbelt.profile(**arguments)  # A Git dir the profile cannot name stays fully denied.
             self.assertNotIn('qu"ote', nested)
-            checkout = seatbelt.profile(**arguments, checkout=(self.root / "Dev (1)+x/new", writable / ".git"))
             with self.assertRaises(Fault) as caught:
                 seatbelt.profile(readable=[self.root / 'quote"d'], writable=[writable], private=self.root, control=[],
-                                 denied=[], exceptions=[])
+                                 denied=[], exceptions=[], executable=self.root / "omc/om-code")
             self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
         self.assertEqual(lines[:2], ["(version 1)", "(deny default)"])
         # Broad reads come first; denied areas, then their exceptions and granted roots, narrow them in order.
         order = ["(allow file-read*)", f'(deny file-read* process-exec (subpath "{self.root / "home/Library"}") '
-                 f'(subpath "{self.root / "T/openmachine-scope"}"))',
+                 f'(subpath "{self.root / "T/omc"}"))',
                  f'(allow file-read* process-exec (subpath "{self.root / "home/Library/Developer"}"))',
                  f'(allow file-read* file-read-data process-exec (subpath "{readable}"))']
         self.assertEqual([lines.index(line) for line in order], sorted(lines.index(line) for line in order))
@@ -74,7 +73,7 @@ class ProfileTests(unittest.TestCase):
         freeze = f'(deny file-write-create file-write-unlink (regex #"{seatbelt.NESTED_GIT_REGEX}"))'
         self.assertGreater(lines.index(freeze), lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
         inside = (f'(require-any (subpath "{writable}") (subpath "{worktree}") '
-                  f'(subpath "{self.root / "T/openmachine-scope/exec"}"))')
+                  f'(subpath "{self.root / "T/omc/lifetime"}"))')
         tail = [protected,
                 rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
                 "(deny file-clone (vnode-type DIRECTORY))",
@@ -102,42 +101,20 @@ class ProfileTests(unittest.TestCase):
         for path in ("worktrees/wt", "worktrees/new/logs", "modules/vendor", "modules/vendor/objects",
                      "modules/vendor/objects/lib", "modules/vendor/objects/other", "modules/vendor/objects/lib/modules/x"):
             self.assertFalse(any(pattern.match(str(writable / ".git" / path)) for pattern in data), path)
-        # Only Core's own worktree creation may make its new registration and link; existing ones stay unchanged.
-        added = checkout.splitlines()
-        registrations = writable / ".git/worktrees"
-        self.assertEqual(added[:start + 3], found[:start + 3])
-        self.assertEqual(added[start + 4:start + 7], tail[:3])
-        self.assertEqual(added[start + 7:], [
-            f'(allow file-write-create (require-all {inside} (literal "{self.root / "Dev (1)+x/new/.git"}")))',
-            added[start + 8], f'(deny file-write-unlink (literal "{registrations}"))',
-            f'(deny {seatbelt.WRITES} (subpath "{registrations / "wt"}"))', tail[-1]])
         # A later wildcard denial does not override an allowance that names an operation, so the denials
         # name every write operation that any allowance names.
-        named = {operation for line in added if line.startswith("(allow")
+        named = {operation for line in found if line.startswith("(allow")
                  for operation in re.findall(r"file-write-[a-z]+", line)}
         self.assertLessEqual(named, set(seatbelt.WRITES.split()))
-        new, commondir = (re.search(r'#"([^"]+)"', line).group(1) for line in (added[start + 3], added[start + 8]))
-        self.assertTrue(inside in added[start + 3] and inside in added[start + 8])
-        for path in (registrations, registrations / "new", registrations / "new/HEAD", registrations / "new/logs/refs"):
-            self.assertRegex(str(path), new)
-        self.assertRegex(str(registrations / "new/commondir"), commondir)
-        for path in (worktree / ".git/worktrees", writable / ".git/modules/x"):
-            self.assertNotRegex(str(path), new)
-        for path in (registrations / "new/gitdir", writable / ".git/commondir", worktree / ".git/worktrees/x/commondir"):
-            self.assertNotRegex(str(path), commondir)
         self.assertNotIn("SecurityServer", text)
         self.assertNotIn("appleevents", text.lower())
-        self.assertIn('(allow file-read* file-write* (literal "/dev/ttys004"))', seatbelt.own_terminal(text, "/dev/ttys004"))
 
     def test_only_the_named_executable_runs_inside_a_denied_area(self):
         client, denied = self.root / "home/Library/om/om-code", self.root / "home/Library"
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
-            plain = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
-                                     denied=[denied], exceptions=[])
             text = seatbelt.profile(readable=[], writable=[], private=self.root / "T/p", control=[self.root / "state"],
                                     denied=[denied], exceptions=[], executable=client)
         allow = f'(allow file-read* process-exec (literal "{client}"))'
-        self.assertNotIn("literal \"" + str(client), plain)
         lines = text.splitlines()
         self.assertLess(lines.index(f'(deny file-read* process-exec (subpath "{denied}") (subpath "{self.root / "T"}"))'),
                         lines.index(allow))
@@ -157,6 +134,13 @@ class ProfileTests(unittest.TestCase):
                      ".git/info/exclude", ".git/objects/ab/cd", "config", "hooks/x", ".gitconfig", ".gitmodules",
                      ".github/hooks/x", "bare.git/config"):
             self.assertNotRegex("/r/" + path, pattern)
+        # Seatbelt matches names case-insensitively, as the volume resolves them; IDE settings run later too.
+        protected = re.compile(f"{seatbelt.PROTECTED_REGEX}|{seatbelt.PROTECTED_IDE_REGEX}", re.IGNORECASE)
+        for path in (".vscode/tasks.json", "a/.idea/x", ".VSCODE/tasks.json", ".vſcode/x", ".GIT/CONFIG", "sub/.Git",
+                     ".git/hooKs/x"):
+            self.assertRegex("/r/" + path, protected)
+        for path in ("file.txt", ".vscodex/x", "idea/x", ".github/x"):
+            self.assertNotRegex("/r/" + path, protected)
 
     def test_nested_git_dirs_are_the_ones_git_lays_out(self):
         nested = re.compile(seatbelt.NESTED_GIT_REGEX)
@@ -191,16 +175,13 @@ class ProfileTests(unittest.TestCase):
             self.assertNotRegex(path, directories)
         self.assertNotRegex("/p/aws-sdk/lib/credentials/index.js", files)
 
-    def test_environment_and_private_home_hold_no_inherited_secrets(self):
+    def test_environment_holds_no_inherited_secrets(self):
         base = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C", "TERM": "xterm", "HOME": "/Users/real",
                 "SSH_AUTH_SOCK": "/tmp/agent", "GIT_DIR": "/elsewhere", "GITHUB_TOKEN": "secret", "OPENMACHINE_STATE": "x"}
         private = self.root / "private"
         environment = seatbelt.environment(base, private)
         self.assertEqual({key for key in environment if key in base}, {"PATH", "LANG", "LC_ALL", "TERM", "HOME"})
         self.assertEqual((environment["HOME"], environment["TMPDIR"]), (str(private / "home"), str(private / "tmp") + "/"))
-        seatbelt.prepare(private, {"name": "Fixture", "email": "fixture@example.invalid\n[core]"})
-        self.assertEqual((private / "home/.gitconfig").read_text(), "[user]\n\tname = Fixture\n")
-        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
 
 
 if __name__ == "__main__":

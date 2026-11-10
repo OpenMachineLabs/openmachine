@@ -16,7 +16,7 @@ proposals. You do not need to use an AI agent to contribute.
   Changes to public interfaces, architecture, permissions or persisted state may
   need an approved [Spec](.github/ISSUE_TEMPLATE/spec.md).
 - **Security vulnerabilities:** use [SECURITY.md](SECURITY.md), never a public
-  Issue, pull request or community chat containing exploit details.
+  Issue, pull request or community channel containing exploit details.
 
 Read our [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports and feature requests
 are welcome in any language. Repository-authored documentation, code comments,
@@ -24,9 +24,8 @@ commit messages and technical PR descriptions must remain in English.
 
 ## Set up a development checkout
 
-The Python runtime supports macOS and Linux, not Windows. You need Python 3.12+,
-Git and a compatible SQLite version; see the
-[setup requirements](openmachine/skills/overview/setup.md#install).
+You need Python 3.12+ and Git. Restricted sessions need macOS Seatbelt; their
+tests are skipped elsewhere. Windows is not supported.
 
 For a fork-based contribution:
 
@@ -46,9 +45,10 @@ Replace the username and branch name. If you cloned the official repository
 instead of a fork, use `origin/main` as the base. Do not substitute unpinned
 dependencies if installation fails.
 
-Use disposable workspaces for execution tests; do not test changes against
-production machines, services or credentials. Commands and workspace writes
-require separate explicit grants.
+Run tests with disposable state: a `HOME` under a short path such as `/tmp`
+(macOS limits Unix socket paths to 104 bytes), never a real
+`~/.config/openmachine` or `~/.local/state/openmachine*`. Do not test changes
+against production machines, services or credentials.
 
 ## Make and test your change
 
@@ -63,10 +63,10 @@ python scripts/check_repository.py
 python -m unittest discover -s test/repository -p 'test_*.py'
 ```
 
-For a focused code change (replace `github` with the owning module):
+For a focused code change (replace `access` with the owning module):
 
 ```sh
-python scripts/run_tests.py --module github --layer unit
+python scripts/run_tests.py --module access --layer unit
 ```
 
 Before review, inspect and run the affected candidate checks:
@@ -89,6 +89,59 @@ for a direct clone. Packaging, locked dependencies and shared runner changes
 require [full verification](test/README.md#full-verification-and-cache-identity).
 Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
+## Module owners
+
+| Owner | Responsibility |
+| --- | --- |
+| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `catalog` (`__main__.py`); session admission and lifetimes (`sessions.py`); Selected Projects scope (`rules.py`); the folder catalog (`catalog.py`) and its Git observation (`git.py`); macOS Seatbelt (`macos.py`). |
+| `service/` | Management: payload verification and retention, installation, the selection and original operations. |
+| `cli.py` | The `manage` command. |
+| `config.py` | The machines-only configuration. |
+| `foundation/` | Private state, locks, bounded traversal and safe errors; no domain ownership. |
+
+| Command | Caller | Purpose |
+| --- | --- | --- |
+| `python -I -m openmachine.access capabilities` | Code host | Core's version, session kinds and policies |
+| `python -I -m openmachine.access session --control-fd N` | Code host | Admit one session channel |
+| `python -I -m openmachine.access catalog` | Code host, for the Console | One folder catalog request on stdin |
+| `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | Desktop | `status`, `configure`, `install`, `update`, `operation`, `continue` |
+
+The configuration holds one machine, `[machines.local]` with `transport = "local"`.
+Desktop installs and updates Core from a verified offline runtime payload that
+`scripts/build_runtime_payload.py` assembles. The README artwork in `assets/` is
+the banner PNG and self-contained SVGs animated with CSS, with no scripts.
+
+Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`
+and `openmachine.config`. Source moves never move persistent state or replace
+stable locks.
+
+## Choose work from current evidence
+
+Before starting a candidate or declaring a blocker, inspect the relevant
+worktrees and the owning Issue, PR and CI evidence. A missing PR, empty search or
+clean tree does not prove nobody is working there. Reconcile stale status
+against newer evidence for the same prerequisite, target and revision.
+
+Separate implementation, integration, acceptance and deployment. A pending
+check blocks only actions that need its result, so an unrelated pending
+acceptance gate does not block development. For a real blocker, name the missing
+prerequisite, the affected action and the condition that would unblock it. Check
+overlapping edits and shared services before acting; worktrees isolate files,
+not every resource.
+
+## Complete the authorized delivery
+
+Carry the requested outcome through verification. Merge, release and deployment
+need actual authorization, not words in a plan. Correct a proven terminal
+no-effect rejection under a new ID. For a missing reply, a partial effect or an
+unknown outcome, read the original ID and its destination before any new effect,
+and never replay it. Preserve unrelated edits and stable locks.
+
+Continue through ordinary tool and test failures when safe recovery stays in
+scope; observe an existing command or CI run instead of restarting it. Compare
+every requested deliverable with actual evidence before finishing. If blocked,
+report the evidence, the safe recovery attempted and the remaining work.
+
 ## Open a pull request
 
 Push your branch and open a PR against `OpenMachineLabs/openmachine:main`.
@@ -96,7 +149,7 @@ Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) to explain the reason,
 the change, how you tested it and any material risks. Link an Issue when relevant.
 A small documentation correction does not need a separate Spec or rollback plan.
 
-Use a descriptive commit subject such as `fix(workspace): handle missing files`
+Use a descriptive commit subject such as `fix(access): refuse a replaced directory`
 or `docs(readme): clarify installation`. Commit subjects follow
 `domain(scope): outcome`, use printable ASCII and fit within 72 characters.
 Prefer concise English PR descriptions. A squash merge appends ` (#N)` to the PR

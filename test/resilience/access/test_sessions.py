@@ -3,22 +3,27 @@
 import json
 import os
 from pathlib import Path
+import pwd
+import pty
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
 import unittest
 
-from openmachine.access import macos
-from openmachine.chat import projects
+from openmachine.access import catalog, macos
 from openmachine.config import load
 from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
             "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+
+# Sessions take the account's home from the password database, whatever $HOME the caller has.
+ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def detached(name):
@@ -37,7 +42,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         reply, code, out, err = self.session(lifetime, command=(
             f"cat <<EOF > $HOME/heredoc\nhere\nEOF\ncat $HOME/heredoc; echo w > {outside}/x; /usr/bin/sudo -n true; "
-            f"cat {Path.home()}/.ssh/config; echo HOME=$HOME; exit 3"))
+            f"cat {ACCOUNT_HOME}/.ssh/config; echo HOME=$HOME; exit 3"))
         self.assertEqual(reply["status"], "admitted", reply)
         self.assertEqual(code, 3, err)
         self.assertIn("here", out)
@@ -167,19 +172,20 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))
         self.assertEqual((reply["status"], reply["error"]["code"]), ("denied", "github_client_invalid"), reply)
 
-    def test_the_code_host_state_is_a_control_path(self):
-        """The Go Code host keeps its host key, network keys and socket beside Core's state; no session reads it."""
+    def test_the_code_host_and_connector_state_are_control_paths(self):
+        """The Code host and the Connector keep keys and sign-in beside Core's state; no session reads them."""
         default = self.root / "home/.local/state/openmachine"
-        code = default.parent / "openmachine-code"
-        code.mkdir(parents=True, mode=0o700)
-        (code / "host").write_text("private\n")
+        hosts = [default.parent / "openmachine-code", default.parent / "openmachine-connector"]
+        for path in hosts:
+            path.mkdir(parents=True, mode=0o700)
+            (path / "host").write_text("private\n")
         prelude = f"from openmachine.access import rules; rules.DEFAULT_STATE = rules.Path({str(default)!r}); "
-        process, reply = self.start(self.request(self.lifetime(), "read_only", "exec", f"cat {code}/host; ls {code}"),
-                                    prelude=prelude)
+        command = "; ".join(f"cat {path}/host; ls {path}" for path in hosts)
+        process, reply = self.start(self.request(self.lifetime(), "read_only", "exec", command), prelude=prelude)
         out, err = process.communicate(timeout=60)
         self.assertEqual(reply["status"], "admitted", reply)
         self.assertNotIn(b"private", out)
-        self.assertEqual(err.decode().count(DENIED), 2, err)
+        self.assertEqual(err.decode().count(DENIED), 4, err)
 
     def test_detached_work_shares_its_lifetime(self):
         first, other = self.lifetime(), self.lifetime()
@@ -315,22 +321,31 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         for path in (full, read_only):
             path.mkdir()
             (path / "file.txt").write_text(path.name + "\n")
-        subprocess.run(["git", "-C", str(full), "init", "-q"], check=True)
+        git = ["git", "-C", str(full), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+               "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+        for args in (["init", "-q", "-b", "main"], ["add", "file.txt"], ["commit", "-q", "-m", "Fixture"]):
+            subprocess.run(git + args, check=True, capture_output=True)
+        # A registered worktree of a Full repository is writable although no root selects it.
+        linked = self.root / "full-linked"
+        subprocess.run(git + ["worktree", "add", "-q", "-b", "linked", str(linked)], check=True, capture_output=True)
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
                  for path, mode in ((full, "full_access"), (read_only, "read_only"))]
         scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
                                                                "grant_revision": 1, "session_generation": 0}}
         lifetime = self.lifetime()
         reply, code, out, err = self.session(lifetime, "selected_projects", (
             f"echo w >> {full}/file.txt && echo full-ok; echo x > {full}/.git/hooks/pre-commit; "
+            f"mkdir {full}/.vscode; mkdir -p {full}/a/.idea; echo w > {linked}/new.txt && echo linked-ok; "
             f"echo x >> {read_only}/file.txt; cat {read_only}/file.txt"), machine="local", scope=scope)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertIn("full-ok", out)
+        self.assertIn("linked-ok", out)
         self.assertIn("read-only", out)
-        self.assertEqual(err.count(DENIED), 2, err)
+        self.assertEqual(err.count(DENIED), 4, err)
         self.assertFalse((full / ".git/hooks/pre-commit").exists())
+        self.assertFalse((full / ".vscode").exists() or (full / "a/.idea").exists())
         self.assertEqual((read_only / "file.txt").read_text(), "read-only\n")
         # The live instance is reused, but a replaced directory is never rebound to the old grant.
         read_only.rename(self.root / "moved")
@@ -338,6 +353,54 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
         self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
                          ("denied", "scope_target_changed", "known_no_effect", 1, ""))
+
+    def test_restricted_sessions_reach_no_sockets_terminals_descriptors_or_denied_areas(self):
+        project, personal, denied = self.root / "project", self.root / "personal", self.root / "denied"
+        for path in (project, personal, denied):
+            path.mkdir()
+            (path / ".env").write_text(f"ENV-{path.name.upper()}\n")
+        (denied / "drive.txt").write_text("DRIVE-SECRET\n")
+        shutil.copy("/usr/bin/true", denied / "tool")
+        (project / "outside").symlink_to(denied, target_is_directory=True)
+        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
+        target = catalog.inspect(load(self.config), "local", str(project), "inspect", ".")["project"]["target_id"]
+        scope = {"protocol": 1, "authority": {"policy_revision": 1, "grant_id": "fixture", "grant_revision": 1,
+                                              "session_generation": 0},
+                 "roots": [{"machine": "local", "workspace_name": str(project), "relative_path": ".", "mode": "full_access",
+                            "target_id": target}]}
+        listener = socket.socket(socket.AF_UNIX)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.root / "c.sock"))
+        listener.listen(1)
+        listener.setblocking(False)
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        probes = "\n".join([
+            "import ctypes, os, socket, sys",
+            "s = socket.socket(socket.AF_UNIX)",
+            "try:\n    s.connect(sys.argv[1]); print('unix: connected')\nexcept OSError as e:\n    print('unix:', type(e).__name__)",
+            "l = ctypes.CDLL(None); p = ctypes.c_uint()",
+            "print('appleevents:', l.bootstrap_look_up(ctypes.c_uint.in_dll(l, 'bootstrap_port'), "
+            "b'com.apple.coreservices.appleevents', ctypes.byref(p)))",
+            "for fd in range(3, 256):\n    try:\n        os.write(fd, b'x')\n    except OSError:\n        continue\n    print('WRITABLE', fd)"])
+        command = (f"{shlex.quote(sys.executable)} -I -c {shlex.quote(probes)} {self.root / 'c.sock'}; "
+                   f"echo injected > {os.ttyname(slave)}; cat {project}/.env; cat {personal}/.env; "
+                   f"cat {project}/outside/drive.txt; {denied}/tool && echo tool-ran; true")
+        process, reply = self.start(self.request(self.lifetime(), "selected_projects", "exec", command, machine="local",
+                                                 scope=scope), prelude=prelude)
+        out, err = (stream.decode(errors="replace") for stream in process.communicate(timeout=60))
+        self.assertEqual((reply["status"], process.returncode), ("admitted", 0), err)
+        self.assertIn("unix: PermissionError", out)
+        self.assertNotIn("appleevents: 0\n", out)
+        self.assertNotIn("WRITABLE", out)
+        self.assertIn("ENV-PROJECT", out)  # A selected root reads its own secret-named files.
+        self.assertNotIn("ENV-PERSONAL", out)
+        self.assertNotIn("DRIVE-SECRET", out)
+        self.assertNotIn("tool-ran", out)
+        self.assertGreaterEqual(err.count(DENIED), 4, err)
+        with self.assertRaises(BlockingIOError):
+            listener.accept()
 
     def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
         """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
@@ -365,7 +428,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         config = [path.read_bytes() for path in protected]
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
                  for path, mode in ((full, "full_access"), (plain, "full_access"), (read_only, "read_only"))]
         scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
                                                                "grant_revision": 1, "session_generation": 0}}
@@ -508,7 +571,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
 
     def test_full_access_is_an_ordinary_shell(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
-        self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={Path.home()}\n"), err)
+        self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={ACCOUNT_HOME}\n"), err)
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
