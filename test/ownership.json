@@ -76,8 +76,6 @@
         ".github/workflows/runtime-payload.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-hero.svg",
-        "assets/openmachine-devices.svg",
-        "assets/openmachine-permissions.svg",
         "assets/button-download-light.svg",
         "assets/button-download-dark.svg",
         "assets/button-console-light.svg",

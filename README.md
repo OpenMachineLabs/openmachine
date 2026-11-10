@@ -44,22 +44,6 @@ GitHub tokens never sit on your machines.
    ssh studio.om
    ```
 
-## Connect all your devices
-
-<p align="center">
-  <img src="assets/openmachine-devices.svg" width="1000" alt="Open Machine connects laptops, desktops, GPU machines, phones and devices in the world into one workspace." />
-</p>
-
-<p align="center">Your laptop, the GPU cluster, the build machine and your phones become one workspace your agent can reach.</p>
-
-## Power under your control
-
-<p align="center">
-  <img src="assets/openmachine-permissions.svg" width="1000" alt="Choose Read only, Select projects or Full access for each person on each machine." />
-</p>
-
-<p align="center">Set each person's access on each machine, change it any time, and turn a machine off to put it out of reach.</p>
-
 ## How it fits together
 
 - **App**: signs each machine in and keeps it reachable.
