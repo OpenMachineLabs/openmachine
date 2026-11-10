@@ -77,6 +77,8 @@ class CatalogTests(CatalogFixture, unittest.TestCase):
             self.fault("desktop_redirected", root)
             with patch.object(catalog.os, "lstat", side_effect=PermissionError):
                 self.fault("desktop_access_denied", root)
+        with patch.object(catalog.pwd, "getpwuid", side_effect=KeyError), patch.object(catalog.sys, "platform", "darwin"):
+            self.fault("desktop_missing", root)
         with patch.object(catalog.sys, "platform", "linux"):
             self.fault("desktop_unsupported", root)
         self.fault("invalid_project_request", lambda: catalog.inspect(self.config, "local"))

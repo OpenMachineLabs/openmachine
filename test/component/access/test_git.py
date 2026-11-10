@@ -53,6 +53,14 @@ class GitContextTests(unittest.TestCase):
             result = git.context(self.work)
         self.assertEqual((result["git_state"], result["context_error"]), ("unavailable", "unsupported_git_object_format"))
 
+    def test_an_incomplete_worktree_list_is_unavailable(self):
+        self.git("init", "-q", "-b", "main")
+        for result in ((b"", 128, False), (b"worktree " + bytes(self.work), 0, True)):
+            with self.subTest(result=result), patch.object(git, "capture", return_value=result):
+                with self.assertRaises(git.Fault) as raised:
+                    git.registered_worktrees(self.work)
+                self.assertEqual(raised.exception.code, "git_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

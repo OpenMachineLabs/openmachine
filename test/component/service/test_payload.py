@@ -28,6 +28,17 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         file.chmod(0o644)
         file.unlink()
         self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.digest))
+        file.write_bytes(original)
+        # A complete manifest still needs every required member.
+        for name in ("requirements.lock", "THIRD_PARTY_NOTICES.md"):
+            with self.subTest(name=name):
+                member = self.source / name
+                content = member.read_bytes()
+                member.unlink()
+                self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.seal()))
+                member.write_bytes(content)
+                member.chmod(0o644)
+                self.digest = self.seal()
 
     def test_manifest_and_target_rejection_before_copy_or_execution(self):
         path = self.source / "manifest.json"

@@ -109,7 +109,10 @@ def desktop(machine: str) -> dict:
     """The account's own Desktop, from the account database; never $HOME, Finder or a fallback."""
     if sys.platform != "darwin":
         raise Fault("desktop_unsupported", "Desktop-first discovery is available on macOS; navigate explicitly.")
-    path = Path(pwd.getpwuid(os.getuid()).pw_dir) / "Desktop"
+    try:
+        path = Path(pwd.getpwuid(os.getuid()).pw_dir) / "Desktop"
+    except KeyError as error:
+        raise Fault("desktop_missing", "This account has no home directory record; navigate explicitly.") from error
     try:
         info = os.lstat(path)
         canonical = path.resolve(strict=True)
