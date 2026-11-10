@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import pwd
 import shlex
 import shutil
 import signal
@@ -11,14 +12,16 @@ import sys
 import time
 import unittest
 
-from openmachine.access import macos
-from openmachine.access import catalog
+from openmachine.access import catalog, macos
 from openmachine.config import load
 from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
             "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+
+# Sessions take the account's home from the password database, whatever $HOME the caller has.
+ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def detached(name):
@@ -37,7 +40,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         reply, code, out, err = self.session(lifetime, command=(
             f"cat <<EOF > $HOME/heredoc\nhere\nEOF\ncat $HOME/heredoc; echo w > {outside}/x; /usr/bin/sudo -n true; "
-            f"cat {Path.home()}/.ssh/config; echo HOME=$HOME; exit 3"))
+            f"cat {ACCOUNT_HOME}/.ssh/config; echo HOME=$HOME; exit 3"))
         self.assertEqual(reply["status"], "admitted", reply)
         self.assertEqual(code, 3, err)
         self.assertIn("here", out)
@@ -508,7 +511,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
 
     def test_full_access_is_an_ordinary_shell(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
-        self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={Path.home()}\n"), err)
+        self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={ACCOUNT_HOME}\n"), err)
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
