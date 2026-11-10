@@ -1,9 +1,10 @@
 # Agent Instructions
 
-Open Machine Core is the open-source access launcher that Open Machine SSH
-sessions run through. These rules apply to every change in this repository. A
-more specific `AGENTS.md`, such as [.github/AGENTS.md](.github/AGENTS.md), adds
-rules for its directory.
+Open Machine Core is the open-source part of Open Machine that runs on each
+machine: it starts a coding agent's work there with the access the owner chose.
+These rules apply to every change in this repository. A more specific
+`AGENTS.md`, such as [.github/AGENTS.md](.github/AGENTS.md), adds rules for its
+directory.
 
 ## Authority and scope
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openmachine"
 dynamic = ["version"]
-description = "The Code access launcher that Open Machine SSH sessions run through."
+description = "Your AI. Your machines. Let your coding agent work on every machine you own, with the access you choose."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

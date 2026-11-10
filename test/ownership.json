@@ -73,7 +73,12 @@
         ".github/workflows/trusted-review-gate.yml",
         "scripts/trusted_review_gate.py",
         ".github/CODEOWNERS",
-        ".github/workflows/runtime-payload.yml"
+        ".github/workflows/runtime-payload.yml",
+        "assets/openmachine-banner.svg",
+        "assets/openmachine-agent.svg",
+        "assets/openmachine-flow.svg",
+        "assets/openmachine-machines.svg",
+        "assets/openmachine-access.svg"
       ],
       "tests": [
         "test/repository/test_auto_metadata.py",

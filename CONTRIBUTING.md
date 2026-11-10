@@ -99,6 +99,18 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 | `config.py` | The machines-only configuration. |
 | `foundation/` | Private state, locks, bounded traversal and safe errors; no domain ownership. |
 
+| Command | Caller | Purpose |
+| --- | --- | --- |
+| `python -I -m openmachine.access capabilities` | Code host | Core's version, session kinds and policies |
+| `python -I -m openmachine.access session --control-fd N` | Code host | Admit one session channel |
+| `python -I -m openmachine.access catalog` | Code host, for the Console | One folder catalog request on stdin |
+| `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | Desktop | `status`, `configure`, `install`, `update`, `operation`, `continue` |
+
+The configuration holds one machine, `[machines.local]` with `transport = "local"`.
+Desktop installs and updates Core from a verified offline runtime payload that
+`scripts/build_runtime_payload.py` assembles. The README artwork in `assets/` is
+self-contained SVG with CSS animation and no scripts.
+
 Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`
 and `openmachine.config`. Source moves never move persistent state or replace
 stable locks.
