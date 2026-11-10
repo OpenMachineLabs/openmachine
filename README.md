@@ -19,8 +19,6 @@
 <a href="https://console.openmachine.app"><img src="https://img.shields.io/badge/Console-efefef?style=for-the-badge&amp;logo=googlechrome&amp;logoColor=141414" height="44" alt="Open the Open Machine Console"></a>
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/openmachine.app-efefef?style=for-the-badge&amp;logo=safari&amp;logoColor=141414" height="44" alt="Visit openmachine.app"></a>
 
-**Download: [openmachine.app/download](https://openmachine.app/download)** · Console: [console.openmachine.app](https://console.openmachine.app) · Website: [openmachine.app](https://openmachine.app)
-
 </div>
 
 <br />
