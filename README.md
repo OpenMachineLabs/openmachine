@@ -41,7 +41,7 @@ Open Machine runs on Macs with Apple Silicon (macOS 13 or later) today; Linux,
 Windows and iOS are coming.
 
 1. [Download](https://openmachine.app/download) the app and sign in on each machine.
-2. Choose access per machine: **Read only**, **Selected projects** or **Full access**.
+2. Choose access per machine: **Read only**, **Workspace** or **Full access**.
 3. Ask your coding agent. It reaches a machine with one command:
 
    ```bash

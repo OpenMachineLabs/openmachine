@@ -19,7 +19,6 @@ import uuid
 
 from openmachine.access import rules, sessions
 from openmachine.access.macos import seatbelt
-from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory
 
@@ -97,19 +96,15 @@ def _runtime(lifetime: str) -> Path:
 
 
 def _grant(request: sessions.SessionRequest) -> str:
-    return seatbelt.digest(json.dumps({"policy": request.policy, "machine": request.machine, "scope": request.scope},
-                                   sort_keys=True, separators=(",", ":")))
+    return seatbelt.digest(json.dumps({"policy": request.policy, "folders": request.folders},
+                                      sort_keys=True, separators=(",", ":")))
 
 
 def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path) -> str:
     denied, exceptions = seatbelt.read_denials(seatbelt.account_home())
     control = list(dict.fromkeys([*rules.control_paths(state), state]))
-    readable, writable = [], [home]
-    if scope is not None:
-        for path, mode in scope.grants():
-            (writable if mode == "full_access" else readable).append(path)
-    return seatbelt.profile(readable=readable, writable=writable, private=runtime, control=control,
-                         denied=denied, exceptions=exceptions, executable=_stable_client())
+    return seatbelt.profile(home=home, folders=[] if scope is None else scope.grants(), private=runtime,
+                            control=control, denied=denied, exceptions=exceptions, executable=_stable_client())
 
 
 def _stable_client() -> Path:
@@ -149,13 +144,15 @@ def _install(client: Path) -> Path:
     return stable
 
 
-def _admit_restricted(request: sessions.SessionRequest, account, config_path: Path, state: Path) -> tuple:
+def _admit_restricted(request: sessions.SessionRequest, account, state: Path) -> tuple:
     if seatbelt.lifetime_unavailable_reason() is not None:
         raise Fault("scope_unsupported", "Restricted Code sessions need the macOS Seatbelt lifetime backend.",
                     effect="known_no_effect")
     program, argv = sessions._argv(request, account)
-    # Re-verify every selected binding on each admission: a replaced directory is never rebound.
-    scope = None if request.scope is None else rules.compile(load(config_path), state, request.machine, request.scope)
+    scope = None
+    if request.folders is not None:  # Re-checked on each admission: a folder whose path changed grants nothing.
+        control = rules.control_paths(state)
+        scope = rules.Scope(tuple(rules.folders(request.folders, control, admission=True)), control)
     client = sessions._client(request)
     stable = _install(client) if client else None
     home = persistent_home()
@@ -165,7 +162,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, config_path: Pa
     with lifetime.lock():
         record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
         if record["policy"] != request.policy or record.get("grant_sha256") != grant:
-            raise Fault("lifetime_changed", "This lifetime's policy or scope changed; start sessions in a new "
+            raise Fault("lifetime_changed", "This lifetime's policy or folders changed; start sessions in a new "
                         "lifetime.", effect="known_no_effect")
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
         # instance may run Core's copy of om-code, except instances started before that copy existed: a
@@ -174,7 +171,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, config_path: Pa
         usable = newest and _spawner_alive(newest) and (stable is None or newest.get("client") == str(stable))
         instance = newest if usable else None
         if instance is None:
-            # Selected roots and worktrees are fixed when an instance starts; later sessions reuse them.
+            # Folders and worktrees are fixed when an instance starts; later sessions reuse them.
             text = _restricted_profile(scope, state, runtime, home)
             # Publish the marker before anything starts, so a failed save, a lost launcher or a stalled
             # spawner never leaves a running instance that no record names.
@@ -192,7 +189,8 @@ def _admit_restricted(request: sessions.SessionRequest, account, config_path: Pa
         # Connect before another admission can start a newer instance, which rebinds the socket; a
         # connection made first still reaches its own spawner.
         connection = _connect(lifetime, instance)
-    body = json.dumps({"program": program, "argv": argv, "env": environment, "cwd": str(home / "home"),
+    cwd = request.folders[0] if request.folders else str(home / "home")  # Workspace starts in its first folder.
+    body = json.dumps({"program": program, "argv": argv, "env": environment, "cwd": cwd,
                        "tty": request.terminal is not None}).encode()
     socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])
     connection.sendall(body)

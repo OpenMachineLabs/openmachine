@@ -17,21 +17,21 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
 
     def test_import_check_rejects_forbidden_edges_and_unowned_modules(self):
         cases = (
-            ("openmachine.access.catalog", "import openmachine.access.rules", "must not depend"),
-            ("openmachine.access.git", "from . import catalog", "must not depend"),
+            ("openmachine.access.git", "import openmachine.access.rules", "must not depend"),
+            ("openmachine.access.rules", "from . import sessions", "must not depend"),
             ("openmachine.access.sessions", "import openmachine.service.state", "must not depend"),
             ("openmachine.access.__main__", "import openmachine.service", "must not depend"),
             ("openmachine.access.rules", "def compile():\n    import openmachine.cli", "must not depend"),
-            ("openmachine.foundation.files", "import openmachine.config", "must not depend"),
-            ("openmachine.foundation.files", "from ..access import git", "must not depend"),
+            ("openmachine.foundation.state", "import openmachine.config", "must not depend"),
+            ("openmachine.foundation.state", "from ..access import git", "must not depend"),
             ("openmachine.config", "import openmachine.access", "must not depend"),
             ("openmachine.service.state", "from . import transition", "must not depend"),
             ("openmachine.service.processes", "from . import install", "must not depend"),
             ("openmachine.service.install", "import openmachine.access.sessions", "must not depend"),
             ("openmachine.service.maintenance", "import openmachine.access", "must not depend"),
             ("openmachine.new_owner", "import os", "explicit dependency owner"),
-            ("openmachine.foundation.files", "from .sanitize import *", "wildcard import"),
-            ("openmachine.foundation.files", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.config", "must not depend"),
+            ("openmachine.foundation.state", "from .sanitize import *", "wildcard import"),
+            ("openmachine.foundation.state", "if TYPE_CHECKING:\n    pass\nelse:\n    import openmachine.config", "must not depend"),
         )
         for module, text, message in cases:
             with self.subTest(module=module, text=text), self.assertRaisesRegex(AssertionError, message):
@@ -41,14 +41,14 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
         for final_edge in ("import openmachine.foundation", "def f():\n    from .. import foundation"):
             with self.subTest(final_edge=final_edge), self.assertRaisesRegex(AssertionError, "Runtime source import cycle"):
                 self.assert_import_contract({
-                    "openmachine.foundation": ("from .files import read", True),
-                    "openmachine.foundation.files": ("from . import sanitize", False),
+                    "openmachine.foundation": ("from .state import read", True),
+                    "openmachine.foundation.state": ("from . import sanitize", False),
                     "openmachine.foundation.sanitize": (final_edge, False),
                 })
 
     def test_import_check_accepts_type_only_dependencies(self):
         self.assert_import_contract({
-            "openmachine.access.catalog": ("import os\nfrom typing import TYPE_CHECKING\n"
+            "openmachine.access.git": ("import os\nfrom typing import TYPE_CHECKING\n"
                                            "if TYPE_CHECKING:\n    from openmachine.config import Settings\n"
                                            "import typing\nif typing.TYPE_CHECKING:\n    import openmachine.service", False),
         })

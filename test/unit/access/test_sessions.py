@@ -12,8 +12,8 @@ from openmachine.access.macos import seatbelt as macos
 from openmachine.access.macos import sessions as restricted
 from openmachine.foundation.sanitize import Fault
 
-VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
-SCOPE = {"protocol": 1, "authority": {}, "roots": []}
+VALID = {"protocol": 2, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
+FOLDERS = ["/Users/dev/code", "/Users/dev/Documents/notes"]
 BROKER = "https://127.0.0.1:41234"
 ROUTING = {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
            "GIT_CONFIG_KEY_0": f"url.{BROKER}/github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
@@ -30,12 +30,15 @@ class RequestTests(unittest.TestCase):
         request = self.parse(VALID | {"terminal": {"term": "xterm-256color"}, "environment": {"LANG": "en_US.UTF-8"}})
         self.assertEqual((request.kind, request.terminal.term, request.environment), ("exec", "xterm-256color",
                                                                                       {"LANG": "en_US.UTF-8"}))
-        self.assertEqual(self.parse(VALID | {"policy": "selected_projects", "machine": "local", "scope": SCOPE}).scope, SCOPE)
+        self.assertEqual(self.parse(VALID | {"policy": "workspace", "folders": FOLDERS}).folders, FOLDERS)
 
     def test_inconsistent_or_unsafe_requests_are_rejected_before_any_effect(self):
-        for change in ({"protocol": 2}, {"extra": 1}, {"lifetime": "../x"}, {"lifetime": "x" * 65},
+        for change in ({"protocol": 1}, {"extra": 1}, {"lifetime": "../x"}, {"lifetime": "x" * 65},
                        {"kind": "shell"}, {"kind": "exec", "command": None}, {"command": "a\0b"},
-                       {"policy": "selected_projects"}, {"scope": SCOPE}, {"machine": "local"},
+                       {"policy": "admin"}, {"policy": "workspace"}, {"folders": FOLDERS},
+                       {"policy": "workspace", "folders": []}, {"policy": "workspace", "folders": FOLDERS * 17},
+                       *({"policy": "workspace", "folders": [folder]} for folder in ("code", "/a\0b", "/a\nb", "/" + "x" * 1024)),
+                       {"policy": "workspace", "folders": FOLDERS, "scope": {}}, {"machine": "local"},
                        {"environment": {"PATH": "/tmp"}}, {"environment": {"LANG": "x;rm"}},
                        {"terminal": {"term": "x y"}}, {"kind": "sftp"}):
             with self.subTest(change=change):
@@ -95,7 +98,8 @@ class RequestTests(unittest.TestCase):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             policies = capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
-                                    "selected_projects": "platform_unsupported"})
+                                    "workspace": "platform_unsupported"})
+        self.assertEqual(capabilities()["protocol"], 2)
         self.assertEqual(capabilities()["github"], "https")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             self.assertNotIn("github_client", capabilities())

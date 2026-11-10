@@ -1,5 +1,7 @@
-"""Selected Projects scope: whole-map validation, per-binding and pairwise shape rules, inherited worktrees."""
+"""Workspace folders: the folder rule's codes and canonical paths, and the worktrees a folder grants."""
 
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -7,123 +9,142 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import catalog, rules
-from openmachine.config import Settings
-from openmachine.foundation.sanitize import Fault
-
-AUTHORITY = {"policy_revision": 7, "grant_id": "grant-fixture", "grant_revision": 3, "session_generation": 12}
+from openmachine.access import rules
+from openmachine.access.__main__ import folders_reply
 
 
-class RulesTests(unittest.TestCase):
+@unittest.skipUnless(sys.platform == "darwin", "folders resolve through the macOS F_GETPATH")
+class FolderRuleTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="om-rules-", dir="/tmp")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.dev = self.root / "Development"
-        self.core, self.cloud = self.dev / "core", self.dev / "cloud"
-        self.personal = self.root / "personal"
-        for path in (self.core, self.cloud, self.personal):
+        self.home = self.root / "home"
+        self.code, self.notes = self.home / "code", self.home / "Documents/notes"
+        for path in (self.code, self.notes, self.home / "Library/LaunchAgents", self.home / ".ssh", self.home / ".local/state"):
             path.mkdir(parents=True)
-        for repo in (self.core, self.cloud):
-            (repo / "file.txt").write_text(repo.name + "\n")
-            self.git(repo, "init", "-q", "-b", "main")
-            self.git(repo, "add", "file.txt")
-            self.git(repo, "commit", "-q", "-m", "Fixture")
-        self.state = self.root / "state"
-        self.config = Settings.model_validate({"machines": {"local": {"transport": "local"}}})
-        home = patch.object(rules.seatbelt, "account_home", return_value=self.root / "home")
+        self.control = (self.home / ".local/state",)
+        home = patch.object(rules.seatbelt, "account_home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
+
+    def check(self, *paths, admission=False):
+        return rules.folders([str(path) for path in paths], self.control, admission=admission)
+
+    def refused(self, code, index, *paths, admission=False):
+        with self.assertRaises(rules.FolderFault) as caught:
+            self.check(*paths, admission=admission)
+        self.assertEqual((caught.exception.code, caught.exception.index, caught.exception.effect),
+                         (code, index, "known_no_effect"))
+        self.assertIn(str(paths[index]), str(caught.exception))
+        self.assertIn("Open Machine app on this Mac", str(caught.exception))
+
+    def test_folders_resolve_to_their_kernel_path_in_order(self):
+        link = self.root / "link"
+        link.symlink_to(self.code, target_is_directory=True)
+        tmp = Path("/tmp") / self.root.name  # /tmp is a link to /private/tmp
+        self.assertEqual(self.check(self.notes, link, admission=False), [self.notes, self.code])
+        self.assertEqual(self.check(tmp / "home/code"), [self.code])
+        # Another case spelling gives the on-disk names.
+        self.assertEqual(self.check(Path(str(self.code).upper())), [self.code])
+        data = Path("/System/Volumes/Data") / self.code.relative_to("/")
+        if data.is_dir():  # The data-volume firmlink spelling.
+            self.assertEqual(self.check(data), [self.code])
+
+    def test_each_code_names_the_refused_folder(self):
+        (self.root / "file").write_text("x\n")
+        locked = self.root / "locked"
+        locked.mkdir(mode=0o000)
+        self.addCleanup(locked.chmod, 0o700)
+        quoted = self.root / 'qu"ote'
+        quoted.mkdir()
+        for code, path in (("folder_missing", self.root / "missing"), ("folder_not_directory", self.root / "file"),
+                           ("folder_access_denied", locked), ("folder_unsupported", quoted),
+                           ("folder_too_broad", Path("/")), ("folder_too_broad", self.home), ("folder_too_broad", self.root),
+                           ("folder_protected", self.home / "Library/LaunchAgents"), ("folder_protected", self.home / ".ssh"),
+                           ("folder_protected", self.home / "Library"),
+                           ("folder_conflict", self.home / ".local"), ("folder_conflict", self.home / ".local/state")):
+            with self.subTest(code=code, path=path):
+                self.refused(code, 1, self.notes, path)
+        # The account database or a control path may spell a name in another case than the disk does.
+        with patch.object(rules.seatbelt, "account_home", return_value=Path(str(self.home).swapcase())):
+            self.refused("folder_too_broad", 0, self.home)
+        self.control = (Path(str(self.code).swapcase()),)
+        self.refused("folder_conflict", 0, self.code)
+
+    def test_a_folder_may_not_repeat_or_lie_inside_another(self):
+        (self.code / "docs").mkdir()
+        self.refused("folder_overlap", 1, self.code, self.code)
+        self.refused("folder_overlap", 1, self.code, Path(str(self.code).upper()))
+        self.refused("folder_overlap", 1, self.code, self.code / "docs")
+        self.refused("folder_overlap", 0, self.code / "docs", self.code)
+        self.assertEqual(self.check(self.code, self.notes), [self.code, self.notes])
+
+    def test_admission_refuses_a_folder_whose_kernel_path_changed(self):
+        self.assertEqual(self.check(self.code, admission=True), [self.code])
+        link = self.root / "link"
+        link.symlink_to(self.code, target_is_directory=True)
+        for path in (link, Path(str(self.code).upper())):
+            with self.subTest(path=path):
+                self.refused("folder_changed", 0, path, admission=True)
+        self.code.rename(self.root / "moved")
+        self.refused("folder_missing", 0, self.code, admission=True)
+
+    def test_admission_reads_no_entry_of_a_folder(self):
+        with patch.object(rules.os, "scandir", side_effect=PermissionError):
+            self.assertEqual(self.check(self.code, admission=True), [self.code])
+            self.refused("folder_access_denied", 0, self.code)
+
+    def test_the_folders_command_answers_json_on_stdin_and_stdout(self):
+        reply = lambda value: folders_reply(self.home / ".local/state", json.dumps(value).encode())
+        self.assertEqual(reply({"folders": [str(self.notes), str(self.code)]}), {"folders": [str(self.notes), str(self.code)]})
+        self.assertEqual(reply({"folders": [str(self.code), str(self.home)]}), {"error": {"code": "folder_too_broad", "index": 1}})
+        for value in ({}, {"folders": []}, {"folders": ["relative"]}, {"folders": [str(self.code)] * 33},
+                      {"folders": [str(self.code)], "extra": 1}, {"folders": [str(self.code) + "\0"]}, []):
+            with self.subTest(value=value):
+                self.assertEqual(reply(value), {"error": {"code": "invalid_request"}})
+        self.assertEqual(folders_reply(self.root, b"{"), {"error": {"code": "invalid_request"}})
+
+
+class WorktreeGrantTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="om-rules-", dir="/tmp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.core, self.personal = self.root / "core", self.root / "personal"
+        for path in (self.core, self.personal):
+            path.mkdir()
+        (self.core / "file.txt").write_text("core\n")
+        self.git(self.core, "init", "-q", "-b", "main")
+        self.git(self.core, "add", "file.txt")
+        self.git(self.core, "commit", "-q", "-m", "Fixture")
 
     def git(self, repo, *args):
         return subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
                               check=True, capture_output=True, text=True).stdout
 
-    def binding(self, path, mode, *, workspace=None, relative="."):
-        workspace = str(path) if workspace is None else str(workspace)
-        target = catalog.inspect(self.config, "local", workspace, "inspect", relative)["project"]["target_id"]
-        return {"machine": "local", "workspace_name": workspace, "relative_path": relative, "target_id": target, "mode": mode}
+    def grants(self, *folders, control=()):
+        return rules.Scope(folders, control).grants()
 
-    def scope(self, *bindings):
-        bindings = bindings or (self.binding(self.dev, "read_only"), self.binding(self.core, "full_access"),
-                                self.binding(self.cloud, "full_access"))
-        return {"protocol": 1, "authority": dict(AUTHORITY), "roots": list(bindings)}
-
-    def compile(self, value=None):
-        return rules.compile(self.config, self.state, "local", value or self.scope())
-
-    def fault(self, code, operation):
-        with self.assertRaises(Fault) as caught:
-            operation()
-        self.assertEqual(caught.exception.code, code, str(caught.exception))
-
-    def test_malformed_foreign_or_duplicate_maps_are_rejected(self):
-        valid = self.scope()
-        for value in (dict(valid, protocol=2), dict(valid, unexpected=True), dict(valid, roots=[]),
-                      dict(valid, authority=dict(valid["authority"], policy_revision=True)),
-                      dict(valid, roots=[dict(valid["roots"][0], machine="other")]),
-                      dict(valid, roots=[valid["roots"][1], dict(valid["roots"][1])])):
-            with self.subTest(value=value):
-                self.fault("scope_invalid", lambda: self.compile(value))
-
-    def test_a_replaced_directory_is_never_rebound(self):
-        value = self.scope()
-        self.core.rename(self.root / "moved")
-        self.core.mkdir()
-        self.fault("scope_target_changed", lambda: self.compile(value))
-
-    def test_nesting_is_a_union_but_misleading_or_broad_maps_fail(self):
-        (self.core / "docs").mkdir()
-        nested = self.compile(self.scope(self.binding(self.dev, "read_only"), self.binding(self.core, "full_access")))
-        self.assertEqual(nested.grants(), [(self.dev, "read_only"), (self.core, "full_access")])
-        inner = self.scope(self.binding(self.core, "full_access"), self.binding(self.core / "docs", "read_only"))
-        self.fault("scope_conflict", lambda: self.compile(inner))
-        alias = self.binding(self.dev, "full_access", workspace=self.root, relative="Development")
-        self.fault("scope_conflict", lambda: self.compile(self.scope(self.binding(self.dev, "read_only"), alias)))
-        # Two paths for one directory that resolution keeps apart: the macOS data-volume firmlink.
-        data = Path("/System/Volumes/Data") / self.dev.relative_to("/")
-        if data.is_dir():
-            firmlink = self.binding(data, "full_access")
-            self.fault("scope_conflict", lambda: self.compile(self.scope(self.binding(self.dev, "read_only"), firmlink)))
-        # On macOS another case spelling names the same directory.
-        spellings = (str, str.swapcase) if sys.platform == "darwin" else (str,)
-        for spell in spellings:
-            for home in (self.dev, self.core):
-                with self.subTest(home=spell(str(home))), patch.object(rules.seatbelt, "account_home",
-                                                                        return_value=Path(spell(str(home)))):
-                    self.fault("scope_too_broad", lambda: self.compile())
-            with patch.object(rules, "control_paths", return_value=(Path(spell(str(self.cloud / "state"))),)):
-                self.fault("scope_conflict", lambda: self.compile())
-
-    def test_only_reciprocal_worktrees_inherit_their_repository_mode(self):
-        real = self.dev / "core-wt"
+    def test_only_reciprocal_worktrees_of_a_folder_repository_are_granted(self):
+        real = self.root / "core-wt"
         self.git(self.core, "worktree", "add", "-q", "-b", "wt", str(real))
-        # Scoped work can write registration metadata in a Full repository; forge one for an unrelated folder.
+        # Workspace work can write registration metadata in a folder's repository; forge one for an unrelated folder.
         forged = self.core / ".git" / "worktrees" / "forged"
         forged.mkdir()
         for name, text in (("gitdir", f"{self.personal}/.git\n"), ("commondir", "../..\n"),
                            ("HEAD", "ref: refs/heads/main\n"), ("locked", "\n")):
             (forged / name).write_text(text)
         self.assertIn(f"worktree {self.personal}\n", self.git(self.core, "worktree", "list", "--porcelain") + "\n")
-        grants = self.compile().grants()
-        self.assertIn((real, "full_access"), grants)
-        self.assertNotIn(self.personal, [path for path, _ in grants])
-        # A worktree inside Core's control paths is never granted.
-        with patch.object(rules, "control_paths", return_value=(real,)):
-            self.assertEqual(self.compile(self.scope(self.binding(self.core, "full_access"))).grants(), [(self.core, "full_access")])
-        # A worktree a Read-only repository holds stays read-only, even inside no selected folder.
-        read_only = self.compile(self.scope(self.binding(self.core, "read_only")))
-        self.assertEqual(read_only.grants(), [(self.core, "read_only"), (real, "read_only")])
-        # Inside a Full folder it gains nothing: the folder already grants more.
-        nested = self.cloud / "core-wt"
-        self.git(self.core, "worktree", "add", "-q", "-b", "nested", str(nested))
-        inside = self.compile(self.scope(self.binding(self.core, "read_only"), self.binding(self.cloud, "full_access")))
-        self.assertEqual(inside.grants(), [(self.core, "read_only"), (self.cloud, "full_access"), (real, "read_only")])
-        # A selected linked worktree grants itself, never its sibling worktrees.
-        sibling = self.dev / "core-sibling"
+        self.assertEqual(self.grants(self.core), [self.core, real])
+        # A worktree inside Core's control paths, or already inside a folder, adds nothing.
+        self.assertEqual(self.grants(self.core, control=(real,)), [self.core])
+        self.assertEqual(self.grants(self.core, self.root), [self.core, self.root])
+        # A linked worktree that is a folder grants itself, never its sibling worktrees.
+        sibling = self.root / "core-sibling"
         self.git(self.core, "worktree", "add", "-q", "-b", "sibling", str(sibling))
-        self.assertEqual(self.compile(self.scope(self.binding(real, "full_access"))).grants(), [(real, "full_access")])
+        self.assertEqual(self.grants(real), [real])
 
 
 if __name__ == "__main__":

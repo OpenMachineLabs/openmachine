@@ -70,7 +70,7 @@ class SessionFixture(object):
                 str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
-        value = {"protocol": 1, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, **extra}
+        value = {"protocol": 2, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, **extra}
         if command is not None:
             value["command"] = command
         return value

@@ -17,11 +17,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from openmachine.access import rules
 from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-PROTOCOL = 1
+PROTOCOL = 2
 MAX_REQUEST = 256 * 1024
 SHARED = Path("/Users/Shared")
 HOME_NAME = "openmachine-code-{uid}"
@@ -73,12 +74,11 @@ class GitHub(BaseModel):
 class SessionRequest(BaseModel):
     """One SSH channel after Go verified Cloud authority; Core verifies paths and applies confinement."""
     model_config = ConfigDict(extra="forbid", strict=True)
-    protocol: Literal[1]
+    protocol: Literal[2]
     user: Annotated[str, Field(min_length=1, max_length=255)]
     lifetime: LifetimeId
-    policy: Literal["read_only", "selected_projects", "full_access"]
-    machine: Annotated[str, Field(min_length=1, max_length=128)] | None = None
-    scope: dict | None = None
+    policy: Literal["read_only", "workspace", "full_access"]
+    folders: rules.Folders | None = None
     kind: Literal["shell", "exec", "sftp"]
     command: Annotated[str, Field(min_length=1, max_length=65536)] | None = None
     terminal: Terminal | None = None
@@ -89,8 +89,8 @@ class SessionRequest(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self):
-        if (self.policy == "selected_projects") != (self.scope is not None) or (self.scope is None) != (self.machine is None):
-            raise ValueError("selected_projects requires exactly one machine and scope")
+        if (self.policy == "workspace") != (self.folders is not None):
+            raise ValueError("workspace requires exactly its folders")
         if (self.kind == "exec") != (self.command is not None) or "\0" in (self.command or ""):
             raise ValueError("exec requires exactly one command")
         return self
@@ -102,7 +102,7 @@ def parse(raw: bytes) -> SessionRequest:
     try:
         return SessionRequest.model_validate_json(raw)
     except ValidationError as error:
-        raise Fault("request_invalid", "Use access protocol 1 with a valid session request.",
+        raise Fault("request_invalid", "Use access protocol 2 with a valid session request.",
                     effect="known_no_effect") from error
 
 

@@ -24,11 +24,6 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     machines: Annotated[dict[Literal["local"], Machine], Field(min_length=1)]
 
-    def machine(self, name: str) -> Machine:
-        if name not in self.machines:
-            raise Fault("unknown_machine", "Select the machine named in the Core configuration.")
-        return self.machines[name]
-
 
 def load(path: Path) -> Settings:
     try:

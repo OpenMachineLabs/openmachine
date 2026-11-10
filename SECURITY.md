@@ -1,10 +1,10 @@
 # Security Policy
 
 Open Machine Core starts Open Machine SSH sessions as the machine's user. A Full
-Access session can do anything that user can; Read Only and Selected Projects
-sessions are confined by macOS Seatbelt. Core is a single-operator access layer,
-**not** a multi-tenant security boundary. A sandbox escape, a write outside a
-Full project or a read of a denied area from a restricted session is in scope.
+Access session can do anything that user can; Read Only and Workspace sessions
+are confined by macOS Seatbelt. Core is a single-operator access layer, **not** a
+multi-tenant security boundary. A sandbox escape, a write outside a Workspace
+folder or a read of a denied area from a restricted session is in scope.
 
 ## Supported versions
 

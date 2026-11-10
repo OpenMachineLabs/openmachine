@@ -93,17 +93,17 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 | Owner | Responsibility |
 | --- | --- |
-| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `catalog` (`__main__.py`); session admission and lifetimes (`sessions.py`); Selected Projects scope (`rules.py`); the folder catalog (`catalog.py`) and its Git observation (`git.py`); macOS Seatbelt (`macos.py`). |
+| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`). |
 | `service/` | Management: payload verification and retention, installation, the selection and original operations. |
 | `cli.py` | The `manage` command. |
 | `config.py` | The machines-only configuration. |
-| `foundation/` | Private state, locks, bounded traversal and safe errors; no domain ownership. |
+| `foundation/` | Private state, locks and safe errors; no domain ownership. |
 
 | Command | Caller | Purpose |
 | --- | --- | --- |
 | `python -I -m openmachine.access capabilities` | Code host | Core's version, session kinds and policies |
 | `python -I -m openmachine.access session --control-fd N` | Code host | Admit one session channel |
-| `python -I -m openmachine.access catalog` | Code host, for the Console | One folder catalog request on stdin |
+| `python -I -m openmachine.access folders` | Code host, for Desktop | Check Workspace folders: one JSON request on stdin |
 | `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | Desktop | `status`, `configure`, `install`, `update`, `operation`, `continue` |
 
 The configuration holds one machine, `[machines.local]` with `transport = "local"`.

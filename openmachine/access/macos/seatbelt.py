@@ -20,16 +20,16 @@ MACH_SERVICES = ("com.apple.system.opendirectoryd.libinfo", "com.apple.system.op
                  "com.apple.diagnosticd", "com.apple.analyticsd", "com.apple.trustd.agent",
                  "com.apple.dnssd.service", "com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent")
 DEVICES = ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/dtracehelper", "/dev/ptmx")
-# Default-denied reads under scope, relative to the account home: credentials, other apps' private
-# data, cloud-synced and media libraries. A selected root re-allows reading inside it.
+# Default-denied reads in restricted sessions, relative to the account home: credentials, other apps'
+# private data, cloud-synced and media libraries. No Workspace folder lies in one.
 HOME_DENIED = (".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/gh", ".config/gcloud", ".netrc",
                ".git-credentials", ".npmrc", ".pypirc", ".bash_history", ".zsh_history", ".zsh_sessions",
                ".sh_history", "Library", "Pictures", "Music", "Movies")
 HOME_READABLE = ("Library/Developer",)  # Developer tools' data inside the denied Library.
 SYSTEM_DENIED = ("/Volumes", "/Library/Keychains")  # External and network volumes; system keychains.
-# Secret-named files outside selected roots: unreadable contents, anywhere. Public CA bundles (*.pem) and
-# SDK "credentials" packages stay readable, so HTTPS and installed tools keep working. Inside a selected
-# root, the project reads them.
+# Secret-named files outside Workspace folders: unreadable contents, anywhere. Public CA bundles (*.pem) and
+# SDK "credentials" packages stay readable, so HTTPS and installed tools keep working. Inside a Workspace
+# folder, the project reads them.
 SECRET_DIRECTORIES = (".ssh", ".aws", ".azure", ".gnupg", ".kube")
 SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.toml|id_rsa|id_ed25519|[^/]*\.(key|p12|pfx)"
 SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
@@ -41,6 +41,9 @@ PROTECTED_GIT = r"((modules|worktrees)/.+/)?(hooks(/.*)?|config(\.worktree)?|com
 # Any .git entry (a repository, or a worktree or submodule link) and those files inside one, at any path.
 PROTECTED_REGEX = r"^(/.*)?/\.git(/" + PROTECTED_GIT + ")?$"
 PROTECTED_IDE_REGEX = r"^(/.*)?/\.(vscode|idea)(/.*)?$"
+# Agent and Git hook manager configuration that the owner's tools later run outside any sandbox; denied
+# inside Workspace folders, never in the sandbox home, where the session's own agents keep theirs.
+PROTECTED_CONFIG_REGEX = r"^(/.*)?/(\.(claude|codex|agents|cursor|gemini|husky)(/.*)?|\.mcp\.json)$"
 # Where nested Git dirs live, and the data directories Git itself creates in one, relative to it.
 NESTED_GIT_REGEX = r"^(/.*)?/\.git/(modules|worktrees)(/.*)?$"
 GIT_DATA = (r"(objects|refs|reftable|logs|info|lfs|rebase-merge|rebase-apply|sequencer|rr-cache|fsmonitor--daemon)"
@@ -139,10 +142,10 @@ def nested_git_dirs(git_dir: Path) -> list[Path]:
     return found[:MAX_NESTED_GIT]
 
 
-def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
+def profile(*, home: Path, folders: list[Path], private: Path, control: list[Path],
             denied: list[Path], exceptions: list[Path], executable: Path) -> str:
-    """Generate one profile: read the machine except denied areas, write only granted roots, and run
-    only the named executable inside a denied area.
+    """Generate one profile: read the machine except denied areas, write only the sandbox home, the
+    Workspace folders and the private tree, and run only the named executable inside a denied area.
 
     For the same operation Seatbelt applies the last matching rule, so each later block narrows or
     re-allows the one before it and the protected and control denials come last. A later broader
@@ -154,7 +157,10 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     in place, and a directory is never cloned. The profile follows the nested Git dirs of each writable
     root's .git as they exist when it is built; later ones stay fully denied, and restricted work cannot
     make a directory there look like one.
+
+    Seatbelt's regex matching ignores case, so every protected name is denied in any spelling.
     """
+    writable = [home, *folders]
     xcrun = user_temp() / "xcrun_db"
     lines = [
         "(version 1)", "(deny default)",
@@ -181,13 +187,11 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     if exceptions:
         lines.append(f"(allow file-read* process-exec {_filters('subpath', exceptions)})")
     lines.append(f"(allow file-read* process-exec {_filters('literal', [executable])})")
-    # A later file-read* does not override a file-read-data denial, so the selected roots below
+    # A later file-read* does not override a file-read-data denial, so the writable roots below
     # re-allow file-read-data by name. Only regular files match by name: SDK directories called
     # "credentials" stay listable.
     lines.append(f'(deny file-read-data (regex #"{SECRET_DIRECTORY_REGEX}"))')
     lines.append(f'(deny file-read-data (require-all (regex #"{SECRET_FILE_REGEX}") (vnode-type REGULAR-FILE)))')
-    if readable:
-        lines.append(f"(allow file-read* file-read-data process-exec {_filters('subpath', readable)})")
     lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
     lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
     # Every exception below also requires a writable root, so it never re-allows a path outside one.
@@ -216,6 +220,9 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
         "(deny file-clone (vnode-type DIRECTORY))",
     ]
+    if folders:
+        lines.append(f"(deny {WRITES} (require-all (require-any {_filters('subpath', folders)}) "
+                     f'(regex #"{PROTECTED_CONFIG_REGEX}")))')
     lines.append(f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 
