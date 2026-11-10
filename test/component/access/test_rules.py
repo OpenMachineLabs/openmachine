@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -85,11 +86,15 @@ class RulesTests(unittest.TestCase):
         if data.is_dir():
             firmlink = self.binding(data, "full_access")
             self.fault("scope_conflict", lambda: self.compile(self.scope(self.binding(self.dev, "read_only"), firmlink)))
-        for home in (self.dev, self.core):
-            with self.subTest(home=home), patch.object(rules.macos, "account_home", return_value=home):
-                self.fault("scope_too_broad", lambda: self.compile())
-        with patch.object(rules, "control_paths", return_value=(self.cloud / "state",)):
-            self.fault("scope_conflict", lambda: self.compile())
+        # On macOS another case spelling names the same directory.
+        spellings = (str, str.swapcase) if sys.platform == "darwin" else (str,)
+        for spell in spellings:
+            for home in (self.dev, self.core):
+                with self.subTest(home=spell(str(home))), patch.object(rules.macos, "account_home",
+                                                                        return_value=Path(spell(str(home)))):
+                    self.fault("scope_too_broad", lambda: self.compile())
+            with patch.object(rules, "control_paths", return_value=(Path(spell(str(self.cloud / "state"))),)):
+                self.fault("scope_conflict", lambda: self.compile())
 
     def test_only_reciprocal_worktrees_inherit_their_repository_mode(self):
         real = self.dev / "core-wt"

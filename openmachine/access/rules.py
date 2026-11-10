@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import os
+import sys
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -105,6 +106,8 @@ def control_paths(state: Path) -> tuple[Path, ...]:
 
 
 def _inside(path: Path, other: Path) -> bool:
+    if sys.platform == "darwin":  # macOS volumes match names in any case; refuse every spelling.
+        path, other = Path(str(path).casefold()), Path(str(other).casefold())
     return path == other or path.is_relative_to(other)
 
 
