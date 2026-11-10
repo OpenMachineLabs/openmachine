@@ -1,6 +1,5 @@
 """Core management: install, update, original-operation readback and status."""
 
-import json
 import os
 import subprocess
 import sys

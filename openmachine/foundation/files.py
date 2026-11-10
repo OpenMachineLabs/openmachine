@@ -18,7 +18,7 @@ def excluded(path: Path) -> bool:
 
 
 def file_parts(path: str) -> tuple[str, ...]:
-    """Validate a single reader/editor resource without broadening workspace scope."""
+    """Validate one relative path below a selected directory."""
     try:
         if not isinstance(path, str):
             raise ValueError

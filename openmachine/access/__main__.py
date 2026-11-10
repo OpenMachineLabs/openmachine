@@ -61,14 +61,14 @@ def catalog_reply(config_path: Path, state: Path, raw: bytes) -> dict:
             result = catalog.inspect(config, machine, arguments.workspace_name, action, arguments.path,
                                      arguments.offset, arguments.limit, arguments.expected_snapshot,
                                      arguments.expected_target_id)
-        if len(json.dumps(result).encode()) > catalog.MAX_RESULT:
+        if len(json.dumps(result).encode()) >= catalog.MAX_RESULT:  # print adds a newline
             raise Fault("catalog_limit", "The result exceeds 64 KiB; use a smaller page.")
         return result
     except Fault as error:
         code = error.code
         return {"error": {"code": code if code in PASSED else "target_unverified"
                           if code in CHANGED or code.startswith("scope_") else "catalog_unavailable"}}
-    except ValueError:
+    except (ValueError, RecursionError, OSError):
         return {"error": {"code": "catalog_unavailable"}}
 
 

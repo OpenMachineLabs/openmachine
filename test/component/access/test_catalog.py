@@ -308,14 +308,21 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
                 self.assertEqual(self.reply({"action": "root"}), {"error": {"code": expected}})
 
     def test_invalid_requests_configuration_and_the_64_kib_bounds(self):
-        for raw in (b"", b"\xff", b"[]", b'{"action": "validate"}', b'{"unexpected": 1}', b'{"offset": "1"}',
+        for raw in (b"", b"\xff", b"[]", b'{"action": "validate"}', b'{"unexpected": 1}', b'{"offset": "1"}', b"[" * 60000,
                     json.dumps({"action": "validate", "projects": [{}] * 33}).encode(), b" " * 65537):
             with self.subTest(raw=raw[:40]):
                 self.assertEqual(self.reply(raw), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('schema_version = 1\n[machines.local]\ntransport = "local"\n')
         self.assertEqual(self.reply({}), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('[machines.local]\ntransport = "local"\n')
-        with patch.object(catalog, "inspect", return_value={"protocol": 2, "directories": ["x" * 65536]}):
+        # The printed reply, newline included, stays within 64 KiB.
+        for size, expected in ((65499, "directories"), (65500, "error")):
+            with self.subTest(size=size), patch.object(catalog, "inspect", return_value={"protocol": 2, "directories": ["x" * size]}):
+                reply = self.reply({"action": "root"})
+                self.assertIn(expected, reply)
+                if expected == "directories":
+                    self.assertEqual(len(json.dumps(reply).encode()) + 1, 65536)
+        with patch.object(catalog, "inspect", side_effect=FileNotFoundError):
             self.assertEqual(self.reply({"action": "root"}), {"error": {"code": "catalog_unavailable"}})
 
     def test_launcher_reads_stdin_and_exits_zero_for_results_and_errors(self):
