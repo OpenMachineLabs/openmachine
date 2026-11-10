@@ -1,0 +1,56 @@
+name: runtime-payload
+
+# Build a reviewable Apple Silicon runtime payload without publishing a release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Build exact Core and checked offline payload
+        run: |
+          set -eu
+          test "$(uname -m)" = "arm64"
+          python3 -m venv "$RUNNER_TEMP/builder"
+          "$RUNNER_TEMP/builder/bin/python" -m pip install -r requirements.lock
+          mkdir -p "$RUNNER_TEMP/wheels" "$PWD/dist"
+          "$RUNNER_TEMP/builder/bin/python" -m pip wheel --no-deps --no-build-isolation . --wheel-dir "$RUNNER_TEMP/wheels"
+          wheel="$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' -print)"
+          test -n "$wheel"
+          test "$(find "$RUNNER_TEMP/wheels" -maxdepth 1 -name 'openmachine-*.whl' | wc -l | tr -d ' ')" = 1
+          "$RUNNER_TEMP/builder/bin/python" -m pip install --no-deps "$wheel"
+          "$RUNNER_TEMP/builder/bin/python" scripts/build_runtime_payload.py \
+            --wheel "$wheel" --requirements "$PWD/requirements.lock" \
+            --commit "$(git rev-parse HEAD)" \
+            --cache "$RUNNER_TEMP/runtime-inputs" \
+            --output "$RUNNER_TEMP/runtime-macos-arm64"
+          tar -C "$RUNNER_TEMP" -czf "$PWD/dist/openmachine-runtime-macos-arm64.tar.gz" runtime-macos-arm64
+      - name: Attest unpublished runtime payload
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: dist/openmachine-runtime-macos-arm64.tar.gz
+      - name: Upload unpublished runtime payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openmachine-runtime-macos-arm64
+          path: dist/openmachine-runtime-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 7

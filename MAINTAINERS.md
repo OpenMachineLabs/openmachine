@@ -120,6 +120,6 @@ required checks and community links before relying on them; documentation alone
 does not enable repository settings. See [SECURITY.md](SECURITY.md) and
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-Publishing any npm package additionally requires the exact artifact, provenance,
-clean-user native acceptance and third-party redistribution review described in
-[npm/README.md](npm/README.md) and [npm/THIRD_PARTY.md](npm/THIRD_PARTY.md).
+The manual `runtime-payload` workflow builds an unsigned, attested runtime payload
+for review. Shipping one in a product needs the release authority above, its
+reviewed manifest digest and the third-party notices it carries.

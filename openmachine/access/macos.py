@@ -1,4 +1,4 @@
-"""macOS Seatbelt confinement: Chat's per-operation process trees and Code's persistent lifetimes."""
+"""macOS Seatbelt confinement for Code's persistent lifetimes."""
 
 import ctypes
 import errno
@@ -14,7 +14,6 @@ from typing import NamedTuple
 
 from openmachine.foundation.sanitize import Fault
 
-BACKEND = "macos_seatbelt"
 LIBRARY = "/usr/lib/libsandbox.1.dylib"
 MACH_SERVICES = ("com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
                  "com.apple.system.notification_center", "com.apple.system.logger", "com.apple.logd",
@@ -70,10 +69,6 @@ def unavailable_reason() -> str | None:
 def user_temp() -> Path:
     """Per-user Darwin temp (DARWIN_USER_TEMP_DIR), independent of $TMPDIR."""
     return Path(os.confstr(65537)).resolve(strict=True)
-
-
-def private_directory(execution_id: str) -> Path:
-    return user_temp() / "openmachine-scope" / execution_id
 
 
 def account_home() -> Path:
@@ -145,8 +140,7 @@ def nested_git_dirs(git_dir: Path) -> list[Path]:
 
 
 def profile(*, readable: list[Path], writable: list[Path], private: Path, control: list[Path],
-            denied: list[Path], exceptions: list[Path], executable: Path | None = None,
-            checkout: tuple[Path, Path] | None = None) -> str:
+            denied: list[Path], exceptions: list[Path], executable: Path) -> str:
     """Generate one profile: read the machine except denied areas, write only granted roots, and run
     only the named executable inside a denied area.
 
@@ -159,8 +153,7 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
     directory moves everything inside it without checking those paths. So a nested Git dir must also stay
     in place, and a directory is never cloned. The profile follows the nested Git dirs of each writable
     root's .git as they exist when it is built; later ones stay fully denied, and restricted work cannot
-    make a directory there look like one. checkout is the destination and common Git dir of Core's own
-    git worktree add, which alone creates that worktree's .git file and its new registration.
+    make a directory there look like one.
     """
     xcrun = user_temp() / "xcrun_db"
     lines = [
@@ -181,14 +174,13 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         '(allow file-read* file-write* (subpath "/dev/fd"))',
         '(allow file-read* file-write* (require-all (regex #"^/dev/ttys[0-9]+$") (extension "com.apple.sandbox.pty")))',
         '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
-        # Default-denied areas, plus other scoped executions' private homes.
+        # Default-denied areas, plus other lifetimes' runtime trees.
         f"(deny file-read* process-exec {_filters('subpath', [*denied, private.parent])})",
         f"(allow file-read-metadata {_filters('literal', denied)})",
     ]
     if exceptions:
         lines.append(f"(allow file-read* process-exec {_filters('subpath', exceptions)})")
-    if executable is not None:
-        lines.append(f"(allow file-read* process-exec {_filters('literal', [executable])})")
+    lines.append(f"(allow file-read* process-exec {_filters('literal', [executable])})")
     # A later file-read* does not override a file-read-data denial, so the selected roots below
     # re-allow file-read-data by name. Only regular files match by name: SDK directories called
     # "credentials" stay listable.
@@ -217,10 +209,6 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
                   f"(require-any {files})))",
                   f"(allow file-write-create file-write-unlink (require-all {inside} (vnode-type REGULAR-FILE DIRECTORY) "
                   f"(require-any {data})))"]
-    if checkout is not None:
-        destination, common = checkout
-        registrations = f"^{_regex(common)}/worktrees"
-        lines.append(f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}(/.*)?$")))')
     lines += [
         # After the exceptions above and naming their operations, so that none of them re-allows a protected name.
         f'(deny {WRITES} (regex #"{PROTECTED_REGEX}") (regex #"{PROTECTED_IDE_REGEX}"))',
@@ -228,25 +216,12 @@ def profile(*, readable: list[Path], writable: list[Path], private: Path, contro
         rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
         "(deny file-clone (vnode-type DIRECTORY))",
     ]
-    if checkout is not None:
-        # Only the new registration: a failed add removes it and the new link again.
-        lines += [f"(allow file-write-create (require-all {inside} (literal {_literal(destination / '.git')})))",
-                  f'(allow file-write-create file-write-unlink (require-all {inside} (regex #"{registrations}/[^/]+/commondir$")))',
-                  f"(deny file-write-unlink (literal {_literal(common / 'worktrees')}))"]
-        existing = _directories(common / "worktrees")
-        if existing:
-            lines.append(f"(deny {WRITES} {_filters('subpath', existing)})")
     lines.append(f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})")
     return "\n".join(lines) + "\n"
 
 
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def own_terminal(text: str, terminal: str) -> str:
-    """Let a PTY child reopen only its own slave, never another terminal."""
-    return text + f"(allow file-read* file-write* (literal {_literal(terminal)}))\n"
 
 
 def environment(base: dict, private: Path) -> dict:
@@ -256,18 +231,6 @@ def environment(base: dict, private: Path) -> dict:
                    "XDG_CACHE_HOME": str(private / "cache"), "XDG_CONFIG_HOME": str(private / "config"),
                    "XDG_DATA_HOME": str(private / "data"), "XDG_STATE_HOME": str(private / "state"),
                    "npm_config_cache": str(private / "cache" / "npm")}
-
-
-def prepare(private: Path, identity: dict[str, str]) -> None:
-    """Create the private home/temp tree and a Git config holding only the user's identity."""
-    private.parent.mkdir(mode=0o700, exist_ok=True)
-    private.mkdir(mode=0o700)
-    for name in ("home", "tmp", "cache", "config", "data", "state"):
-        (private / name).mkdir(mode=0o700)
-    lines = [f"\t{key} = {value}" for key, value in identity.items()
-             if value and not any(ord(char) < 32 for char in value)]
-    if lines:
-        (private / "home" / ".gitconfig").write_text("[user]\n" + "\n".join(lines) + "\n")
 
 
 def apply(text: str) -> None:

@@ -10,7 +10,6 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import zipfile
 
 from test.support.repository import RepositoryFixture
 
@@ -27,13 +26,13 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         plan = runner.make_plan(self.root, self.base)
         self.assertEqual(self.product_tests(plan), {
             "test/unit/github/test_values.py", "test/component/github/test_calls.py",
-            "test/contract/mcp/github/test_dispatch.py",
+            "test/component/server/test_dispatch.py",
         })
         self.assertEqual(plan["scope"], "affected")
         self.assertTrue(plan["dirty"])
 
     def test_test_changes_and_fixture_changes_do_not_expand_through_reverse_owners(self):
-        path = "test/contract/mcp/github/test_dispatch.py"
+        path = "test/component/server/test_dispatch.py"
         self.write(path, self.files[path] + "\n")
         self.assertEqual(self.product_tests(runner.make_plan(self.root, self.base)), {path})
         self.git("restore", path)
@@ -99,20 +98,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertEqual(result["layers"][0]["tests"], 1)
         self.assertFalse(any("environment" in stage for stage in result["stages"]))
 
-    def test_bundled_skill_change_selects_installed_resource_coverage(self):
-        for path in ("openmachine/skills/overview/SKILL.md", "openmachine/skills/bindings.yaml",
-                     "openmachine/skills/guidance.py"):
-            for full in (False, True):
-                with self.subTest(path=path, full=full), patch.object(runner, "changed_paths", return_value={path}):
-                    plan = runner.make_plan(ROOT, "HEAD", full=full)
-                    self.assertTrue(plan["runtime_required"])
-                    self.assertEqual(plan["environment"], "wheel")
-                    expected = {"test/component/skills/test_resources.py", "test/component/skills/test_packaging.py",
-                                "test/component/bootstrap/test_composition.py", "test/contract/mcp/server/test_catalog.py"}
-                    self.assertTrue(expected <= self.product_tests(plan))
-                    if not full:
-                        self.assertEqual(self.product_tests(plan), expected)
-
     def test_skill_library_named_folder_is_selected_by_ownership(self):
         test = "test/skill-library/example-skill/test_behavior.py"
         source = "skill-library/example-skill/SKILL.md"
@@ -127,11 +112,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertEqual(plan["environment"], "wheel")
         with self.assertRaisesRegex(ValueError, "named Skill directory"):
             runner.test_path("test/skill-library/test_example.py")
-
-    def test_unowned_canonical_skill_resources_are_rejected(self):
-        self.write("openmachine/skills/new-guide.md", "A new shipped guide.\n")
-        with self.assertRaisesRegex(ValueError, "without an explicit owner"):
-            runner.make_plan(self.root, self.base, full=True)
 
     def test_repository_fixture_change_does_not_require_product_installation(self):
         self.manifest["support"]["test/support/wire.py"] = ["test/repository/test_rules.py"]
@@ -186,23 +166,32 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.save_manifest()
         plan = runner.make_plan(self.root, self.base)
         self.assertEqual(self.product_tests(plan), {
-            "test/component/github/test_calls.py", "test/contract/mcp/github/test_dispatch.py"})
+            "test/component/github/test_calls.py", "test/component/server/test_dispatch.py"})
 
-    def test_removing_an_entire_owner_cannot_hide_behind_another_modules_tests(self):
+    def test_a_surviving_owner_cannot_hide_behind_another_modules_tests(self):
+        (self.root / "test/resilience/execution/test_process.py").unlink()
+        self.manifest["modules"]["execution"]["tests"] = []
+        self.manifest["modules"]["execution"]["boundary_tests"] = ["test/repository/test_rules.py"]
+        self.save_manifest()
+        self.write("openmachine/execution.py", "VALUE = 2\n")
+        self.write("openmachine/github.py", "VALUE = 2\n")
+        for full in (False, True):
+            with self.subTest(full=full), self.assertRaisesRegex(ValueError, "no retained behavior coverage"):
+                runner.make_plan(self.root, self.base, full=full)
+
+    def test_retiring_a_whole_owner_needs_no_coverage_for_what_it_deleted(self):
         (self.root / "openmachine/execution.py").unlink()
         (self.root / "test/resilience/execution/test_process.py").unlink()
         del self.manifest["modules"]["execution"]
         self.save_manifest()
         self.write("openmachine/github.py", "VALUE = 2\n")
-        with self.assertRaisesRegex(ValueError, "no retained behavior coverage"):
+        plan = runner.make_plan(self.root, self.base)
+        self.assertEqual(self.product_tests(plan), {"test/unit/github/test_values.py", "test/component/github/test_calls.py",
+                                                    "test/component/server/test_dispatch.py"})
+        # Anything the retired owner left behind is unowned, not retired.
+        self.write("openmachine/execution.py", "VALUE = 1\n")
+        with self.assertRaisesRegex(ValueError, "without an explicit owner"):
             runner.make_plan(self.root, self.base)
-        with self.assertRaisesRegex(ValueError, "no retained behavior coverage"):
-            runner.make_plan(self.root, self.base, full=True)
-        self.manifest["modules"]["execution"] = {
-            "sources": [], "tests": [],
-            "boundary_tests": ["test/contract/mcp/github/test_dispatch.py"]}
-        self.save_manifest()
-        self.assertTrue(runner.make_plan(self.root, self.base)["runtime_required"])
 
     def test_manifest_only_addition_selects_that_owner_without_a_full_run(self):
         path = "test/unit/github/test_more.py"
@@ -224,11 +213,11 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.save_manifest()
         plan = runner.make_plan(self.root, self.base)
         self.assertIn(path, plan["tests"])
-        self.assertIn("test/contract/mcp/github/test_dispatch.py", plan["tests"])
+        self.assertIn("test/component/server/test_dispatch.py", plan["tests"])
 
     def test_missing_transitive_fixture_consumer_is_rejected_before_selection(self):
         helper = "test/support/shared.py"
-        consumer = "test/contract/mcp/github/test_dispatch.py"
+        consumer = "test/component/server/test_dispatch.py"
         self.write(helper, '"""Shared helper."""\n')
         self.write("test/support/wire.py", "from test.support import shared\n")
         self.write(consumer, "from test.support import wire\n" + self.files[consumer])
@@ -339,43 +328,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
                 result = subprocess.run([sys.executable, "-I", "-c", code],
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-
-class SkillPackageParity(unittest.TestCase):
-    def test_payload_parity_rejects_missing_changed_extra_and_retired_resources(self):
-        with tempfile.TemporaryDirectory(prefix="om-skill-package-") as directory:
-            root = Path(directory)
-            package = root / "openmachine/skills"
-            (package / "overview").mkdir(parents=True)
-            for path, content in (("__init__.py", b""), ("bindings.yaml", b"{}\n"),
-                                  ("overview/SKILL.md", b"Canonical guide.\n")):
-                (package / path).write_bytes(content)
-            expected = runner.skill_sources(root)
-            archive = root / "candidate.whl"
-
-            def write(payload):
-                with zipfile.ZipFile(archive, "w") as wheel:
-                    for path, content in payload.items():
-                        wheel.writestr(path, content)
-
-            write(expected)
-            runner.verify_skill_payloads(root, archive, archive)
-            malformed = [
-                {key: value for key, value in expected.items() if not key.endswith("SKILL.md")},
-                {**expected, "openmachine/skills/overview/SKILL.md": b"Stale guide.\n"},
-                {**expected, "openmachine/skills/extra.md": b"Unexpected guide.\n"},
-                {**expected, "openmachine/_skills/SKILL.md": b"Old duplicate.\n"},
-            ]
-            for payload in malformed:
-                with self.subTest(paths=list(payload)):
-                    write(payload)
-                    with self.assertRaisesRegex(ValueError, "Skill (package differs|resources)"):
-                        runner.verify_skill_payloads(root, archive)
-            write(expected)
-            with zipfile.ZipFile(archive, "a") as wheel, self.assertWarns(UserWarning):
-                wheel.writestr("openmachine/skills/bindings.yaml", b"{}\n")
-            with self.assertRaisesRegex(ValueError, "duplicate"):
-                runner.verify_skill_payloads(root, archive)
 
 
 if __name__ == "__main__":

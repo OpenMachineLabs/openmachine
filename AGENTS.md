@@ -1,9 +1,9 @@
 # Agent Instructions
 
-Open Machine Core is the open-source runtime that lets an AI agent operate
-machines through bounded MCP tools. These rules apply to every change in this
-repository. A more specific `AGENTS.md`, such as
-[.github/AGENTS.md](.github/AGENTS.md), adds rules for its directory.
+Open Machine Core is the open-source access launcher that Open Machine SSH
+sessions run through. These rules apply to every change in this repository. A
+more specific `AGENTS.md`, such as [.github/AGENTS.md](.github/AGENTS.md), adds
+rules for its directory.
 
 ## Authority and scope
 
@@ -18,7 +18,7 @@ delta. The safety rules below apply regardless of either.
   not approval. [MAINTAINERS.md](MAINTAINERS.md#design-and-scope) defines each
   Issue type.
 - Current code and tests describe implemented behavior.
-- Do not expand architecture, integrations or deployment as a side effect of
+- Do not expand architecture, external services or deployment as a side effect of
   other work.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), [MAINTAINERS.md](MAINTAINERS.md) and
@@ -28,13 +28,11 @@ any more-specific `AGENTS.md` before changing their scope.
 
 | Path | Contents |
 | --- | --- |
-| `openmachine/` | Runtime package; module owners are in the [development guide](openmachine/skills/overview/development.md) |
-| `openmachine/skills/` | Built-in operating Skills served to agents |
+| `openmachine/` | Runtime package; module owners are in [CONTRIBUTING.md](CONTRIBUTING.md#module-owners) |
 | `test/` | All tests; layers and ownership are in [test/README.md](test/README.md) |
 | `scripts/` | Repository checks and test runners |
 | `spec/` | Spec index and necessary attachments; Spec and Survey bodies stay in Issues |
 | `.github/` | Issue and PR templates, managed labels and CI workflows |
-| `npm/` | npm packaging; publication rules are in [npm/README.md](npm/README.md) |
 
 Keep every test under `test/`, and add a responsibility group only when it
 contains real checks.
@@ -45,7 +43,7 @@ contains real checks.
   smallest acceptance check and stopping condition.
 - Read the affected code and its callers first. Preserve unrelated work; use an
   isolated branch or worktree when other work shares the checkout. Follow the
-  [parallel-work rule](openmachine/skills/overview/SKILL.md#choose-work-from-current-evidence):
+  [parallel-work rule](CONTRIBUTING.md#choose-work-from-current-evidence):
   an unrelated pending acceptance gate does not block development.
 - Prefer direct, readable code in the existing owner. Every dependency, module,
   public interface, configuration option and abstraction needs a current use.
@@ -92,8 +90,8 @@ when working from a fork.
 python scripts/check_repository.py
 python -m unittest discover -s test/repository -p 'test_*.py'
 
-# Focused code change; replace github with the owning module
-python scripts/run_tests.py --module github --layer unit
+# Focused code change; replace access with the owning module
+python scripts/run_tests.py --module access --layer unit
 
 # Affected candidate checks, then the clean committed-candidate gate
 python scripts/run_tests.py --base origin/main --plan
@@ -128,7 +126,7 @@ On resumption or uncertainty, read the original execution, task or PR by its ID
 and inspect the destination before acting again; never replay an effect whose
 outcome is unknown. Only a request proven rejected before any effect may be
 corrected and resubmitted, under a new ID. The
-[operating Skill](openmachine/skills/overview/SKILL.md#complete-the-authorized-delivery)
+[delivery rules](CONTRIBUTING.md#complete-the-authorized-delivery)
 has the full recovery rules.
 
 If truly blocked, report the evidence, the safe recovery you attempted and the

@@ -12,7 +12,7 @@ import time
 import unittest
 
 from openmachine.access import macos
-from openmachine.chat import projects
+from openmachine.access import catalog
 from openmachine.config import load
 from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
@@ -318,7 +318,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         subprocess.run(["git", "-C", str(full), "init", "-q"], check=True)
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
                  for path, mode in ((full, "full_access"), (read_only, "read_only"))]
         scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
                                                                "grant_revision": 1, "session_generation": 0}}
@@ -365,7 +365,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         config = [path.read_bytes() for path in protected]
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": projects.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
+                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
                  for path, mode in ((full, "full_access"), (plain, "full_access"), (read_only, "read_only"))]
         scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
                                                                "grant_revision": 1, "session_generation": 0}}

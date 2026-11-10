@@ -94,7 +94,7 @@ def verify(root: Path, expected_sha256: str) -> dict:
         if len(raw) > MANIFEST_LIMIT or hashlib.sha256(raw).hexdigest() != expected_sha256:
             raise ValueError("manifest digest mismatch")
         value = json.loads(raw, object_pairs_hook=_pairs)
-        if (set(value) != {"format", "target", "core", "python", "git", "files"}
+        if (set(value) != {"format", "target", "core", "python", "files"}
                 or type(value["format"]) is not int or value["format"] != 1
                 or value["target"] != TARGET):
             raise ValueError("unsupported manifest")
@@ -108,22 +108,19 @@ def verify(root: Path, expected_sha256: str) -> dict:
                 or _relative(core["wheel"]).parent != PurePosixPath("wheels")
                 or not core["wheel"].endswith(".whl")):
             raise ValueError("invalid Core identity")
-        for name in ("python", "git"):
-            item = value[name]
-            if (set(item) != {"version", "build", "url", "sha256"}
-                    or any(not isinstance(item[key], str) or not 0 < len(item[key]) <= 2048 for key in item)
-                    or not item["url"].startswith("https://")
-                    or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
-                raise ValueError("invalid input provenance")
+        item = value["python"]
+        if (set(item) != {"version", "build", "url", "sha256"}
+                or any(not isinstance(item[key], str) or not 0 < len(item[key]) <= 2048 for key in item)
+                or not item["url"].startswith("https://")
+                or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+            raise ValueError("invalid input provenance")
         if not isinstance(value["files"], dict) or inventory(root) != value["files"]:
             raise ValueError("payload contents differ from the complete manifest")
-        for name in ("python/bin/python3", "bin/git", "git/bin/git", core["wheel"],
-                     "requirements.lock", "THIRD_PARTY_NOTICES.md"):
+        for name in ("python/bin/python3", core["wheel"], "requirements.lock", "THIRD_PARTY_NOTICES.md"):
             if name not in value["files"] or not (root / name).is_file():
                 raise ValueError("missing required payload member")
-        for name in ("python/bin/python3", "bin/git", "git/bin/git"):
-            if not os.access(root / name, os.X_OK):
-                raise ValueError("payload entry is not executable")
+        if not os.access(root / "python/bin/python3", os.X_OK):
+            raise ValueError("payload entry is not executable")
         return value
     except (OSError, ValueError, TypeError, KeyError, RuntimeError, RecursionError) as error:
         raise Fault("invalid_runtime_payload", "The runtime payload is incomplete, altered, unsafe or incompatible; no installation was selected.") from error
@@ -162,9 +159,7 @@ def retain(state: Path, source: Path, expected_sha256: str) -> tuple[Path, dict]
     return destination, manifest
 
 
-def environment(root: Path) -> dict[str, str]:
-    """Offline installation never inherits pip, Python, loader or Git configuration."""
-    return {"PATH": os.pathsep.join((str(root / "bin"), str(root / "git/bin"), os.defpath)),
-            "HOME": str(Path.home()), "LANG": "en_US.UTF-8", "PIP_CONFIG_FILE": os.devnull,
-            "PIP_NO_INDEX": "1", "PIP_NO_CACHE_DIR": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+def environment() -> dict[str, str]:
+    """Offline installation never inherits pip, Python or loader configuration."""
+    return {"PATH": os.defpath, "HOME": str(Path.home()), "LANG": "en_US.UTF-8", "PIP_CONFIG_FILE": os.devnull,
+            "PIP_NO_INDEX": "1", "PIP_NO_CACHE_DIR": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}

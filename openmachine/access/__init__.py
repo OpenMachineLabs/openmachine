@@ -1,1 +1,1 @@
-"""Shared scope rules and native confinement for Chat and Code access."""
+"""Code access: the launcher, Selected Projects scope, the folder catalog and native confinement."""

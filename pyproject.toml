@@ -5,20 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "openmachine"
 dynamic = ["version"]
-description = "A local-first MCP runtime for explicit work on your machines."
+description = "The Code access launcher that Open Machine SSH sessions run through."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-dependencies = ["mcp==2.2.0", "httpx2==2.13.1", "jsonschema==4.26.0", "pydantic==2.13.5", "PyYAML==6.0.3", "uvicorn==0.38.0"]
-
-[project.scripts]
-openmachine = "openmachine.cli:main"
+dependencies = ["pydantic==2.13.5"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["openmachine", "integrations"]
+packages = ["openmachine"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/openmachine", "/integrations", "/pyproject.toml", "/README.md", "/LICENSE"]
+include = ["/openmachine", "/pyproject.toml", "/README.md", "/LICENSE"]
 
 [tool.hatch.version]
 path = "openmachine/__init__.py"

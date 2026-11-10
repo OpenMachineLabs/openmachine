@@ -1,93 +1,35 @@
-"""Bound management CLI and finite, independent product install/update operations."""
+"""Bound management CLI and finite, independent product install and update operations."""
 
-from contextlib import ExitStack
-import base64
-import hashlib
 import json
 import os
-import platform
 from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
-import tempfile
-import tomllib
 import time
 from typing import Literal
 
-from openmachine import __version__
+from openmachine.config import initialize, load
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-from . import payload, processes, runtime, state as service_state
-from .state import _configuration_digest as _digest
+from . import install, payload, transition
+from . import state as service_state
 
 MAX_OPERATIONS = 128
-RETIRE_LIFECYCLE_WAIT_SECONDS = 5.0
-RETIRE_LIFECYCLE_POLL_SECONDS = 0.05
-PHASES = {"accepted", "retaining", "retained", "preparing", "prepared", "activating",
-          "deferred", "completed", "rejected", "restored", "recovery_required"}
-TERMINAL = {"completed", "rejected", "restored"}
-CONTINUABLE = {"accepted", "retained", "prepared", "deferred"}
-CAPABILITIES = ["status", "bind", "start", "resume", "stop", "startup", "configure", "install", "update", "operation", "continue", "retire", "rollback", "machines"]
-
-
-def _selection_digest(record: dict) -> str:
-    # Recovery advances independently; policy, configuration and selection do not.
-    selected = {key: value for key, value in record.items() if key != "recovery"}
-    return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
+UNPREPARED = {"accepted", "retaining", "retained", "preparing"}
+PHASES = UNPREPARED | {"prepared", "activating", "completed", "rejected", "recovery_required"}
+TERMINAL = {"completed", "rejected"}
+CONTINUABLE = {"accepted", "retained", "prepared"}
+CAPABILITIES = ["status", "configure", "configure:verify_existing", "install", "update", "update:selection_consent",
+                "operation", "continue"]
 
 
 def _selection(state: Path) -> str | None:
     if not os.path.lexists(state / "service/service.json"):
         return None
-    return _selection_digest(service_state._record(state))
-
-
-def _activation_basis(record: dict) -> str:
-    # Selection, snapshots and recovery change during the admitted transition;
-    # configuration binding, policy, launcher and readiness probe must not.
-    stable = {key: value for key, value in record.items()
-              if key not in {"current", "previous", "pending", "configurations", "recovery", "management"}}
-    return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
-
-
-def _cutover_selection(state: Path, record: dict) -> dict | None:
-    """Recognize only this maintenance intent after its irreversible Task cutover."""
-    from . import transition
-
-    if (record["phase"] not in {"activating", "recovery_required"}
-            or record["request"]["action"] != "update" or record["prepared"] is None):
-        return None
-    proof = (record["outcome"] or {}).get("activation")
-    if not isinstance(proof, dict) or set(proof) != {"from", "previous", "basis_sha256"}:
-        return None
-    target, request = record["prepared"]["identity"], record["request"]
-    selected = service_state._record(state)
-    if (selected["current"] != target or target == proof["from"] or selected["config"] != request["config"]
-            or _activation_basis(selected) != proof["basis_sha256"]
-            or selected.get("configurations", {}).get(target) != request["candidate_sha256"]):
-        return None
-    pending = selected["pending"]
-    if (pending is not None and pending != {"from": proof["from"], "to": target, "previous": proof["previous"]}
-            or pending is None and selected["previous"] != proof["from"]):
-        return None
-    installed = service_state._installed(state, target)
-    if installed.get("payload_sha256") != request["payload_sha256"]:
-        return None
-    if not transition._task_cutover(state, selected, committed=True):
-        return None
-    return selected
-
-
-def _restoring(record: dict, selected: dict) -> bool:
-    """An update reselecting the current installation's own recorded configuration."""
-    request, prepared = record["request"], record["prepared"]
-    return (request["action"] == "update" and prepared is not None
-            and selected["current"] == prepared["identity"] and selected["pending"] is None
-            and request["candidate_sha256"] != request["config_sha256"]
-            and selected.get("configurations", {}).get(selected["current"]) == request["candidate_sha256"])
+    return service_state.selection_digest(service_state._record(state))
 
 
 def _operation_path(state: Path, identity: str) -> Path:
@@ -104,36 +46,30 @@ def _read(state: Path, identity: str) -> dict:
         raise Fault("maintenance_state_invalid", "The original maintenance store is not an owned private directory.")
     record = service_state._json(path)
     try:
-        request = record["request"]
+        request, prepared, phase = record["request"], record["prepared"], record["phase"]
         if (set(record) != {"format", "operation_id", "request", "phase", "created_at_ms", "updated_at_ms", "prepared", "outcome", "reason"}
                 or type(record["format"]) is not int or record["format"] != 1 or record["operation_id"] != identity
-                or record["phase"] not in PHASES
+                or phase not in PHASES
                 or any(type(record[key]) is not int or not 0 < record[key] <= 2**53 - 1 for key in ("created_at_ms", "updated_at_ms"))
                 or record["updated_at_ms"] < record["created_at_ms"]
                 or not isinstance(record["reason"], str) or not re.fullmatch(r"[a-z0-9_]{0,128}", record["reason"])
-                or set(request) != {"action", "config", "source", "payload_sha256", "candidate_config", "config_sha256", "candidate_sha256", "selection_sha256", "workspace", "path"}
+                or set(request) != {"action", "config", "source", "payload_sha256", "selection_sha256"}
                 or request["action"] not in {"install", "update"}
-                or any(not isinstance(request[key], str) or len(request[key]) > 4096 for key in request if key != "selection_sha256")
-                or any(not Path(request[key]).is_absolute() for key in ("config", "source", "candidate_config"))
-                or any(not re.fullmatch(r"[0-9a-f]{64}", request[key]) for key in ("payload_sha256", "config_sha256", "candidate_sha256"))
-                or request["selection_sha256"] is not None and not re.fullmatch(r"[0-9a-f]{64}", request["selection_sha256"])):
+                or any(not isinstance(request[key], str) or len(request[key]) > 4096 or not Path(request[key]).is_absolute()
+                       for key in ("config", "source"))
+                or not re.fullmatch(service_state.HEX, request["payload_sha256"])
+                or (request["selection_sha256"] is None) != (request["action"] == "install")
+                or request["selection_sha256"] is not None and not re.fullmatch(service_state.HEX, request["selection_sha256"])):
             raise ValueError("unsupported operation")
-        prepared = record["prepared"]
-        if prepared is not None and (not isinstance(prepared, dict)
-                or set(prepared) != {"status", "identity", "version", "payload_sha256", "runtime", "launch_python", "path_environment", "selection", "service"}
-                or any(not isinstance(value, str) or len(value) > 8192 for value in prepared.values())
-                or not re.fullmatch(r"[0-9a-f]{64}", prepared["identity"])
-                or prepared["payload_sha256"] != request["payload_sha256"]
-                or prepared["runtime"] != str(state / "service/versions" / prepared["identity"])
-                or not Path(prepared["launch_python"]).is_absolute()
-                or (prepared["status"], prepared["selection"], prepared["service"]) != ("prepared", "unchanged", "not_started")):
+        if prepared is not None and (set(prepared) != {"identity", "version"} or prepared["identity"] != request["payload_sha256"]
+                                     or not isinstance(prepared["version"], str)):
             raise ValueError("invalid prepared identity")
-        if (record["phase"] in {"accepted", "retaining", "retained", "preparing"} and prepared is not None
-                or record["phase"] in {"prepared", "deferred", "activating", "completed", "restored"} and prepared is None):
+        if (phase in UNPREPARED and prepared is not None
+                or phase in {"prepared", "activating", "completed"} and prepared is None):
             raise ValueError("inconsistent prepared phase")
         if record["outcome"] is not None and not isinstance(record["outcome"], dict):
             raise ValueError("invalid outcome")
-        if record["phase"] == "completed" and record["outcome"] is None:
+        if phase == "completed" and record["outcome"] is None:
             raise ValueError("missing completed outcome")
     except (KeyError, ValueError, TypeError) as error:
         raise Fault("maintenance_state_invalid", "Preserve the original maintenance record; its bounded contract is invalid.") from error
@@ -167,35 +103,34 @@ def _available(state: Path) -> None:
         raise Fault("maintenance_store_full", "The bounded maintenance store has reached 128 retained operations.")
 
 
+def _busy(state: Path) -> bool | None:
+    """Whether a maintenance process holds the operation lock; None when that is unknown."""
+    try:
+        with lease(state / "service/operation.lock", create=False):
+            return False
+    except FileNotFoundError:
+        return False
+    except Fault as error:
+        if error.code != "resource_busy":
+            raise
+        return True
+    except OSError:
+        return None
+
+
 def read_operation(config_path: Path, state: Path, identity: str) -> dict:
     record = _read(state, identity)
     if record["request"]["config"] != str(config_path):
         raise Fault("service_configuration_mismatch", "This operation belongs to a different explicit configuration.")
-    busy, reason = False, ""
-    try:
-        with lease(state / "service/operation.lock", create=False):
-            pass
-    except Fault as error:
-        if error.code != "resource_busy":
-            raise
-        busy = True
-    except OSError:
-        busy, reason = None, "maintenance_owner_unknown"
+    busy = _busy(state)
+    reason = "" if busy is not None else "maintenance_owner_unknown"
     try:
         selection = _selection(state)
-    except (Fault, OSError):
+    except Fault:
         selection, reason = None, "service_selection_unknown"
     phase = record["phase"]
-    continuable = phase in CONTINUABLE
-    if not continuable and busy is False:
-        try:
-            continuable = _cutover_selection(state, record) is not None
-        except Fault as error:
-            reason = error.code
-        except OSError:
-            reason = "task_storage_unverified"
     status = phase if phase in TERMINAL else "busy" if busy else (
-        "continuation_required" if continuable and busy is False else "recovery_required")
+        "continuation_required" if phase in CONTINUABLE and busy is False else "recovery_required")
     return {"status": status, "operation": record, "owner_busy": busy,
             "selection_sha256": selection, "reason": reason, "observed_at_ms": time.time_ns() // 1000000}
 
@@ -208,84 +143,56 @@ def _spawn(state: Path, identity: str, lock, python: str) -> None:
                      stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=(lock.fileno(),))
 
 
-def _confirmed_configuration(path: Path, expected: str | None, reason: str, *, state: Path | None = None) -> str:
-    """Classify input drift before admission without hiding retention-store failures."""
-    try:
-        digest = _digest(path) if state is None else service_state._snapshot_configuration(state, path)
-    except (Fault, OSError) as error:
-        input_error = (isinstance(error, Fault) and error.code in {
-            "config_unavailable", "invalid_config", "invalid_service_configuration"}
-            or isinstance(error, OSError) and (state is None or error.filename == str(path)))
-        if expected is None or not input_error:
-            raise
-        raise Fault(reason, "The confirmed configuration is unavailable or invalid; review and confirm it again.") from error
-    if expected is not None and digest != expected:
-        raise Fault(reason, "The confirmed configuration changed; review and confirm it again.")
-    return digest
+def _uninstalled(state: Path) -> None:
+    if state.exists() and any(item.name != "service" for item in state.iterdir()):
+        raise Fault("service_adoption_required", "Existing state is not a clean first-run state; inspect its original owner.")
+    if any(os.path.lexists(state / "service" / name) for name in ("service.json", "manage.py")):
+        raise Fault("service_already_installed", "An existing or incomplete installation requires readback; no silent adoption is permitted.")
+
+
+def _unchanged(state: Path, request: dict) -> None:
+    """The state an operation was admitted against still holds before each of its effects."""
+    if request["action"] == "install":
+        _uninstalled(state)
+    elif _selection(state) != request["selection_sha256"]:
+        raise Fault("maintenance_input_changed", "The selection changed after admission; this operation cannot be rebased or replayed.")
 
 
 def submit(config_path: Path, state: Path, action: Literal["install", "update"], identity: str,
-           source: Path, sha256: str, *, candidate_config: Path | None = None,
-           workspace: str = "", path: str = "", expected_config_sha256: str | None = None,
-           expected_candidate_sha256: str | None = None,
-           expected_selection_sha256: str | None = None) -> dict:
+           source: Path, sha256: str, expected_selection_sha256: str | None = None) -> dict:
     destination = _operation_path(state, identity)
     if os.path.lexists(destination):
         return read_operation(config_path, state, identity)
-    if (expected_candidate_sha256 is not None and expected_config_sha256 is None
-            or any(value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value))
-                   for value in (expected_config_sha256, expected_candidate_sha256))):
-        raise Fault("invalid_configuration_consent", "Use confirmed lowercase SHA256 file digests; candidate consent also requires the active configuration digest.")
-    if expected_selection_sha256 is not None and (
-            action != "update" or expected_config_sha256 is None or expected_candidate_sha256 is None
-            or not isinstance(expected_selection_sha256, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", expected_selection_sha256)):
-        raise Fault("invalid_selection_consent", "Confirm the selected installation along with both configuration digests.")
-    if not source.is_absolute() or candidate_config is not None and not candidate_config.is_absolute():
-        raise Fault("invalid_service_path", "Payload and candidate configuration paths must be absolute.")
-    # Verification is read-only. The expected digest is supplied by the trusted
-    # product artifact, never a feed-selected command or an arbitrary executable.
+    if not source.is_absolute():
+        raise Fault("invalid_service_path", "The payload path must be absolute.")
+    # Verification is read-only. The expected digest comes from the trusted product artifact.
     payload.verify(source, sha256)
-    selected_config = candidate_config or config_path
-    config_hash = _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
-    candidate_hash = _confirmed_configuration(selected_config, expected_candidate_sha256, "candidate_configuration_changed")
+    load(config_path)
     state = private_directory(state)
     root = private_directory(state / "service")
-    private_directory(state / "locks")
     with lease(root / "operation.lock") as lock:
         if os.path.lexists(destination):
             return {"status": "busy", "operation": _read(state, identity)}
         _available(state)
-        if expected_config_sha256 is not None:
-            _confirmed_configuration(config_path, expected_config_sha256, "configuration_changed")
-            digest = _confirmed_configuration(selected_config, candidate_hash, "candidate_configuration_changed", state=state)
-            selected_config = service_state._saved_configuration(state, digest)
         if action == "install":
-            if candidate_config is not None or not workspace or not path:
-                raise Fault("invalid_service_request", "Installation requires the configured probe workspace/path, without a replacement configuration.")
             _uninstalled(state)
         else:
-            record = service_state._record(state)
-            _bound(config_path, state, record)
-            if expected_selection_sha256 is not None and _selection_digest(record) != expected_selection_sha256:
+            if service_state._record(state)["config"] != str(config_path):
+                raise Fault("service_configuration_mismatch", "Use the explicit configuration registered with this state.")
+            if _selection(state) != expected_selection_sha256:
                 raise Fault("selection_changed", "The confirmed Core installation changed before admission; review it again.")
-            if record["pending"] is not None:
-                raise Fault("activation_pending", "Read the original transition before submitting another update.")
         private_directory(root / "operations")
-        request = {"action": action, "config": str(config_path), "source": str(source), "payload_sha256": sha256,
-                   "candidate_config": str(selected_config), "config_sha256": config_hash, "candidate_sha256": candidate_hash,
-                   "selection_sha256": _selection(state), "workspace": workspace, "path": path}
-        if any(isinstance(value, str) and len(value) > 4096 for value in request.values()):
-            raise Fault("invalid_service_request", "Maintenance input fields are bounded to 4096 characters.")
         now = time.time_ns() // 1000000
+        request = {"action": action, "config": str(config_path), "source": str(source), "payload_sha256": sha256,
+                   "selection_sha256": expected_selection_sha256}
         record = {"format": 1, "operation_id": identity, "request": request, "phase": "accepted",
                   "created_at_ms": now, "updated_at_ms": now, "prepared": None, "outcome": None, "reason": ""}
         record = _save(state, record, "accepted")
         try:
             _spawn(state, identity, lock, sys.executable)
         except OSError:
-            # Popen failed before a process was created. The recorded intent is
-            # known unperformed and needs explicit continuation, never a new ID.
+            # Popen failed before a process was created: the intent is known unperformed and needs
+            # explicit continuation, never a new ID.
             record = _save(state, record, "accepted", reason="maintenance_launch_unavailable")
         return {"status": "accepted", "operation": record}
 
@@ -295,9 +202,7 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         record = _read(state, identity)
         if record["request"]["config"] != str(config_path):
             raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
-        if (record["phase"] not in CONTINUABLE and _cutover_selection(state, record) is None
-                and not (record["phase"] in {"activating", "recovery_required"}
-                         and _restoring(record, service_state._record(state)))):
+        if record["phase"] not in CONTINUABLE:
             raise Fault("maintenance_not_continuable", "Preparation or activation may have occurred; read original state without replay.")
         python = sys.executable
         if record["phase"] != "accepted":
@@ -308,325 +213,65 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         return {"status": "accepted", "operation": record}
 
 
-def _retirement_lifecycle(state: Path) -> ExitStack:
-    """Acquire retirement exclusivity within one finite pre-effect budget."""
-    deadline = time.monotonic() + RETIRE_LIFECYCLE_WAIT_SECONDS
-    while True:
-        owned = ExitStack()
-        try:
-            owned.enter_context(lease(state / "locks/lifecycle.lock"))
-            return owned
-        except Fault as error:
-            owned.close()
-            if error.code != "resource_busy":
-                raise
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            time.sleep(min(RETIRE_LIFECYCLE_POLL_SECONDS, remaining))
-
-
-def retire_operation(config_path: Path, state: Path, identity: str) -> dict:
-    """Terminally reject only a deferred update proven not to have activated."""
-    with lease(state / "service/operation.lock", create=False):
-        record = _read(state, identity)
-        if record["request"]["config"] != str(config_path):
-            raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
-        if record["phase"] == "rejected" and record["reason"] == "retired_before_activation":
-            return {"status": "retired", "operation": record}
-        if record["phase"] != "deferred" or record["request"]["action"] != "update":
-            raise Fault("maintenance_not_retirable",
-                        "Only a deferred update with completed preparation can be retired before activation.")
-        request, prepared = record["request"], record["prepared"]
-        with _retirement_lifecycle(state):
-            selected = service_state._record(state)
-            _bound(config_path, state, selected)
-            if selected["pending"] is not None:
-                raise Fault("activation_pending", "Read the original pending transition before retiring maintenance.")
-            if (_selection(state) != request["selection_sha256"]
-                    or _digest(Path(request["config"])) != request["config_sha256"]):
-                raise Fault("maintenance_input_changed",
-                            "Original selection, policy or configuration changed; preserve the operation.")
-            if selected["current"] == prepared["identity"]:
-                raise Fault("maintenance_not_retirable",
-                            "The prepared update is selected; preserve the original operation and inspect current state.")
-            observed = observe(config_path, state)
-            stable = observed.get("status") == "ready" or (
-                observed.get("status") == "stopped" and service_state.stopped(selected)
-                and observed.get("reason") == "deliberate_stop")
-            if not stable or observed.get("current") != selected["current"]:
-                raise Fault("maintenance_retirement_unverified",
-                            "The selected service is not stably ready or stopped; preserve the deferred operation.")
-            if (_selection(state) != request["selection_sha256"]
-                    or _digest(Path(request["config"])) != request["config_sha256"]
-                    or _read(state, identity) != record):
-                raise Fault("maintenance_retirement_unverified",
-                            "Maintenance inputs changed during retirement verification; preserve the original operation.")
-            retired = _save(state, record, "rejected", reason="retired_before_activation")
-        return {"status": "retired", "operation": retired}
-
-
-def _uninstalled(state: Path) -> None:
-    root = state / "service"
-    if state.exists() and any(item.name not in {"service", "locks"} for item in state.iterdir()):
-        raise Fault("service_adoption_required", "Existing runtime history is not a clean first-run state; inspect its original owner.")
-    if any(os.path.lexists(item) for item in (root / "service.json", root / "launch.py", root / "service.log", root / "manage.py", runtime._plist_path(state))):
-        raise Fault("service_already_installed", "Existing or incomplete native registration requires readback; no silent adoption is permitted.")
-    if runtime._native(state)["loaded"] or runtime.socket_alive(state / "mcp.sock"):
-        raise Fault("service_already_running", "An existing native job or listener blocks installation; nothing was stopped.")
-
-
-def _bound(config_path: Path, state: Path, record: dict) -> None:
-    if record["config"] != str(config_path):
-        raise Fault("service_configuration_mismatch", "Use the explicit configuration registered with this state.")
-    runtime._verify_files(state, record)
-
-
-def _inputs_unchanged(state: Path, record: dict) -> Path:
-    request = record["request"]
-    if (_selection(state) != request["selection_sha256"]
-            or _digest(Path(request["config"])) != request["config_sha256"]):
-        raise Fault("maintenance_input_changed", "Original selection, policy or configuration changed; this operation cannot be rebased or replayed.")
-    snapshot = state / "service/configurations" / (request["candidate_sha256"] + ".toml")
-    if not os.path.lexists(snapshot):
-        if _digest(Path(request["candidate_config"])) != request["candidate_sha256"]:
-            raise Fault("maintenance_input_changed", "The exact accepted candidate configuration is no longer available.")
-        digest = service_state._snapshot_configuration(state, Path(request["candidate_config"]))
-        if digest != request["candidate_sha256"]:
-            raise Fault("maintenance_input_changed", "Candidate configuration changed while being retained.")
-    return service_state._saved_configuration(state, request["candidate_sha256"])
-
-
 def run_operation(state: Path, identity: str, lock_fd: int) -> None:
     """One admitted operation; the caller owns the inherited operation flock."""
-    from . import install, transition
-
     record = _read(state, identity)
-    if record["phase"] not in CONTINUABLE | {"activating", "recovery_required"}:
+    if record["phase"] not in CONTINUABLE:
         return
+    request = record["request"]
+    retained = state / "service/payloads" / request["payload_sha256"]
     try:
-        request = record["request"]
-        if record["phase"] not in CONTINUABLE:
-            selected = _cutover_selection(state, record)
-            if selected is not None:
-                _bound(Path(request["config"]), state, selected)
-                result = transition._resume_activation(state, selected)
-                _save(state, record, "completed", outcome=result)
-            elif _restoring(record, selected := service_state._record(state)):
-                # An interrupted restore repeats idempotently under its original ID,
-                # unless readback proves it already succeeded.
-                _bound(Path(request["config"]), state, selected)
-                result = runtime.status(Path(request["config"]), state)
-                if (_digest(Path(request["config"])) != request["candidate_sha256"]
-                        or result["status"] != "ready"):
-                    result = transition._restore_configuration(state, selected, request["candidate_sha256"],
-                                                               request["config_sha256"], before_change=lambda: None)
-                _save(state, record, "completed", outcome=result)
-            return
-        snapshot = _inputs_unchanged(state, record)
         if record["phase"] == "accepted":
+            _unchanged(state, request)
             record = _save(state, record, "retaining")
-            retained, manifest = payload.retain(state, Path(request["source"]), request["payload_sha256"])
-            incoming = processes.run([str(retained / "python/bin/python3"), "-I", "-B", "-m", "openmachine.service",
-                                   "check-state", str(snapshot), str(state)], env=payload.environment(retained))
-            try:
-                proof = json.loads(incoming.stdout)
-                if (incoming.returncode or type(proof.get("management_contract")) is not int
-                        or proof["management_contract"] != service_state.MANAGEMENT_CONTRACT
-                        or proof.get("version") != manifest["core"]["version"]
-                        or proof.get("prefix") != str(retained / "python")):
-                    raise ValueError("incoming implementation contract")
-            except (ValueError, TypeError, AttributeError) as error:
-                raise Fault("incompatible_management", "The trusted incoming payload does not implement this maintenance contract.") from error
+            payload.retain(state, Path(request["source"]), request["payload_sha256"])
             record = _save(state, record, "retained")
-            # A future-state transition runs in the trusted incoming Core, not
-            # an old CLI coerced into accepting a contract it cannot read.
-            retained = state / "service/payloads" / request["payload_sha256"]
+            # Preparation and selection run in the incoming Core, which owns the state they write.
             python = str(retained / "python/bin/python3")
             os.set_inheritable(lock_fd, True)
-            os.execve(python, [python, "-I", "-B", "-m", "openmachine.service.maintenance", str(state), identity, str(lock_fd)],
-                      payload.environment(retained))
+            os.execve(python, [python, "-I", "-B", "-m", "openmachine.service.maintenance", str(state), identity,
+                               str(lock_fd)], payload.environment())
         if record["phase"] == "retained":
             record = _save(state, record, "preparing")
-            retained = state / "service/payloads" / request["payload_sha256"]
-            prepared = install._prepare_payload(snapshot, state, retained, request["payload_sha256"])
-            record = _save(state, record, "prepared", prepared=prepared)
-        if record["phase"] not in {"prepared", "deferred"}:
-            return
-        prepared = record["prepared"]
-        config = Path(request["config"])
-        def before_change():
-            nonlocal record
-            _inputs_unchanged(state, record)
-            checkpoint = None
-            if request["action"] == "update":
-                selected = service_state._record(state)
-                checkpoint = {"activation": {"from": selected["current"], "previous": selected["previous"],
-                                               "basis_sha256": _activation_basis(selected)}}
-            record = _save(state, record, "activating", outcome=checkpoint)
+            record = _save(state, record, "prepared", prepared=install.prepare(state, retained, request["payload_sha256"]))
+        _unchanged(state, request)
+        record = _save(state, record, "activating")
+        target = record["prepared"]["identity"]
         if request["action"] == "install":
-            _uninstalled(state)
-            result = transition._register(config, state, prepared["identity"], request["workspace"], request["path"],
-                                          prepared=prepared, before_change=before_change)
-            runtime._set_startup(state, False)
+            transition.register(Path(request["config"]), state, target)
         else:
-            selected = service_state._record(state)
-            _bound(config, state, selected)
-            if _restoring(record, selected):
-                # Only the selected installation's own recorded configuration may
-                # be restored over an edited file.
-                result = transition._restore_configuration(state, selected, request["candidate_sha256"],
-                                                           request["config_sha256"], before_change=before_change)
-            elif selected["current"] == prepared["identity"]:
-                if request["candidate_sha256"] != request["config_sha256"]:
-                    raise Fault("same_installation", "A configuration change requires an explicit distinct candidate installation.")
-                result = runtime.status(config, state)
-                if "management" not in selected:
-                    with lease(state / "locks/lifecycle.lock"):
-                        before_change()
-                        selected = service_state._record(state)
-                        selected = service_state._bind_management(state, selected, prepared["identity"])
-                        save_json(state / "service/service.json", selected)
-            else:
-                result = transition._activate(state, selected, prepared["identity"], snapshot,
-                                              before_change=before_change, require_safe=True)
-        _save(state, record, "completed", outcome=result)
+            transition.select(state, target)
+        _save(state, record, "completed", outcome={"current": target})
     except Fault as error:
-        phase = "restored" if error.code == "activation_failed_restored" else (
-            "recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
-            # A restore continuation may follow an applied configuration effect.
-            or record["phase"] == "recovery_required" and _restoring(record, service_state._record(state))
-            or error.code == "service_output_limit" else
-            "deferred" if record["phase"] in {"prepared", "deferred"} and error.code in {
-                "resource_busy", "activation_deferred", "legacy_workspace_busy", "incompatible_remote_state"} else "rejected")
+        phase = ("recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
+                 or error.code == "service_output_limit" else "rejected")
         _save(state, record, phase, reason=error.code)
     except OSError:
         # Filesystem acknowledgement loss can follow a completed atomic effect.
         _save(state, record, "recovery_required", reason="maintenance_effect_unverified")
 
 
-def control(config_path: Path, state: Path, action: Literal["start", "resume", "stop", "startup", "bind"], *,
-            enabled: bool | None = None, identity: str | None = None) -> dict:
-    from . import checks
-
-    with lease(state / "service/operation.lock"):
-        record = service_state._record(state)
-        _bound(config_path, state, record)
-        if record["pending"] is not None:
-            raise Fault("activation_pending", "Read or explicitly restore the original pending transition first.")
-        selected = service_state._installed(state, record["current"])
-        if action == "resume":
-            # Opening a controller may restore existing intent, never create it.
-            # The operation lock serializes this with deliberate Stop and updates.
-            if record.get("policy", {}).get("desired") == "running":
-                with lease(state / "locks/lifecycle.lock"):
-                    checks._candidate_state(service_state._runtime(state, record["current"]) / "bin/python", config_path, state)
-                runtime._start(state, record)
-        elif action == "bind":
-            with lease(state / "locks/lifecycle.lock"):
-                record = service_state._record(state)
-                record = service_state._bind_management(state, record, identity or record["current"])
-                save_json(state / "service/service.json", record)
-        elif action == "start" and record["format"] == 1:
-            with lease(state / "locks/lifecycle.lock"):
-                checks._candidate_state(service_state._runtime(state, record["current"]) / "bin/python", config_path, state)
-            runtime._start(state, record)
-        elif selected["state_contract"] < 14:
-            raise Fault("incompatible_management", "The selected old Core supports legacy Start/status only; update before persistent Stop or login policy.")
-        elif action == "startup" and record["format"] == 1:
-            if type(enabled) is not bool:
-                raise Fault("invalid_service_request", "Startup requires one explicit boolean.")
-            # Native registration already persists this choice. Do not change
-            # the launch format of a running legacy job: launchd caches argv
-            # until bootout. The first deliberate Stop creates format 2.
-            runtime._set_startup(state, enabled)
-        else:
-            with lease(state / "locks/lifecycle.lock"):
-                # The supervisor can advance its existing budget before this
-                # admission is acquired. Never publish policy from a stale copy.
-                record = service_state._record(state)
-                checks._candidate_state(service_state._runtime(state, record["current"]) / "bin/python", config_path, state)
-                record = service_state._bind_management(state, record, record["current"])
-                policy = record.get("policy") or {"desired": "running", "start_at_login": runtime._startup(state)["enabled"]}
-                if action == "startup":
-                    if type(enabled) is not bool:
-                        raise Fault("invalid_service_request", "Startup requires one explicit boolean.")
-                    policy = policy | {"start_at_login": enabled}
-                else:
-                    policy = policy | {"desired": "running" if action == "start" else "stopped"}
-                record = record | {"format": 2, "policy": policy}
-                save_json(state / "service/service.json", record)
-                if action == "stop":
-                    runtime._stop(state)
-                # A running legacy job continues with its original definition;
-                # the next startup uses the exact new policy-aware entry.
-                runtime._sync_definition(state, record)
-                if action == "startup":
-                    runtime._set_startup(state, enabled)
-            if action == "start":
-                runtime._start(state, record)
-    return observe(config_path, state)
-
-
 def observe(config_path: Path, state: Path) -> dict:
-    result = runtime.status(config_path, state)
-    if result["status"] == "not_installed":
-        return result
+    status = "busy" if _busy(state) else None
+    if not os.path.lexists(state / "service/service.json"):
+        return {"status": status or "not_installed", "current": None, "selection_sha256": None,
+                "product_version": None, "product_commit": None, "entry": None}
     record = service_state._record(state)
-    if result.get("current") is not None and result["current"] != record["current"]:
-        raise Fault("selection_changed", "The selected installation changed during observation; refresh the original status.")
-    selected = service_state._installed(state, record["current"])
-    result.update(selection_sha256=_selection_digest(record),
-                  state_contract=selected["state_contract"], policy=record.get("policy"), startup=runtime._startup(state),
-                  persistent_control_supported=selected["state_contract"] >= 14)
-    if result.get("error") == "resource_busy":
-        result.update(status="busy", reason="readiness_busy")
-    if result.get("recovery") and runtime._recovery_blocked(result["recovery"], time.time_ns() // 1000000):
-        result["status"] = "blocked"
-    if service_state.stopped(record) and result["status"] != "activation_pending":
-        idle = result.get("supervisor_pid") is None and result.get("pid") is None
-        result["status"] = "stopped" if idle and not runtime.socket_alive(state / "mcp.sock") else "blocked"
-        result["reason"] = "deliberate_stop" if result["status"] == "stopped" else "stop_unverified"
-    if "management" in record:
-        result["entry"] = {"python": record["management"]["launch_python"], "path": str(state / "service/manage.py"),
-                           "config": str(config_path), "state": str(state), "identity": record["management"]["identity"]}
-    if record["pending"] is not None:
-        result["status"] = "activation_pending"
-    result["product_version"] = selected["version"]
-    result["product_commit"] = selected.get("commit")
-    return result
-
-
-
-
-
-
-
-
-
-
-
-
-def machines(config_path: Path, state: Path) -> dict:
-    """Read only native machine metadata; this is not remote-device discovery."""
-    from openmachine.config import load
-
-    digest = _digest(config_path)
-    config = load(config_path)
-    if _digest(config_path) != digest:
-        raise Fault("configuration_changed", "Configuration changed during observation; refresh again.")
-    return {"status": "observed", "config_sha256": digest,
-            "machines": [{"name": name, "transport": "local",
-                          "os": platform.system(), "architecture": platform.machine()}
-                         for name in config.machines]}
+    if record["config"] != str(config_path):
+        raise Fault("service_configuration_mismatch", "Use the explicit configuration registered with this state.")
+    installed = service_state._installed(state, record["current"])
+    binding = record["management"]
+    return {"status": status or "installed", "current": record["current"],
+            "selection_sha256": service_state.selection_digest(record),
+            "product_version": installed["version"], "product_commit": installed["commit"],
+            "entry": {"python": binding["launch_python"],
+                      "access_python": str(state / "service/payloads" / installed["payload_sha256"] / "python/bin/python3"),
+                      "path": str(state / "service/manage.py"), "config": str(config_path), "state": str(state),
+                      "identity": binding["identity"]}}
 
 
 def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, **inputs) -> dict:
-    envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT,
-                "capabilities": [*CAPABILITIES, "configure:local_access", "configure:verify_existing", "update:configuration_consent",
-                                 "update:restore_configuration", "update:selection_consent", "update:workspace_reference_guard"],
-                "implementation_version": __version__, "implementation_commit": service_state.running_commit(__version__),
-                "implementation_state_contract": service_state.STATE_CONTRACT}
+    envelope = {"management_contract": service_state.MANAGEMENT_CONTRACT, "capabilities": CAPABILITIES}
     try:
         if contract != service_state.MANAGEMENT_CONTRACT:
             raise Fault("incompatible_management", "This Core supports management contract 1.")
@@ -635,40 +280,22 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
         config_path, state = config_path.resolve(), state.resolve()
         if sys.platform != "darwin" or os.getuid() == 0:
             raise Fault("unsupported_service_host", "Management requires the owning logged-in macOS user.")
-        if len(os.fsencode(state / "mcp.sock")) >= 104:
-            raise Fault("invalid_service_path", "Use a shorter state path for the macOS private socket.")
         if action == "status":
             result = observe(config_path, state)
-        elif action == "machines":
-            result = machines(config_path, state)
         elif action == "configure":
-            from openmachine.config import initialize
             _uninstalled(state)
             result = {"status": "configured", **initialize(config_path, **inputs)}
         elif action in {"install", "update"}:
             result = submit(config_path, state, action, **inputs)
         elif action == "operation":
             result = read_operation(config_path, state, **inputs)
-        elif action == "continue":
-            result = continue_operation(config_path, state, **inputs)
-        elif action == "retire":
-            result = retire_operation(config_path, state, **inputs)
-        elif action == "rollback":
-            from . import transition
-            result = transition.operate(config_path, state, "rollback", require_safe=True)
-        elif action in {"start", "resume", "stop", "startup", "bind"}:
-            result = control(config_path, state, action, **inputs)
         else:
-            raise Fault("invalid_service_request", "Select an advertised management action.")
+            result = continue_operation(config_path, state, **inputs)
     except (Fault, OSError) as error:
         code = error.code if isinstance(error, Fault) else "management_unavailable"
         result = {"status": "busy" if code in {"resource_busy", "maintenance_busy"} else
-                  "incompatible" if code.startswith("incompatible") else "activation_pending" if code == "activation_pending" else
-                  "blocked" if code == "runtime_recovery_blocked" else "unready" if code == "service_unready" else "unknown",
-                  "reason": code}
-        if (action == "update" and code in {"configuration_changed", "candidate_configuration_changed",
-                                            "invalid_configuration_consent", "invalid_selection_consent", "selection_changed"}
-                and not os.path.lexists(_operation_path(state, inputs["identity"]))):
+                  "incompatible" if code.startswith("incompatible") else "unknown", "reason": code}
+        if action == "update" and code == "selection_changed" and not os.path.lexists(_operation_path(state, inputs["identity"])):
             result.update(status="rejected", admitted=False, operation_id=inputs["identity"])
     return envelope | result | {"observed_at_ms": time.time_ns() // 1000000}
 

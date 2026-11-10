@@ -26,6 +26,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from openmachine import __version__
 from openmachine.access import macos, rules
 from openmachine.config import load
 from openmachine.foundation.sanitize import Fault
@@ -117,7 +118,7 @@ def capabilities() -> dict:
     reason = macos.lifetime_unavailable_reason()
     restricted = "available" if reason is None else reason
     # github names the routing form Core takes, so a host and Core that disagree on it route nothing.
-    value = {"protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "https",
+    value = {"version": __version__, "protocol": PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "https",
              "policies": {"full_access": "available", "read_only": restricted, "selected_projects": restricted}}
     if reason is None:
         value["github_client"] = str(_stable_client())  # what restricted sessions' Git routing runs
@@ -401,9 +402,8 @@ def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path,
     control = list(dict.fromkeys([*rules.control_paths(state), state]))
     readable, writable = [], [home]
     if scope is not None:
-        mapped = scope.process_request()
-        for item in [*mapped["roots"], *mapped["worktrees"]]:
-            (writable if item["mode"] == "full_access" else readable).append(Path(item["path"]))
+        for path, mode in scope.grants():
+            (writable if mode == "full_access" else readable).append(path)
     return macos.profile(readable=readable, writable=writable, private=runtime, control=control,
                          denied=denied, exceptions=exceptions, executable=_stable_client())
 

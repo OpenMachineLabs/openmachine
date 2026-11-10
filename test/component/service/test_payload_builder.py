@@ -1,4 +1,4 @@
-"""Tests for service behavior at the component layer."""
+"""The payload producer refuses signing options and unsafe input archives."""
 
 import io
 from pathlib import Path
@@ -21,20 +21,6 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         ], capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized arguments: --sign-identity", result.stderr)
-
-    def test_git_entry_resolves_helpers_after_relocation_and_preserves_arguments(self):
-        builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))
-        (self.source / "git/bin/git").write_text(
-            '#!/bin/sh\nprintf "%s\\n" "$GIT_EXEC_PATH" "$GIT_TEMPLATE_DIR" "$@"\n')
-        builder["git_entry"](self.source)
-        moved = self.root / "relocated payload 'quoted'"
-        self.source.rename(moved)
-        result = subprocess.run([str(moved / "bin/git"), "a b", "$(not-a-command)"],
-            cwd="/", env={"PATH": "/bin:/usr/bin", "GIT_EXEC_PATH": "/foreign"},
-            capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [str(moved / "git/libexec/git-core"),
-            str(moved / "git/share/git-core/templates"), "a b", "$(not-a-command)"])
 
     def test_producer_rejects_hardlinks_and_archive_path_escape(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))

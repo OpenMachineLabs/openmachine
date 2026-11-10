@@ -38,8 +38,7 @@ class SessionFixture(object):
         self.state = self.root / "state"
         self.state.mkdir(mode=0o700)
         self.config = self.root / "config.toml"
-        self.config.write_text('schema_version = 1\n\n[machines.local]\ntransport = "local"\nlocal_access = "full_access"\n'
-                               'execution_enabled = true\nworkspace_write_enabled = true\n')
+        self.config.write_text('[machines.local]\ntransport = "local"\n')
         self.lifetimes = set()
         self.addCleanup(self.end_all)
 

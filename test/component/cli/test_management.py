@@ -1,70 +1,66 @@
-"""Tests for cli behavior at the component layer."""
+"""The manage-only CLI routes typed inputs to management and reports failure statuses by exit code."""
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
-from openmachine.service import maintenance
-from openmachine.service import runtime as service_runtime
-from test.support.service_cases import ServiceCaseFixture
+
+from openmachine import cli
+
+BASE = ["openmachine", "--config", "/c/config.toml", "--state-dir", "/s/state", "manage"]
 
 
-class ServiceTests(ServiceCaseFixture, unittest.TestCase):
-    def test_manage_retire_routes_original_operation_id(self):
-        from openmachine.cli import main
-        argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage",
-                "--contract", "1", "retire", "--operation-id", "c" * 32]
-        result = {"status": "retired", "operation": {"operation_id": "c" * 32}}
-        with patch.object(maintenance, "dispatch", return_value=result) as dispatch, \
-                patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(main(), 0)
+class ManagementCliTests(unittest.TestCase):
+    def run_cli(self, argv, status="accepted"):
+        result = {"status": status}
+        with patch.object(cli, "dispatch", return_value=result) as dispatch, patch.object(sys, "argv", BASE + argv), \
+                redirect_stdout(io.StringIO()) as output:
+            code = cli.main()
         self.assertEqual(json.loads(output.getvalue()), result)
-        dispatch.assert_called_once_with(self.config, self.state, "retire", contract=1, identity="c" * 32)
+        return code, dispatch
 
-    def test_manage_update_routes_paired_configuration_consent_and_preserves_legacy_calls(self):
-        from openmachine.cli import main
-        for guarded in ("legacy", "config", "selection"):
-            with self.subTest(guarded=guarded):
-                source, candidate = self.root / "payload", self.root / "candidate.toml"
-                argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage", "update",
-                        "--operation-id", "a" * 32, "--payload", str(source), "--sha256", "b" * 64,
-                        "--candidate-config", str(candidate)]
-                consent = {}
-                if guarded != "legacy":
-                    argv += ["--config-sha256", "c" * 64, "--candidate-sha256", "d" * 64]
-                    consent = {"expected_config_sha256": "c" * 64, "expected_candidate_sha256": "d" * 64}
-                if guarded == "selection":
-                    argv += ["--expected-selection-sha256", "e" * 64]
-                    consent["expected_selection_sha256"] = "e" * 64
-                with patch.object(maintenance, "dispatch", return_value={"status": "accepted"}) as dispatch, \
-                        patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
-                    self.assertEqual(main(), 0)
-                dispatch.assert_called_once_with(self.config, self.state, "update", contract=1, identity="a" * 32,
-                    source=source, sha256="b" * 64, candidate_config=candidate, **consent)
+    def test_each_action_routes_exactly_its_inputs(self):
+        payload = ["--operation-id", "a" * 32, "--payload", "/p/payload", "--sha256", "b" * 64]
+        cases = (
+            (["status"], "status", {}),
+            (["configure"], "configure", {"verify_existing": False}),
+            (["configure", "--verify-existing"], "configure", {"verify_existing": True}),
+            (["install", *payload], "install", {"identity": "a" * 32, "source": Path("/p/payload"), "sha256": "b" * 64}),
+            (["update", *payload, "--expected-selection-sha256", "e" * 64], "update",
+             {"identity": "a" * 32, "source": Path("/p/payload"), "sha256": "b" * 64, "expected_selection_sha256": "e" * 64}),
+            (["operation", "--operation-id", "c" * 32], "operation", {"identity": "c" * 32}),
+            (["continue", "--operation-id", "c" * 32], "continue", {"identity": "c" * 32}),
+            (["--contract", "2", "status"], "status", {}),
+        )
+        for argv, action, inputs in cases:
+            with self.subTest(argv=argv):
+                code, dispatch = self.run_cli(argv)
+                self.assertEqual(code, 0)
+                dispatch.assert_called_once_with(Path("/c/config.toml"), Path("/s/state"), action,
+                                                 contract=2 if "--contract" in argv else 1, **inputs)
 
-    def test_manage_update_rejects_unpaired_selection_before_dispatch(self):
-        from openmachine.cli import main
-        argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage", "update",
-                "--operation-id", "a" * 32, "--payload", str(self.root / "payload"), "--sha256", "b" * 64,
-                "--expected-selection-sha256", "e" * 64]
-        with patch.object(maintenance, "dispatch") as dispatch, patch.object(sys, "argv", argv), \
-                redirect_stderr(io.StringIO()) as output, self.assertRaises(SystemExit) as exit:
-            main()
-        self.assertEqual(exit.exception.code, 2)
-        self.assertIn("requires both configuration digests", output.getvalue())
-        dispatch.assert_not_called()
+    def test_failure_statuses_exit_nonzero(self):
+        for status in ("unknown", "incompatible", "busy", "rejected", "recovery_required"):
+            with self.subTest(status=status):
+                self.assertEqual(self.run_cli(["status"], status)[0], 1)
+        for status in ("installed", "not_installed", "configured", "accepted", "completed", "continuation_required"):
+            with self.subTest(status=status):
+                self.assertEqual(self.run_cli(["status"], status)[0], 0)
 
-    def test_manage_update_rejects_incomplete_consent_before_dispatch(self):
-        from openmachine.cli import main
-        for flag in ("--config-sha256", "--candidate-sha256"):
-            with self.subTest(flag=flag):
-                argv = ["openmachine", "--config", str(self.config), "--state-dir", str(self.state), "manage", "update",
-                        "--operation-id", "a" * 32, "--payload", str(self.root / "payload"), "--sha256", "b" * 64, flag, "c" * 64]
-                with patch.object(maintenance, "dispatch") as dispatch, patch.object(sys, "argv", argv), \
-                        redirect_stderr(io.StringIO()) as output, self.assertRaises(SystemExit) as exit:
-                    main()
-                self.assertEqual(exit.exception.code, 2)
-                self.assertIn("must be supplied together", output.getvalue())
-                dispatch.assert_not_called()
+    def test_retired_commands_and_missing_inputs_fail_before_dispatch(self):
+        payload = ["--operation-id", "a" * 32, "--payload", "/p", "--sha256", "b" * 64]
+        for argv in (BASE + ["update", *payload], BASE + ["bind", "--identity", "a" * 64], BASE + ["start"],
+                     BASE + ["install", *payload, "--probe-workspace", "/w"], ["openmachine", "serve"],
+                     ["openmachine", "manage", "status"]):
+            with self.subTest(argv=argv), patch.object(cli, "dispatch") as dispatch, patch.object(sys, "argv", argv), \
+                    redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit:
+                cli.main()
+            self.assertEqual(exit.exception.code, 2)
+            dispatch.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

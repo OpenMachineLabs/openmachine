@@ -10,17 +10,15 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 import types
 import unittest
-import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "test/ownership.json"
-LAYERS = ("repository", "unit", "component", "skill-library", "contract", "resilience")
+LAYERS = ("repository", "unit", "component", "skill-library", "resilience")
 GLOBAL_PATHS = {
     "requirements.lock", "pyproject.toml", "scripts/run_tests.py",
     "scripts/premerge.py", ".github/workflows/quality.yml",
@@ -86,10 +84,10 @@ def source_path(value: object) -> str:
     return value
 
 
-def test_path(value: object) -> str:
+def test_path(value: object, layers: tuple[str, ...] | None = LAYERS) -> str:
     path = source_path(value)
     parts = PurePosixPath(path).parts
-    if len(parts) < 3 or parts[0] != "test" or parts[1] not in LAYERS:
+    if len(parts) < 3 or parts[0] != "test" or layers is not None and parts[1] not in layers:
         raise ValueError(f"test must have an explicit layer: {path}")
     if parts[1] == "skill-library" and len(parts) < 4:
         raise ValueError(f"skill-library tests require a named Skill directory: {path}")
@@ -98,10 +96,10 @@ def test_path(value: object) -> str:
     return path
 
 
-def _unique_paths(value: object, *, tests: bool = False) -> list[str]:
+def _unique_paths(value: object, *, tests: bool = False, layers: tuple[str, ...] | None = LAYERS) -> list[str]:
     if not isinstance(value, list):
         raise ValueError("ownership entries must be lists of exact paths")
-    paths = [(test_path(item) if tests else source_path(item)) for item in value]
+    paths = [(test_path(item, layers) if tests else source_path(item)) for item in value]
     if len(set(paths)) != len(paths):
         raise ValueError("duplicate path in ownership entry")
     return paths
@@ -155,7 +153,8 @@ def check_fixture_consumers(root: Path, files: set[str], tests: set[str], suppor
                 raise ValueError(f"fixture consumer is not registered: {helper} -> {test}")
 
 
-def validate_manifest(value: object, files: set[str] | None = None, root: Path | None = None) -> dict:
+def validate_manifest(value: object, files: set[str] | None = None, root: Path | None = None,
+                      layers: tuple[str, ...] | None = LAYERS) -> dict:
     if not isinstance(value, dict) or set(value) != {"format", "modules", "support"} or value["format"] != 1:
         raise ValueError("unsupported or incomplete test ownership manifest")
     modules, support = value["modules"], value["support"]
@@ -168,7 +167,7 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
         if set(entry) != {"sources", "tests", "boundary_tests"}:
             raise ValueError(f"{name}: expected sources, tests, and boundary_tests")
         for key in entry:
-            _unique_paths(entry[key], tests=key != "sources")
+            _unique_paths(entry[key], tests=key != "sources", layers=layers)
         if not entry["tests"] and not entry["boundary_tests"]:
             raise ValueError(f"{name}: a module must select actual behavior tests")
         for path in entry["sources"]:
@@ -189,7 +188,7 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
         source_path(path)
         if not path.startswith("test/") or path in owned_tests:
             raise ValueError(f"support entry is not a test fixture: {path}")
-        _unique_paths(consumers, tests=True)
+        _unique_paths(consumers, tests=True, layers=layers)
         if not consumers or any(consumer not in owned_tests for consumer in consumers):
             raise ValueError(f"support has missing or unowned consumers: {path}")
         references.add(path)
@@ -197,9 +196,7 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
         missing = sorted(references - files)
         if missing:
             raise ValueError("stale ownership paths: " + ", ".join(missing))
-        production = {path for path in files
-                      if (path.endswith(".py") and path.startswith(("openmachine/", "integrations/")))
-                      or (path.startswith("openmachine/skills/") and path.endswith((".md", ".yaml")))}
+        production = {path for path in files if path.endswith(".py") and path.startswith("openmachine/")}
         tests = {path for path in files if path.startswith("test/")
                  and PurePosixPath(path).name.startswith("test_") and path.endswith(".py")}
         helpers = {path for path in files if path.startswith("test/") and path.endswith(".py")
@@ -229,7 +226,8 @@ def _old_manifest(root: Path, base_sha: str) -> dict | None:
         if MANIFEST in git(root, "ls-tree", "-r", "--name-only", base_sha).splitlines():
             raise ValueError("could not read the baseline ownership manifest")
         return None
-    return validate_manifest(json.loads(result.stdout))
+    # A baseline may name a layer this runner retired; its tests only map what the candidate deleted.
+    return validate_manifest(json.loads(result.stdout), layers=None)
 
 
 def _repository_only(path: str) -> bool:
@@ -300,9 +298,12 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
             if manifest is None:
                 continue
             for name, entry in manifest["modules"].items():
+                # A deleted path of a module the current manifest no longer has retires it: no behavior remains.
+                retired = path not in files and name not in current["modules"]
                 if path in entry["sources"]:
                     known = True
-                    required_paths.setdefault(path, set()).update(_tests_for(entry) & all_tests)
+                    if not retired:
+                        required_paths.setdefault(path, set()).update(_tests_for(entry) & all_tests)
                     add(_tests_for(entry), f"{path} -> {name}")
                     if name in current["modules"]:
                         required_paths[path].update(_tests_for(current["modules"][name]) & all_tests)
@@ -311,7 +312,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                     known = True
                     if path in all_tests:
                         add([path], f"changed test: {path}")
-                    else:
+                    elif not retired:
                         required_paths.setdefault(path, set()).update(_tests_for(entry) & all_tests)
                         add(_tests_for(entry), f"removed test: {path}")
                         if name in current["modules"]:
@@ -351,7 +352,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                 add(old["support"].get(path, []), f"fixture ownership changed: {path}")
                 add(current["support"].get(path, []), f"fixture ownership changed: {path}")
     for path, retained in required_paths.items():
-        product_path = path.startswith(("openmachine/", "integrations/")) or (
+        product_path = path.startswith("openmachine/") or (
             path.startswith("test/") and PurePosixPath(path).name.startswith("test_")
             and not path.startswith("test/repository/"))
         behavior = {test for test in retained if not test.startswith("test/repository/")} if product_path else retained
@@ -363,7 +364,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
         reasons = {path: why for path, why in reasons.items() if path.split("/")[1] == layer}
     selected = sorted(reasons, key=lambda path: (LAYERS.index(path.split("/")[1]), path))
     product = [path for path in selected if not path.startswith("test/repository/")]
-    changed_product = any(path.startswith(("openmachine/", "integrations/")) for path in changes)
+    changed_product = any(path.startswith("openmachine/") for path in changes)
     changed_tests = any(path.startswith("test/") and PurePosixPath(path).name.startswith("test_")
                         and path.endswith(".py") and not path.startswith("test/repository/")
                         for path in changes)
@@ -468,34 +469,6 @@ def run_files(root: Path, paths: list[str], *, installed: bool, source: bool = F
     return {"layers": results}
 
 
-def skill_sources(root: Path) -> dict[str, bytes]:
-    package = root / "openmachine/skills"
-    return {path.relative_to(root).as_posix(): path.read_bytes()
-            for path in package.rglob("*") if path.is_file() and path.suffix in {".py", ".yaml", ".md"}}
-
-
-def wheel_skills(wheel: Path) -> dict[str, bytes]:
-    with zipfile.ZipFile(wheel) as archive:
-        paths = [name for name in archive.namelist() if name.startswith("openmachine/skills/")
-                 and Path(name).suffix in {".py", ".yaml", ".md"}]
-        if len(paths) != len(set(paths)) or any(name.startswith("openmachine/_skills/") for name in archive.namelist()):
-            raise ValueError("wheel has duplicate or retired Skill resources")
-        return {name: archive.read(name) for name in paths}
-
-
-def verify_skill_payloads(root: Path, *wheels: Path) -> None:
-    expected = skill_sources(root)
-    if not {"openmachine/skills/__init__.py", "openmachine/skills/bindings.yaml",
-            "openmachine/skills/overview/SKILL.md"} <= expected.keys():
-        raise ValueError("canonical Skill package inputs are incomplete")
-    for wheel in wheels:
-        actual = wheel_skills(wheel)
-        if actual != expected:
-            missing, extra = sorted(expected.keys() - actual.keys()), sorted(actual.keys() - expected.keys())
-            changed = sorted(name for name in expected.keys() & actual.keys() if expected[name] != actual[name])
-            raise ValueError(f"Skill package differs from source in {wheel.name}: missing={missing}, extra={extra}, changed={changed}")
-
-
 def execute_plan(root: Path, plan: dict) -> dict:
     print_plan(plan)
     stages = {}
@@ -541,29 +514,6 @@ def execute_plan(root: Path, plan: dict) -> dict:
             artifacts = list(wheels.glob("openmachine-*.whl"))
             if len(artifacts) != 1:
                 raise ValueError("expected exactly one newly built candidate wheel")
-            sdists = temporary / "sdists"
-            sdists.mkdir()
-            stages["sdist build"] = run_command([str(python), "-c",
-                "from hatchling.build import build_sdist; import sys; build_sdist(sys.argv[1])", str(sdists)],
-                cwd=root, stage="build candidate sdist")
-            archives = list(sdists.glob("openmachine-*.tar.gz"))
-            if len(archives) != 1:
-                raise ValueError("expected exactly one newly built candidate sdist")
-            unpacked = temporary / "sdist-source"
-            with tarfile.open(archives[0]) as archive:
-                archive.extractall(unpacked, filter="data")
-            source_roots = list(unpacked.glob("*/pyproject.toml"))
-            if len(source_roots) != 1:
-                raise ValueError("expected one candidate source root in the sdist")
-            derived = temporary / "sdist-wheels"
-            derived.mkdir()
-            stages["sdist wheel build"] = run_command([str(python), "-m", "pip", "wheel", "--no-deps",
-                "--no-build-isolation", ".", "--wheel-dir", str(derived)],
-                cwd=source_roots[0].parent, stage="build wheel from candidate sdist")
-            derived_artifacts = list(derived.glob("openmachine-*.whl"))
-            if len(derived_artifacts) != 1:
-                raise ValueError("expected exactly one newly built sdist-derived wheel")
-            verify_skill_payloads(root, artifacts[0], derived_artifacts[0])
             stages["wheel install"] = run_command([str(python), "-m", "pip", "install", "--no-deps",
                                                    "--force-reinstall", str(artifacts[0])],
                                                   cwd=root, stage="install candidate wheel")
