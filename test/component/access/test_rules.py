@@ -56,13 +56,18 @@ class FolderRuleTests(unittest.TestCase):
         locked = self.root / "locked"
         locked.mkdir(mode=0o000)
         self.addCleanup(locked.chmod, 0o700)
-        quoted = self.root / 'qu"ote'
-        quoted.mkdir()
+        quoted, broken = self.root / 'qu"ote', self.root / "line\nbreak"
+        for path in (quoted, broken, self.home / ".config"):
+            path.mkdir()
+        (self.root / "broken").symlink_to(broken, target_is_directory=True)
         for code, path in (("folder_missing", self.root / "missing"), ("folder_not_directory", self.root / "file"),
                            ("folder_access_denied", locked), ("folder_unsupported", quoted),
+                           ("folder_unsupported", self.root / "broken"),
                            ("folder_too_broad", Path("/")), ("folder_too_broad", self.home), ("folder_too_broad", self.root),
                            ("folder_protected", self.home / "Library/LaunchAgents"), ("folder_protected", self.home / ".ssh"),
-                           ("folder_protected", self.home / "Library"),
+                           ("folder_protected", self.home / "Library"), ("folder_protected", self.home / ".config"),
+                           ("folder_protected", Path("/Volumes")), ("folder_protected", Path("/dev")),
+                           ("folder_protected", rules.seatbelt.user_temp()), ("folder_protected", rules.seatbelt.user_temp().parent),
                            ("folder_conflict", self.home / ".local"), ("folder_conflict", self.home / ".local/state")):
             with self.subTest(code=code, path=path):
                 self.refused(code, 1, self.notes, path)

@@ -90,7 +90,9 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
     whose kernel path is no longer the stored one.
     """
     home = seatbelt.account_home()
-    denied, _ = seatbelt.read_denials(home)
+    # Everything the profile denies before a folder's allow, which would re-open it: the denied areas,
+    # devices and Core's runtime trees.
+    denied = [*seatbelt.read_denials(home)[0], Path("/dev"), seatbelt.user_temp() / "omc"]
     found = []
     for index, text in enumerate(paths):
         try:
@@ -111,7 +113,7 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
         except OSError:
             raise FolderFault("folder_access_denied", index, text) from None
         code = ("folder_changed" if admission and str(path) != text
-                else "folder_unsupported" if any(char in str(path) for char in '"\\')
+                else "folder_unsupported" if any(char in '"\\' or ord(char) < 32 or ord(char) == 127 for char in str(path))
                 else "folder_too_broad" if _inside(home, path)
                 else "folder_protected" if any(_inside(path, item) or _inside(item, path) for item in denied)
                 else "folder_conflict" if any(_inside(path, item) or _inside(item, path) for item in control)
