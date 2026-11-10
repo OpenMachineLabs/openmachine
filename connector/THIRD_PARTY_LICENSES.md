@@ -16,7 +16,7 @@ include those license texts. CI fails when this list differs from the build grap
 - `github.com/hdevalence/ed25519consensus` v0.2.0 (BSD-3-Clause)
 - `github.com/huin/goupnp` v1.3.0 (BSD-2-Clause)
 - `github.com/jsimonetti/rtnetlink` v1.4.2 (MIT)
-- `github.com/klauspost/compress` v1.20.0 (Apache-2.0 and BSD-3-Clause; linked packages add nested MIT and BSD-3-Clause license files)
+- `github.com/klauspost/compress` v1.20.0 (BSD-3-Clause; the linked `zstd/internal/xxhash` is MIT and `internal/snapref` BSD-3-Clause, each with its own license file)
 - `github.com/mdlayher/netlink` v1.11.2 (MIT)
 - `github.com/mdlayher/socket` v0.7.0 (MIT)
 - `github.com/mitchellh/go-ps` v1.0.0 (MIT)

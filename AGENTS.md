@@ -34,7 +34,7 @@ any more-specific `AGENTS.md` before changing their scope.
 | `scripts/` | Repository checks and test runners |
 | `spec/` | Spec index and necessary attachments; Spec and Survey bodies stay in Issues |
 | `.github/` | Issue and PR templates, managed labels and CI workflows |
-| `connector/` | Standalone Go network module; see [connector/README.md](connector/README.md) |
+| `connector/` | Standalone Go network module; [connector/README.md](connector/README.md) has its build and test commands |
 
 Keep every test under `test/`, and add a responsibility group only when it
 contains real checks. The one exception is `connector/test/`, so that the Go
