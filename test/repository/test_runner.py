@@ -286,6 +286,21 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cannot be combined"):
             runner.make_plan(self.root, full=True, layer="unit")
 
+    def test_release_version_bump_verifies_the_complete_candidate(self):
+        self.manifest["modules"]["server"]["sources"].append("openmachine/__init__.py")
+        self.save_manifest()
+        self.write("openmachine/__init__.py", '__version__ = "1.0.0"\n')
+        self.commit()
+        release_base = self.git("rev-parse", "HEAD")
+        self.write("openmachine/__init__.py", '__version__ = "1.0.1"\n')
+        plan = runner.make_plan(self.root, release_base)
+        self.assertEqual(plan["scope"], "full")
+        self.assertIn("global verification or dependency change: openmachine/__init__.py", plan["full_reasons"])
+        self.assertEqual(self.product_tests(plan), {
+            "test/unit/github/test_values.py", "test/component/github/test_calls.py",
+            "test/resilience/execution/test_process.py", "test/component/server/test_dispatch.py",
+        })
+
     def test_first_manifest_migration_is_explicitly_reported_as_full(self):
         self.git("rm", "test/ownership.json")
         self.commit()
