@@ -5,6 +5,7 @@ pathspec==1.1.1
 pluggy==1.6.0
 pydantic==2.13.5
 pydantic_core==2.46.5
+PyYAML==6.0.3
 trove-classifiers==2026.9.21.13
 typing-inspection==0.4.4
 typing_extensions==4.16.0
