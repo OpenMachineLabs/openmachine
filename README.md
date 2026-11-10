@@ -6,8 +6,6 @@
 
 **An open-source platform that lets your coding agent work on every machine you own.**
 
-<sub>Built on Tailscale: your machines connect peer-to-peer over encrypted WireGuard, with our own relays as a fallback.</sub>
-
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/Website-openmachine.app-141414?style=flat-square" alt="Website"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-43A047?style=flat-square" alt="MIT License"></a>
@@ -28,7 +26,23 @@
   <img src="assets/openmachine-hero.svg" width="1000" alt="Your machines in the Open Machine Console, a coding agent training a model on a GPU machine and opening a pull request, and your connected tools." />
 </p>
 
-<p align="center">Ask your coding agent as you do today. It reaches the right machine, does the work there and brings the results back.</p>
+Your coding agent already works on this machine. Open Machine lets it work on
+all of them: train on the GPU machine, build on the workstation, test on the
+spare Mac, with each machine's results coming back to you.
+
+**Yours, end to end.** Machines connect peer-to-peer over encrypted WireGuard,
+built on Tailscale. You choose how far the agent reaches on each machine, and
+GitHub tokens never sit on your machines.
+
+## Quick start
+
+1. [Download](https://openmachine.app/download) the app and sign in on each machine.
+2. Choose access per machine: **Read only**, **Selected projects** or **Full access**.
+3. Ask your coding agent. It reaches a machine with one command:
+
+   ```bash
+   ssh studio.om
+   ```
 
 ## Connect all your devices
 
@@ -44,7 +58,14 @@
   <img src="assets/openmachine-permissions.svg" width="1000" alt="Choose Read only, Select projects or Full access for each person on each machine." />
 </p>
 
-<p align="center">Choose how far the agent can reach on each machine: Read only, Select projects or Full access.</p>
+<p align="center">Set each person's access on each machine, change it any time, and turn a machine off to put it out of reach.</p>
+
+## How it fits together
+
+- **App**: signs each machine in and keeps it reachable.
+- **Console**: your machines, members and access, in one place.
+- **Network**: a private WireGuard network between your machines.
+- **Core** (this repository): starts the agent's work on each machine with the access you chose.
 
 ## Contributors
 
