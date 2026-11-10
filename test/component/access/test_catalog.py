@@ -133,6 +133,11 @@ class CatalogTests(CatalogFixture, unittest.TestCase):
         (self.work / "parent").mkdir()
         (self.work / "old/child").rename(self.work / "parent/child")
         self.fault("project_changed", lambda: self.target("parent/child", expected_target_id=original))
+        original = self.target("parent/child")["target_id"]
+        (self.work / "parent/child").rename(self.work / "displaced")
+        (self.work / "parent/child").mkdir()
+        self.fault("project_changed", lambda: self.target("parent/child", expected_target_id=original))
+        self.fault("project_changed", lambda: self.target("displaced", expected_target_id=original))
         before = self.target()["target_id"]
         self.work.rename(self.root / "original")
         self.work.mkdir()
@@ -312,6 +317,9 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
                     json.dumps({"action": "validate", "projects": [{}] * 33}).encode(), b" " * 65537):
             with self.subTest(raw=raw[:40]):
                 self.assertEqual(self.reply(raw), {"error": {"code": "catalog_unavailable"}})
+        padded = json.dumps({"action": "inspect", "machine": "local", "workspace_name": str(self.work)}).encode()
+        self.assertIn("project", self.reply(padded + b" " * (65536 - len(padded))))
+        self.assertEqual(self.reply(padded + b" " * (65537 - len(padded))), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('schema_version = 1\n[machines.local]\ntransport = "local"\n')
         self.assertEqual(self.reply({}), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('[machines.local]\ntransport = "local"\n')

@@ -104,9 +104,17 @@ class RulesTests(unittest.TestCase):
         grants = self.compile().grants()
         self.assertIn((real, "full_access"), grants)
         self.assertNotIn(self.personal, [path for path, _ in grants])
+        # A worktree inside Core's control paths is never granted.
+        with patch.object(rules, "control_paths", return_value=(real,)):
+            self.assertEqual(self.compile(self.scope(self.binding(self.core, "full_access"))).grants(), [(self.core, "full_access")])
         # A worktree a Read-only repository holds stays read-only, even inside no selected folder.
         read_only = self.compile(self.scope(self.binding(self.core, "read_only")))
         self.assertEqual(read_only.grants(), [(self.core, "read_only"), (real, "read_only")])
+        # Inside a Full folder it gains nothing: the folder already grants more.
+        nested = self.cloud / "core-wt"
+        self.git(self.core, "worktree", "add", "-q", "-b", "nested", str(nested))
+        inside = self.compile(self.scope(self.binding(self.core, "read_only"), self.binding(self.cloud, "full_access")))
+        self.assertEqual(inside.grants(), [(self.core, "read_only"), (self.cloud, "full_access"), (real, "read_only")])
 
 
 if __name__ == "__main__":

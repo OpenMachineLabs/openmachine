@@ -44,10 +44,12 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_verification_refuses_changed_or_unsafe_files_without_writing(self):
         initialize(self.path)
-        for change in ("content", "mode", "hardlink", "symlink"):
+        for change in ("content", "bytes", "mode", "hardlink", "symlink"):
             with self.subTest(change=change):
                 if change == "content":
                     self.path.write_text(TEXT + "\n")
+                elif change == "bytes":
+                    self.path.write_bytes(b"\xff" + TEXT.encode())
                 elif change == "mode":
                     self.path.chmod(0o644)
                 elif change == "hardlink":

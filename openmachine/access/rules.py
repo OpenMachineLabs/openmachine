@@ -148,7 +148,7 @@ def compile(config, state: Path, machine: str, value: dict) -> Scope:
     try:
         model = OperationScope.model_validate(value)
     except ValidationError as error:
-        raise Fault("scope_invalid", "Use operation_scope protocol 1 with 1-32 exact bindings.",
+        raise Fault("scope_invalid", "Use scope protocol 1 with 1-32 exact bindings.",
                     effect="known_no_effect") from error
     control = control_paths(state)
     return Scope(bind(config, machine, model.roots, control), control)

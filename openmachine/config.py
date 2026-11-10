@@ -46,7 +46,7 @@ def initialize(path: Path, *, verify_existing: bool = False) -> dict:
     if verify_existing:
         metadata = path.lstat()
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_uid != os.getuid()
-                or metadata.st_nlink != 1 or path.read_text() != TEXT):
+                or metadata.st_nlink != 1 or path.read_bytes() != TEXT.encode()):
             raise Fault("configuration_mismatch", "The existing private configuration is not the first-run configuration.")
         return {"verified": str(path)}
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

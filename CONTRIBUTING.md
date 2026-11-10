@@ -24,8 +24,8 @@ commit messages and technical PR descriptions must remain in English.
 
 ## Set up a development checkout
 
-You need Python 3.12+ and Git. Restricted sessions and management run on macOS;
-their tests are skipped elsewhere. Windows is not supported.
+You need Python 3.12+ and Git. Restricted sessions need macOS Seatbelt; their
+tests are skipped elsewhere. Windows is not supported.
 
 For a fork-based contribution:
 
