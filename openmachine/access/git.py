@@ -165,4 +165,3 @@ def registered_worktrees(root: Path) -> list[dict]:
     except (UnicodeError, ValueError) as error:
         raise Fault("git_unavailable", "Git returned an invalid worktree registration record.") from error
     return entries
-

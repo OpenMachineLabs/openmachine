@@ -1,7 +1,7 @@
 """Code SSH sessions: confined launch inside a persistent lifetime.
 
-No Tasks, Executions or receipts. Lifetime records hold only supervision metadata, never commands,
-output or context, and nothing here restarts a command.
+Lifetime records hold only supervision metadata, never commands, output or context, and nothing
+here restarts a command.
 """
 
 import errno
