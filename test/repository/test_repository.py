@@ -397,7 +397,7 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
-        expected_jobs = {"quality.yml": 2, "metadata.yml": 1,
+        expected_jobs = {"quality.yml": 3, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1, "runtime-payload.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}

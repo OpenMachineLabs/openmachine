@@ -232,8 +232,9 @@ def _old_manifest(root: Path, base_sha: str) -> dict | None:
 
 def _repository_only(path: str) -> bool:
     # Keep retired docs classified so their deletion still selects repository checks.
+    # connector/ is a Go module that its own CI job builds and tests.
     return (path in REPOSITORY_PATHS or
-            path.startswith("spec/") or
+            path.startswith(("spec/", "connector/")) or
             (path.endswith(".md") and path.startswith(("docs/", "test/"))) or
             (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".md", ".yml", ".yaml"))))
 
