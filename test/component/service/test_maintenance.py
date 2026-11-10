@@ -1,5 +1,6 @@
 """Core management: install, update, original-operation readback and status."""
 
+import json
 import os
 import subprocess
 import sys
@@ -8,8 +9,9 @@ from unittest.mock import patch
 
 from openmachine.config import TEXT
 from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease
+from openmachine.foundation.state import lease, save_json
 from openmachine.service import maintenance, transition
+from openmachine.service import state as service_state
 from test.support.service_cases import FIRST, SECOND, ServiceCaseFixture
 
 ENVELOPE = {"management_contract": 1, "capabilities": ["status", "configure", "configure:verify_existing", "install",
@@ -129,6 +131,44 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
             return prepared
         changed = self.complete(SECOND, prepare=prepare)
         self.assertEqual((changed["phase"], changed["reason"]), ("rejected", "maintenance_input_changed"))
+
+    def test_the_pinned_entry_refuses_a_changed_binding(self):
+        self.install()
+        record = service_state._json(self.state / "service/service.json")
+        for change in ({"config": str(self.root / "other.toml")}, {"management": record["management"] | {"identity": "f" * 64}}):
+            with self.subTest(change=change):
+                save_json(self.state / "service/service.json", record | change)
+                result = subprocess.run([sys.executable, "-I", str(self.state / "service/manage.py"), "status"],
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual((result.returncode, json.loads(result.stdout)["reason"]),
+                                 (1, "management_identity_unavailable"))
+
+    def test_operation_ids_and_the_store_are_bounded(self):
+        for identity in ("../other", "A" * 32, "1" * 31):
+            with self.subTest(identity=identity):
+                self.assertEqual(self.manage("operation", identity=identity)["reason"], "invalid_operation_id")
+        self.manage("install", identity=FIRST, source=self.source, sha256=self.digest)
+        maintenance._save(self.state, self.record(FIRST), "rejected", reason="fixture")
+        with patch.object(maintenance, "MAX_OPERATIONS", 1):
+            self.assertEqual(self.manage("install", identity=SECOND, source=self.source, sha256=self.digest)["reason"],
+                             "maintenance_store_full")
+        self.assertFalse(maintenance._operation_path(self.state, SECOND).exists())
+
+    def test_invalid_selection_and_installation_records_are_never_replaced(self):
+        self.install()
+        selection, installation = self.state / "service/service.json", self.state / "service/versions" / self.digest / "installation.json"
+        good = {path: service_state._json(path) for path in (selection, installation)}
+        cases = ((selection, {"current": "../x"}, "service_state_invalid"), (selection, {"extra": 1}, "service_state_invalid"),
+                 (installation, {"commit": "x"}, "incompatible_runtime"), (installation, {"extra": 1}, "incompatible_runtime"),
+                 (installation, {"management_contract": 2}, "incompatible_runtime"))
+        for path, change, code in cases:
+            with self.subTest(path=path.name, change=change):
+                save_json(path, good[path] | change)
+                before = path.read_bytes()
+                self.assertEqual(self.manage("status")["reason"], code)
+                self.assertEqual(path.read_bytes(), before)
+                save_json(path, good[path])
+        self.assertEqual(self.manage("status")["status"], "installed")
 
     def test_configure_status_and_request_boundaries(self):
         os.unlink(self.config)

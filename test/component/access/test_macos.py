@@ -134,6 +134,13 @@ class ProfileTests(unittest.TestCase):
                      ".git/info/exclude", ".git/objects/ab/cd", "config", "hooks/x", ".gitconfig", ".gitmodules",
                      ".github/hooks/x", "bare.git/config"):
             self.assertNotRegex("/r/" + path, pattern)
+        # Seatbelt matches names case-insensitively, as the volume resolves them; IDE settings run later too.
+        protected = re.compile(f"{seatbelt.PROTECTED_REGEX}|{seatbelt.PROTECTED_IDE_REGEX}", re.IGNORECASE)
+        for path in (".vscode/tasks.json", "a/.idea/x", ".VSCODE/tasks.json", ".vſcode/x", ".GIT/CONFIG", "sub/.Git",
+                     ".git/hooKs/x"):
+            self.assertRegex("/r/" + path, protected)
+        for path in ("file.txt", ".vscodex/x", "idea/x", ".github/x"):
+            self.assertNotRegex("/r/" + path, protected)
 
     def test_nested_git_dirs_are_the_ones_git_lays_out(self):
         nested = re.compile(seatbelt.NESTED_GIT_REGEX)

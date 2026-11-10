@@ -320,7 +320,13 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         for path in (full, read_only):
             path.mkdir()
             (path / "file.txt").write_text(path.name + "\n")
-        subprocess.run(["git", "-C", str(full), "init", "-q"], check=True)
+        git = ["git", "-C", str(full), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+               "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+        for args in (["init", "-q", "-b", "main"], ["add", "file.txt"], ["commit", "-q", "-m", "Fixture"]):
+            subprocess.run(git + args, check=True, capture_output=True)
+        # A registered worktree of a Full repository is writable although no root selects it.
+        linked = self.root / "full-linked"
+        subprocess.run(git + ["worktree", "add", "-q", "-b", "linked", str(linked)], check=True, capture_output=True)
         settings = load(self.config)
         roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
                   "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
@@ -330,12 +336,15 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         reply, code, out, err = self.session(lifetime, "selected_projects", (
             f"echo w >> {full}/file.txt && echo full-ok; echo x > {full}/.git/hooks/pre-commit; "
+            f"mkdir {full}/.vscode; mkdir -p {full}/a/.idea; echo w > {linked}/new.txt && echo linked-ok; "
             f"echo x >> {read_only}/file.txt; cat {read_only}/file.txt"), machine="local", scope=scope)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertIn("full-ok", out)
+        self.assertIn("linked-ok", out)
         self.assertIn("read-only", out)
-        self.assertEqual(err.count(DENIED), 2, err)
+        self.assertEqual(err.count(DENIED), 4, err)
         self.assertFalse((full / ".git/hooks/pre-commit").exists())
+        self.assertFalse((full / ".vscode").exists() or (full / "a/.idea").exists())
         self.assertEqual((read_only / "file.txt").read_text(), "read-only\n")
         # The live instance is reused, but a replaced directory is never rebound to the old grant.
         read_only.rename(self.root / "moved")

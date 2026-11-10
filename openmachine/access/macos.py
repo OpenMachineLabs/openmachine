@@ -27,9 +27,9 @@ HOME_DENIED = (".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/gh", ".con
                ".sh_history", "Library", "Pictures", "Music", "Movies")
 HOME_READABLE = ("Library/Developer",)  # Developer tools' data inside the denied Library.
 SYSTEM_DENIED = ("/Volumes", "/Library/Keychains")  # External and network volumes; system keychains.
-# Secret-named files outside selected roots: unreadable contents, anywhere. A subset of the typed
-# tools' rule that programs can live with: public CA bundles (*.pem) and SDK "credentials" packages stay
-# readable, so HTTPS and installed tools keep working. Inside a selected root, the project reads them.
+# Secret-named files outside selected roots: unreadable contents, anywhere. Public CA bundles (*.pem) and
+# SDK "credentials" packages stay readable, so HTTPS and installed tools keep working. Inside a selected
+# root, the project reads them.
 SECRET_DIRECTORIES = (".ssh", ".aws", ".azure", ".gnupg", ".kube")
 SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.toml|id_rsa|id_ed25519|[^/]*\.(key|p12|pfx)"
 SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
