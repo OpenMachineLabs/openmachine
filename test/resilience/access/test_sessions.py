@@ -14,8 +14,7 @@ import sys
 import time
 import unittest
 
-from openmachine.access import catalog, macos
-from openmachine.config import load
+from openmachine.access.macos import seatbelt as macos
 from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
 
 DENIED = "not permitted"
@@ -66,7 +65,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                 path.write_text(f"#!/bin/sh\necho {program}-{name} \"$@\"\n")
                 path.chmod(0o755)
             clients.append(denied / name / "om-code")
-        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
+        prelude = f"from openmachine.access.macos import seatbelt; seatbelt.SYSTEM_DENIED = seatbelt.SYSTEM_DENIED + ({str(denied)!r},); "
         return clients, prelude
 
     def admitted(self, lifetime, command, prelude, client=None):
@@ -139,7 +138,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         # This admission pauses under the lifetime lock, just before it connects; meanwhile a routed
         # session waits for the lock, then starts a newer instance that rebinds the socket.
         holding = self.root / "holding"
-        pause = ("import time\nfrom openmachine.access import sessions as _s\n_connect = _s._connect\n"
+        pause = ("import time\nfrom openmachine.access.macos import sessions as _s\n_connect = _s._connect\n"
                  f"def _paused(lifetime, instance):\n open({str(holding)!r}, 'w').close()\n time.sleep(3)\n"
                  " return _connect(lifetime, instance)\n_s._connect = _paused\n")
         paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
@@ -155,7 +154,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         (first, second), prelude = self.clients()
         lifetime = self.lifetime()
         self.admitted(lifetime, "true", prelude, second)  # Core holds a copy of another client
-        remove = ("from openmachine.access import sessions as _s\n_install = _s._install\n"
+        remove = ("from openmachine.access.macos import sessions as _s\n_install = _s._install\n"
                   "def _removed(client):\n client.unlink()\n return _install(client)\n_s._install = _removed\n")
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran", github=self.routing(first)),
                                     prelude + remove)
@@ -244,7 +243,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertTrue(self.stopped(instance["pid"]))
         started = time.monotonic()
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
-                                    "from openmachine.access import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
+                                    "from openmachine.access.macos import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
         # The request may already be queued at the spawner: a retry is not known to be safe.
@@ -256,7 +255,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_a_spawner_that_never_reports_ready_releases_the_lifetime(self):
         lifetime = self.lifetime()
         # The spawner enters its sandbox and then stalls before it reports ready.
-        prelude = ("import time\nfrom openmachine.access import macos as _m, sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+        prelude = ("import time\nfrom openmachine.access.macos import seatbelt as _m, sessions as _s\n_s.SPAWN_SECONDS = 1\n"
                    "_apply = _m.apply\ndef _stall(text):\n _apply(text)\n time.sleep(120)\n_m.apply = _stall\n")
         started = time.monotonic()
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"), prelude)
@@ -272,7 +271,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         noted = self.state / "intermediate"
         # The intermediate process stalls before it can fork the spawner.
-        prelude = ("import os, time\nfrom openmachine.access import sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+        prelude = ("import os, time\nfrom openmachine.access.macos import sessions as _s\n_s.SPAWN_SECONDS = 1\n"
                    f"def _stall():\n open({str(noted)!r}, 'w').write(str(os.getpid()))\n time.sleep(120)\n"
                    "os.setsid = _stall\n")
         started = time.monotonic()
@@ -316,43 +315,54 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                 self.assertFalse(self.alive(child))
         self.assertTrue(self.alive(kept))
 
-    def test_selected_projects_write_only_full_roots_outside_protected_paths(self):
-        full, read_only = self.root / "full", self.root / "read-only"
-        for path in (full, read_only):
+    def test_workspace_writes_only_its_folders_and_starts_in_the_first(self):
+        code, notes, outside = self.root / "code", self.root / "notes", self.root / "outside"
+        for path in (code, notes, outside):
             path.mkdir()
             (path / "file.txt").write_text(path.name + "\n")
-        git = ["git", "-C", str(full), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        git = ["git", "-C", str(code), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
         for args in (["init", "-q", "-b", "main"], ["add", "file.txt"], ["commit", "-q", "-m", "Fixture"]):
             subprocess.run(git + args, check=True, capture_output=True)
-        # A registered worktree of a Full repository is writable although no root selects it.
-        linked = self.root / "full-linked"
+        # A registered worktree of a folder's repository is writable although no folder holds it.
+        linked = self.root / "code-linked"
         subprocess.run(git + ["worktree", "add", "-q", "-b", "linked", str(linked)], check=True, capture_output=True)
-        settings = load(self.config)
-        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
-                 for path, mode in ((full, "full_access"), (read_only, "read_only"))]
-        scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
-                                                               "grant_revision": 1, "session_generation": 0}}
+        (code / ".claude").mkdir()
+        (code / ".claude/settings.json").write_text("{}\n")
+        folders = [str(code), str(notes)]
         lifetime = self.lifetime()
-        reply, code, out, err = self.session(lifetime, "selected_projects", (
-            f"echo w >> {full}/file.txt && echo full-ok; echo x > {full}/.git/hooks/pre-commit; "
-            f"mkdir {full}/.vscode; mkdir -p {full}/a/.idea; echo w > {linked}/new.txt && echo linked-ok; "
-            f"echo x >> {read_only}/file.txt; cat {read_only}/file.txt"), machine="local", scope=scope)
-        self.assertEqual((reply["status"], code), ("admitted", 0), err)
-        self.assertIn("full-ok", out)
-        self.assertIn("linked-ok", out)
-        self.assertIn("read-only", out)
-        self.assertEqual(err.count(DENIED), 4, err)
-        self.assertFalse((full / ".git/hooks/pre-commit").exists())
-        self.assertFalse((full / ".vscode").exists() or (full / "a/.idea").exists())
-        self.assertEqual((read_only / "file.txt").read_text(), "read-only\n")
-        # The live instance is reused, but a replaced directory is never rebound to the old grant.
-        read_only.rename(self.root / "moved")
-        read_only.mkdir()
-        reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
-        self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
-                         ("denied", "scope_target_changed", "known_no_effect", 1, ""))
+        reply, code_, out, err = self.session(lifetime, "workspace", (
+            f"pwd; echo w >> {code}/file.txt && echo w >> {notes}/file.txt && echo w > {linked}/new.txt && echo wrote; "
+            f"cat {outside}/file.txt; mkdir -p $HOME/.claude && echo .mcp > $HOME/.mcp.json && echo home-ok"),
+            folders=folders)
+        self.assertEqual((reply["status"], code_), ("admitted", 0), err)
+        self.assertEqual(out.split(), [str(code), "wrote", "outside", "home-ok"])
+        # Outside the folders, and on names the owner's tools later run, every write is refused, in any case.
+        refused = [f"echo x >> {outside}/file.txt", f"echo x > {code}/.git/hooks/pre-commit", f"mkdir {code}/.vscode",
+                   f"mkdir -p {notes}/a/.idea", f"echo x >> {code}/.claude/settings.json", f"mkdir {notes}/.Claude",
+                   f"mkdir {notes}/.CODEX", f"mkdir {notes}/.agents", f"mkdir -p {notes}/sub/.Cursor", f"mkdir {notes}/.gemini",
+                   f"mkdir {code}/.Husky", f"echo {{}} > {notes}/.MCP.json", f"mkdir {linked}/.claude", f"mkdir {notes}/.GIT",
+                   f"rm -r {code}/.claude"]
+        for command in refused:
+            reply, code_, _, err = self.session(lifetime, "workspace", command, folders=folders)
+            self.assertEqual(reply["status"], "admitted", reply)
+            self.assertNotEqual(code_, 0, command)
+            self.assertIn(DENIED, err, command)
+        self.assertEqual((outside / "file.txt").read_text(), "outside\n")
+        self.assertEqual((code / ".claude/settings.json").read_text(), "{}\n")
+        for path in (code / ".vscode", notes / "a/.idea", notes / ".claude", notes / ".codex", notes / ".agents",
+                     notes / "sub/.cursor", notes / ".gemini", code / ".husky", notes / ".mcp.json", linked / ".claude",
+                     notes / ".git", code / ".git/hooks/pre-commit"):
+            self.assertFalse(os.path.lexists(path), path)
+        # A lifetime keeps the folders it started with.
+        reply, code_, out, _ = self.session(lifetime, "workspace", "echo ran", folders=[str(code)])
+        self.assertEqual((reply["error"]["code"], code_, out), ("lifetime_changed", 1, ""))
+        # Each admission re-checks the folders: a renamed one is refused before anything runs.
+        notes.rename(self.root / "moved")
+        reply, code_, out, _ = self.session(lifetime, "workspace", "echo ran", folders=folders)
+        self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code_, out),
+                         ("denied", "folder_missing", "known_no_effect", 1, ""))
+        self.assertIn(str(notes), reply["error"]["message"])
 
     def test_restricted_sessions_reach_no_sockets_terminals_descriptors_or_denied_areas(self):
         project, personal, denied = self.root / "project", self.root / "personal", self.root / "denied"
@@ -362,12 +372,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         (denied / "drive.txt").write_text("DRIVE-SECRET\n")
         shutil.copy("/usr/bin/true", denied / "tool")
         (project / "outside").symlink_to(denied, target_is_directory=True)
-        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
-        target = catalog.inspect(load(self.config), "local", str(project), "inspect", ".")["project"]["target_id"]
-        scope = {"protocol": 1, "authority": {"policy_revision": 1, "grant_id": "fixture", "grant_revision": 1,
-                                              "session_generation": 0},
-                 "roots": [{"machine": "local", "workspace_name": str(project), "relative_path": ".", "mode": "full_access",
-                            "target_id": target}]}
+        prelude = f"from openmachine.access.macos import seatbelt; seatbelt.SYSTEM_DENIED = seatbelt.SYSTEM_DENIED + ({str(denied)!r},); "
         listener = socket.socket(socket.AF_UNIX)
         self.addCleanup(listener.close)
         listener.bind(str(self.root / "c.sock"))
@@ -387,14 +392,14 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         command = (f"{shlex.quote(sys.executable)} -I -c {shlex.quote(probes)} {self.root / 'c.sock'}; "
                    f"echo injected > {os.ttyname(slave)}; cat {project}/.env; cat {personal}/.env; "
                    f"cat {project}/outside/drive.txt; {denied}/tool && echo tool-ran; true")
-        process, reply = self.start(self.request(self.lifetime(), "selected_projects", "exec", command, machine="local",
-                                                 scope=scope), prelude=prelude)
+        process, reply = self.start(self.request(self.lifetime(), "workspace", "exec", command, folders=[str(project)]),
+                                    prelude=prelude)
         out, err = (stream.decode(errors="replace") for stream in process.communicate(timeout=60))
         self.assertEqual((reply["status"], process.returncode), ("admitted", 0), err)
         self.assertIn("unix: PermissionError", out)
         self.assertNotIn("appleevents: 0\n", out)
         self.assertNotIn("WRITABLE", out)
-        self.assertIn("ENV-PROJECT", out)  # A selected root reads its own secret-named files.
+        self.assertIn("ENV-PROJECT", out)  # A folder reads its own secret-named files.
         self.assertNotIn("ENV-PERSONAL", out)
         self.assertNotIn("DRIVE-SECRET", out)
         self.assertNotIn("tool-ran", out)
@@ -405,20 +410,19 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
         """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
         full, plain, remote = self.root / "full", self.root / "plain", self.root / "plain/remote.git"
-        nested, source, read_only, unselected = full / "vendor/lib", self.root / "source", self.root / "read-only", self.root / "other"
+        nested, source, unselected = full / "vendor/lib", self.root / "source", self.root / "other"
         for path in (nested, plain):
             path.mkdir(parents=True)
         git = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null",
                "-c", "protocol.file.allow=always"]
-        for repository, name in ((full, "file.txt"), (nested, "lib.txt"), (source, "file.txt"), (read_only, "file.txt"),
-                                 (unselected, "file.txt")):
+        for repository, name in ((full, "file.txt"), (nested, "lib.txt"), (source, "file.txt"), (unselected, "file.txt")):
             repository.mkdir(exist_ok=True)
             (repository / name).write_text("x\n")
             subprocess.run([*git, "-C", str(repository), "init", "-q", "-b", "main"], check=True)
             subprocess.run([*git, "-C", str(repository), "add", name], check=True)
             subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Fixture"], check=True)
-        # A submodule whose valid name holds a Git data directory name; Read-only and unselected ones too.
-        for repository, name, path in ((full, "vendor/objects/ext", "ext"), (read_only, "sub", "sub"), (unselected, "sub", "sub")):
+        # A submodule whose valid name holds a Git data directory name; one outside the folders too.
+        for repository, name, path in ((full, "vendor/objects/ext", "ext"), (unselected, "sub", "sub")):
             subprocess.run([*git, "-C", str(repository), "submodule", "add", "-q", "--name", name, str(source), path], check=True)
             subprocess.run([*git, "-C", str(repository), "commit", "-q", "-m", "Submodule"], check=True)
         subprocess.run([*git, "init", "-q", "--bare", str(remote)], check=True)
@@ -426,21 +430,17 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         protected = [full / ".git/config", nested / ".git/config", full / ".git/worktrees/linked/commondir",
                      full / ".git/modules/vendor/objects/ext/config"]
         config = [path.read_bytes() for path in protected]
-        settings = load(self.config)
-        roots = [{"machine": "local", "workspace_name": str(path), "relative_path": ".", "mode": mode,
-                  "target_id": catalog.inspect(settings, "local", str(path), "inspect", ".")["project"]["target_id"]}
-                 for path, mode in ((full, "full_access"), (plain, "full_access"), (read_only, "read_only"))]
-        scope = {"protocol": 1, "roots": roots, "authority": {"policy_revision": 1, "grant_id": "fixture",
-                                                               "grant_revision": 1, "session_generation": 0}}
+        folders = [str(full), str(plain)]
         lifetime = self.lifetime()
-        refused = [f"mkdir -p {full}/new/.git", f"mkdir {plain}/.git",
+        refused = [f"mkdir -p {full}/new/.git", f"mkdir {plain}/.git", f"mkdir {plain}/.GIT",
+                   f"git init -q {plain}/init", f"git -c protocol.file.allow=always clone -q {source} {plain}/clone",
                    f"mkdir {full}/file && echo 'gitdir: /tmp/x' > {full}/file/.git",
                    f"mkdir {full}/renamed && echo 'gitdir: /tmp/x' > {full}/staged && mv {full}/staged {full}/renamed/.git",
                    f"mv {nested}/.git {nested}/.git-old", f"cd {full} && git worktree add -q {plain}/worktree",
                    # The persistent home or the lifetime's temp could otherwise carry one in by a directory rename.
                    'mkdir "$HOME/carried" && mkdir "$HOME/carried/.git"',
                    'mkdir "${TMPDIR%/}/carried" && mkdir "${TMPDIR%/}/carried/.git"',
-                   # A repository, a selected root itself included, keeps its protected files when moved out,
+                   # A repository, a folder itself included, keeps its protected files when moved out,
                    # and a worktree registration stays in place.
                    *(f't="${{TMPDIR%/}}/moved"; mv {path} "$t" && {{ echo "[core]" >> "$t/.git/config"; s=$?; '
                      f'mv "$t" {path}; exit $s; }}' for path in (full, nested)),
@@ -451,30 +451,29 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                    # Protected files are not replaced by unlinking and creating them or by renaming over them.
                    f"cd {full}/.git/modules/vendor/objects/ext && rm config && echo '[core]' > config",
                    f"cd {full}/.git/worktrees/linked && echo /tmp > staged && mv staged commondir",
-                   # Nothing outside the Full roots changes.
-                   *(f"rm {repository}/sub/.git" for repository in (read_only, unselected)),
-                   f"mkdir {read_only}/.git/modules/sub/objects/zz", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
+                   # Nothing outside the folders changes.
+                   f"rm {unselected}/sub/.git", f"mkdir {unselected}/.git/modules/sub/refs/zz"]
         # The last command runs in a new lifetime, whose instance builds its own profile.
         for command, session_lifetime in [*((command, lifetime) for command in refused),
                                           (f'mv {full}/.git/modules/vendor/objects/ext "${{TMPDIR%/}}/moved"', self.lifetime())]:
-            reply, code, _, err = self.session(session_lifetime, "selected_projects", command, machine="local", scope=scope)
+            reply, code, _, err = self.session(session_lifetime, "workspace", command, folders=folders)
             self.assertEqual(reply["status"], "admitted", reply)
             self.assertNotEqual(code, 0, command)
             self.assertIn(DENIED, err, command)
         self.assertFalse(os.path.lexists(full / ".git/modules/vendor/HEAD"))
         self.assertEqual([path.read_bytes() for path in protected], config)
-        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree"):
+        for path in (full / "new", plain, full / "file", full / "renamed", HOME / "carried", plain / "worktree",
+                     plain / "init", plain / "clone"):
             self.assertFalse(os.path.lexists(path / ".git"), path)
-        self.assertFalse(any(os.path.lexists(path) for path in (nested / ".git-old", read_only / ".git/modules/sub/objects/zz",
-                                                                 unselected / ".git/modules/sub/refs/zz")))
-        self.assertTrue(all(os.path.lexists(path / "sub/.git") for path in (read_only, unselected)))
+        self.assertFalse(any(os.path.lexists(path) for path in (nested / ".git-old", unselected / ".git/modules/sub/refs/zz")))
+        self.assertTrue(os.path.lexists(unselected / "sub/.git"))
         worktrees = subprocess.run([*git, "-C", str(full), "worktree", "list"], capture_output=True, text=True).stdout
         self.assertNotIn(str(plain / "worktree"), worktrees)
-        reply, code, out, err = self.session(lifetime, "selected_projects", (
+        reply, code, out, err = self.session(lifetime, "workspace", (
             f"cd {full} && export {IDENTITY} && echo edit >> file.txt && git commit -qam pushed && "
             f"echo edit >> vendor/lib/lib.txt && git -C vendor/lib commit -qam nested && echo edit >> ext/file.txt && "
             f"git -C ext commit -qam inside && git push -q {remote} main && git fetch -q {remote} main && "
-            f"git log --oneline -1 FETCH_HEAD"), machine="local", scope=scope)
+            f"git log --oneline -1 FETCH_HEAD"), folders=folders)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertIn("pushed", out)
 
@@ -575,7 +574,8 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
-        for extra in ({"user": "root"}, {"command": None}, {"kind": "sftp"}, {"policy": "selected_projects"},
+        for extra in ({"protocol": 1}, {"user": "root"}, {"command": None}, {"kind": "sftp"}, {"policy": "admin"},
+                      {"policy": "workspace"}, {"folders": ["/tmp"]},
                       {"environment": {"PATH": "/tmp"}}, {"lifetime": "../escape"}, {"unexpected": True}):
             with self.subTest(extra=extra):
                 reply, code, out, _ = self.admit(self.request(lifetime, "full_access", "exec", "echo ran") | extra)

@@ -5,14 +5,14 @@
       "sources": [
         "openmachine/access/__init__.py",
         "openmachine/access/__main__.py",
-        "openmachine/access/catalog.py",
         "openmachine/access/git.py",
-        "openmachine/access/macos.py",
+        "openmachine/access/macos/__init__.py",
+        "openmachine/access/macos/seatbelt.py",
+        "openmachine/access/macos/sessions.py",
         "openmachine/access/rules.py",
         "openmachine/access/sessions.py"
       ],
       "tests": [
-        "test/component/access/test_catalog.py",
         "test/component/access/test_git.py",
         "test/component/access/test_macos.py",
         "test/component/access/test_rules.py",
@@ -41,7 +41,7 @@
         "test/component/config/test_configuration.py"
       ],
       "boundary_tests": [
-        "test/component/access/test_catalog.py",
+        "test/component/access/test_rules.py",
         "test/component/service/test_maintenance.py"
       ]
     },
@@ -49,13 +49,11 @@
       "sources": [
         "openmachine/__init__.py",
         "openmachine/foundation/__init__.py",
-        "openmachine/foundation/files.py",
         "openmachine/foundation/sanitize.py",
         "openmachine/foundation/state.py"
       ],
       "tests": [],
       "boundary_tests": [
-        "test/component/access/test_catalog.py",
         "test/component/access/test_sessions.py",
         "test/component/service/test_maintenance.py",
         "test/component/service/test_payload.py"

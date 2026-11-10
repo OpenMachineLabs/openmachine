@@ -23,8 +23,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_only_the_local_machine_with_local_transport_loads(self):
         self.path.parent.mkdir()
         self.path.write_text(TEXT)
-        self.assertEqual(load(self.path).machine("local").transport, "local")
-        self.fault("unknown_machine", lambda: load(self.path).machine("remote"))
+        self.assertEqual(load(self.path).machines["local"].transport, "local")
         for text in ('schema_version = 1\n' + TEXT, TEXT + 'local_access = "full_access"\n',
                      TEXT + '[workspaces.project]\nmachine = "local"\nroot = "/tmp"\n', TEXT + "[skills]\nroots = []\n",
                      '[machines.remote]\ntransport = "local"\n', '[machines.local]\ntransport = "ssh"\n', "", "[machines"):

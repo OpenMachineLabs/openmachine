@@ -1,1 +1,1 @@
-"""Code access: the launcher, Selected Projects scope, the folder catalog and native confinement."""
+"""Code access: the launcher, Workspace folders and native confinement."""
