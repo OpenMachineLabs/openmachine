@@ -7,7 +7,9 @@
         "openmachine/access/__main__.py",
         "openmachine/access/catalog.py",
         "openmachine/access/git.py",
-        "openmachine/access/macos.py",
+        "openmachine/access/macos/__init__.py",
+        "openmachine/access/macos/seatbelt.py",
+        "openmachine/access/macos/sessions.py",
         "openmachine/access/rules.py",
         "openmachine/access/sessions.py"
       ],

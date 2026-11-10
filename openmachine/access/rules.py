@@ -8,7 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from openmachine.access import catalog, git, macos
+from openmachine.access import catalog, git
+from openmachine.access.macos import seatbelt
 from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
 from openmachine.foundation.sanitize import Fault
 
@@ -115,7 +116,7 @@ def bind(config, machine: str, items: list[ScopeRoot], control: tuple[Path, ...]
     """Re-verify every binding, then apply the per-binding and pairwise shape rules; no authority is needed."""
     if any(item.machine != machine for item in items) or len({item.target_id for item in items}) != len(items):
         raise Fault("scope_invalid", "Scope bindings must target this machine and be distinct.", effect="known_no_effect")
-    home = macos.account_home()
+    home = seatbelt.account_home()
     roots = []
     for item in items:
         try:

@@ -14,7 +14,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import macos, sessions
+from openmachine.access import sessions
+from openmachine.access.macos import seatbelt as macos
+from openmachine.access.macos import sessions as restricted
 from openmachine.foundation.sanitize import Fault
 
 STICKY_ROOT = Path("/tmp").resolve()  # Root-owned and sticky on macOS and Linux.
@@ -32,28 +34,28 @@ class PersistentHomeTests(unittest.TestCase):
 
     def unsafe(self):
         with self.assertRaises(Fault) as caught:
-            sessions.persistent_home()
+            restricted.persistent_home()
         self.assertEqual(caught.exception.code, "persistent_home_unsafe")
 
     def test_the_home_is_created_owner_only_with_only_the_git_identity(self):
-        with patch.object(sessions, "_git_identity", return_value={"name": "Dev", "email": "dev@example.invalid"}):
-            self.assertEqual(sessions.persistent_home(), self.home)
+        with patch.object(restricted, "_git_identity", return_value={"name": "Dev", "email": "dev@example.invalid"}):
+            self.assertEqual(restricted.persistent_home(), self.home)
         for name in ("", "home", "cache", "config", "data", "state"):
             self.assertEqual((self.home / name).stat().st_mode & 0o777, 0o700, name)
         config = self.home / "home" / ".gitconfig"
         self.assertEqual(config.read_text(), "[user]\n\tname = Dev\n\temail = dev@example.invalid\n")
         config.write_text("changed by confined work\n")
-        with patch.object(sessions, "_git_identity", return_value={"name": "Other"}):
-            sessions.persistent_home()
+        with patch.object(restricted, "_git_identity", return_value={"name": "Other"}):
+            restricted.persistent_home()
         self.assertEqual(config.read_text(), "changed by confined work\n")
 
     def test_links_loose_modes_and_unprotected_parents_are_refused(self):
-        sessions.persistent_home()
+        restricted.persistent_home()
         (self.home / "cache").rmdir()
         (self.home / "cache").symlink_to(Path.home())
         self.unsafe()
         (self.home / "cache").unlink()
-        sessions.persistent_home()
+        restricted.persistent_home()
         self.home.chmod(0o755)
         self.unsafe()
         self.home.chmod(0o700)
@@ -61,7 +63,7 @@ class PersistentHomeTests(unittest.TestCase):
             subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(self.home / "data")], check=True)
             self.unsafe()
             subprocess.run(["/bin/chmod", "-N", str(self.home / "data")], check=True)
-        sessions.persistent_home()
+        restricted.persistent_home()
         with tempfile.TemporaryDirectory() as owned, patch.object(sessions, "SHARED", Path(owned)):
             self.unsafe()
         with patch.object(sessions, "SHARED", STICKY_ROOT / "missing-om-root"):
@@ -127,26 +129,26 @@ class GitHubClientTests(unittest.TestCase):
                 self.refused(self.client)
         # A restricted profile runs only Core's copy, never the host's file.
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
-            text = sessions._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
+            text = restricted._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
         self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)
         self.assertNotIn(str(self.client), text)
 
     @unittest.skipUnless(sys.platform == "darwin", "Core keeps its copy in the macOS user temporary directory")
     def test_core_keeps_one_copy_and_replaces_it_in_place_when_the_client_changes(self):
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
-            stable = sessions._install(self.client)
+            stable = restricted._install(self.client)
             copied = stable.stat()
             self.assertEqual((stable, stable.read_text(), stat.S_IMODE(copied.st_mode)),
                              (self.root / "T/omc/client/om-code", "#!/bin/sh\n", 0o755))
-            self.assertEqual(sessions._install(self.client).stat().st_ino, copied.st_ino)  # unchanged: kept
+            self.assertEqual(restricted._install(self.client).stat().st_ino, copied.st_ino)  # unchanged: kept
             update = self.root / "next/om-code"  # as an update installs a new file elsewhere
             update.parent.mkdir(mode=0o755)
             update.write_text("#!/bin/sh\necho next\n")
-            self.assertEqual(sessions._install(update), stable)
+            self.assertEqual(restricted._install(update), stable)
             self.assertEqual((stable.read_text(), [p.name for p in stable.parent.iterdir()]), ("#!/bin/sh\necho next\n", ["om-code"]))
             update.unlink()  # removed meanwhile, as by a later update
             with self.assertRaises(Fault) as caught:
-                sessions._install(update)
+                restricted._install(update)
             self.assertEqual((caught.exception.code, caught.exception.effect), ("github_client_invalid", "known_no_effect"))
 
 
@@ -170,7 +172,7 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         launcher.sendall(body)
         with patch.object(macos, "birth", birth):
             try:
-                pid = sessions._spawn(spawner)
+                pid = restricted._spawn(spawner)
             except OSError:
                 pid = None
         frame = json.loads(launcher.makefile("rb").readline())
@@ -188,14 +190,14 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
 
         pid, frame = self.spawn(["/usr/bin/true"], slow)
         self.assertIsNotNone(seen[0])
-        self.assertEqual(sessions.started(frame), macos.Birth(pid, seen[0].start))
+        self.assertEqual(restricted.started(frame), macos.Birth(pid, seen[0].start))
 
     def test_an_unreadable_birth_withholds_the_launch(self):
         ran = self.root / "ran"
         pid, frame = self.spawn(["/bin/sh", "-c", f"echo x > {ran}"], lambda pid: None)
         self.assertIsNone(pid)
         with self.assertRaises(Fault) as caught:
-            sessions.started(frame)
+            restricted.started(frame)
         self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
         time.sleep(0.3)
         self.assertFalse(ran.exists())

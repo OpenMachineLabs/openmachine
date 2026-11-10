@@ -6,8 +6,10 @@ import unittest
 from unittest.mock import patch
 
 import openmachine
-from openmachine.access import macos, sessions
-from openmachine.access import sessions as sessions_module
+from openmachine.access import sessions
+from openmachine.access.__main__ import capabilities
+from openmachine.access.macos import seatbelt as macos
+from openmachine.access.macos import sessions as restricted
 from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 1, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
@@ -85,32 +87,32 @@ class RequestTests(unittest.TestCase):
                     self.parse(VALID | {"github": github})
 
     def test_capabilities_report_the_core_version_om_code_records(self):
-        version = sessions.capabilities()["version"]
+        version = capabilities()["version"]
         self.assertEqual(version, openmachine.__version__)
         self.assertRegex(version, r"^[0-9A-Za-z.+-]{1,32}$")
 
     def test_restricted_policies_follow_the_lifetime_backend(self):
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
-            policies = sessions.capabilities()["policies"]
+            policies = capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "selected_projects": "platform_unsupported"})
-        self.assertEqual(sessions.capabilities()["github"], "https")
+        self.assertEqual(capabilities()["github"], "https")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
-            self.assertNotIn("github_client", sessions.capabilities())
+            self.assertNotIn("github_client", capabilities())
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
                 patch.object(macos, "user_temp", return_value=Path("/private/var/folders/x/T")):
-            self.assertEqual(sessions.capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
+            self.assertEqual(capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
 
 
 class LaunchAcknowledgmentTests(unittest.TestCase):
     def test_only_an_explicit_pre_exec_errno_proves_nothing_ran(self):
-        self.assertEqual(sessions.started({"pid": 41, "start": 7}), macos.Birth(41, 7))
+        self.assertEqual(restricted.started({"pid": 41, "start": 7}), macos.Birth(41, 7))
         with self.assertRaises(Fault) as caught:
-            sessions.started({"errno": 2})
+            restricted.started({"errno": 2})
         self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
         for frame in ({}, {"pid": "41"}, {"pid": 41}, {"errno": "2"}):
             with self.subTest(frame=frame), self.assertRaises(Fault) as caught:
-                sessions.started(frame)
+                restricted.started(frame)
             self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_unverified", "effect_unknown"))
 
 
@@ -121,10 +123,10 @@ class SpawnerSelfTestTests(unittest.TestCase):
         sent = []
         with (patch.object(macos, "birth", lambda pid: births.pop(0) if births else None),
               patch.object(macos, "member", lambda pid, marker: verdicts[pid]),
-              patch.object(sessions_module.os, "getpid", return_value=7),
-              patch.object(sessions_module.os, "kill", lambda pid, signum: sent.append(pid))):
+              patch.object(restricted.os, "getpid", return_value=7),
+              patch.object(restricted.os, "kill", lambda pid, signum: sent.append(pid))):
             try:
-                return sessions_module._confirm_spawner(reported, "0" * 32), sent
+                return restricted._confirm_spawner(reported, "0" * 32), sent
             except Fault as error:
                 self.assertEqual((error.code, error.effect), ("lifetime_unverifiable", "known_no_effect"))
                 return None, sent

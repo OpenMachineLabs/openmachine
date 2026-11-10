@@ -31,7 +31,7 @@ class RulesTests(unittest.TestCase):
             self.git(repo, "commit", "-q", "-m", "Fixture")
         self.state = self.root / "state"
         self.config = Settings.model_validate({"machines": {"local": {"transport": "local"}}})
-        home = patch.object(rules.macos, "account_home", return_value=self.root / "home")
+        home = patch.object(rules.seatbelt, "account_home", return_value=self.root / "home")
         home.start()
         self.addCleanup(home.stop)
 
@@ -90,7 +90,7 @@ class RulesTests(unittest.TestCase):
         spellings = (str, str.swapcase) if sys.platform == "darwin" else (str,)
         for spell in spellings:
             for home in (self.dev, self.core):
-                with self.subTest(home=spell(str(home))), patch.object(rules.macos, "account_home",
+                with self.subTest(home=spell(str(home))), patch.object(rules.seatbelt, "account_home",
                                                                         return_value=Path(spell(str(home)))):
                     self.fault("scope_too_broad", lambda: self.compile())
             with patch.object(rules, "control_paths", return_value=(Path(spell(str(self.cloud / "state"))),)):

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import macos as seatbelt
+from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 
 
