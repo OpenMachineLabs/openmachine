@@ -82,6 +82,10 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
             self.assertEqual(self.manage("operation", identity=FIRST)["status"], "busy")
             self.assertEqual(self.manage("status")["status"], "busy")
             self.assertEqual(self.manage("continue", identity=FIRST)["status"], "busy")
+        # Another reader's probe is no owner: concurrent status and readback do not report each other as busy.
+        with lease(self.state / "service/operation.lock", shared=True):
+            self.assertEqual(self.manage("operation", identity=FIRST)["status"], "continuation_required")
+            self.assertEqual(self.manage("status")["status"], "not_installed")
         self.assertEqual(self.manage("continue", identity=FIRST)["status"], "accepted")
         self.assertEqual(self.spawned[-1], (FIRST, sys.executable))
         self.assertEqual(self.manage("update", identity=SECOND, source=self.source, sha256=self.digest,

@@ -104,9 +104,10 @@ def _available(state: Path) -> None:
 
 
 def _busy(state: Path) -> bool | None:
-    """Whether a maintenance process holds the operation lock; None when that is unknown."""
+    """Whether a maintenance process holds the operation lock; None when that is unknown. A shared probe
+    conflicts only with that holder, so concurrent readers never report one another or block an admission."""
     try:
-        with lease(state / "service/operation.lock", create=False):
+        with lease(state / "service/operation.lock", shared=True, create=False):
             return False
     except FileNotFoundError:
         return False

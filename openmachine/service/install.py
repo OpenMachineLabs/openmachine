@@ -19,6 +19,7 @@ def prepare(state: Path, retained: Path, payload_sha256: str) -> dict:
     destination = private_directory(state / "service/versions") / identity
     if destination.exists():
         return {"identity": identity, "version": service_state._installed(state, identity)["version"]}
+    destination.mkdir(mode=0o700)
     pip = [str(destination / "bin/python"), "-I", "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
            "--no-deps", "--no-index", "--find-links", str(retained / "wheels"), "--only-binary=:all:"]
     # Keep failed candidates for diagnosis. Never overwrite or garbage-collect an installation.

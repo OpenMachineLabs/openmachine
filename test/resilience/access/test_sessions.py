@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import pwd
+import pty
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -341,6 +343,54 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, _ = self.session(lifetime, "selected_projects", "echo ran", machine="local", scope=scope)
         self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], code, out),
                          ("denied", "scope_target_changed", "known_no_effect", 1, ""))
+
+    def test_restricted_sessions_reach_no_sockets_terminals_descriptors_or_denied_areas(self):
+        project, personal, denied = self.root / "project", self.root / "personal", self.root / "denied"
+        for path in (project, personal, denied):
+            path.mkdir()
+            (path / ".env").write_text(f"ENV-{path.name.upper()}\n")
+        (denied / "drive.txt").write_text("DRIVE-SECRET\n")
+        shutil.copy("/usr/bin/true", denied / "tool")
+        (project / "outside").symlink_to(denied, target_is_directory=True)
+        prelude = f"from openmachine.access import macos; macos.SYSTEM_DENIED = macos.SYSTEM_DENIED + ({str(denied)!r},); "
+        target = catalog.inspect(load(self.config), "local", str(project), "inspect", ".")["project"]["target_id"]
+        scope = {"protocol": 1, "authority": {"policy_revision": 1, "grant_id": "fixture", "grant_revision": 1,
+                                              "session_generation": 0},
+                 "roots": [{"machine": "local", "workspace_name": str(project), "relative_path": ".", "mode": "full_access",
+                            "target_id": target}]}
+        listener = socket.socket(socket.AF_UNIX)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.root / "c.sock"))
+        listener.listen(1)
+        listener.setblocking(False)
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        probes = "\n".join([
+            "import ctypes, os, socket, sys",
+            "s = socket.socket(socket.AF_UNIX)",
+            "try:\n    s.connect(sys.argv[1]); print('unix: connected')\nexcept OSError as e:\n    print('unix:', type(e).__name__)",
+            "l = ctypes.CDLL(None); p = ctypes.c_uint()",
+            "print('appleevents:', l.bootstrap_look_up(ctypes.c_uint.in_dll(l, 'bootstrap_port'), "
+            "b'com.apple.coreservices.appleevents', ctypes.byref(p)))",
+            "for fd in range(3, 256):\n    try:\n        os.write(fd, b'x')\n    except OSError:\n        continue\n    print('WRITABLE', fd)"])
+        command = (f"{shlex.quote(sys.executable)} -I -c {shlex.quote(probes)} {self.root / 'c.sock'}; "
+                   f"echo injected > {os.ttyname(slave)}; cat {project}/.env; cat {personal}/.env; "
+                   f"cat {project}/outside/drive.txt; {denied}/tool && echo tool-ran; true")
+        process, reply = self.start(self.request(self.lifetime(), "selected_projects", "exec", command, machine="local",
+                                                 scope=scope), prelude=prelude)
+        out, err = (stream.decode(errors="replace") for stream in process.communicate(timeout=60))
+        self.assertEqual((reply["status"], process.returncode), ("admitted", 0), err)
+        self.assertIn("unix: PermissionError", out)
+        self.assertNotIn("appleevents: 0\n", out)
+        self.assertNotIn("WRITABLE", out)
+        self.assertIn("ENV-PROJECT", out)  # A selected root reads its own secret-named files.
+        self.assertNotIn("ENV-PERSONAL", out)
+        self.assertNotIn("DRIVE-SECRET", out)
+        self.assertNotIn("tool-ran", out)
+        self.assertGreaterEqual(err.count(DENIED), 4, err)
+        with self.assertRaises(BlockingIOError):
+            listener.accept()
 
     def test_restricted_sessions_cannot_create_move_or_replace_git_entries(self):
         """Unsandboxed Git later trusts any .git entry, so none is placed in any writable path of an instance."""
