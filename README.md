@@ -22,10 +22,6 @@
 
 <br />
 
-<p align="center">
-  <img src="assets/openmachine-hero.svg" width="1000" alt="Your machines in the Open Machine Console, a coding agent training a model on a GPU machine and opening a pull request, and your connected tools." />
-</p>
-
 Your coding agent already works on this machine. Open Machine lets it work on
 all of them: train on the GPU machine, build on the workstation, test on the
 spare Mac, with each machine's results coming back to you.
@@ -33,6 +29,10 @@ spare Mac, with each machine's results coming back to you.
 **Yours, end to end.** Machines connect peer-to-peer over encrypted WireGuard,
 built on Tailscale. You choose how far the agent reaches on each machine, and
 GitHub tokens never sit on your machines.
+
+<p align="center">
+  <img src="assets/openmachine-hero.svg" width="1000" alt="Your machines in the Open Machine Console, a coding agent training a model on a GPU machine and opening a pull request, and your connected tools." />
+</p>
 
 ## Quick start
 
@@ -63,4 +63,4 @@ Thanks to everyone who contributes to Open Machine.
 
 ## License
 
-[MIT](LICENSE) © 2026 OpenMachineLabs.
+[MIT](LICENSE) © 2026 OpenMachine.
