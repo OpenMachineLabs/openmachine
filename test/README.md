@@ -138,7 +138,7 @@ and no-replay scenarios; protocol conformance does not multiply every business
 lifecycle by every supported protocol. Deleting repeated coverage requires an
 explicit retained-coverage map in the PR.
 
-All tests remain under root `test/`; no additional test framework, network
+All Python tests remain under root `test/`; no additional test framework, network
 account or GPU is required. Private disposable directories, short owned processes
 and local Unix sockets are fixtures, not production projects or live
 client acceptance.

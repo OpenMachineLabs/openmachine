@@ -30,13 +30,15 @@ any more-specific `AGENTS.md` before changing their scope.
 | Path | Contents |
 | --- | --- |
 | `openmachine/` | Runtime package; module owners are in [CONTRIBUTING.md](CONTRIBUTING.md#module-owners) |
-| `test/` | All tests; layers and ownership are in [test/README.md](test/README.md) |
+| `test/` | All Python tests; layers and ownership are in [test/README.md](test/README.md) |
 | `scripts/` | Repository checks and test runners |
 | `spec/` | Spec index and necessary attachments; Spec and Survey bodies stay in Issues |
 | `.github/` | Issue and PR templates, managed labels and CI workflows |
+| `connector/` | Standalone Go network module; [connector/README.md](connector/README.md) has its build and test commands |
 
 Keep every test under `test/`, and add a responsibility group only when it
-contains real checks.
+contains real checks. The one exception is `connector/test/`, so that the Go
+module builds and tests on its own.
 
 ## Make the smallest useful change
 

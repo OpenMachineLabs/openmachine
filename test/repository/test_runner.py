@@ -70,6 +70,12 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
 
+    def test_go_connector_changes_run_repository_checks_only(self):
+        self.write("connector/test/proof_test.go", "package test\n")
+        plan = runner.make_plan(self.root, self.base)
+        self.assertFalse(plan["runtime_required"])
+        self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+
     def test_community_policy_documents_select_repository_checks(self):
         for path in ("CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
                      "CODE_OF_CONDUCT.md"):
