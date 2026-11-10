@@ -23,6 +23,24 @@ server, build on the workstation, test on the spare Mac. It reaches that machine
 does the work there and brings the results back to you, while you stay where
 you are.
 
+[GitHub Issues](https://github.com/OpenMachineLabs/openmachine/issues) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+
+<div align="center">
+
+<table aria-label="Open Machine community">
+<tr>
+<td align="center" width="520">
+  <a href="https://discord.gg/TAxEWV7fgZ">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&amp;logo=discord&amp;logoColor=white" height="42" alt="Join the Open Machine Discord community" /><br />
+    <strong>Join the Open Machine Community</strong>
+  </a><br />
+  <sub>Discord · Q&amp;A · Show and Tell</sub>
+</td>
+</tr>
+</table>
+
+</div>
+
 ## Put your AI to work
 
 <table>
