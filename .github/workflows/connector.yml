@@ -1,0 +1,70 @@
+name: connector
+
+# The Go network module builds and tests on its own, apart from the Python
+# package. It is not a required check, so pull requests run it only when the
+# module or this workflow changes; edits to a PR's text never rerun it, and
+# every main push and manual dispatch verifies it.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "connector/**"
+      - ".github/workflows/connector.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connector-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connector:
+    name: connector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: connector
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: connector/go.mod
+          cache-dependency-path: connector/go.sum
+      - name: Build and vet for Linux and macOS
+        run: |
+          test -z "$(gofmt -l .)"
+          go build ./...
+          go vet ./...
+          GOOS=darwin go vet ./...
+      - name: Third-party license list matches the build graph
+        run: |
+          # Native macOS builds use cgo; list that graph on any host.
+          for os in linux darwin; do
+            CGO_ENABLED=1 GOOS=$os go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}}{{end}}{{end}}' .
+          done | sort -u > "$RUNNER_TEMP/graph"
+          sed -nE 's/^- `([^`]+)` ([^ ]+) .*/\1 \2/p' THIRD_PARTY_LICENSES.md | diff - "$RUNNER_TEMP/graph"
+      - name: Restore pinned Headscale and DERP
+        id: tailnet-bin
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/bin
+          key: tailnet-bin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/connector.yml', 'connector/go.mod') }}
+      - name: Install pinned Headscale and DERP
+        if: steps.tailnet-bin.outputs.cache-hit != 'true'
+        env:
+          CGO_ENABLED: "0"  # static, so a cached copy runs on any later runner
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/juanfont/headscale/cmd/headscale@v0.29.7
+          GOBIN="$RUNNER_TEMP/bin" go install "tailscale.com/cmd/derper@$(go list -m -f '{{.Version}}' tailscale.com)"
+      - name: Test, including the network proof
+        env:
+          OM_HEADSCALE: ${{ runner.temp }}/bin/headscale
+          OM_DERPER: ${{ runner.temp }}/bin/derper
+        run: go test -count=1 -v ./...

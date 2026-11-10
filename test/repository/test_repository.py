@@ -390,6 +390,23 @@ class RepositoryChecks(unittest.TestCase):
             self.assertNotIn("pull_request_target:", workflow)
             self.assertNotIn(": write", workflow)
 
+    def test_go_connector_runs_only_for_its_module_and_never_for_text_edits(self):
+        quality = (ROOT / ".github/workflows/quality.yml").read_text()
+        connector = (ROOT / ".github/workflows/connector.yml").read_text()
+        self.assertNotIn("go test", quality)
+        # Not a required check: a path filter cannot strand a required status.
+        self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n"
+                      "    paths:\n      - \"connector/**\"\n      - \".github/workflows/connector.yml\"\n", connector)
+        self.assertIn("  push:\n    branches: [main]\n  workflow_dispatch:\n", connector)
+        self.assertNotIn("edited", connector)
+        self.assertIn("  connector:\n    name: connector\n", connector)
+        self.assertIn("go test -count=1 -v ./...", connector)
+        self.assertIn('CGO_ENABLED: "0"', connector)
+        self.assertIn("if: steps.tailnet-bin.outputs.cache-hit != 'true'", connector)
+        self.assertIn("persist-credentials: false", connector)
+        self.assertNotIn("pull_request_target:", connector)
+        self.assertNotIn(": write", connector)
+
     def test_codeowners_routes_all_paths_to_core_maintainers(self):
         lines = (ROOT / '.github/CODEOWNERS').read_text().splitlines()
         rules = [line.strip() for line in lines
@@ -397,7 +414,7 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
-        expected_jobs = {"quality.yml": 3, "metadata.yml": 1,
+        expected_jobs = {"quality.yml": 2, "connector.yml": 1, "metadata.yml": 1,
                          "spec-development.yml": 1, "labels.yml": 1, "runtime-payload.yml": 1,
                          "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
                          "trusted-review-gate.yml": 1}

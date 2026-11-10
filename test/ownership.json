@@ -63,6 +63,7 @@
       "boundary_tests": [],
       "sources": [
         ".github/workflows/auto-metadata.yml",
+        ".github/workflows/connector.yml",
         "scripts/auto_metadata.py",
         "scripts/check_repository.py",
         "scripts/premerge.py",

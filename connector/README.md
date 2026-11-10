@@ -56,6 +56,9 @@ GOBIN="$bin" go install "tailscale.com/cmd/derper@$(go list -m -f '{{.Version}}'
 OM_HEADSCALE="$bin/headscale" OM_DERPER="$bin/derper" go test ./...
 ```
 
+The [connector workflow](../.github/workflows/connector.yml) runs these checks
+on pull requests that change this module and on every `main` push.
+
 ## License
 
 MIT; see [LICENSE](LICENSE). Dependencies keep their own licenses; see
