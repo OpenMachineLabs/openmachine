@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "test/ownership.json"
 LAYERS = ("repository", "unit", "component", "skill-library", "resilience")
 GLOBAL_PATHS = {
+    # The release version: a release bump verifies the complete candidate it tags.
+    "openmachine/__init__.py",
     "requirements.lock", "pyproject.toml", "scripts/run_tests.py",
     "scripts/premerge.py", ".github/workflows/quality.yml",
 }
