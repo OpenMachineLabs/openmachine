@@ -16,9 +16,9 @@
 
 <img src="assets/openmachine-banner.png" width="1200" alt="Open Machine — Your AI. Your machines. Your coding agent, at work on every machine you own." />
 
-<a href="https://openmachine.app/download"><img src="https://img.shields.io/badge/Download-ffffff?style=for-the-badge" height="44" alt="Download Open Machine"></a>
-<a href="https://console.openmachine.app"><img src="https://img.shields.io/badge/Console-efefef?style=for-the-badge&amp;logo=googlechrome&amp;logoColor=141414" height="44" alt="Open the Open Machine Console"></a>
-<a href="https://openmachine.app"><img src="https://img.shields.io/badge/openmachine.app-efefef?style=for-the-badge&amp;logo=safari&amp;logoColor=141414" height="44" alt="Visit openmachine.app"></a>
+<a href="https://openmachine.app/download"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-download-dark.svg" /><img src="assets/button-download-light.svg" height="44" alt="Download Open Machine" /></picture></a>
+<a href="https://console.openmachine.app"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-console-dark.svg" /><img src="assets/button-console-light.svg" height="44" alt="Open the Console" /></picture></a>
+<a href="https://openmachine.app"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/button-website-dark.svg" /><img src="assets/button-website-light.svg" height="44" alt="Visit openmachine.app" /></picture></a>
 
 </div>
 
