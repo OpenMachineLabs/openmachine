@@ -154,6 +154,7 @@ class CatalogTests(CatalogFixture, unittest.TestCase):
             with self.subTest(selector=selector):
                 self.fault("path_denied", lambda: catalog.inspect(self.config, "local", selector, "inspect"))
         self.fault("unknown_machine", lambda: catalog.inspect(self.config, "remote", str(self.work), "inspect"))
+        self.fault("source_unavailable", lambda: catalog.root_for(str(self.work / "source.py")))
 
     def test_path_escape_links_and_credential_paths_are_rejected(self):
         (self.work / "link").symlink_to(self.root, target_is_directory=True)
@@ -296,8 +297,16 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
         self.git("init", "-q", cwd=self.work / "repo")
         below = self.binding(self.work, relative="repo")
         self.assertEqual(self.reply({"action": "validate", "projects": [below]}), {"error": {"code": "target_unverified"}})
-        own = self.binding(self.work / "repo")
-        self.assertEqual(self.reply({"action": "validate", "projects": [own]}), {"protocol": 2, "validated": [own]})
+        (self.work / "repo/file.txt").write_text("fixture\n")
+        self.git("add", "file.txt", cwd=self.work / "repo")
+        self.git("commit", "-q", "-m", "Initial", cwd=self.work / "repo")
+        self.git("worktree", "add", "-q", "-b", "linked", str(self.work / "linked"), cwd=self.work / "repo")
+        linked = self.binding(self.work, relative="linked")
+        self.assertEqual(self.reply({"action": "validate", "projects": [linked]}), {"error": {"code": "target_unverified"}})
+        # The echo is the request's own bytes order, which Cloud compares as JSON text.
+        own = dict(reversed(self.binding(self.work / "repo").items()))
+        self.assertEqual(json.dumps(self.reply({"action": "validate", "projects": [own]})),
+                         json.dumps({"protocol": 2, "validated": [own]}))
         (self.work / "folder").mkdir()
         folder = self.binding(self.work, relative="folder")
         self.assertEqual(self.reply({"action": "validate", "projects": [folder]}), {"protocol": 2, "validated": [folder]})
@@ -314,12 +323,18 @@ class CatalogCommandTests(CatalogFixture, unittest.TestCase):
 
     def test_invalid_requests_configuration_and_the_64_kib_bounds(self):
         for raw in (b"", b"\xff", b"[]", b'{"action": "validate"}', b'{"unexpected": 1}', b'{"offset": "1"}', b"[" * 60000,
+                    b'{"action": "inspect", "machine": "local", "workspace_name": "/", "offset": "0"}',
                     json.dumps({"action": "validate", "projects": [{}] * 33}).encode(), b" " * 65537):
             with self.subTest(raw=raw[:40]):
                 self.assertEqual(self.reply(raw), {"error": {"code": "catalog_unavailable"}})
         padded = json.dumps({"action": "inspect", "machine": "local", "workspace_name": str(self.work)}).encode()
         self.assertIn("project", self.reply(padded + b" " * (65536 - len(padded))))
         self.assertEqual(self.reply(padded + b" " * (65537 - len(padded))), {"error": {"code": "catalog_unavailable"}})
+        # 33 valid bindings exceed the bound before any is inspected.
+        (self.work / "one").mkdir()
+        one = self.binding(self.work / "one")
+        with patch.object(catalog, "inspect", side_effect=AssertionError("inspected")):
+            self.assertEqual(self.reply({"action": "validate", "projects": [one] * 33}), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('schema_version = 1\n[machines.local]\ntransport = "local"\n')
         self.assertEqual(self.reply({}), {"error": {"code": "catalog_unavailable"}})
         self.config_path.write_text('[machines.local]\ntransport = "local"\n')

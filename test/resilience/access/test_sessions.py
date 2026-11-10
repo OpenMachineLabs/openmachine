@@ -172,19 +172,20 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))
         self.assertEqual((reply["status"], reply["error"]["code"]), ("denied", "github_client_invalid"), reply)
 
-    def test_the_code_host_state_is_a_control_path(self):
-        """The Go Code host keeps its host key, network keys and socket beside Core's state; no session reads it."""
+    def test_the_code_host_and_connector_state_are_control_paths(self):
+        """The Code host and the Connector keep keys and sign-in beside Core's state; no session reads them."""
         default = self.root / "home/.local/state/openmachine"
-        code = default.parent / "openmachine-code"
-        code.mkdir(parents=True, mode=0o700)
-        (code / "host").write_text("private\n")
+        hosts = [default.parent / "openmachine-code", default.parent / "openmachine-connector"]
+        for path in hosts:
+            path.mkdir(parents=True, mode=0o700)
+            (path / "host").write_text("private\n")
         prelude = f"from openmachine.access import rules; rules.DEFAULT_STATE = rules.Path({str(default)!r}); "
-        process, reply = self.start(self.request(self.lifetime(), "read_only", "exec", f"cat {code}/host; ls {code}"),
-                                    prelude=prelude)
+        command = "; ".join(f"cat {path}/host; ls {path}" for path in hosts)
+        process, reply = self.start(self.request(self.lifetime(), "read_only", "exec", command), prelude=prelude)
         out, err = process.communicate(timeout=60)
         self.assertEqual(reply["status"], "admitted", reply)
         self.assertNotIn(b"private", out)
-        self.assertEqual(err.decode().count(DENIED), 2, err)
+        self.assertEqual(err.decode().count(DENIED), 4, err)
 
     def test_detached_work_shares_its_lifetime(self):
         first, other = self.lifetime(), self.lifetime()

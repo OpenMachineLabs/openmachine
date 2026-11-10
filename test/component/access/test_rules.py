@@ -115,6 +115,10 @@ class RulesTests(unittest.TestCase):
         self.git(self.core, "worktree", "add", "-q", "-b", "nested", str(nested))
         inside = self.compile(self.scope(self.binding(self.core, "read_only"), self.binding(self.cloud, "full_access")))
         self.assertEqual(inside.grants(), [(self.core, "read_only"), (self.cloud, "full_access"), (real, "read_only")])
+        # A selected linked worktree grants itself, never its sibling worktrees.
+        sibling = self.dev / "core-sibling"
+        self.git(self.core, "worktree", "add", "-q", "-b", "sibling", str(sibling))
+        self.assertEqual(self.compile(self.scope(self.binding(real, "full_access"))).grants(), [(real, "full_access")])
 
 
 if __name__ == "__main__":
