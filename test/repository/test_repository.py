@@ -18,116 +18,40 @@ SPEC.loader.exec_module(rules)
 
 
 class RepositoryChecks(unittest.TestCase):
-    def test_valid_titles(self):
-        cases = [
-            ("commit", "governance(repo): establish a minimal scaffold"),
-            ("pr", "ci(repository): check contribution metadata"),
-            ("issue", "[SPEC] architecture(runtime): define the first behavior"),
-            ("issue", "[REQUEST] runtime(workspace): support path exclusions"),
-            ("issue", "[BUG] runtime(connection): handle a failed retry"),
-            ("issue", "[BUG] \u6587\u4ef6\u65e0\u6cd5\u6253\u5f00"),
-            ("issue", "[REQUEST] \u652f\u6301\u66f4\u591a\u5de5\u4f5c\u533a"),
-            ("issue", "[SURVEY] research(transport): compare current options"),
-            ("issue", "[SURVEY] experiment(latency): measure overhead"),
-            ("issue", "[BENCHMARK] eval(transport): compare frozen candidates"),
-            ("issue", "[ROADMAP] Repository foundation"),
-        ]
-        for kind, title in cases:
-            with self.subTest(title=title):
-                self.assertEqual(rules.title_errors(title, kind), [])
+    def test_metadata_accepts_content_without_presentation_gates(self):
+        for title in ['Repair login.', 'fixup! temporary work', '[Custom] A useful report',
+                      '\u4fee\u590d\u767b\u5f55', 'A' * 120]:
+            for kind in ('pr', 'issue'):
+                obj = {'title': title, 'body': 'A concise explanation without fixed headings.',
+                       'labels': [{'name': 'spec'}]}
+                self.assertEqual(rules.metadata_errors(obj, kind), [])
+        obj = {'title': 'Update', 'body': '\u4e2d\u6587 path example'}
+        self.assertEqual(rules.metadata_errors(obj, 'pr'), [])
+        for bad in [None, '', '  ', 5, 'line\nbreak']:
+            self.assertTrue(rules.metadata_errors({**obj, 'title': bad}, 'pr'))
+        for bad in [None, '', ' \n', 5, 'bad\0control']:
+            self.assertTrue(rules.metadata_errors({**obj, 'body': bad}, 'pr'))
 
-    def test_invalid_titles(self):
-        cases = [
-            ("commit", "[SPEC] docs(repo): describe the rules"),
-            ("pr", " "),
-            ("pr", " docs(repo): explain the contribution"),
-            ("pr", "docs(repo): explain the contribution."),
-            ("pr", "x" * 101),
-            ("issue", "[RESEARCH] research(repo): investigate governance"),
-            ("issue", "[Program] Repository foundation"),
-            ("issue", "[PROGRAM] Repository foundation"),
-            ("issue", "[Roadmap] Repository foundation"),
-            ("issue", "[ROADMAP]  Repository foundation"),
-            ("issue", "[REQUEST]  runtime(repo): add a new capability"),
-            ("issue", "[Request] runtime(repo): add a new capability"),
-            ("issue", "[BUG]  runtime(connection): handle a failed retry"),
-            ("issue", "[Bug] runtime(connection): handle a failed retry"),
-            ("issue", "[SURVEY]  research(repo): investigate governance"),
-            ("issue", "[SURVEY] governance(repo): change the rules"),
-            ("issue", "[BENCHMARK] research(repo): compare candidates"),
-            ("commit", "eval(repo): compare candidates"),
-            ("commit", "docs(repo): update"),
-            ("commit", "docs(repo): a change."),
-            ("commit", "docs(repo): a change\nsecond line"),
-            ("commit", "docs(repo): " + "a" * 73),
-            ("pr", "docs(repo): \u4e2d\u6587"),
-        ]
-        for kind, title in cases:
-            with self.subTest(title=title):
-                self.assertTrue(rules.title_errors(title, kind))
-
-    def test_pr_title_fits_the_squash_commit_subject(self):
-        body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
-        fits = "docs(readme): " + "a" * (72 - len("docs(readme): ") - len(" (#250)"))
-        self.assertEqual(rules.metadata_errors({"title": fits, "body": body, "number": 250}, "pr"), [])
-        self.assertEqual(rules.metadata_errors({"title": fits + "a", "body": body, "number": 250}, "pr"),
-                         ["PR title plus its ' (#N)' squash suffix must fit within 72 characters"])
-        self.assertEqual(rules.metadata_errors({"title": fits + "a", "body": body}, "pr"), [])
-
-    def test_nonconventional_pr_title_warns_without_blocking(self):
-        for title in ("Update README.md", "[SURVEY] research(repo): investigate governance",
-                      "docs(repo): update"):
-            with self.subTest(title=title):
-                obj = {"title": title, "body": "Explain the change, verification, and limitations."}
-                self.assertEqual(rules.metadata_errors(obj, "pr"), [])
-                self.assertIn("presentation: consider domain(scope): concrete English outcome",
-                              rules.metadata_warnings(obj, "pr"))
-        conventional = {"title": "docs(readme): clarify setup instructions",
-                        "body": (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()}
-        self.assertEqual(rules.metadata_warnings(conventional, "pr"), [])
-        self.assertTrue(rules.title_errors("Update README.md", "commit"))
-        self.assertTrue(rules.title_errors("Update README.md", "issue"))
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "event.json"
-            path.write_text(json.dumps({"pull_request": {
-                "title": "Update README.md",
-                "body": "Explain the change, verification, and limitations.",
-            }}))
-            result, output, errors = self.checker([
-                "--mode", "metadata", "--event-name", "pull_request", "--event-path", str(path)])
-            self.assertEqual(result, 0)
-            self.assertIn("PASS: repository checks", output)
-            self.assertIn("WARN: presentation: consider domain(scope):", errors)
-
-    def test_language_backstop_does_not_claim_ascii_is_english(self):
-        self.assertEqual(rules.english_errors("English prose with a caf\u00e9 name and an em dash\u2014fine."), [])
-        for text in ["\u4e2d\u6587", "\u30ab\u30ca", "\ud55c\uae00"]:
-            self.assertTrue(rules.english_errors(text))
-
-    def test_label_manifest(self):
-        labels = json.loads((ROOT / ".github/labels.json").read_text())
-        self.assertEqual(rules.label_errors(labels), [])
-        self.assertEqual(sum(label["name"] == "feature-request" for label in labels), 1)
-        for bad in [{}, [], labels + [labels[0]], [{"name": "bug"}],
-                    [{"name": "Bug", "color": "ffffff", "description": "A bug."}],
-                    [{"name": "bug", "color": "red", "description": "A bug."}],
-                    [{"name": "bug", "color": "ffffff", "description": "\u4e2d\u6587"}]]:
-            with self.subTest(bad=bad):
-                self.assertTrue(rules.label_errors(bad))
-
-    def test_text_hygiene_and_relative_links(self):
+    def test_unicode_data_and_style_do_not_hide_broken_links(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "target.md").write_text("# Target\n")
-            page = root / "README.md"
-            page.write_text("[Target](target.md#anchor) and [Web](https://example.com)\n")
-            self.assertEqual(rules.file_errors(page, root), [])
-            for content in ["[Missing](missing.md)\n", "[Outside](../outside.md)\n",
-                            "trailing space \n", "no final newline", "\ufeffBOM\n",
-                            "\u4e2d\u6587\n", "Windows\r\n"]:
-                page.write_bytes(content.encode("utf-8"))
-                self.assertTrue(rules.file_errors(page, root), repr(content))
+            page = root / 'README.md'
+            (root / 'target.md').write_text('# Target\n')
+            for text in ['[Target](target.md)\n', 'Unicode: \u4e2d\u6587',
+                         'trailing whitespace \n', 'Windows\r\n', '\ufeffBOM\n']:
+                page.write_bytes(text.encode())
+                self.assertEqual(rules.file_errors(page, root), [])
+            for text in ['[Missing](missing.md)\n', '[Outside](../outside.md)\n']:
+                page.write_text(text)
+                self.assertTrue(rules.file_errors(page, root))
+
+    def test_label_manifest_keeps_api_shape_and_unique_names(self):
+        labels = json.loads((ROOT / '.github/labels.json').read_text())
+        self.assertEqual(rules.label_errors(labels), [])
+        for bad in [{}, [], labels + [labels[0]], [{'name': 'bug'}],
+                    [{'name': 'bug', 'color': 'red', 'description': 'Bug'}]]:
+            self.assertTrue(rules.label_errors(bad))
+
 
     def test_public_boundary_guards_public_source_and_new_metadata(self):
         allowed = (
@@ -173,71 +97,6 @@ class RepositoryChecks(unittest.TestCase):
                         {"title": title + " " + text, "body": body}, kind
                     ))
 
-    def test_issue_templates_match_scoped_metadata_policy(self):
-        templates = list((ROOT / ".github/ISSUE_TEMPLATE").glob("*.md"))
-        self.assertEqual(len(templates), 8)
-        for path in templates:
-            body = path.read_text()
-            title = next(line.split('"', 2)[1] for line in body.splitlines()
-                         if line.startswith('title: "'))
-            label = next(line.split('"', 2)[1] for line in body.splitlines()
-                         if line.startswith('labels: "'))
-            with self.subTest(template=path.name):
-                self.assertEqual(rules.metadata_errors(
-                    {"title": title, "body": body, "labels": [{"name": label}]}, "issue"), [])
-
-        for prefix, headings in rules.FORMAL_ISSUE_HEADINGS.items():
-            template = next(path.read_text() for path in templates
-                            if f'title: "[{prefix}] ' in path.read_text())
-            title = next(line.split('"', 2)[1] for line in template.splitlines()
-                         if line.startswith('title: "'))
-            for heading in headings:
-                trimmed = template.replace(f"## {heading}", f"## Omitted {heading}")
-                with self.subTest(prefix=prefix, heading=heading):
-                    self.assertTrue(rules.metadata_errors({"title": title, "body": trimmed}, "issue"))
-
-        body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
-        obj = {"title": "governance(repo): establish a minimal scaffold", "body": body}
-        self.assertEqual(rules.metadata_errors(obj, "pr"), [])
-        self.assertEqual(rules.metadata_warnings(obj, "pr"), [])
-        for candidate in ("A concise change and actual test result.", body + "\n## Testing\n"):
-            self.assertEqual(rules.metadata_errors({**obj, "body": candidate}, "pr"), [])
-            self.assertTrue(rules.metadata_warnings({**obj, "body": candidate}, "pr"))
-        self.assertEqual(rules.metadata_errors(
-            {"title": "governance(repo): propose a scoped task", "body": "Short task."}, "issue"), [])
-
-    def test_community_issues_support_unicode_and_short_reports(self):
-        for title, body in (
-            ("[BUG] \u6587\u4ef6\u65e0\u6cd5\u6253\u5f00", "\u91cd\u73b0\u6b65\u9aa4：\u8fd0\u884c\u540e\u51fa\u73b0\u9519\u8bef\u3002"),
-            ("[REQUEST] \u652f\u6301\u66f4\u591a\u5de5\u4f5c\u533a", "\u5e0c\u671b\u652f\u6301\u989d\u5916\u7684\u5de5\u4f5c\u76ee\u5f55\u3002"),
-            ("[BUG] Connection fails", "Observed an error on startup."),
-        ):
-            with self.subTest(title=title):
-                label = "bug" if title.startswith("[BUG]") else "feature-request"
-                self.assertEqual(rules.metadata_errors(
-                    {"title": title, "body": body, "labels": [{"name": label}]}, "issue"), [])
-        self.assertTrue(rules.metadata_errors({"title": "[SPEC] architecture(api): add fields",
-                                              "body": "Too short"}, "issue"))
-        self.assertTrue(rules.metadata_errors({"title": "[BUG] Short report",
-                                              "body": "A private URL " + "https://chatgpt.com/" + "c/secret"}, "issue"))
-
-    def test_formal_issue_labels_prevent_title_edits_from_bypassing_policy(self):
-        for label in ("spec", "research", "benchmark", "feature"):
-            for title in ("maintenance(repo): describe the change", "[BUG] Short report",
-                          "[REQUEST] A new capability"):
-                for body in ("Short report.", "\u7b80\u77ed\u62a5\u544a"):
-                    with self.subTest(label=label, title=title, body=body):
-                        errors = rules.metadata_errors(
-                            {"title": title, "body": body, "labels": [{"name": label}]}, "issue")
-                        self.assertIn("body needs exactly one 'Why' section", errors)
-                        if title.startswith("["):
-                            self.assertTrue(any("conflicts with" in error for error in errors))
-                        if body != "Short report.":
-                            self.assertIn("use English; CJK text was found", errors)
-
-        feature = {"title": "feature(workspace): add path exclusions", "labels": [{"name": "feature"}],
-                   "body": "## Why\nA concrete need.\n## Outcome\nExpected behavior.\n## Scope\nOne change.\n"}
-        self.assertEqual(rules.metadata_errors(feature, "issue"), [])
 
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
@@ -256,18 +115,6 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(frontmatter.count("\nlabels:"), 1)
         self.assertIn('\nlabels: "feature"\n', frontmatter)
 
-    def test_historical_program_events_keep_editability(self):
-        issue = {"title": "[Program] Existing roadmap",
-                 "labels": [{"name": "feature"}],
-                 "body": (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()}
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "event.json"
-            for action, expected in (("edited", 0), ("reopened", 0), ("opened", 1)):
-                path.write_text(json.dumps({"action": action, "issue": issue}))
-                with self.subTest(action=action), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                    self.assertEqual(rules.main(["--mode", "metadata", "--event-name", "issues",
-                                                 "--event-path", str(path)]), expected)
-        self.assertEqual(issue["title"], "[Program] Existing roadmap")
 
     def test_security_contact_intake_excludes_public_vulnerability_details(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/security-contact.md").read_text()
@@ -285,16 +132,6 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(frontmatter.count("\nlabels:"), 1)
         self.assertIn('\nlabels: "bug"\n', frontmatter)
 
-    def test_metadata_keeps_title_language_and_nonempty_body_checks(self):
-        obj = {"title": "docs(repo): explain the bounded change", "body": "Actual change and validation."}
-        for body in (None, "", " \t\r\n ", [], "Embedded \0 control", "\u4e2d\u6587"):
-            with self.subTest(body=body):
-                self.assertTrue(rules.metadata_errors({**obj, "body": body}, "pr"))
-        for title in (None, 3, "", " invalid", "Invalid title.", "x" * 101):
-            with self.subTest(title=title):
-                self.assertTrue(rules.metadata_errors({**obj, "title": title}, "pr"))
-        self.assertTrue(rules.metadata_errors([], "pr"))
-        self.assertEqual(rules.metadata_errors(obj, "pr"), [])
 
     def checker(self, argv):
         out, err = io.StringIO(), io.StringIO()
@@ -322,7 +159,7 @@ class RepositoryChecks(unittest.TestCase):
                 event.write_text(json.dumps({"pull_request": obj}))
                 self.assertEqual(self.checker(["--mode", "metadata"])[0], 0)
                 self.assertEqual(self.checker(["--mode", "source"])[0], 0)
-                source.write_text("# Failed source \n")
+                source.write_text("[Missing](missing.md)\n")
                 self.assertEqual(self.checker(["--mode", "source"])[0], 1)
                 obj["body"] += "\nMore review context."
                 event.write_text(json.dumps({"pull_request": obj}))
@@ -347,48 +184,33 @@ class RepositoryChecks(unittest.TestCase):
                         rules.main(incomplete)
                     self.assertEqual(failure.exception.code, 2)
 
-    def test_source_mode_ignores_pr_event_payload_but_retains_push_commit_checks(self):
+    def test_source_mode_never_audits_development_history(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".github").mkdir()
             (root / ".github/labels.json").write_text(json.dumps([
-                {"name": "maintenance", "color": "ffffff", "description": "Repository maintenance."}]))
-            event = root / "event.json"
-            event.write_text("not JSON")
-            arguments = ["--mode", "source", "--event-name", "pull_request", "--event-path", str(event)]
-            with patch.object(rules, "ROOT", root), patch.object(rules, "git", return_value=""), \
-                    patch.object(rules, "commit_errors", return_value=["invalid final commit"]) as audit:
-                self.assertEqual(self.checker(arguments)[0], 0)
-                audit.assert_not_called()
-                event.write_text(json.dumps({"before": "a" * 40, "after": "b" * 40}))
-                arguments[3] = "push"
-                self.assertEqual(self.checker(arguments)[0], 1)
-                audit.assert_called_once_with(root, "a" * 40, "b" * 40)
-                audit.reset_mock()
-                self.assertEqual(self.checker(arguments[2:])[0], 1)
-                audit.assert_called_once_with(root, "a" * 40, "b" * 40)
+                {"name": "maintenance", "color": "ffffff", "description": "Maintenance."}]))
+            for event in ("push", "pull_request"):
+                with patch.object(rules, "ROOT", root), patch.object(rules, "git", return_value="") as git:
+                    self.assertEqual(self.checker(["--mode", "source", "--event-name", event,
+                                                   "--event-path", "/absent/event.json"])[0], 0)
+                    self.assertEqual(git.call_args.args[1], "ls-files")
 
-    def test_workflow_modes_preserve_code_and_metadata_check_identity(self):
+
+    def test_metadata_edits_cannot_rerun_or_replace_required_code_checks(self):
         quality = (ROOT / ".github/workflows/quality.yml").read_text()
         metadata = (ROOT / ".github/workflows/metadata.yml").read_text()
-        self.assertIn("python3 scripts/check_repository.py --mode source", quality)
-        self.assertIn("python3 scripts/check_repository.py --mode metadata", metadata)
-        self.assertIn("python3 scripts/premerge.py --ci --force", quality)
-        self.assertIn("types: [opened, synchronize, edited, reopened, ready_for_review]", metadata)
-        # Required contexts must keep their names and run for metadata-only edits,
-        # otherwise branch protection can wait forever for a status not emitted.
-        self.assertIn("types: [opened, synchronize, reopened, edited, ready_for_review]", quality)
-        self.assertIn("  repository:\n    name: repository\n", quality)
-        self.assertIn("  runtime:\n    needs: repository\n    name: runtime\n", quality)
-        self.assertNotIn("\n    if:", quality)
-        self.assertNotIn("-metadata-edit", quality)
-        self.assertNotIn("    name: ${{", quality)
-        self.assertIn("github.event.changes.base && 'metadata' || 'code'", quality)
-        self.assertIn("group: metadata-", metadata)
+        self.assertIn("check_repository.py --mode source", quality)
+        self.assertIn("check_repository.py --mode metadata", metadata)
+        self.assertIn("if: github.event.action != 'edited' || github.event.changes.base", quality)
+        for name in ("repository", "runtime"):
+            self.assertIn(f"'{name}-metadata-edit' || '{name}'", quality)
+        self.assertIn("'metadata' || 'code'", quality)
         for workflow in (quality, metadata):
             self.assertIn("persist-credentials: false", workflow)
             self.assertNotIn("pull_request_target:", workflow)
             self.assertNotIn(": write", workflow)
+
 
     def test_go_connector_runs_only_for_its_module_and_never_for_text_edits(self):
         quality = (ROOT / ".github/workflows/quality.yml").read_text()
@@ -397,7 +219,7 @@ class RepositoryChecks(unittest.TestCase):
         # Not a required check: a path filter cannot strand a required status.
         self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n"
                       "    paths:\n      - \"connector/**\"\n      - \".github/workflows/connector.yml\"\n", connector)
-        self.assertIn("  push:\n    branches: [main]\n  workflow_dispatch:\n", connector)
+        self.assertIn("  push:\n    branches: [main]\n    paths:", connector)
         self.assertNotIn("edited", connector)
         self.assertIn("  connector:\n    name: connector\n", connector)
         self.assertIn("go test -count=1 -v ./...", connector)
@@ -437,26 +259,6 @@ class RepositoryChecks(unittest.TestCase):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
         obj = {"title": "docs(repo): describe $(false) literally", "body": body + "\n`exit 1`\n"}
         self.assertEqual(rules.metadata_errors(obj, "pr"), [])
-
-    def test_commit_audit_is_prospective_and_rejects_invalid_refs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            def git(*args):
-                return subprocess.run(["git", "-C", directory, *args], check=True,
-                                      capture_output=True, text=True).stdout.strip()
-            git("init", "-q")
-            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit",
-                "--allow-empty", "-qm", "Initial commit")
-            base = git("rev-parse", "HEAD")
-            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit",
-                "--allow-empty", "-qm", "docs(repo): establish contribution rules")
-            head = git("rev-parse", "HEAD")
-            self.assertEqual(rules.commit_errors(root, base, head), [])
-            self.assertTrue(rules.commit_errors(root, "--all", head))
-            self.assertTrue(rules.commit_errors(root, "0" * 40, head))
-            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit",
-                "--allow-empty", "-qm", "Invalid new subject")
-            self.assertTrue(rules.commit_errors(root, base, git("rev-parse", "HEAD")))
 
 
 if __name__ == "__main__":

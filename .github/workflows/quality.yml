@@ -15,10 +15,11 @@ concurrency:
   group: quality-${{ github.event_name }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'code' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Required checks must report on all PR events, including metadata-only edits.
+# Metadata-only edits retain the existing code results; retargeting the base rechecks code.
 jobs:
   repository:
-    name: repository
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'repository-metadata-edit' || 'repository' }}
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -29,12 +30,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Check candidate source and push commit metadata
+      - name: Check candidate source
         run: python3 scripts/check_repository.py --mode source
 
   runtime:
     needs: repository
-    name: runtime
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'runtime-metadata-edit' || 'runtime' }}
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

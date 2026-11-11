@@ -38,13 +38,10 @@ current permission to merge, release or deploy.
 
 ## Git, review and publication
 
-Commit subjects use `<domain>(<scope>): <concrete English outcome>`, printable
-ASCII, lowercase kebab-case domain/scope and a 72-character maximum. Avoid vague
-outcomes like `update`. Ordinary internal Task/Spec/Survey/Benchmark titles follow
-their templates, while public Bug and Feature Request titles may use natural
-language and Unicode. PR title style is advisory; baseline title hygiene still
-applies. Prefer a descriptive `agent/<domain>-<scope>-<outcome>` branch name for
-Open Machine-operated tasks.
+Choose a descriptive final squash title. `domain(scope): outcome` and the Issue
+and PR templates are useful guidance, not presentation gates. Development
+commits, punctuation, length and language are not audited by CI. Prefer English
+prose while allowing Unicode examples, data and community reports.
 
 Keep one focused candidate and review the **full diff**, not merely the last
 commit. Include real test outcomes, known limitations, affected security boundaries
@@ -109,11 +106,10 @@ and shared runner changes require the full suite. A local PASS is not hosted CI
 evidence and neither proves deployment, native service or real-client acceptance.
 Do not remove necessary regression coverage or lower safety gates to obtain PASS.
 
-Repository hygiene uses `scripts/check_repository.py`. Commit formats remain
-strict, while ordinary community Bug/Feature Request Issue bodies need not use
-formal Spec sections or English. The source checker preserves secret-boundary,
-link and file hygiene checks. PR section names are presentation advice, not
-proof of acceptance.
+Repository checks preserve the public-information boundary, valid metadata,
+relative links and label API shape. Docs-only candidates run source checks without
+installing the product or executing unrelated test suites. Metadata-only edits
+have their own check identity and never replace a code-verification result.
 
 Quality CI jobs run on GitHub-hosted Ubuntu 24.04 with pinned actions. Quality checks
 use read-only permissions and cannot run candidate code under write-privileged

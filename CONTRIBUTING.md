@@ -19,8 +19,7 @@ proposals. You do not need to use an AI agent to contribute.
   Issue, pull request or community channel containing exploit details.
 
 Read our [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports and feature requests
-are welcome in any language. Repository-authored documentation, code comments,
-commit messages and technical PR descriptions must remain in English.
+are welcome in any language. Prefer English for repository-authored prose; Unicode examples and data are valid.
 
 ## Set up a development checkout
 
@@ -76,7 +75,9 @@ python scripts/run_tests.py --base upstream/main --plan
 python scripts/run_tests.py --base upstream/main
 ```
 
-Then commit your work and run the clean-candidate gate:
+Commit the reviewed changes. The clean-candidate gate below is available for local
+verification; CI uses the same runner, so do not repeat an unchanged full suite
+locally when its current CI result is available:
 
 ```sh
 git add path/to/changed-file
@@ -149,12 +150,10 @@ Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) to explain the reason,
 the change, how you tested it and any material risks. Link an Issue when relevant.
 A small documentation correction does not need a separate Spec or rollback plan.
 
-Use a descriptive commit subject such as `fix(access): refuse a replaced directory`
-or `docs(readme): clarify installation`. Commit subjects follow
-`domain(scope): outcome`, use printable ASCII and fit within 72 characters.
-Prefer concise English PR descriptions. A squash merge appends ` (#N)` to the PR
-title, so the title plus that suffix must also fit within 72 characters.
-Respond to review comments with focused updates.
+Choose a clear final squash title, for example `fix(access): refuse a replaced
+directory`. Naming and formatting conventions are advisory; CI does not audit
+development commit messages or require fixed Issue/PR headings. Explain the
+change, validation and material limitations, and respond to review findings.
 
 Maintainers review design, safety, tests and CI before deciding on a merge.
 A passing check is not automatic merge approval. Maintainer-specific decisions

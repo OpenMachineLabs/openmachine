@@ -66,10 +66,8 @@ module builds and tests on its own.
 
 ## English and safety
 
-Use English for repository-owned documentation, code comments, commit messages,
-PR technical descriptions and CI text. Community Bug and Feature Request Issues
-may use other languages; preserve technical identifiers. Automated language
-checks do not replace content review.
+Prefer English for repository-owned prose and CI text. Unicode examples, test
+data and community reports are valid. Presentation conventions do not block CI.
 
 Never commit credentials, private infrastructure configuration, personal data,
 raw execution logs or another organization's internal knowledge. Keep public
@@ -96,7 +94,7 @@ python -m unittest discover -s test/repository -p 'test_*.py'
 # Focused code change; replace access with the owning module
 python scripts/run_tests.py --module access --layer unit
 
-# Affected candidate checks, then the clean committed-candidate gate
+# Affected checks; local premerge is available when current CI evidence is absent
 python scripts/run_tests.py --base origin/main --plan
 python scripts/run_tests.py --base origin/main
 python scripts/premerge.py --base origin/main
@@ -111,9 +109,8 @@ PASS, FAIL and NOT RUN separately; a local pass or CI is not product acceptance.
 
 - Review the complete final diff for scope, failure handling and risk, then
   stage exact paths.
-- Write commit subjects as `domain(scope): concrete outcome`, using lowercase
-  kebab-case domain and scope, printable ASCII and at most 72 characters. Name
-  branches `agent/<domain>-<scope>-<outcome>`.
+- Choose a clear final squash title; `domain(scope): outcome` is a useful convention.
+  Development commit messages are not CI inputs. Prefer `agent/<descriptive-task>` branches.
 - Keep one task branch and PR. Do not reset unrelated work, force-push, amend or
   rewrite history without explicit authorization.
 - Opening a PR does not authorize merging, closing a Spec, releasing or

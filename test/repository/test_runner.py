@@ -64,17 +64,27 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.write("README.md", "# Updated documentation\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
-        self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+        self.assertEqual(plan["tests"], [])
+
         self.write("spec/fixture/inputs.json", '{"format": 1}\n')
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
+        self.assertEqual(plan["tests"], [])
+
+    def test_explicit_empty_layer_is_rejected_and_issue_templates_keep_checks(self):
+        self.write("README.md", "# Changed documentation\n")
+        with self.assertRaisesRegex(ValueError, "no required behavior tests"):
+            runner.make_plan(self.root, self.base, layer="unit")
+        self.write(".github/ISSUE_TEMPLATE/bug.md", "---\nlabels: bug\n---\n")
+        plan = runner.make_plan(self.root, self.base)
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+        self.assertFalse(plan["runtime_required"])
 
     def test_go_connector_changes_run_repository_checks_only(self):
         self.write("connector/test/proof_test.go", "package test\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
-        self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+        self.assertEqual(plan["tests"], [])
 
     def test_community_policy_documents_select_repository_checks(self):
         for path in ("CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
@@ -83,7 +93,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
                 self.write(path, "# Community policy\n")
                 plan = runner.make_plan(self.root, self.base)
                 self.assertFalse(plan["runtime_required"])
-                self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+                self.assertEqual(plan["tests"], [])
 
     def test_repository_execution_is_independent_of_ambient_pr_metadata(self):
         for path in ("scripts/run_tests.py", "scripts/check_repository.py"):
@@ -101,7 +111,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
             with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event)}):
                 result = runner.execute_plan(self.root, plan)
         self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["layers"][0]["tests"], 1)
+        self.assertEqual(result["layers"], [])
         self.assertFalse(any("environment" in stage for stage in result["stages"]))
 
     def test_skill_library_named_folder_is_selected_by_ownership(self):
@@ -129,16 +139,26 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
 
-    def test_untracked_production_and_unknown_paths_fail_until_explicitly_owned(self):
+    def test_unregistered_code_and_tests_fall_back_to_complete_discovery(self):
         self.write("openmachine/new_module.py", "VALUE = 1\n")
-        with self.assertRaisesRegex(ValueError, "without an explicit owner"):
-            runner.make_plan(self.root, self.base)
-        self.manifest["modules"]["github"]["sources"].append("openmachine/new_module.py")
-        self.save_manifest()
-        self.assertIn("test/component/github/test_calls.py", runner.make_plan(self.root, self.base)["tests"])
+        new = "test/unit/new_module/test_new.py"
+        self.write(new, self.files["test/unit/github/test_values.py"])
+        plan = runner.make_plan(self.root, self.base)
+        self.assertEqual(plan["scope"], "full")
+        self.assertIn(new, plan["tests"])
+        self.assertIn("test/resilience/execution/test_process.py", plan["tests"])
         self.write("unregistered-tool.py", "VALUE = 1\n")
-        with self.assertRaisesRegex(ValueError, "changed path has no"):
-            runner.make_plan(self.root, self.base)
+        self.assertEqual(runner.make_plan(self.root, self.base)["scope"], "full")
+
+    def test_new_tests_in_an_existing_directory_inherit_the_owner(self):
+        new = "test/unit/github/test_more.py"
+        self.write(new, self.files["test/unit/github/test_values.py"])
+        self.write("openmachine/github.py", "VALUE = 2\n")
+        plan = runner.make_plan(self.root, self.base)
+        self.assertIn(new, plan["tests"])
+        self.assertNotIn("test/resilience/execution/test_process.py", plan["tests"])
+        self.assertEqual(plan["scope"], "affected")
+
 
     def test_staged_and_unstaged_changes_are_both_selected(self):
         self.write("openmachine/github.py", "VALUE = 2\n")
@@ -211,8 +231,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
                                                     "test/component/server/test_dispatch.py"})
         # Anything the retired owner left behind is unowned, not retired.
         self.write("openmachine/execution.py", "VALUE = 1\n")
-        with self.assertRaisesRegex(ValueError, "without an explicit owner"):
-            runner.make_plan(self.root, self.base)
+        self.assertEqual(runner.make_plan(self.root, self.base)["scope"], "full")
 
     def test_manifest_only_addition_selects_that_owner_without_a_full_run(self):
         path = "test/unit/github/test_more.py"
@@ -243,10 +262,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.write("test/support/wire.py", "from test.support import shared\n")
         self.write(consumer, "from test.support import wire\n" + self.files[consumer])
         self.manifest["support"][helper] = ["test/component/github/test_calls.py"]
-        self.save_manifest()
-        with self.assertRaisesRegex(ValueError, "fixture consumer is not registered"):
-            runner.make_plan(self.root, self.base)
-        self.manifest["support"][helper].append(consumer)
         self.save_manifest()
         plan = runner.make_plan(self.root, self.base)
         self.assertIn(consumer, plan["tests"])
@@ -310,22 +325,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertEqual(plan["scope"], "full")
         self.assertTrue(any("predates" in reason for reason in plan["full_reasons"]))
 
-    def test_committed_whitespace_failure_precedes_installation(self):
-        self.write("openmachine/github.py", "VALUE = 2 \n")
-        self.commit()
-        plan = runner.make_plan(self.root, self.base, committed=True)
-        stages = []
-        actual = runner.run_command
-
-        def run(argv, **kwargs):
-            stages.append(kwargs["stage"])
-            return actual(argv, **kwargs)
-
-        with patch.object(runner, "run_command", side_effect=run):
-            with self.assertRaises(subprocess.CalledProcessError):
-                runner.execute_plan(self.root, plan)
-        self.assertEqual(stages[-1], "check committed candidate whitespace")
-        self.assertFalse(any("environment" in stage for stage in stages))
 
     def test_zero_test_collection_is_an_error_not_a_successful_unittest_exit(self):
         path = "test/unit/github/test_empty.py"

@@ -3,7 +3,7 @@ name: connector
 # The Go network module builds and tests on its own, apart from the Python
 # package. It is not a required check, so pull requests run it only when the
 # module or this workflow changes; edits to a PR's text never rerun it, and
-# every main push and manual dispatch verifies it.
+# main uses the same path scope; manual dispatch verifies it.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -12,6 +12,9 @@ on:
       - ".github/workflows/connector.yml"
   push:
     branches: [main]
+    paths:
+      - "connector/**"
+      - ".github/workflows/connector.yml"
   workflow_dispatch:
 
 permissions:

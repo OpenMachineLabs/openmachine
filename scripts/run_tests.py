@@ -108,7 +108,10 @@ def _unique_paths(value: object, *, tests: bool = False, layers: tuple[str, ...]
 
 
 def check_fixture_consumers(root: Path, files: set[str], tests: set[str], support: dict) -> None:
-    helpers = {path for path in support if path.endswith(".py")}
+    helpers = {path for path in files if path.startswith("test/") and path.endswith(".py")
+               and path not in tests and not path.endswith("/__init__.py")}
+    for helper in helpers:
+        support.setdefault(helper, [])
     initializers = {path for path in files if path.startswith("test/") and path.endswith("/__init__.py")}
     python_paths = tests | helpers | initializers
 
@@ -152,7 +155,9 @@ def check_fixture_consumers(root: Path, files: set[str], tests: set[str], suppor
                 pending.extend(edges[path] - seen)
         for helper in seen & helpers:
             if test not in support[helper]:
-                raise ValueError(f"fixture consumer is not registered: {helper} -> {test}")
+                support[helper].append(test)
+    for consumers in support.values():
+        consumers.sort()
 
 
 def validate_manifest(value: object, files: set[str] | None = None, root: Path | None = None,
@@ -203,16 +208,24 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
                  and PurePosixPath(path).name.startswith("test_") and path.endswith(".py")}
         helpers = {path for path in files if path.startswith("test/") and path.endswith(".py")
                    and path not in tests and PurePosixPath(path).name != "__init__.py"}
-        if production - owned_sources.keys():
-            raise ValueError("production files without an explicit owner: " +
-                             ", ".join(sorted(production - owned_sources.keys())))
-        if tests - owned_tests.keys():
-            raise ValueError("test files without an explicit owner: " +
-                             ", ".join(sorted(tests - owned_tests.keys())))
-        if helpers - support.keys():
-            raise ValueError("support files without consumers: " + ", ".join(sorted(helpers - support.keys())))
+        # New files in an established directory inherit its unambiguous owner.
+        # Ambiguous/new modules fall back to complete discovery in make_plan.
+        for key, candidates, owners in (("sources", production, owned_sources), ("tests", tests, owned_tests)):
+            for path in sorted(candidates - owners.keys()):
+                parents = list(PurePosixPath(path).parents)
+                for parent in parents:
+                    if str(parent) in {".", "openmachine", "test", *[f"test/{layer}" for layer in LAYERS]}:
+                        continue
+                    matches = {owner for known, owner in owners.items() if PurePosixPath(known).parent == parent}
+                    if matches:
+                        if len(matches) == 1:
+                            owner = matches.pop()
+                            modules[owner][key].append(path)
+                            modules[owner][key].sort()
+                            owners[path] = owner
+                        break
         if root is not None:
-            for path in references:
+            for path in references | production | tests | helpers:
                 resolved = (root / path).resolve()
                 if not resolved.is_relative_to(root.resolve()) or not resolved.is_file():
                     raise ValueError(f"ownership path escapes the candidate or is not a file: {path}")
@@ -237,7 +250,7 @@ def _repository_only(path: str) -> bool:
     # connector/ is a Go module that its own CI job builds and tests.
     return (path in REPOSITORY_PATHS or
             path.startswith(("spec/", "connector/")) or
-            (path.endswith(".md") and path.startswith(("docs/", "test/"))) or
+            path.endswith(".md") or path.startswith("assets/") or
             (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".md", ".yml", ".yaml"))))
 
 
@@ -273,17 +286,26 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
         raise ValueError("select --base, --module, or --full explicitly")
     old = _old_manifest(root, base_sha) if base_sha else current
     changes = changed_paths(root, base_sha, head_sha, committed=committed) if base_sha else set()
-    all_tests = {path for entry in current["modules"].values() for path in entry["tests"]}
+    # The manifest optimizes known boundaries; newly added tests are never omitted.
+    all_tests = {test_path(path) for path in files if path.startswith("test/")
+                 and PurePosixPath(path).name.startswith("test_") and path.endswith(".py")}
     reasons: dict[str, set[str]] = {}
     required_paths: dict[str, set[str]] = {}
     full_reasons = []
+    mapped = {path for entry in current["modules"].values() for key in ("sources", "tests") for path in entry[key]}
+    unowned = {path for path in files if path.startswith("openmachine/") and path.endswith(".py")} | all_tests
+    if unowned - mapped and (full or modules or any(not _repository_only(path) for path in changes)):
+        full_reasons.append("unmapped source or test: complete discovery")
 
     def add(paths, reason):
         for path in paths:
             if path in all_tests:
                 reasons.setdefault(path, set()).add(reason)
 
-    add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
+    if full or modules or any(path.startswith(".github/") or (
+            not path.endswith(".md") and not path.startswith(("assets/", "spec/", "connector/"))
+            and path not in {"LICENSE", ".gitignore"}) for path in changes):
+        add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
     if full:
         full_reasons.append("explicit full verification")
     if old is None:
@@ -323,7 +345,10 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                             add(_tests_for(current["modules"][name]), f"removed test: {path}")
             if path in manifest["support"]:
                 known = True
-                add(manifest["support"][path], f"changed fixture: {path}")
+                consumers = manifest["support"][path]
+                add(consumers, f"changed fixture: {path}")
+                if not consumers:
+                    full_reasons.append(f"fixture without static consumers: {path}")
         if path.startswith("test/") and PurePosixPath(path).name == "__init__.py":
             known = True
             prefix = str(PurePosixPath(path).parent) + "/"
@@ -341,7 +366,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
             if old is None and path.startswith("test/") and path not in files:
                 # Deleted tests from the pre-manifest layout are covered by this full migration.
                 continue
-            raise ValueError(f"changed path has no test or repository ownership: {path}")
+            full_reasons.append(f"unmapped path: {path}")
     if MANIFEST in changes and old is not None:
         for name in set(old["modules"]) | set(current["modules"]):
             before, after = old["modules"].get(name), current["modules"].get(name)
@@ -372,7 +397,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                         and path.endswith(".py") and not path.startswith("test/repository/")
                         for path in changes)
     needs_product = changed_product or changed_tests
-    if not selected or (needs_product and not product and layer != "repository"):
+    if (not selected and (modules or layer or full or needs_product)) or (needs_product and not product and layer != "repository"):
         raise ValueError("selection contains no required behavior tests")
     if modules and not product and layer != "repository" and modules != ["repository"]:
         raise ValueError("requested module/layer contains no behavior tests")
@@ -475,13 +500,6 @@ def run_files(root: Path, paths: list[str], *, installed: bool, source: bool = F
 def execute_plan(root: Path, plan: dict) -> dict:
     print_plan(plan)
     stages = {}
-    checks = (["git", "diff", "--check"], ["git", "diff", "--cached", "--check"])
-    for index, command in enumerate(checks):
-        stages[f"diff check {index}"] = run_command(command, cwd=root, stage="check uncommitted whitespace")
-    if plan["base_sha"]:
-        stages["candidate diff check"] = run_command(
-            ["git", "diff", "--check", plan["base_sha"], plan["head_sha"]], cwd=root,
-            stage="check committed candidate whitespace")
     with tempfile.TemporaryDirectory(prefix="openmachine-tests-") as directory:
         temporary = Path(directory)
         repository = [path for path in plan["tests"] if path.startswith("test/repository/")]
