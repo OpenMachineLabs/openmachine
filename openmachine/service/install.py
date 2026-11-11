@@ -22,11 +22,11 @@ def prepare(state: Path, retained: Path, payload_sha256: str) -> dict:
     destination.mkdir(mode=0o700)
     pip = [str(destination / "bin/python"), "-I", "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
            "--no-deps", "--no-index", "--find-links", str(retained / "wheels"), "--only-binary=:all:"]
-    # Keep failed candidates for diagnosis. Never overwrite or garbage-collect an installation.
+    # Never overwrite an installation. Retention removes a failed candidate once its operation has ended.
     for argv in ([str(python), "-I", "-m", "venv", str(destination)], [*pip, "-r", str(retained / "requirements.lock")],
                  [*pip, str(retained / manifest["core"]["wheel"])], [str(destination / "bin/python"), "-I", "-m", "pip", "check"]):
         if processes.run(argv, timeout=180, env=env).returncode:
-            raise Fault("installation_failed", "Candidate installation failed; the selection is untouched and the candidate is retained.")
+            raise Fault("installation_failed", "Candidate installation failed; the selection is untouched.")
     # The candidate check: the installed access launcher answers with the declared version.
     checked = processes.run([str(destination / "bin/python"), "-I", "-m", "openmachine.access", "capabilities"], env=env)
     try:

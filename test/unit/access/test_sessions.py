@@ -45,7 +45,8 @@ class RequestTests(unittest.TestCase):
                        {"terminal": {"term": "x y"}}, {"kind": "sftp"},
                        *({"connection": value} for value in (None, "", "100.64.0.2 52144 100.64.0.1", "100.64.0.2 52144 100.64.0.1 22 x",
                                                              "host 52144 100.64.0.1 22", "100.64.0.2 65536 100.64.0.1 22",
-                                                             "100.64.0.2  52144 100.64.0.1 22", "100.64.0.2 -1 100.64.0.1 22"))):
+                                                             "100.64.0.2  52144 100.64.0.1 22", "100.64.0.2 -1 100.64.0.1 22",
+                                                             "fe80::2%eth0 52144 fe80::1 22"))):
             with self.subTest(change=change):
                 with self.assertRaises(Fault) as caught:
                     self.parse(VALID | change)
@@ -125,7 +126,8 @@ class SessionAccountTests(unittest.TestCase):
     def test_root_runs_sessions_on_linux_only(self):
         self.assertEqual(self.account("linux", self.ROOT, "root"), self.ROOT)
         self.assertEqual(self.account("darwin", self.ACCOUNT, "dev"), self.ACCOUNT)
-        for platform, account, user in (("darwin", self.ROOT, "root"), ("linux", self.ACCOUNT, "root"), ("linux", self.ROOT, "dev")):
+        for platform, account, user in (("darwin", self.ROOT, "root"), ("freebsd14", self.ROOT, "root"),
+                                        ("linux", self.ACCOUNT, "root"), ("linux", self.ROOT, "dev")):
             with self.subTest(platform=platform, user=user), self.assertRaises(Fault) as caught:
                 self.account(platform, account, user)
             self.assertEqual((caught.exception.code, caught.exception.effect), ("user_rejected", "known_no_effect"))

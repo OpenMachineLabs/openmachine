@@ -83,7 +83,7 @@ class SessionRequest(BaseModel):
     policy: Literal["read_only", "workspace", "full_access"]
     folders: rules.Folders | None = None
     kind: Literal["shell", "exec", "sftp"]
-    # SSH_CONNECTION: "<client> <port> <server> <port>".
+    # SSH_CONNECTION: "<client> <port> <server> <port>", literal addresses.
     connection: Annotated[str, Field(max_length=128)]
     command: Annotated[str, Field(min_length=1, max_length=65536)] | None = None
     terminal: Terminal | None = None
@@ -99,7 +99,9 @@ class SessionRequest(BaseModel):
         if (self.kind == "exec") != (self.command is not None) or "\0" in (self.command or ""):
             raise ValueError("exec requires exactly one command")
         parts = self.connection.split(" ")
-        if (len(parts) != 4 or not all(re.fullmatch(r"[0-9]{1,5}", port) and int(port) <= 65535 for port in parts[1::2])):
+        # A zone ID may hold any character; the private network's addresses have none.
+        if (len(parts) != 4 or "%" in self.connection
+                or not all(re.fullmatch(r"[0-9]{1,5}", port) and int(port) <= 65535 for port in parts[1::2])):
             raise ValueError("connection names two addresses and their ports")
         for address in parts[0::2]:
             ipaddress.ip_address(address)
@@ -142,8 +144,8 @@ class Lifetime:
 
 def _account(user: str) -> pwd.struct_passwd:
     account = pwd.getpwuid(os.getuid())
-    if user != account.pw_name or os.getuid() == 0 and sys.platform == "darwin":
-        raise Fault("user_rejected", "Sessions run only as the OS user running Open Machine, never as root on macOS.",
+    if user != account.pw_name or os.getuid() == 0 and sys.platform != "linux":
+        raise Fault("user_rejected", "Sessions run only as the OS user running Open Machine, and as root only on Linux.",
                     effect="known_no_effect")
     return account
 
