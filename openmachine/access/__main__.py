@@ -97,6 +97,7 @@ def session(control: int, state: Path) -> None:
     if request.policy == "full_access":
         _, program, argv, environment = launch
         try:
+            sessions.default_signals()
             os.execve(program, argv, environment)
         finally:
             os._exit(127)
