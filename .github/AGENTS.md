@@ -18,9 +18,10 @@ never interpolate untrusted titles or bodies into executable commands.
 
 Do not run candidate code with `pull_request_target` or write tokens.
 
-Required checks run, under their literal names, on every PR event. Only a
-workflow with no required check may use a `paths` filter; it still runs on
-every `main` push.
+Required code checks keep their established names on code and base changes.
+Metadata-only edits use separate check names and never replace code results.
+Optional path-filtered workflows use the same affected-path policy on PRs and main.
+
 
 Label writes belong only to the separate, default-branch workflow and
 must preserve unrelated labels. Changes to permissions or external writes need

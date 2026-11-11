@@ -50,12 +50,11 @@ ignore unknown paths, or treat an empty product selection as behavioral coverage
 Resolve a missing base or update the candidate's base relationship explicitly.
 
 `--plan` prints the changed paths, owning modules, selected files, layers and
-reasons without installing dependencies or running tests. A recognized
-documentation-only change runs repository checks without creating a product
-environment. An explicit module or layer with no tests is an error.
+reasons without installing dependencies or running tests. A documentation-only change runs source/link checks without creating a product
+environment or running test suites. An explicit module or layer with no tests is an error.
 
 `premerge.py` requires a clean committed worktree. It uses the same selector and
-runner as development and CI, checks whitespace and repository rules before
+runner as development and CI, checks repository rules before
 installing dependencies, builds the candidate wheel and runs the required test
 files once against it, installed outside the checkout. Its import check ensures
 product modules come from that wheel. Repository tests remain dependency-free, and the test package
@@ -93,8 +92,9 @@ before publishing success.
 Hosted CI always obtains its own evidence. Pull-request verification binds the
 checked-out merge candidate and both event-pinned parents; main pushes bind the
 exact before/after range. Manual workflow dispatch requests full verification.
-PR-internal commit subjects remain outside the merge gate. PR metadata is checked
-on pull-request events, and the final commit landing on main is checked on push.
+Metadata-only edits do not rerun code or replace its check results. Retargeting
+the base rechecks the candidate. Commit presentation is not a CI gate; maintainers
+choose the final squash title.
 
 ## Directory and ownership rules
 
@@ -102,22 +102,22 @@ on pull-request events, and the final commit landing on main is checked on push.
 | --- | --- |
 | `unit/<module>/` | Pure parsing, validation, transformations and state decisions; no real server, process lifecycle or timed waiting. |
 | `component/<module>/` | Module behavior with local files, state stores and application collaborators. |
-| `skill-library/<skill-name>/` | Standalone Skill behavior tests; keep each Skill in its own named folder, with exact paths in `ownership.json`. |
+| `skill-library/<skill-name>/` | Standalone Skill behavior tests; keep each Skill in its own named folder, with module boundaries in `ownership.json`. |
 | `resilience/<module>/` | Real owned processes, crash/restart, cancellation, lost replies and retained-state recovery. |
 | `repository/` | Repository hygiene, dependency direction, test selection and runner behavior. |
-| `support/` | Shared fixtures with explicit consumers; no TestCase subclasses or test methods. |
+| `support/` | Shared fixtures with discovered and declared consumers; no TestCase subclasses or test methods. |
 
-[ownership.json](ownership.json) is the executable ownership map. Every
-production Python file has one explicit module owner, and every test file has
-one owning module. The source entries use exact file paths so a newly added
-production file cannot be absorbed by a broad pattern without review.
+[ownership.json](ownership.json) optimizes known source/test boundaries. New files
+inherit an unambiguous directory owner; all current tests are discovered even
+without a manifest entry. Unmapped code selects the full discovered suite rather
+than requiring bookkeeping before it can run.
 
 Each module lists its own `tests` and explicit `boundary_tests` owned elsewhere.
 The selector adds those concrete tests once; it does not recursively expand an
 import graph or run every consumer module. Shared foundation, configuration and
 application changes must name the affected consumer boundaries in the manifest.
 
-A changed test runs that test directly. Shared fixture changes run their declared
+A changed test runs that test directly. Shared fixture changes run their declared and import-derived
 consumers, including consumers reached through another helper; package initializer
 changes include the affected package's tests and fixture consumers. Changed
 ownership entries select the union of old and new mappings. Deleted or renamed
@@ -127,8 +127,8 @@ Every changed or deleted source of a surviving module must retain its own mapped
 coverage; it cannot borrow another module's tests as proof. Retiring a whole owner
 removes its sources, its tests and its manifest entry together, and what it
 deleted then needs no coverage: no behavior remains. Anything it leaves behind is
-unowned and fails. Full mode does not bypass missing ownership or
-retained-coverage checks.
+unmapped and selects complete discovery. Full mode does not bypass
+retained-coverage checks for declared behavior.
 
 Keep each assertion with the module and layer that own its risk. Tests import
 shared fixtures from `test.support`, never another test case. Split mixed files
