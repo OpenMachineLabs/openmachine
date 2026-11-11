@@ -97,8 +97,8 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(self.spawned[-1], (FIRST, sys.executable))
         self.assertEqual(self.manage("update", identity=SECOND, source=self.source, sha256=self.digest,
                                      expected_selection_sha256="0" * 64)["status"], "busy")
-        # An interrupted effect is never replayed.
-        maintenance._save(self.state, self.record(FIRST), "retaining")
+        # An effect that may have happened is never replayed.
+        maintenance._save(self.state, self.record(FIRST), "recovery_required", reason="fixture")
         self.assertEqual(self.manage("operation", identity=FIRST)["status"], "recovery_required")
         self.assertEqual(self.manage("continue", identity=FIRST)["reason"], "maintenance_not_continuable")
 
@@ -124,6 +124,9 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
             lost = self.complete(SECOND)
         self.assertEqual((lost["phase"], lost["reason"]), ("activating", "maintenance_effect_unverified"))
         self.assertEqual(self.manage("operation", identity=SECOND)["status"], "continuation_required")
+        # An activation is read back by its own process, never ended.
+        self.assertEqual(self.manage("continue", identity=SECOND)["status"], "accepted")
+        self.assertEqual((self.record(SECOND)["phase"], self.spawned[-1][0]), ("activating", SECOND))
 
     def test_continue_settles_an_interrupted_activation_from_the_selection(self):
         self.install()
@@ -209,12 +212,85 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(maintenance.dispatch(self.config, self.state, "status", contract=2)["status"], "incompatible")
         relative = maintenance.dispatch(self.config.relative_to(self.root), self.state, "status")
         self.assertEqual((relative["status"], relative["reason"]), ("unknown", "invalid_service_path"))
-        with patch.object(maintenance.sys, "platform", "linux"):
-            self.assertEqual(self.manage("status")["reason"], "unsupported_service_host")
+        for platform, uid in (("darwin", 0), ("win32", 501)):
+            with self.subTest(platform=platform), patch.object(maintenance.sys, "platform", platform), \
+                    patch.object(maintenance.os, "getuid", return_value=uid):
+                self.assertEqual(self.manage("status")["reason"], "unsupported_service_host")
+        with patch.object(maintenance.sys, "platform", "linux"), patch.object(maintenance.os, "getuid", return_value=0):
+            self.assertEqual(maintenance.dispatch(self.config, self.state, "status")["status"], "not_installed")
         self.install()
         other = self.root / "other.toml"
         other.write_text(TEXT)
         self.assertEqual(maintenance.dispatch(other, self.state, "status")["reason"], "service_configuration_mismatch")
+
+
+
+class RetentionTests(ServiceCaseFixture, unittest.TestCase):
+    """An unattended machine updates for years: finished work is pruned, interrupted work can end."""
+
+    def update(self, identity, notices, complete=True):
+        (self.source / "THIRD_PARTY_NOTICES.md").write_text(notices)
+        digest = self.seal()
+        accepted = self.manage("update", identity=identity, source=self.source, sha256=digest,
+                               expected_selection_sha256=self.manage("status")["selection_sha256"])
+        self.assertEqual(accepted["status"], "accepted", accepted)
+        if complete:
+            self.assertEqual(self.complete(identity)["outcome"], {"current": digest})
+        return digest
+
+    def kept(self, name):
+        return {path.name for path in (self.state / "service" / name).iterdir()}
+
+    def test_updates_keep_the_current_and_previous_installations_and_the_entrys_payload(self):
+        first = self.install()["outcome"]["current"]
+        second = self.update(SECOND, "second\n")
+        third = self.update("3" * 32, "third\n")
+        self.assertEqual((self.kept("versions"), self.kept("payloads")), ({second, third}, {first, second, third}))
+        self.assertEqual(self.manage("status")["current"], third)
+        fourth = self.update("4" * 32, "fourth\n")
+        self.assertEqual((self.kept("versions"), self.kept("payloads")), ({third, fourth}, {first, third, fourth}))
+        # The entry written at install still runs from the first payload and executes the selection.
+        result = subprocess.run([sys.executable, "-I", str(self.state / "service/manage.py"), "status"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.stdout.splitlines()[0], "-I")
+
+    def test_only_the_newest_finished_records_and_the_previous_selections_are_kept(self):
+        self.install()
+        self.update(SECOND, "second\n")
+        rejected = self.update("3" * 32, "third\n", complete=False)
+        self.complete("3" * 32, prepare=Fault("installation_failed", "fixture"))
+        with patch.object(maintenance, "KEPT_OPERATIONS", 1):
+            self.update("4" * 32, "fourth\n")
+        # The newest record, and SECOND's, which made the previous selection; the rejected one is gone too.
+        self.assertEqual(self.kept("operations"), {"4" * 32 + ".json", SECOND + ".json"})
+        self.assertNotIn(rejected, self.kept("versions") | self.kept("payloads"))
+
+    def test_continue_ends_an_update_interrupted_before_activation(self):
+        first = self.install()["outcome"]["current"]
+        for number, interrupt in enumerate(("killed while retaining", "killed while preparing", "I/O failure while preparing"), 2):
+            identity = str(number) * 32
+            with self.subTest(interrupt=interrupt):
+                digest = self.update(identity, f"{interrupt}\n", complete=False)
+                if interrupt == "killed while retaining":
+                    maintenance._save(self.state, self.record(identity), "retaining")
+                    (self.state / "service/payloads" / digest).mkdir()  # A partial copy.
+                elif interrupt == "killed while preparing":
+                    with lease(self.state / "service/operation.lock") as lock, \
+                            patch.object(maintenance.os, "execve", side_effect=SystemExit), self.assertRaises(SystemExit):
+                        maintenance.run_operation(self.state, identity, lock.fileno())
+                    maintenance._save(self.state, self.record(identity), "preparing")
+                    (self.state / "service/versions" / digest).mkdir()  # A partial installation.
+                else:
+                    failed = self.complete(identity, prepare=OSError("fixture"))
+                    self.assertEqual((failed["phase"], failed["reason"]), ("preparing", "maintenance_effect_unverified"))
+                with lease(self.state / "service/operation.lock"):
+                    self.assertEqual(self.manage("continue", identity=identity)["status"], "busy")
+                self.assertEqual(self.manage("operation", identity=identity)["status"], "continuation_required")
+                ended = self.manage("continue", identity=identity)
+                self.assertEqual((ended["status"], ended["operation"]["reason"]), ("rejected", "maintenance_interrupted"))
+                self.assertEqual((self.kept("versions"), self.kept("payloads")), ({first}, {first}))
+                self.assertEqual(self.manage("status")["current"], first)
+        self.assertNotEqual(self.update("9" * 32, "after\n"), first)
 
 
 if __name__ == "__main__":

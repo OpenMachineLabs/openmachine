@@ -29,6 +29,7 @@ BOOT = ("import sys; from pathlib import Path; from openmachine.access import se
         f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; restricted.CLIENT_NAME = {CLIENT_NAME!r}; "
         "from openmachine.access.__main__ import main; sys.exit(main(sys.argv[1:]))")
 USER = pwd.getpwuid(os.getuid()).pw_name
+CONNECTION = "100.64.0.2 52144 100.64.0.1 22"
 
 
 class SessionFixture(object):
@@ -70,7 +71,8 @@ class SessionFixture(object):
                 str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
-        value = {"protocol": 2, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, **extra}
+        value = {"protocol": 3, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, "connection": CONNECTION,
+                 **extra}
         if command is not None:
             value["command"] = command
         return value
@@ -100,6 +102,23 @@ class SessionFixture(object):
         child.close()
         parent.sendall(json.dumps(value).encode() + b"\n")
         return process, parent
+
+    def sftp(self, request, batch):
+        """Run OpenSSH's sftp client against one channel: sftp -D runs a stand-in host that relays it as the Go host would."""
+        wrapper = self.root / "host.py"
+        wrapper.write_text(
+            "import json,socket,subprocess,sys\n"
+            f"command = {self.command('session', '--control-fd', 'FD')!r}\n"
+            "parent, child = socket.socketpair()\n"
+            "process = subprocess.Popen([str(child.fileno()) if part == 'FD' else part for part in command], pass_fds=[child.fileno()])\n"
+            "child.close()\n"
+            f"parent.sendall(json.dumps({request!r}).encode() + b'\\n')\n"
+            "reply = json.loads(parent.makefile('rb').readline())\n"
+            "sys.exit(process.wait() if reply.get('status') == 'admitted' else 2)\n")
+        commands = self.root / "batch"
+        commands.write_text(batch)
+        return subprocess.run(["sftp", "-b", str(commands), "-D", f"{sys.executable} {wrapper}"],
+                              capture_output=True, text=True, timeout=60)
 
     def wait_for(self, path, seconds=10):
         deadline = time.monotonic() + seconds

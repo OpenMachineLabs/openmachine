@@ -1,6 +1,6 @@
 name: runtime-payload
 
-# Build a reviewable Apple Silicon runtime payload without publishing a release.
+# Build a reviewable runtime payload per target without publishing a release.
 on:
   workflow_dispatch:
 
@@ -8,9 +8,15 @@ permissions:
   contents: read
 
 jobs:
-  macos-arm64:
+  payload:
     if: github.ref == 'refs/heads/main'
-    runs-on: macos-15
+    strategy:
+      matrix:
+        include:
+          - {target: macos-arm64, runner: macos-15}
+          - {target: linux-x86_64, runner: ubuntu-24.04}
+          - {target: linux-aarch64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       id-token: write
@@ -26,9 +32,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Build exact Core and checked offline payload
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -eu
-          test "$(uname -m)" = "arm64"
           python3 -m venv "$RUNNER_TEMP/builder"
           "$RUNNER_TEMP/builder/bin/python" -m pip install -r requirements.lock
           mkdir -p "$RUNNER_TEMP/wheels" "$PWD/dist"
@@ -40,17 +47,17 @@ jobs:
           "$RUNNER_TEMP/builder/bin/python" scripts/build_runtime_payload.py \
             --wheel "$wheel" --requirements "$PWD/requirements.lock" \
             --commit "$(git rev-parse HEAD)" \
-            --cache "$RUNNER_TEMP/runtime-inputs" \
-            --output "$RUNNER_TEMP/runtime-macos-arm64"
-          tar -C "$RUNNER_TEMP" -czf "$PWD/dist/openmachine-runtime-macos-arm64.tar.gz" runtime-macos-arm64
+            --cache "$RUNNER_TEMP/runtime-inputs" --target "$TARGET" \
+            --output "$RUNNER_TEMP/runtime-$TARGET"
+          tar -C "$RUNNER_TEMP" -czf "$PWD/dist/openmachine-runtime-$TARGET.tar.gz" "runtime-$TARGET"
       - name: Attest unpublished runtime payload
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-path: dist/openmachine-runtime-macos-arm64.tar.gz
+          subject-path: dist/openmachine-runtime-${{ matrix.target }}.tar.gz
       - name: Upload unpublished runtime payload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: openmachine-runtime-macos-arm64
-          path: dist/openmachine-runtime-macos-arm64.tar.gz
+          name: openmachine-runtime-${{ matrix.target }}
+          path: dist/openmachine-runtime-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 7

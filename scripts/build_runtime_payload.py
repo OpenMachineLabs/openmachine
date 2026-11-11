@@ -1,15 +1,13 @@
-"""Assemble the Apple Silicon runtime from pinned inputs and one explicit Core wheel."""
+"""Assemble the runtime for this host's target from pinned inputs and one explicit Core wheel."""
 
 import argparse
 from email.parser import BytesParser
 import hashlib
 import json
 from pathlib import Path
-import platform
 import re
 import shutil
 import subprocess
-import sys
 import tarfile
 import urllib.request
 import zipfile
@@ -49,9 +47,11 @@ def main() -> None:
     parser.add_argument("--commit", required=True, help="Exact source commit used to build the selected wheel")
     parser.add_argument("--output", type=Path, required=True, help="A new payload directory; never overwrite an existing build")
     parser.add_argument("--cache", type=Path, required=True, help="Directory for checksum-verified input archives")
+    parser.add_argument("--target", choices=payload.TARGETS, default=payload.host_target(),
+                        help="The payload's target; the build host must be one (default: this host's)")
     args = parser.parse_args()
-    if sys.platform != "darwin" or platform.machine() != "arm64" or not re.fullmatch(r"[0-9a-f]{40}", args.commit):
-        parser.error("Build on Apple Silicon and select an exact source commit.")
+    if args.target is None or args.target != payload.host_target() or not re.fullmatch(r"[0-9a-f]{40}", args.commit):
+        parser.error("Build on a host of the target and select an exact source commit.")
     wheel, requirements = args.wheel.resolve(strict=True), args.requirements.resolve(strict=True)
     lines = [line.strip() for line in requirements.read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
     if not lines or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*==[A-Za-z0-9][A-Za-z0-9_.+!-]*", line) for line in lines):
@@ -66,7 +66,7 @@ def main() -> None:
         if archive.read("openmachine/service/payload.py") != Path(payload.__file__).read_bytes():
             parser.error("Install the selected Core wheel in the build environment before running this script.")
         version = package["Version"]
-    inputs = json.loads(Path(__file__).with_name("runtime-inputs.json").read_text())
+    inputs = json.loads(Path(__file__).with_name("runtime-inputs.json").read_text())[args.target]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     cache = args.cache.resolve()
@@ -84,7 +84,7 @@ def main() -> None:
     # preparation use the complete local wheelhouse without source builds.
     download_env = {key: value for key, value in env.items() if key != "PIP_NO_INDEX"}
     run([python, "-I", "-B", "-m", "pip", "download", "--index-url", "https://pypi.org/simple",
-         "--only-binary=:all:", "--no-deps", "--platform", "macosx_13_0_arm64",
+         "--only-binary=:all:", "--no-deps", "--platform", inputs["platform"],
          "--implementation", "cp", "--python-version", "3.13", "--abi", "cp313",
          "--dest", str(wheels), "-r", str(output / "requirements.lock")], download_env)
     original_entries = set((output / "python/bin").iterdir())
@@ -107,9 +107,9 @@ def main() -> None:
         "Original input URLs/digests are in manifest.json. Dependency licenses remain in their wheels "
         "and installed distribution metadata. Product publication must fulfill the corresponding-source "
         "and notice obligations for all bundled components; this assembly is not signed product acceptance.\n")
-    manifest = {"format": 1, "target": payload.TARGET,
+    manifest = {"format": 1, "target": payload.TARGETS[args.target],
                 "core": {"version": version, "commit": args.commit, "wheel": "wheels/" + wheel.name},
-                **inputs, "files": payload.inventory(output)}
+                "python": inputs["python"], "files": payload.inventory(output)}
     raw = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
     (output / "manifest.json").write_bytes(raw)
     digest = hashlib.sha256(raw).hexdigest()

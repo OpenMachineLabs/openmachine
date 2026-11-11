@@ -14,8 +14,9 @@ import sys
 import time
 import unittest
 
+from openmachine.access import sessions
 from openmachine.access.macos import seatbelt as macos
-from test.support.access_sessions import CLIENT_NAME, HOME, SessionFixture, members
+from test.support.access_sessions import CLIENT_NAME, CONNECTION, HOME, USER, SessionFixture, members
 
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
@@ -514,24 +515,10 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
     @unittest.skipUnless(Path("/usr/bin/sftp").exists(), "requires the OpenSSH sftp client")
     def test_sftp_runs_the_server_inside_the_sandbox(self):
-        lifetime = self.lifetime()
-        wrapper = self.root / "host.py"
-        # sftp -D runs this stand-in host; it relays the session the way the Go host would.
-        wrapper.write_text(
-            "import json,socket,subprocess,sys\n"
-            f"command = {self.command('session', '--control-fd', 'FD')!r}\n"
-            "parent, child = socket.socketpair()\n"
-            "process = subprocess.Popen([str(child.fileno()) if part == 'FD' else part for part in command], pass_fds=[child.fileno()])\n"
-            "child.close()\n"
-            f"parent.sendall(json.dumps({self.request(lifetime, 'read_only', 'sftp')!r}).encode() + b'\\n')\n"
-            "reply = json.loads(parent.makefile('rb').readline())\n"
-            "sys.exit(process.wait() if reply.get('status') == 'admitted' else 2)\n")
         upload, download = self.root / "upload.txt", self.root / "download.txt"
         upload.write_text("payload\n")
-        batch = self.root / "batch"
-        batch.write_text(f"put {upload} up.txt\nget up.txt {download}\n-put {upload} {self.root}/escape.txt\n")
-        result = subprocess.run(["/usr/bin/sftp", "-b", str(batch), "-D", f"{sys.executable} {wrapper}"],
-                                capture_output=True, text=True, timeout=60)
+        result = self.sftp(self.request(self.lifetime(), "read_only", "sftp"),
+                           f"put {upload} up.txt\nget up.txt {download}\n-put {upload} {self.root}/escape.txt\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(download.read_text(), "payload\n")
         self.assertIn("Permission denied", result.stdout + result.stderr)
@@ -572,9 +559,29 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
         self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={ACCOUNT_HOME}\n"), err)
 
+    def test_full_access_names_the_connection_in_exec_and_shell_sessions(self):
+        reply, code, out, err = self.session(self.lifetime(), "full_access", 'echo "$SSH_CONNECTION|$SSH_CLIENT|$USER"')
+        self.assertEqual((reply["status"], code, out), ("admitted", 0, f"{CONNECTION}|100.64.0.2 52144 22|{USER}\n"), err)
+        reply, process, master, output = self.terminal(self.lifetime(), "echo SHELL-$((40+2)) $SSH_CLIENT; exit\n",
+                                                       "SHELL-42 100.64.0.2 52144 22", policy="full_access")
+        os.close(master)
+        process.wait(timeout=20)
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertIn("SHELL-42 100.64.0.2 52144 22", output)
+
+    @unittest.skipUnless(shutil.which("sftp") and any(os.access(path, os.X_OK) for path in sessions.SFTP_SERVERS),
+                         "requires the OpenSSH sftp client and server")
+    def test_full_access_sftp_reads_and_writes_as_the_user(self):
+        upload, download, written = self.root / "upload.txt", self.root / "download.txt", self.root / "written.txt"
+        upload.write_text("payload\n")
+        result = self.sftp(self.request(self.lifetime(), "full_access", "sftp"),
+                           f"put {upload} {written}\nget {written} {download}\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((written.read_text(), download.read_text()), ("payload\n", "payload\n"))
+
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
-        for extra in ({"protocol": 1}, {"user": "root"}, {"command": None}, {"kind": "sftp"}, {"policy": "admin"},
+        for extra in ({"protocol": 2}, {"connection": "100.64.0.2 52144"}, {"user": "openmachine-nobody"}, {"command": None}, {"kind": "sftp"}, {"policy": "admin"},
                       {"policy": "workspace"}, {"folders": ["/tmp"]},
                       {"environment": {"PATH": "/tmp"}}, {"lifetime": "../escape"}, {"unexpected": True}):
             with self.subTest(extra=extra):

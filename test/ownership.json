@@ -6,6 +6,8 @@
         "openmachine/access/__init__.py",
         "openmachine/access/__main__.py",
         "openmachine/access/git.py",
+        "openmachine/access/linux/__init__.py",
+        "openmachine/access/linux/environment.py",
         "openmachine/access/macos/__init__.py",
         "openmachine/access/macos/seatbelt.py",
         "openmachine/access/macos/sessions.py",
@@ -14,6 +16,7 @@
       ],
       "tests": [
         "test/component/access/test_git.py",
+        "test/component/access/test_linux.py",
         "test/component/access/test_macos.py",
         "test/component/access/test_rules.py",
         "test/component/access/test_sessions.py",

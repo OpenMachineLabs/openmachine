@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import pwd
 import unittest
 from unittest.mock import patch
 
@@ -12,7 +13,8 @@ from openmachine.access.macos import seatbelt as macos
 from openmachine.access.macos import sessions as restricted
 from openmachine.foundation.sanitize import Fault
 
-VALID = {"protocol": 2, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test"}
+VALID = {"protocol": 3, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test",
+         "connection": "100.64.0.2 52144 100.64.0.1 22"}
 FOLDERS = ["/Users/dev/code", "/Users/dev/Documents/notes"]
 BROKER = "https://127.0.0.1:41234"
 ROUTING = {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
@@ -33,14 +35,17 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(self.parse(VALID | {"policy": "workspace", "folders": FOLDERS}).folders, FOLDERS)
 
     def test_inconsistent_or_unsafe_requests_are_rejected_before_any_effect(self):
-        for change in ({"protocol": 1}, {"extra": 1}, {"lifetime": "../x"}, {"lifetime": "x" * 65},
+        for change in ({"protocol": 2}, {"extra": 1}, {"lifetime": "../x"}, {"lifetime": "x" * 65},
                        {"kind": "shell"}, {"kind": "exec", "command": None}, {"command": "a\0b"},
                        {"policy": "admin"}, {"policy": "workspace"}, {"folders": FOLDERS},
                        {"policy": "workspace", "folders": []}, {"policy": "workspace", "folders": FOLDERS * 17},
                        *({"policy": "workspace", "folders": [folder]} for folder in ("code", "/a\0b", "/a\nb", "/" + "x" * 1024)),
                        {"policy": "workspace", "folders": FOLDERS, "scope": {}}, {"machine": "local"},
                        {"environment": {"PATH": "/tmp"}}, {"environment": {"LANG": "x;rm"}},
-                       {"terminal": {"term": "x y"}}, {"kind": "sftp"}):
+                       {"terminal": {"term": "x y"}}, {"kind": "sftp"},
+                       *({"connection": value} for value in (None, "", "100.64.0.2 52144 100.64.0.1", "100.64.0.2 52144 100.64.0.1 22 x",
+                                                             "host 52144 100.64.0.1 22", "100.64.0.2 65536 100.64.0.1 22",
+                                                             "100.64.0.2  52144 100.64.0.1 22", "100.64.0.2 -1 100.64.0.1 22"))):
             with self.subTest(change=change):
                 with self.assertRaises(Fault) as caught:
                     self.parse(VALID | change)
@@ -99,13 +104,44 @@ class RequestTests(unittest.TestCase):
             policies = capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "workspace": "platform_unsupported"})
-        self.assertEqual(capabilities()["protocol"], 2)
+        self.assertEqual(capabilities()["protocol"], 3)
         self.assertEqual(capabilities()["github"], "https")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             self.assertNotIn("github_client", capabilities())
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
                 patch.object(macos, "user_temp", return_value=Path("/private/var/folders/x/T")):
             self.assertEqual(capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
+
+
+class SessionAccountTests(unittest.TestCase):
+    ACCOUNT = pwd.struct_passwd(("dev", "x", 1000, 1000, "", "/home/dev", "/bin/bash"))
+    ROOT = pwd.struct_passwd(("root", "x", 0, 0, "", "/root", "/bin/bash"))
+
+    def account(self, platform, account, user):
+        with patch.object(sessions.sys, "platform", platform), patch.object(sessions.os, "getuid", return_value=account.pw_uid), \
+                patch.object(sessions.pwd, "getpwuid", return_value=account):
+            return sessions._account(user)
+
+    def test_root_runs_sessions_on_linux_only(self):
+        self.assertEqual(self.account("linux", self.ROOT, "root"), self.ROOT)
+        self.assertEqual(self.account("darwin", self.ACCOUNT, "dev"), self.ACCOUNT)
+        for platform, account, user in (("darwin", self.ROOT, "root"), ("linux", self.ACCOUNT, "root"), ("linux", self.ROOT, "dev")):
+            with self.subTest(platform=platform, user=user), self.assertRaises(Fault) as caught:
+                self.account(platform, account, user)
+            self.assertEqual((caught.exception.code, caught.exception.effect), ("user_rejected", "known_no_effect"))
+
+    def test_the_session_names_its_connection_like_sshd(self):
+        request = sessions.parse(json.dumps(VALID | {"connection": "fd7a:115c:a1e0::2 52144 fd7a:115c:a1e0::1 22",
+                                                     "environment": {"LANG": "C.UTF-8"}}).encode())
+        for platform in ("darwin", "linux"):
+            with self.subTest(platform=platform), patch.object(sessions.sys, "platform", platform), \
+                    patch.object(sessions.linux, "system", return_value={"PATH": "/usr/bin", "LANG": "en_US.UTF-8", "USER": "x"}):
+                environment = sessions._environment(request, self.ACCOUNT, Path("/opt/om/om-code"))
+            self.assertEqual({key: environment[key] for key in ("SSH_CONNECTION", "SSH_CLIENT", "USER", "HOME", "LANG")},
+                             {"SSH_CONNECTION": "fd7a:115c:a1e0::2 52144 fd7a:115c:a1e0::1 22",
+                              "SSH_CLIENT": "fd7a:115c:a1e0::2 52144 22", "USER": "dev", "HOME": "/home/dev", "LANG": "C.UTF-8"})
+            self.assertTrue(environment["PATH"].endswith(":/opt/om"))
+        self.assertTrue(environment["PATH"].startswith("/usr/bin:"))  # Linux takes PATH from the system files.
 
 
 class LaunchAcknowledgmentTests(unittest.TestCase):

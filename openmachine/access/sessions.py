@@ -5,6 +5,7 @@ here restarts a command.
 """
 
 import fcntl
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -18,16 +19,18 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from openmachine.access import rules
+from openmachine.access.linux import environment as linux
 from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-PROTOCOL = 2
+PROTOCOL = 3
 MAX_REQUEST = 256 * 1024
 SHARED = Path("/Users/Shared")
 HOME_NAME = "openmachine-code-{uid}"
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
-SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server")
+SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server",
+                "/usr/lib/ssh/sftp-server")
 LifetimeId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 
 
@@ -74,12 +77,14 @@ class GitHub(BaseModel):
 class SessionRequest(BaseModel):
     """One SSH channel after Go verified Cloud authority; Core verifies paths and applies confinement."""
     model_config = ConfigDict(extra="forbid", strict=True)
-    protocol: Literal[2]
+    protocol: Literal[3]
     user: Annotated[str, Field(min_length=1, max_length=255)]
     lifetime: LifetimeId
     policy: Literal["read_only", "workspace", "full_access"]
     folders: rules.Folders | None = None
     kind: Literal["shell", "exec", "sftp"]
+    # SSH_CONNECTION: "<client> <port> <server> <port>".
+    connection: Annotated[str, Field(max_length=128)]
     command: Annotated[str, Field(min_length=1, max_length=65536)] | None = None
     terminal: Terminal | None = None
     environment: Annotated[dict[Annotated[str, Field(pattern=r"^(LANG|LC_[A-Z]{1,32})$")],
@@ -93,6 +98,11 @@ class SessionRequest(BaseModel):
             raise ValueError("workspace requires exactly its folders")
         if (self.kind == "exec") != (self.command is not None) or "\0" in (self.command or ""):
             raise ValueError("exec requires exactly one command")
+        parts = self.connection.split(" ")
+        if (len(parts) != 4 or not all(re.fullmatch(r"[0-9]{1,5}", port) and int(port) <= 65535 for port in parts[1::2])):
+            raise ValueError("connection names two addresses and their ports")
+        for address in parts[0::2]:
+            ipaddress.ip_address(address)
         return self
 
 
@@ -102,7 +112,7 @@ def parse(raw: bytes) -> SessionRequest:
     try:
         return SessionRequest.model_validate_json(raw)
     except ValidationError as error:
-        raise Fault("request_invalid", "Use access protocol 2 with a valid session request.",
+        raise Fault("request_invalid", "Use access protocol 3 with a valid session request.",
                     effect="known_no_effect") from error
 
 
@@ -132,8 +142,8 @@ class Lifetime:
 
 def _account(user: str) -> pwd.struct_passwd:
     account = pwd.getpwuid(os.getuid())
-    if user != account.pw_name or os.getuid() == 0:
-        raise Fault("user_rejected", "Sessions run only as the non-root OS user running Open Machine.",
+    if user != account.pw_name or os.getuid() == 0 and sys.platform == "darwin":
+        raise Fault("user_rejected", "Sessions run only as the OS user running Open Machine, never as root on macOS.",
                     effect="known_no_effect")
     return account
 
@@ -167,11 +177,13 @@ def _system_path() -> str:
 
 
 def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Path | None = None) -> dict:
-    path = _system_path() if sys.platform == "darwin" else DEFAULT_PATH
+    environment = linux.system(account.pw_uid) if sys.platform == "linux" else {"PATH": _system_path()}
     if client is not None:
-        path += ":" + str(client.parent)  # so the session finds om-code by name
-    environment = {"PATH": path, "USER": account.pw_name,
-                   "LOGNAME": account.pw_name, "SHELL": account.pw_shell or "/bin/sh", "HOME": account.pw_dir}
+        environment["PATH"] += ":" + str(client.parent)  # so the session finds om-code by name
+    client_address, client_port, _, server_port = request.connection.split(" ")
+    environment |= {"USER": account.pw_name, "LOGNAME": account.pw_name, "SHELL": account.pw_shell or "/bin/sh",
+                    "HOME": account.pw_dir, "SSH_CONNECTION": request.connection,
+                    "SSH_CLIENT": f"{client_address} {client_port} {server_port}"}
     if request.terminal is not None:
         environment["TERM"] = request.terminal.term
     return environment | request.environment

@@ -1,6 +1,8 @@
-"""The payload producer refuses signing options and unsafe input archives."""
+"""The payload producer builds its host's target and refuses signing options and unsafe input archives."""
 
+from contextlib import redirect_stderr
 import io
+import json
 from pathlib import Path
 import runpy
 import subprocess
@@ -8,6 +10,12 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
+import zipfile
+
+from openmachine.service import payload
+
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"
 
 
 class PayloadBuilderTests(unittest.TestCase):
@@ -26,6 +34,37 @@ class PayloadBuilderTests(unittest.TestCase):
         ], capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized arguments: --sign-identity", result.stderr)
+
+    def build(self, *target):
+        """Run the producer up to its first download; returns the input URL it fetched, or its exit status."""
+        wheel = self.root / "openmachine-0.2.8-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("openmachine-0.2.8.dist-info/METADATA", "Name: openmachine\nVersion: 0.2.8\n")
+            archive.write(payload.__file__, "openmachine/service/payload.py")
+        (self.root / "requirements.lock").write_text("pydantic==2.13.5\n")
+        argv = [str(SCRIPT), "--wheel", str(wheel), "--requirements", str(self.root / "requirements.lock"), "--commit", "a" * 40,
+                "--output", str(self.root / "output"), "--cache", str(self.root / "cache"), *target]
+        with patch.object(sys, "argv", argv), patch("urllib.request.urlopen", side_effect=ConnectionError) as fetch, \
+                redirect_stderr(io.StringIO()):
+            try:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+            except SystemExit as exit:
+                return exit.code
+            except ConnectionError:
+                return fetch.call_args.args[0]
+
+    def test_target_selects_its_inputs_and_only_the_host_builds_it(self):
+        inputs = json.loads(SCRIPT.with_name("runtime-inputs.json").read_text())
+        self.assertEqual(set(inputs), set(payload.TARGETS))
+        host = payload.host_target()
+        self.assertEqual(self.build(), inputs[host]["python"]["url"])
+        (self.root / "output").rmdir()
+        self.assertEqual(self.build("--target", host), inputs[host]["python"]["url"])
+        (self.root / "output").rmdir()
+        for other in set(payload.TARGETS) - {host}:
+            with self.subTest(target=other):
+                self.assertEqual(self.build("--target", other), 2)
+                self.assertFalse((self.root / "output").exists())
 
     def test_producer_rejects_hardlinks_and_archive_path_escape(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))

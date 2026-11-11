@@ -1,12 +1,10 @@
 """Shared disposable fixtures; no test cases or test discovery."""
 
-from contextlib import ExitStack
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
-from unittest.mock import patch
 import zipfile
 
 from openmachine.config import TEXT
@@ -33,17 +31,13 @@ class PayloadCaseFixture(object):
             archive.writestr("openmachine-0.2.8.dist-info/METADATA", "Name: openmachine\nVersion: 0.2.8\n")
         (self.source / "requirements.lock").write_text("example==1.0\n")
         (self.source / "THIRD_PARTY_NOTICES.md").write_text("Fixture notices.\n")
-        self.manifest = {"format": 1, "target": dict(payload.TARGET),
+        self.manifest = {"format": 1, "target": dict(payload.TARGETS[payload.host_target()]),
             "core": {"version": "0.2.8", "commit": "a" * 40, "wheel": self.wheel.relative_to(self.source).as_posix()},
             "python": {"version": "3.13.16", "build": "20261003", "url": "https://example.test/python", "sha256": "b" * 64}}
         self.digest = self.seal()
         self.state = private_directory(self.root / "state")
         self.config = self.root / "config.toml"
         self.config.write_text(TEXT)
-        stack = self.enterContext(ExitStack())
-        stack.enter_context(patch.object(payload.sys, "platform", "darwin"))
-        stack.enter_context(patch.object(payload.platform, "machine", return_value="arm64"))
-        stack.enter_context(patch.object(payload.platform, "mac_ver", return_value=("13.0", (), "")))
 
     def cleanup(self):
         # Only this disposable fixture: retained product directories are read-only.

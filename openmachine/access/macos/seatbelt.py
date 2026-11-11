@@ -34,7 +34,7 @@ SECRET_DIRECTORIES = (".ssh", ".aws", ".azure", ".gnupg", ".kube")
 SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.toml|id_rsa|id_ed25519|[^/]*\.(key|p12|pfx)"
 SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
 SECRET_FILE_REGEX = r"^(/.*)?/(" + SECRET_FILES + r")$"
-KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM")
+KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "SSH_CONNECTION", "SSH_CLIENT")
 # Git files that later run code outside any sandbox, relative to a .git directory: hooks, configuration
 # and commondir redirects of the repository and of every worktree and submodule Git dir nested in it.
 PROTECTED_GIT = r"((modules|worktrees)/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir)"

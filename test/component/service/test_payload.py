@@ -52,19 +52,42 @@ class PayloadTests(PayloadCaseFixture, unittest.TestCase):
         self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, "0" * 64))
         with patch.object(payload, "MANIFEST_LIMIT", 8):
             self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.digest))
-        for target in ({"arch": "x86_64"}, {"minimum_os": "14.0"}):
-            self.manifest["target"] = payload.TARGET | target
+        host = self.manifest["target"]
+        for target in ({"arch": "riscv64"}, {"extra": "1"}, {"os": "windows"}):
+            self.manifest["target"] = host | target
             digest = self.seal()
             self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, digest))
-        self.manifest["target"] = dict(payload.TARGET)
+        self.manifest["target"] = host
         # The payload bundles no Git: a manifest that declares one is not this format.
         self.manifest["git"] = dict(self.manifest["python"])
         self.fault("invalid_runtime_payload", lambda: payload.verify(self.source, self.seal()))
-        del self.manifest["git"]
+
+    def test_each_target_is_accepted_only_on_its_host_at_its_minimum(self):
+        hosts = {"macos-arm64": ("darwin", "arm64"), "linux-x86_64": ("linux", "x86_64"), "linux-aarch64": ("linux", "aarch64")}
+        for host, (system, machine) in hosts.items():
+            for name, target in payload.TARGETS.items():
+                self.manifest["target"] = target
+                digest = self.seal()
+                with self.subTest(host=host, target=name), patch.object(payload.sys, "platform", system), \
+                        patch.object(payload.platform, "machine", return_value=machine), \
+                        patch.object(payload.platform, "mac_ver", return_value=("13.0", (), "")), \
+                        patch.object(payload.platform, "libc_ver", return_value=("glibc", "2.17")):
+                    self.assertEqual(payload.host_target(), host)
+                    if name == host:
+                        self.assertEqual(payload.verify(self.source, digest)["target"], target)
+                    else:
+                        self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
+        self.manifest["target"] = payload.TARGETS["linux-x86_64"]
         digest = self.seal()
-        with patch.object(payload.platform, "machine", return_value="x86_64"):
-            self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
-        with patch.object(payload.platform, "mac_ver", return_value=("12.7", (), "")):
+        for libc in (("glibc", "2.16"), ("", "")):  # Too old, or not glibc (musl reports none).
+            with self.subTest(libc=libc), patch.object(payload.sys, "platform", "linux"), \
+                    patch.object(payload.platform, "machine", return_value="x86_64"), \
+                    patch.object(payload.platform, "libc_ver", return_value=libc):
+                self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
+        self.manifest["target"] = payload.TARGETS["macos-arm64"]
+        digest = self.seal()
+        with patch.object(payload.sys, "platform", "darwin"), patch.object(payload.platform, "machine", return_value="arm64"), \
+                patch.object(payload.platform, "mac_ver", return_value=("12.7", (), "")):
             self.fault("unsupported_payload_host", lambda: payload.verify(self.source, digest))
 
     def test_escaping_links_special_files_and_limits_are_rejected(self):

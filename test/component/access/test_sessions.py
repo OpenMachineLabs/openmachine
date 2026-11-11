@@ -83,7 +83,8 @@ class GitHubClientTests(unittest.TestCase):
         self.client.chmod(0o755)
 
     def check(self, client):
-        request = sessions.parse(json.dumps({"protocol": 2, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
+        request = sessions.parse(json.dumps({"protocol": 3, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
+            "connection": "127.0.0.1 1 127.0.0.1 22",
             "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "https://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
         return sessions._client(request)
