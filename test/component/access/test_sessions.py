@@ -65,6 +65,8 @@ class PersistentHomeTests(unittest.TestCase):
             subprocess.run(["/bin/chmod", "-N", str(self.home / "data")], check=True)
         restricted.persistent_home()
         with tempfile.TemporaryDirectory() as owned, patch.object(sessions, "SHARED", Path(owned)):
+            if os.getuid() == 0:
+                os.chown(owned, 65534, -1)  # Any owner but root is refused, as this user is when not root.
             self.unsafe()
         with patch.object(sessions, "SHARED", STICKY_ROOT / "missing-om-root"):
             self.unsafe()
