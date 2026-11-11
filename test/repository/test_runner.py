@@ -65,10 +65,20 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], [])
+
         self.write("spec/fixture/inputs.json", '{"format": 1}\n')
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], [])
+
+    def test_explicit_empty_layer_is_rejected_and_issue_templates_keep_checks(self):
+        self.write("README.md", "# Changed documentation\n")
+        with self.assertRaisesRegex(ValueError, "no required behavior tests"):
+            runner.make_plan(self.root, self.base, layer="unit")
+        self.write(".github/ISSUE_TEMPLATE/bug.md", "---\nlabels: bug\n---\n")
+        plan = runner.make_plan(self.root, self.base)
+        self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
+        self.assertFalse(plan["runtime_required"])
 
     def test_go_connector_changes_run_repository_checks_only(self):
         self.write("connector/test/proof_test.go", "package test\n")

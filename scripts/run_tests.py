@@ -302,8 +302,9 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
             if path in all_tests:
                 reasons.setdefault(path, set()).add(reason)
 
-    if full or modules or any(not path.endswith(".md") and not path.startswith(("assets/", "spec/", "connector/"))
-                              and path not in {"LICENSE", ".gitignore"} for path in changes):
+    if full or modules or any(path.startswith(".github/") or (
+            not path.endswith(".md") and not path.startswith(("assets/", "spec/", "connector/"))
+            and path not in {"LICENSE", ".gitignore"}) for path in changes):
         add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
     if full:
         full_reasons.append("explicit full verification")
@@ -396,7 +397,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                         and path.endswith(".py") and not path.startswith("test/repository/")
                         for path in changes)
     needs_product = changed_product or changed_tests
-    if (not selected and (modules or full or needs_product)) or (needs_product and not product and layer != "repository"):
+    if (not selected and (modules or layer or full or needs_product)) or (needs_product and not product and layer != "repository"):
         raise ValueError("selection contains no required behavior tests")
     if modules and not product and layer != "repository" and modules != ["repository"]:
         raise ValueError("requested module/layer contains no behavior tests")

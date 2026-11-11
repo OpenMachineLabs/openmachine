@@ -51,7 +51,9 @@ Resolve a missing base or update the candidate's base relationship explicitly.
 
 `--plan` prints the changed paths, owning modules, selected files, layers and
 reasons without installing dependencies or running tests. A documentation-only change runs source/link checks without creating a product
-environment or running test suites. An explicit module or layer with no tests is an error.
+environment or running test suites. Issue templates retain repository tests, and
+validated Skill content retains its owning tests. An explicit module or layer
+with no tests is an error.
 
 `premerge.py` requires a clean committed worktree. It uses the same selector and
 runner as development and CI, checks repository rules before
