@@ -559,6 +559,14 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
         self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={ACCOUNT_HOME}\n"), err)
 
+    def test_a_command_starts_with_default_signal_actions(self):
+        """A POSIX shell sets no trap for a signal ignored when it started, as Python's SIGPIPE and nohup's SIGHUP are."""
+        process, reply = self.start(self.request(self.lifetime(), "full_access", "exec", "/bin/sh -c 'trap : HUP PIPE; trap'"),
+                                    prelude="import signal; signal.signal(signal.SIGHUP, signal.SIG_IGN)\n")
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(reply.get("status"), "admitted", err)
+        self.assertEqual(sum(name in out.decode() for name in ("HUP", "PIPE")), 2, out)
+
     def test_full_access_names_the_connection_in_exec_and_shell_sessions(self):
         reply, code, out, err = self.session(self.lifetime(), "full_access", 'echo "$SSH_CONNECTION|$SSH_CLIENT|$USER"')
         self.assertEqual((reply["status"], code, out), ("admitted", 0, f"{CONNECTION}|100.64.0.2 52144 22|{USER}\n"), err)

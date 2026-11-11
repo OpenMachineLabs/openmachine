@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import signal
 import stat
 import sys
 import termios
@@ -230,6 +231,14 @@ def _within(client: Path, roots: list[Path]) -> bool:
     except OSError as error:
         raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
     return any((item.st_dev, item.st_ino) in identities for item in ancestry)
+
+
+def default_signals() -> None:
+    """Like sshd, a command starts with every signal's default action and none blocked, whatever this launcher
+    inherited, as under nohup, or Python set: it ignores SIGPIPE."""
+    for signum in signal.valid_signals() - {signal.SIGKILL, signal.SIGSTOP}:
+        signal.signal(signum, signal.SIG_DFL)
+    signal.pthread_sigmask(signal.SIG_SETMASK, set())
 
 
 def _admit_full(request: SessionRequest, account, state: Path) -> tuple:

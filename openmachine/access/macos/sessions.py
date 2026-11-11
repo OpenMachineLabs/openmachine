@@ -472,9 +472,7 @@ def _spawn(connection: socket.socket) -> int:
 def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int) -> None:
     try:
         signal.set_wakeup_fd(-1)
-        for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGPIPE, signal.SIGCHLD):
-            signal.signal(signum, signal.SIG_DFL)
-        signal.pthread_sigmask(signal.SIG_SETMASK, set())
+        sessions.default_signals()
         if os.read(gate, 1) != b"\0":
             raise OSError(errno.ECANCELED, "launch withdrawn")
         os.close(gate)
