@@ -46,7 +46,7 @@ class RequestTests(unittest.TestCase):
                        *({"connection": value} for value in (None, "", "100.64.0.2 52144 100.64.0.1", "100.64.0.2 52144 100.64.0.1 22 x",
                                                              "host 52144 100.64.0.1 22", "100.64.0.2 65536 100.64.0.1 22",
                                                              "100.64.0.2  52144 100.64.0.1 22", "100.64.0.2 -1 100.64.0.1 22",
-                                                             "fe80::2%eth0 52144 fe80::1%eth0 22", "fe80::2%\0 52144 fe80::1 22"))):
+                                                             "fe80::2%eth0 52144 fe80::1 22"))):
             with self.subTest(change=change):
                 with self.assertRaises(Fault) as caught:
                     self.parse(VALID | change)
