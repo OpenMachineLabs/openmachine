@@ -15,6 +15,8 @@ from openmachine.service import payload
 
 class PayloadCaseFixture(object):
     def setUp(self):
+        # A payload has no group- or other-writable member, whatever the runner's umask (Ubuntu users have 002).
+        self.addCleanup(os.umask, os.umask(0o022))
         self.temporary = tempfile.TemporaryDirectory(prefix="om-payload-", dir="/tmp")
         self.root = Path(self.temporary.name).resolve()
         self.addCleanup(self.cleanup)
