@@ -52,7 +52,7 @@ class InstallTests(PayloadCaseFixture, unittest.TestCase):
             with self.subTest(failing=failing, version=version), self.run_fake(version, failing):
                 self.fault(code, lambda: install.prepare(self.state, self.retained, self.digest))
                 self.assertFalse((self.destination / "installation.json").exists())
-                # A failed candidate stays for diagnosis and is never adopted.
+                # A failed candidate is never adopted; retention removes it when its operation ends.
                 self.fault("service_state_invalid", lambda: install.prepare(self.state, self.retained, self.digest))
             shutil.rmtree(self.destination)
 

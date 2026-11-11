@@ -186,10 +186,11 @@ class ProfileTests(unittest.TestCase):
 
     def test_environment_holds_no_inherited_secrets(self):
         base = {"PATH": "/usr/bin", "LANG": "C", "LC_ALL": "C", "TERM": "xterm", "HOME": "/Users/real",
+                "SSH_CONNECTION": "100.64.0.2 52144 100.64.0.1 22", "SSH_CLIENT": "100.64.0.2 52144 22",
                 "SSH_AUTH_SOCK": "/tmp/agent", "GIT_DIR": "/elsewhere", "GITHUB_TOKEN": "secret", "OPENMACHINE_STATE": "x"}
         private = self.root / "private"
         environment = seatbelt.environment(base, private)
-        self.assertEqual({key for key in environment if key in base}, {"PATH", "LANG", "LC_ALL", "TERM", "HOME"})
+        self.assertEqual({key for key in environment if key in base}, {"PATH", "LANG", "LC_ALL", "TERM", "HOME", "SSH_CONNECTION", "SSH_CLIENT"})
         self.assertEqual((environment["HOME"], environment["TMPDIR"]), (str(private / "home"), str(private / "tmp") + "/"))
 
 

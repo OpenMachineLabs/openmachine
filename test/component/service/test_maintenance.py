@@ -265,6 +265,28 @@ class RetentionTests(ServiceCaseFixture, unittest.TestCase):
         self.assertEqual(self.kept("operations"), {"4" * 32 + ".json", SECOND + ".json"})
         self.assertNotIn(rejected, self.kept("versions") | self.kept("payloads"))
 
+    def test_rejected_updates_are_pruned_and_never_fill_the_store(self):
+        first = self.install()["outcome"]["current"]
+        for number in range(2, maintenance.MAX_OPERATIONS + 1):
+            self.update(f"{number:032x}", "failing\n", complete=False)
+            failed = self.complete(f"{number:032x}", prepare=Fault("installation_failed", "fixture"))
+            self.assertEqual(failed["phase"], "rejected")
+        self.assertEqual(self.manage("status")["current"], first)
+        latest = self.update("f" * 32, "after\n")
+        # The install's record made the previous selection; what the rejected updates retained went with them.
+        self.assertEqual(len(self.kept("operations")), maintenance.KEPT_OPERATIONS + 1)
+        self.assertEqual((self.kept("versions"), self.kept("payloads")), ({first, latest}, {first, latest}))
+
+    def test_the_previous_selection_outlives_more_ended_updates_than_kept_records(self):
+        first = self.install()["outcome"]["current"]
+        second = self.update(SECOND, "second\n")
+        for number in range(3, maintenance.KEPT_OPERATIONS + 3):
+            self.update(f"{number:032x}", "interrupted\n", complete=False)
+            maintenance._save(self.state, self.record(f"{number:032x}"), "retaining")
+            self.assertEqual(self.manage("continue", identity=f"{number:032x}")["status"], "rejected")
+        third = self.update("f" * 32, "third\n")
+        self.assertEqual((self.kept("versions"), self.kept("payloads")), ({second, third}, {first, second, third}))
+
     def test_continue_ends_an_update_interrupted_before_activation(self):
         first = self.install()["outcome"]["current"]
         for number, interrupt in enumerate(("killed while retaining", "killed while preparing", "I/O failure while preparing"), 2):

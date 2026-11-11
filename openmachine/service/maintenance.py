@@ -262,7 +262,8 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
         phase = ("recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
                  or error.code == "service_output_limit" else "rejected")
         _save(state, record, phase, reason=error.code)
-        return
+        if phase != "rejected":
+            return
     except OSError:
         # Filesystem acknowledgement loss can follow a completed atomic effect; continue settles an activation
         # and ends an operation interrupted before it.
@@ -273,17 +274,21 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
 
 
 def _retain(state: Path) -> None:
-    """Keep the newest finished records and the one that made the previous selection, the installations of
-    the current and previous selections, their payloads and the management entry's; remove the rest."""
+    """After an operation ended: keep the newest finished records and the two that made the current selection
+    and the one before it, the installations and payloads of those two selections and the management entry's
+    payload; remove the rest."""
     root = state / "service"
     records = sorted((_read(state, path.stem) for path in (root / "operations").iterdir()),
                      key=lambda record: record["updated_at_ms"], reverse=True)
     selection = service_state._record(state) if os.path.lexists(root / "service.json") else None
     current = selection and selection["current"]
-    previous = next((record for record in records
-                     if record["phase"] == "completed" and record["outcome"]["current"] != current), None)
+    completed = [record for record in records if record["phase"] == "completed"]
+    # The record that made the current selection stays too: once the next selection is made, it is the
+    # only evidence of the previous one.
+    selecting = next((record for record in completed if record["outcome"]["current"] == current), None)
+    previous = next((record for record in completed if record["outcome"]["current"] != current), None)
     for record in [record for record in records if record["phase"] in TERMINAL][KEPT_OPERATIONS:]:
-        if record is not previous:
+        if record is not selecting and record is not previous:
             _operation_path(state, record["operation_id"]).unlink()
     installations = {current, previous and previous["outcome"]["current"]}
     payloads = installations | {selection and selection["management"]["identity"]}
