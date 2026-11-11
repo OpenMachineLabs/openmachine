@@ -164,5 +164,7 @@ the original-operation records are compatibility contracts.
 
 Disposable state and short owned processes are not native acceptance. Restricted
 session tests need macOS Seatbelt; on other hosts they are skipped, not passed.
+Full Access sessions and management run on macOS and Linux; root cases run only
+where the runner is root, such as a disposable Linux container.
 Run installation checks only on authorized disposable resources, never against
 an account's real Core state.

@@ -16,7 +16,29 @@ from openmachine.foundation.state import private_directory
 MANIFEST_LIMIT = 4 * 1024 * 1024
 FILE_LIMIT = 20000
 BYTE_LIMIT = 2 * 1024 * 1024 * 1024
-TARGET = {"os": "macos", "arch": "arm64", "minimum_os": "13.0"}
+TARGETS = {
+    "macos-arm64": {"os": "macos", "arch": "arm64", "minimum_os": "13.0"},
+    "linux-x86_64": {"os": "linux", "arch": "x86_64", "libc": "glibc", "minimum_libc": "2.17"},
+    "linux-aarch64": {"os": "linux", "arch": "aarch64", "libc": "glibc", "minimum_libc": "2.17"},
+}
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+def host_target() -> str | None:
+    """The name of the target this host runs, whatever its version."""
+    system = {"darwin": "macos", "linux": "linux"}.get(sys.platform)
+    return next((name for name, target in TARGETS.items()
+                 if (target["os"], target["arch"]) == (system, platform.machine())), None)
+
+
+def _meets(target: dict) -> bool:
+    if target["os"] == "macos":
+        return _version(platform.mac_ver()[0]) >= _version(target["minimum_os"])
+    libc, version = platform.libc_ver()
+    return libc == target["libc"] and _version(version) >= _version(target["minimum_libc"])
 
 
 def _relative(value: str) -> PurePosixPath:
@@ -96,11 +118,10 @@ def verify(root: Path, expected_sha256: str) -> dict:
         value = json.loads(raw, object_pairs_hook=_pairs)
         if (set(value) != {"format", "target", "core", "python", "files"}
                 or type(value["format"]) is not int or value["format"] != 1
-                or value["target"] != TARGET):
+                or value["target"] not in TARGETS.values()):
             raise ValueError("unsupported manifest")
-        if (sys.platform != "darwin" or platform.machine() != "arm64"
-                or int(platform.mac_ver()[0].split(".")[0]) < 13):
-            raise Fault("unsupported_payload_host", "This runtime payload requires Apple Silicon and macOS 13 or newer.")
+        if value["target"] != TARGETS.get(host_target()) or not _meets(value["target"]):
+            raise Fault("unsupported_payload_host", "This runtime payload is for another system, or a newer version of it.")
         core = value["core"]
         if (set(core) != {"version", "commit", "wheel"}
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!-]{0,99}", core["version"])

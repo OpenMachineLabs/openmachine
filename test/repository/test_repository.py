@@ -246,14 +246,18 @@ class RepositoryChecks(unittest.TestCase):
         for name, expected_count in expected_jobs.items():
             with self.subTest(workflow=name):
                 workflow = workflows[name]
-                runner = "macos-15" if name == "runtime-payload.yml" else "ubuntu-24.04"
-                self.assertEqual(workflow.count("    runs-on: " + runner), expected_count)
                 self.assertNotIn("CORE_CI_RUNNER", workflow)
-                self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
                 if name == "runtime-payload.yml":
+                    # One job per target, each on a hosted runner of that target, named literally in the matrix.
+                    self.assertEqual(workflow.count("    runs-on: " + chr(36) + "{{ matrix.runner }}"), expected_count)
+                    for target, runner in (("macos-arm64", "macos-15"), ("linux-x86_64", "ubuntu-24.04"),
+                                           ("linux-aarch64", "ubuntu-24.04-arm")):
+                        self.assertIn(f"- {{target: {target}, runner: {runner}}}", workflow)
                     self.assertIn("workflow_dispatch:", workflow)
-                    self.assertIn("test \"$(uname -m)\" = \"arm64\"", workflow)
                     self.assertNotIn("contents: write", workflow)  # It builds; it cannot publish a release.
+                else:
+                    self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), expected_count)
+                    self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
 
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()

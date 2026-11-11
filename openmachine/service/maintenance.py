@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -18,10 +19,13 @@ from . import install, payload, transition
 from . import state as service_state
 
 MAX_OPERATIONS = 128
+KEPT_OPERATIONS = 32
 UNPREPARED = {"accepted", "retaining", "retained", "preparing"}
 PHASES = UNPREPARED | {"prepared", "activating", "completed", "rejected", "recovery_required"}
 TERMINAL = {"completed", "rejected"}
 CONTINUABLE = {"accepted", "retained", "prepared", "activating"}
+# Stopped before activation began: nothing was selected, so continue ends the operation.
+INTERRUPTED = {"retaining", "preparing"}
 CAPABILITIES = ["status", "configure", "configure:verify_existing", "install", "update", "update:selection_consent",
                 "operation", "continue"]
 
@@ -131,7 +135,7 @@ def read_operation(config_path: Path, state: Path, identity: str) -> dict:
         selection, reason = None, "service_selection_unknown"
     phase = record["phase"]
     status = phase if phase in TERMINAL else "busy" if busy else (
-        "continuation_required" if phase in CONTINUABLE and busy is False else "recovery_required")
+        "continuation_required" if phase in CONTINUABLE | INTERRUPTED and busy is False else "recovery_required")
     return {"status": status, "operation": record, "owner_busy": busy,
             "selection_sha256": selection, "reason": reason, "observed_at_ms": time.time_ns() // 1000000}
 
@@ -208,6 +212,10 @@ def continue_operation(config_path: Path, state: Path, identity: str) -> dict:
         record = _read(state, identity)
         if record["request"]["config"] != str(config_path):
             raise Fault("service_configuration_mismatch", "Use the original operation's configuration.")
+        if record["phase"] in INTERRUPTED:
+            record = _save(state, record, "rejected", reason="maintenance_interrupted")
+            _retain(state)
+            return {"status": "rejected", "operation": record}
         if record["phase"] not in CONTINUABLE:
             raise Fault("maintenance_not_continuable", "Preparation or activation may have occurred; read original state without replay.")
         python = sys.executable
@@ -242,24 +250,49 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
             record = _save(state, record, "prepared", prepared=install.prepare(state, retained, request["payload_sha256"]))
         target = record["prepared"]["identity"]
         # An interrupted activation is settled from the selection it would have written, never replayed blindly.
-        if record["phase"] == "activating" and _activated(state, target):
-            _save(state, record, "completed", outcome={"current": target})
-            return
-        _unchanged(state, request)
-        record = _save(state, record, "activating")
-        if request["action"] == "install":
-            transition.register(Path(request["config"]), state, target)
-        else:
-            transition.select(state, target)
+        if record["phase"] != "activating" or not _activated(state, target):
+            _unchanged(state, request)
+            record = _save(state, record, "activating")
+            if request["action"] == "install":
+                transition.register(Path(request["config"]), state, target)
+            else:
+                transition.select(state, target)
         _save(state, record, "completed", outcome={"current": target})
     except Fault as error:
         phase = ("recovery_required" if record["phase"] == "activating" or error.code.endswith("unverified")
                  or error.code == "service_output_limit" else "rejected")
         _save(state, record, phase, reason=error.code)
+        return
     except OSError:
-        # Filesystem acknowledgement loss can follow a completed atomic effect; continue settles an activation.
-        _save(state, record, "activating" if record["phase"] == "activating" else "recovery_required",
+        # Filesystem acknowledgement loss can follow a completed atomic effect; continue settles an activation
+        # and ends an operation interrupted before it.
+        _save(state, record, record["phase"] if record["phase"] in INTERRUPTED | {"activating"} else "recovery_required",
               reason="maintenance_effect_unverified")
+        return
+    _retain(state)
+
+
+def _retain(state: Path) -> None:
+    """Keep the newest finished records and the one that made the previous selection, the installations of
+    the current and previous selections, their payloads and the management entry's; remove the rest."""
+    root = state / "service"
+    records = sorted((_read(state, path.stem) for path in (root / "operations").iterdir()),
+                     key=lambda record: record["updated_at_ms"], reverse=True)
+    selection = service_state._record(state) if os.path.lexists(root / "service.json") else None
+    current = selection and selection["current"]
+    previous = next((record for record in records
+                     if record["phase"] == "completed" and record["outcome"]["current"] != current), None)
+    for record in [record for record in records if record["phase"] in TERMINAL][KEPT_OPERATIONS:]:
+        if record is not previous:
+            _operation_path(state, record["operation_id"]).unlink()
+    installations = {current, previous and previous["outcome"]["current"]}
+    payloads = installations | {selection and selection["management"]["identity"]}
+    for name, kept in (("versions", installations), ("payloads", payloads)):
+        for path in (root / name).iterdir() if (root / name).is_dir() else ():
+            if path.name not in kept:
+                for directory, _, _ in os.walk(path):
+                    os.chmod(directory, 0o700)  # Retained payloads are read-only.
+                shutil.rmtree(path)
 
 
 def observe(config_path: Path, state: Path) -> dict:
@@ -289,7 +322,7 @@ def dispatch(config_path: Path, state: Path, action: str, *, contract: int = 1, 
         if not config_path.is_absolute() or not state.is_absolute():
             raise Fault("invalid_service_path", "Management requires explicit absolute configuration and state paths.")
         config_path, state = config_path.resolve(), state.resolve()
-        if sys.platform != "darwin" or os.getuid() == 0:
+        if sys.platform != "linux" and (sys.platform != "darwin" or os.getuid() == 0):
             raise Fault("unsupported_service_host", "Management requires the owning logged-in macOS user.")
         if action == "status":
             result = observe(config_path, state)

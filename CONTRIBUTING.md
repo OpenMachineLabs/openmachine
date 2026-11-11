@@ -94,8 +94,8 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 | Owner | Responsibility |
 | --- | --- |
-| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`). |
-| `service/` | Management: payload verification and retention, installation, the selection and original operations. |
+| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Linux session environment (`linux/environment.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`). |
+| `service/` | Management on macOS and Linux: payload targets and verification, installation, the selection, original operations and their retention. |
 | `cli.py` | The `manage` command. |
 | `config.py` | The machines-only configuration. |
 | `foundation/` | Private state, locks and safe errors; no domain ownership. |
@@ -109,7 +109,7 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 The configuration holds one machine, `[machines.local]` with `transport = "local"`.
 Desktop installs and updates Core from a verified offline runtime payload that
-`scripts/build_runtime_payload.py` assembles. The README artwork in `assets/` is
+`scripts/build_runtime_payload.py` assembles for its host's target (`--target`). The README artwork in `assets/` is
 the banner PNG and self-contained SVGs animated with CSS, with no scripts.
 
 Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`
