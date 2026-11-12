@@ -38,7 +38,7 @@ class RequestTests(unittest.TestCase):
 
     def test_inconsistent_or_unsafe_requests_are_rejected_before_any_effect(self):
         for change in ({"protocol": 3}, {"extra": 1},
-                       *({"home": value} for value in ("a" * 31, "A" * 32, "a" * 32 + "\n")), {"lifetime": "../x"}, {"lifetime": "x" * 65},
+                       *({"home": value} for value in ("a" * 31, "A" * 32, "g" * 32, "a" * 32 + "\n")), {"lifetime": "../x"}, {"lifetime": "x" * 65},
                        {"kind": "shell"}, {"kind": "exec", "command": None}, {"command": "a\0b"},
                        {"policy": "admin"}, {"policy": "workspace"}, {"folders": FOLDERS},
                        {"policy": "workspace", "folders": []}, {"policy": "workspace", "folders": FOLDERS * 17},
