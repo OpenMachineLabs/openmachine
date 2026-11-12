@@ -11,6 +11,7 @@ from typing import Annotated
 from pydantic import Field
 
 from openmachine.access import git
+from openmachine.access.linux import sandbox
 from openmachine.access.macos import seatbelt
 from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
 from openmachine.foundation.sanitize import Fault
@@ -24,8 +25,9 @@ class FolderFault(Fault):
     """A folder the rule refuses, by its index in the request."""
 
     def __init__(self, code: str, index: int, folder: str):
-        super().__init__(code, f"The Workspace folder {folder} cannot be used ({code}); change it in the "
-                         "Open Machine app on this Mac.", effect="known_no_effect")
+        where = "the Console" if sys.platform == "linux" else "the Open Machine app on this Mac"
+        super().__init__(code, f"The Workspace folder {folder} cannot be used ({code}); change it in {where}.",
+                         effect="known_no_effect")
         self.index = index
 
 
@@ -49,8 +51,10 @@ class Scope:
                 and observed["common_dir"] == common and observed["git_dir"] != common)
 
     def grants(self) -> list[Path]:
-        """Each folder, and each registered worktree of a repository that is a folder."""
+        """Each folder, and each registered worktree of a repository that is a folder. On Linux, where a
+        worktree is granted by its path alone, one that the folder rule refuses is not."""
         found = list(self.folders)
+        areas = _areas() if sys.platform == "linux" else None
         for folder in self.folders:
             observed = git.context(folder)
             if (observed["git_status"] != "observed" or Path(observed["worktree"]) != folder
@@ -59,7 +63,8 @@ class Scope:
             for item in git.registered_worktrees(folder):
                 path = Path(item["worktree"])
                 if (item["prunable"] or item["bare"] or not path.is_dir() or self._controlled(path)
-                        or self._covered(path) or not self._reciprocal(path, observed["common_dir"])):
+                        or self._covered(path) or not self._reciprocal(path, observed["common_dir"])
+                        or areas and _refusal(path, *areas, self.control)):
                     continue
                 found.append(path)
         return found
@@ -87,17 +92,41 @@ def _inside(path: Path, other: Path) -> bool:
     return path == other or path.is_relative_to(other)
 
 
+def _areas() -> tuple[Path, list[Path]]:
+    """The account home, and everything the sandbox denies before a folder's grant, which would re-open it:
+    the denied areas, devices and Core's runtime trees, and on Linux the system directories."""
+    home = account_home()
+    if sys.platform == "linux":
+        return home, [*sandbox.read_denials(home), *sandbox.system_directories()]
+    return home, [*seatbelt.read_denials(home)[0], Path("/dev"), seatbelt.user_temp() / "omc"]
+
+
+def _refusal(path: Path, home: Path, denied: list[Path], control: tuple[Path, ...]) -> str | None:
+    """Why the rule refuses a kernel path, if it does."""
+    def touches(items) -> bool:
+        return any(_inside(path, item) or _inside(item, path) for item in items)
+
+    if any(char in '"\\' or ord(char) < 32 or ord(char) == 127 for char in str(path)):
+        return "folder_unsupported"
+    if _inside(home, path):
+        return "folder_too_broad"
+    if sys.platform != "linux":
+        return "folder_protected" if touches(denied) else "folder_conflict" if touches(control) else None
+    # A hidden entry directly under the home is where programs that run outside the sandbox keep what
+    # they execute; Core's runtime trees and persistent home lie in one.
+    hidden = path.is_relative_to(home) and path.relative_to(home).parts[0].startswith(".")
+    return "folder_conflict" if touches(control) else "folder_protected" if hidden or touches(denied) else None
+
+
 def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> list[Path]:
     """Each folder's kernel path, in order, or a FolderFault for the first folder the rule refuses.
 
     The folders command reads one entry of each folder, so that a privacy denial shows while the owner
-    is at the Mac. Admission reads none, so that no privacy prompt holds a launch, and refuses a folder
-    whose kernel path is no longer the stored one.
+    is at the Mac, and on Linux searches it for repositories, as an instance does when it starts. Admission
+    reads none, so that no privacy prompt holds a launch, and refuses a folder whose kernel path is no
+    longer the stored one.
     """
-    home = account_home()
-    # Everything the profile denies before a folder's allow, which would re-open it: the denied areas,
-    # devices and Core's runtime trees.
-    denied = [*seatbelt.read_denials(home)[0], Path("/dev"), seatbelt.user_temp() / "omc"]
+    home, denied = _areas()
     found = []
     for index, text in enumerate(paths):
         try:
@@ -105,7 +134,8 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
             try:
                 # The open descriptor's path: links, /tmp and /System/Volumes/Data spellings resolved, and
                 # each component's on-disk name.
-                path = Path(os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0")))
+                path = Path(os.readlink(f"/proc/self/fd/{fd}") if sys.platform == "linux" else
+                            os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0")))
                 if not admission:
                     with os.scandir(fd) as entries:
                         next(entries, None)
@@ -117,14 +147,14 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
             raise FolderFault("folder_not_directory", index, text) from None
         except OSError:
             raise FolderFault("folder_access_denied", index, text) from None
-        code = ("folder_changed" if admission and str(path) != text
-                else "folder_unsupported" if any(char in '"\\' or ord(char) < 32 or ord(char) == 127 for char in str(path))
-                else "folder_too_broad" if _inside(home, path)
-                else "folder_protected" if any(_inside(path, item) or _inside(item, path) for item in denied)
-                else "folder_conflict" if any(_inside(path, item) or _inside(item, path) for item in control)
-                else None)
+        code = "folder_changed" if admission and str(path) != text else _refusal(path, home, denied, control)
         if code:
             raise FolderFault(code, index, text)
+        if sys.platform == "linux" and not admission:
+            try:
+                sandbox.git_entries(path)
+            except sandbox.TooLarge:
+                raise FolderFault("folder_too_large", index, text) from None
         found.append(path)
     for index, path in enumerate(found):
         # A duplicate refuses the later one; a folder inside another refuses the inner one.

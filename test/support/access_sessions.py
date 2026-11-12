@@ -34,8 +34,12 @@ CONNECTION = "100.64.0.2 52144 100.64.0.1 22"
 
 
 class SessionFixture(object):
+    BASE = "/tmp"  # Where each test's files live.
+    prelude = ""  # Runs first in every launcher of this test.
+    python = sys.executable  # Runs every launcher of this test.
+
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="om-access-", dir="/tmp")
+        temporary = tempfile.TemporaryDirectory(prefix="om-access-", dir=self.BASE)
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.state = self.root / "state"
@@ -68,7 +72,7 @@ class SessionFixture(object):
 
     def command(self, *args, prelude=""):
         """prelude runs first in the launcher process, for fault injection."""
-        return [sys.executable, "-I", "-c", prelude + BOOT, "--config", str(self.config), "--state-dir",
+        return [self.python, "-I", "-c", self.prelude + prelude + BOOT, "--config", str(self.config), "--state-dir",
                 str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
@@ -177,7 +181,7 @@ class SessionFixture(object):
 def members(marker):
     """PIDs of every process in the lifetime instance with this marker."""
     listed = subprocess.run(["/bin/ps", "-A", "-o", "pid="], capture_output=True, text=True, check=True).stdout
-    return [pid for pid in map(int, listed.split()) if pid > 1 and macos.member(pid, marker) is True]
+    return [pid for pid in map(int, listed.split()) if pid > 1 and restricted.backend.member(pid, marker) is True]
 
 
 def end(marker, seconds=10):

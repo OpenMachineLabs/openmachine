@@ -15,17 +15,20 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import termios
 from typing import NamedTuple
 import uuid
 
-from openmachine.access import sessions
+from openmachine.access import rules, sessions
+from openmachine.access.linux import sandbox
 from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory
 
-backend = seatbelt  # The platform's start(pid), member(pid, marker) and peer(connection).
-CLIENT_NAME = "client"  # Core's copy of the host's om-code lives in user_temp()/omc/CLIENT_NAME
+# The platform's start(pid), member(pid, marker) and peer(connection).
+backend = sandbox if sys.platform == "linux" else seatbelt
+CLIENT_NAME = "client"  # Core's copy of the host's om-code lives in this directory of the runtime tree.
 MAX_FRAME = 512 * 1024
 SPAWN_SECONDS = 5
 # Each launcher step up to the spawner's acknowledgment; longer than one stalled launch the spawner waits out.
@@ -100,7 +103,8 @@ def _grant(request: sessions.SessionRequest) -> str:
 def _stable_client() -> Path:
     """Core's copy of the host's om-code, the one client every restricted instance may run. Restricted
     work cannot write here, and an update replaces the file in place, so it needs no new instance."""
-    return seatbelt.user_temp() / "omc" / CLIENT_NAME / "om-code"
+    runtime = sandbox.runtime(rules.account_home()) if sys.platform == "linux" else seatbelt.user_temp() / "omc"
+    return runtime / CLIENT_NAME / "om-code"
 
 
 def _install(client: Path) -> Path:
@@ -202,9 +206,9 @@ def _relay(replies) -> None:
     os._exit(os.waitstatus_to_exitcode(status) if os.WIFEXITED(status) else 255)
 
 
-def _frame(stream) -> dict:
+def _frame(stream, first: bytes = b"") -> dict:
     try:
-        value = json.loads(stream.readline(MAX_FRAME) or b"{}")
+        value = json.loads(first + stream.readline(MAX_FRAME) or b"{}")
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
@@ -275,8 +279,12 @@ def _confirm_spawner(reported: bytes, marker: str) -> Birth:
                 effect="known_no_effect")
 
 
-def _serve(listener: socket.socket) -> None:
-    """The in-sandbox spawner: start each session's command in this instance and report its exit."""
+def _serve(listener: socket.socket, vouch: bool = False) -> None:
+    """The in-sandbox spawner: start each session's command in this instance and report its exit.
+
+    Where a PID inside the instance means nothing outside it, each command vouches for itself: before it
+    executes, it sends one byte on its launcher's connection, to which the kernel attaches its PID as the
+    launcher sees it, and it runs only once the launcher answers."""
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGPIPE):
         signal.signal(signum, signal.SIG_IGN)
     wake_read, wake_write = os.pipe()
@@ -293,7 +301,7 @@ def _serve(listener: socket.socket) -> None:
                 if key.fileobj is listener:
                     connection, _ = listener.accept()
                     try:
-                        pid = _spawn(connection)
+                        pid = _spawn(connection, vouch)
                         children[pid] = connection
                         selector.register(connection, selectors.EVENT_READ)
                     except (OSError, ValueError, KeyError, TypeError):
@@ -329,7 +337,7 @@ def _serve(listener: socket.socket) -> None:
                     connection.close()
 
 
-def _spawn(connection: socket.socket) -> int:
+def _spawn(connection: socket.socket, vouch: bool = False) -> int:
     connection.settimeout(SPAWN_SECONDS)
     header, fds, _, _ = socket.recv_fds(connection, 4, 3)
     try:
@@ -355,7 +363,7 @@ def _spawn(connection: socket.socket) -> int:
         pid = os.fork()
         if pid == 0:
             os.close(gate_write)
-            _exec(program, argv, environment, cwd, tty, fds, failure_write, gate_read)
+            _exec(program, argv, environment, cwd, tty, fds, failure_write, gate_read, connection if vouch else None)
         os.close(failure_write)
         os.close(gate_read)
     finally:
@@ -383,13 +391,17 @@ def _spawn(connection: socket.socket) -> int:
     return pid
 
 
-def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int) -> None:
+def _exec(program, argv, environment, cwd, tty, fds, failure: int, gate: int, vouch: socket.socket | None) -> None:
     try:
         signal.set_wakeup_fd(-1)
         sessions.default_signals()
         if os.read(gate, 1) != b"\0":
             raise OSError(errno.ECANCELED, "launch withdrawn")
         os.close(gate)
+        if vouch is not None:
+            vouch.sendall(b"\0")
+            if vouch.recv(1) != b"\0":
+                raise OSError(errno.ECANCELED, "launch withdrawn")
         os.setsid()
         for target, fd in enumerate(fds):
             os.dup2(fd, target)

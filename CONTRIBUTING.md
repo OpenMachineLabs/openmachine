@@ -23,8 +23,8 @@ are welcome in any language. Prefer English for repository-authored prose; Unico
 
 ## Set up a development checkout
 
-You need Python 3.12+ and Git. Restricted sessions need macOS Seatbelt; their
-tests are skipped elsewhere. Windows is not supported.
+You need Python 3.12+ and Git. Restricted sessions need macOS Seatbelt or, on
+Linux, a bubblewrap that can build the sandbox; their tests are skipped elsewhere. Windows is not supported.
 
 For a fork-based contribution:
 
@@ -94,7 +94,7 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 | Owner | Responsibility |
 | --- | --- |
-| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Linux session environment (`linux/environment.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`). |
+| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Linux session environment (`linux/environment.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); what the restricted backends share, the spawner with its launch frames, relay and exit report (`restricted.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`); the Linux bubblewrap sandbox (`linux/sandbox.py`) and restricted sessions (`linux/sessions.py`). |
 | `service/` | Management on macOS and Linux: payload targets and verification, installation, the selection, original operations and their retention. |
 | `cli.py` | The `manage` command. |
 | `config.py` | The machines-only configuration. |
@@ -109,7 +109,8 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 The configuration holds one machine, `[machines.local]` with `transport = "local"`.
 Desktop installs and updates Core from a verified offline runtime payload that
-`scripts/build_runtime_payload.py` assembles for its host's target (`--target`). The README artwork in `assets/` is
+`scripts/build_runtime_payload.py` assembles for its host's target (`--target`); a Linux
+payload carries a static `bwrap`, built there with meson, ninja, pkg-config and the static libcap. The README artwork in `assets/` is
 the banner PNG and self-contained SVGs animated with CSS, with no scripts.
 
 Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`

@@ -3,12 +3,14 @@
 import json
 from pathlib import Path
 import pwd
+import sys
 import unittest
 from unittest.mock import patch
 
 import openmachine
-from openmachine.access import restricted, sessions
+from openmachine.access import restricted, rules, sessions
 from openmachine.access.__main__ import capabilities
+from openmachine.access.linux import sandbox
 from openmachine.access.macos import seatbelt as macos
 from openmachine.foundation.sanitize import Fault
 
@@ -100,6 +102,7 @@ class RequestTests(unittest.TestCase):
         self.assertRegex(version, r"^[0-9A-Za-z.+-]{1,32}$")
 
     def test_restricted_policies_follow_the_lifetime_backend(self):
+        self.enterContext(patch.object(sys, "platform", "darwin"))
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             policies = capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
@@ -111,6 +114,19 @@ class RequestTests(unittest.TestCase):
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
                 patch.object(macos, "user_temp", return_value=Path("/private/var/folders/x/T")):
             self.assertEqual(capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
+
+    def test_on_linux_restricted_policies_follow_the_bubblewrap_probe(self):
+        self.enterContext(patch.object(sys, "platform", "linux"))
+        self.enterContext(patch.object(rules, "account_home", return_value=Path("/home/dev")))
+        with patch.object(sandbox, "bubblewrap", return_value=None):
+            value = capabilities()
+        self.assertEqual(value["policies"], {"full_access": "available", "read_only": "sandbox_unavailable",
+                                             "workspace": "sandbox_unavailable"})
+        self.assertNotIn("github_client", value)
+        with patch.object(sandbox, "bubblewrap", return_value=Path("/usr/bin/bwrap")):
+            value = capabilities()
+        self.assertEqual(value["policies"], {"full_access": "available", "read_only": "available", "workspace": "available"})
+        self.assertEqual(value["github_client"], "/home/dev/.local/state/openmachine-sandbox/client/om-code")
 
 
 class SessionAccountTests(unittest.TestCase):

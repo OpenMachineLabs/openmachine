@@ -1,6 +1,7 @@
 """The payload producer builds its host's target and refuses signing options and unsafe input archives."""
 
 from contextlib import redirect_stderr
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -65,6 +66,48 @@ class PayloadBuilderTests(unittest.TestCase):
             with self.subTest(target=other):
                 self.assertEqual(self.build("--target", other), 2)
                 self.assertFalse((self.root / "output").exists())
+
+    def test_linux_payloads_carry_a_static_bubblewrap_built_from_a_pinned_release(self):
+        inputs = json.loads(SCRIPT.with_name("runtime-inputs.json").read_text())
+        self.assertNotIn("bubblewrap", inputs["macos-arm64"])
+        self.assertEqual(inputs["linux-x86_64"]["bubblewrap"], inputs["linux-aarch64"]["bubblewrap"])
+        pinned = inputs["linux-x86_64"]["bubblewrap"]
+        self.assertEqual(pinned["url"], "https://github.com/containers/bubblewrap/releases/download/"
+                         f"v{pinned['version']}/bubblewrap-{pinned['version']}.tar.xz")
+        self.assertRegex(pinned["sha256"], r"^[0-9a-f]{64}$")
+        # The build, with the compiler's part played here: the release's source in, bwrap and its licence out.
+        source = self.root / "bubblewrap-9.9"
+        source.mkdir()
+        (source / "COPYING").write_text("LGPL\n")
+        release = self.root / "release.tar.xz"
+        with tarfile.open(release, "w:xz") as archive:
+            archive.add(source, "bubblewrap-9.9")
+        item = {"version": "9.9", "url": "https://example.invalid/unused", "sha256": hashlib.sha256(release.read_bytes()).hexdigest()}
+        cache, output, ran = self.root / "cache", self.root / "output", []
+        for path in (cache, output):
+            path.mkdir()
+        release.rename(cache / (item["sha256"] + ".tar.xz"))
+
+        def run(argv, env):
+            ran.append(argv)
+            if argv[0] == "ninja":
+                self.assertEqual((Path(argv[2]).parent / "bubblewrap-9.9/COPYING").read_text(), "LGPL\n")
+                Path(argv[2]).mkdir()
+                (Path(argv[2]) / "bwrap").write_text("#!/bin/sh\n")
+
+        builder = runpy.run_path(str(SCRIPT))
+        builder["bubblewrap"].__globals__["run"] = run
+        builder["bubblewrap"](item, cache, output)
+        self.assertEqual([argv[0] for argv in ran], ["meson", "ninja", str(output / "bwrap")])
+        self.assertIn("-Dc_link_args=-static", ran[0])
+        self.assertEqual((output / "bwrap").stat().st_mode & 0o777, 0o755)
+        self.assertEqual((output / "bwrap.COPYING").read_text(), "LGPL\n")
+        self.assertEqual(payload.inventory(output)["bwrap"]["executable"], True)
+        # A release that differs from its pin builds nothing.
+        (cache / (item["sha256"] + ".tar.xz")).write_bytes(b"other")
+        with self.assertRaises(ValueError):
+            builder["bubblewrap"](item, cache, self.root)
+        self.assertFalse((self.root / "bwrap").exists())
 
     def test_producer_rejects_hardlinks_and_archive_path_escape(self):
         builder = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"))

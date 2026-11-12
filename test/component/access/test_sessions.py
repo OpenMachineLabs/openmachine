@@ -14,7 +14,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import restricted, sessions
+from openmachine.access import restricted, rules, sessions
+from openmachine.access.linux import sandbox
 from openmachine.access.macos import seatbelt as macos
 from openmachine.access.macos import sessions as backend
 from openmachine.foundation.sanitize import Fault
@@ -112,8 +113,18 @@ class GitHubClientTests(unittest.TestCase):
         self.client.parent.chmod(0o777)
         self.refused(self.client)
         self.client.parent.chmod(0o755)
-        with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
-            self.refused(self.client)  # inside the persistent home, which restricted work may write
+        if sys.platform == "darwin":
+            with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
+                self.refused(self.client)  # inside the persistent home, which restricted work may write
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux keeps the sandbox home and runtime tree under the account home")
+    def test_on_linux_clients_where_restricted_work_writes_are_refused(self):
+        with patch.object(rules, "account_home", return_value=self.root):
+            for directory in (sandbox.home(self.root) / "home/bin", sandbox.runtime(self.root) / "abc"):
+                directory.mkdir(parents=True, mode=0o755)
+                shutil.copy(self.client, directory / "om-code")
+                self.refused(directory / "om-code")
+            self.assertEqual(self.check(self.client), self.client)
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS keeps restricted runtime trees and ACLs")
     def test_clients_where_restricted_work_writes_are_refused_by_physical_identity(self):
@@ -164,7 +175,9 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
 
-    def spawn(self, argv, birth):
+    def spawn(self, argv, birth=restricted.birth, answer=None):
+        """Run one launch as the spawner. With an answer, the command vouches for itself: it sends one byte
+        and executes only once it reads the launcher's, here sent ahead; an empty answer hangs up instead."""
         launcher, spawner = socket.socketpair()
         self.addCleanup(launcher.close)
         self.addCleanup(spawner.close)
@@ -173,12 +186,17 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         socket.send_fds(launcher, [struct.pack("!I", len(body))], [null, null, null])
         os.close(null)
         launcher.sendall(body)
+        if answer is not None:
+            launcher.sendall(answer) if answer else launcher.shutdown(socket.SHUT_WR)
         with patch.object(restricted, "birth", birth):
             try:
-                pid = restricted._spawn(spawner)
+                pid = restricted._spawn(spawner, answer is not None)
             except OSError:
                 pid = None
-        frame = json.loads(launcher.makefile("rb").readline())
+        replies = launcher.makefile("rb")
+        if answer is not None:
+            self.assertEqual(replies.read(1), b"\0")  # The command's own byte comes first.
+        frame = json.loads(replies.readline())
         if pid is not None:
             os.waitpid(pid, 0)
         return pid, frame
@@ -204,3 +222,18 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
         time.sleep(0.3)
         self.assertFalse(ran.exists())
+
+    def test_a_command_that_vouches_for_itself_runs_only_once_its_launcher_answers(self):
+        ran = self.root / "ran"
+        pid, frame = self.spawn(["/bin/sh", "-c", f"echo x > {ran}"], answer=b"\0")
+        self.assertEqual(restricted.started(frame).pid, pid)
+        self.assertTrue(ran.exists())
+        ran.unlink()
+        for answer in (b"", b"x"):  # The launcher hangs up, or answers anything else.
+            with self.subTest(answer=answer):
+                pid, frame = self.spawn(["/bin/sh", "-c", f"echo x > {ran}"], answer=answer)
+                self.assertIsNone(pid)
+                with self.assertRaises(Fault) as caught:
+                    restricted.started(frame)
+                self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
+                self.assertFalse(ran.exists())

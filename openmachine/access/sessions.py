@@ -20,7 +20,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from openmachine.access import rules
-from openmachine.access.linux import environment as linux
+from openmachine.access.linux import environment as linux, sandbox
 from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
@@ -200,7 +200,9 @@ def _client(request: SessionRequest) -> Path | None:
     if request.github is None:
         return None
     client = Path(request.github.client)
-    restricted = [SHARED / HOME_NAME.format(uid=os.getuid())] + ([seatbelt.user_temp() / "omc"] if sys.platform == "darwin" else [])
+    account = rules.account_home()
+    restricted = ([sandbox.home(account), sandbox.runtime(account)] if sys.platform == "linux" else
+                  [SHARED / HOME_NAME.format(uid=os.getuid()), seatbelt.user_temp() / "omc"])
     try:
         info, parent = client.lstat(), client.parent.lstat()
         valid = (stat.S_ISREG(info.st_mode) and os.path.realpath(client) == str(client) and os.access(client, os.X_OK)
