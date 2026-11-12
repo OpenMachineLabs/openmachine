@@ -57,10 +57,17 @@ def persistent_home(default: Path, key: str | None) -> tuple[Path, list[Path]]:
     Every restricted session of one home shares it, whatever its policy and lifetime, so a later session
     may run what an earlier one left there, such as shell startup files or cached packages, but only
     inside its own sandbox, which reads and writes no other home. The others exist before any sandbox
-    starts, so that a mount can hide them.
+    starts, so that a mount can hide them; what the default home's sessions made of it refuses no session
+    of a key.
     """
     keyed = sessions.keyed_homes(default)
-    private_home(default)
+    if key is None:
+        private_home(default)
+    else:
+        try:
+            default.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
     _owner_only(keyed)
     return (default, [keyed]) if key is None else (private_home(keyed / key), [default, keyed])
 
@@ -81,8 +88,9 @@ def _owner_only(path: Path) -> bool:
 
 def private_home(home: Path) -> Path:
     """Create or check one owner-only sandbox home; unconfined code never trusts its contents."""
-    created = _owner_only(home)
-    for name in ("home", "cache", "config", "data", "state"):
+    _owner_only(home)
+    created = _owner_only(home / "home")  # The default home may exist empty, made for a session of a key.
+    for name in ("cache", "config", "data", "state"):
         _owner_only(home / name)
     if created:
         identity = _git_identity()

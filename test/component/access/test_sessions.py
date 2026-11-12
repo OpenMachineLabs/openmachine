@@ -56,8 +56,18 @@ class PersistentHomeTests(unittest.TestCase):
         key = "0123456789abcdef" * 2
         with patch.object(restricted, "_git_identity", return_value={"name": "Dev"}):
             self.assertEqual(backend.persistent_home(key), (self.homes / key, [self.home, self.homes]))
-        for path in (self.homes, self.homes / key / "home"):
+            # The default home exists by now, to be hidden, and is still made whole on its own first use.
+            self.assertEqual(backend.persistent_home(None), (self.home, [self.homes]))
+        for path in (self.homes, self.homes / key / "home", self.home):
             self.assertEqual(path.stat().st_mode & 0o777, 0o700, path)
+        self.assertEqual((self.home / "home/.gitconfig").read_text(), "[user]\n\tname = Dev\n")
+        # What the default home's sessions made of it refuses only them.
+        (self.home / "cache").chmod(0o755)
+        self.home.chmod(0o755)
+        self.unsafe()
+        self.assertEqual(backend.persistent_home(key)[0], self.homes / key)
+        for path in (self.home, self.home / "cache"):
+            path.chmod(0o700)
         # Every sandbox denies the directory of the keyed homes, so no session starts while it is unsafe.
         (self.homes / key / "state").chmod(0o750)
         self.unsafe(key)
