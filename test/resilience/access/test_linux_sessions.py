@@ -446,22 +446,29 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
 
     def test_a_directory_swapped_for_a_link_while_the_instance_mounts_refuses_it(self):
         folder, hidden = self.root / "folder", self.account / ".ssh"
-        for path in (folder / "sub/.git", hidden / ".git"):
+        for path in (folder / "sub/.git", folder / ".claude", hidden / ".git"):
             path.mkdir(parents=True)
         (hidden / "key").write_text("secret\n")
-        # As another instance that writes the folder can: after the search, before bubblewrap mounts.
-        swap = ("import os\nfrom openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
-                f"def _swapped(**given):\n    found = _arguments(**given)\n    os.rename({str(folder / 'sub')!r}, {str(folder / 'moved')!r})\n"
-                f"    os.symlink({os.path.relpath(hidden, folder)!r}, {str(folder / 'sub')!r})\n    return found\n_b.arguments = _swapped\n")
-        lifetime = self.lifetime()
-        process, reply = self.start(self.request(lifetime, "workspace", "exec", f"cat {hidden}/key; echo x > {hidden}/written",
-                                                 folders=[str(folder)]), swap)
-        out, _ = process.communicate(timeout=60)
-        self.assertEqual((reply["status"], out), ("denied", b""), reply)
-        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
-        self.assertIn(f"mounted something else at {hidden}", reply["error"]["message"])
-        self.assertEqual(self.leftover(), [])
-        self.assertFalse((hidden / "written").exists())
+        # The link's target is then bound onto itself over what hides it. With / as the target that is
+        # all of the machine, read-only here, where the spawner cannot even listen.
+        for name, target, message in (("sub", hidden, f"mounted something else at {hidden}"), (".claude", Path("/"), "did not start")):
+            with self.subTest(target=target):
+                # As another instance that writes the folder can: after the search, before bubblewrap mounts.
+                swap = ("import os\nfrom openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
+                        f"def _swapped(**given):\n    found = _arguments(**given)\n"
+                        f"    os.rename({str(folder / name)!r}, {str(folder / 'moved')!r})\n"
+                        f"    os.symlink({os.path.relpath(target, folder)!r}, {str(folder / name)!r})\n    return found\n"
+                        "_b.arguments = _swapped\n")
+                process, reply = self.start(self.request(self.lifetime(), "workspace", "exec",
+                                                         f"cat {hidden}/key; echo x > {hidden}/written", folders=[str(folder)]), swap)
+                out, _ = process.communicate(timeout=60)
+                self.assertEqual((reply["status"], out), ("denied", b""), reply)
+                self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
+                self.assertIn(message, reply["error"]["message"])
+                self.assertEqual(self.leftover(), [])
+                self.assertFalse((hidden / "written").exists())
+                (folder / name).unlink()
+                (folder / "moved").rename(folder / name)
 
     def test_a_command_runs_only_once_the_supervisor_has_checked_its_own_credentials(self):
         lifetime = self.lifetime()

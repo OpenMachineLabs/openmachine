@@ -194,14 +194,20 @@ class SandboxArgumentTests(unittest.TestCase):
                         ("/home/dev/code", "8:2", "/dev/code"), ("/dev/shm", "0:5", "/shm")):
             with self.subTest(swapped=swapped):
                 self.assertEqual(sandbox.foreign([*instance, swapped], arguments, machine), [swapped[0]])
+        # A link to an ancestor binds it over the mounts made before, which are then gone: over / it
+        # leaves the machine's own mounts and what was bound afterwards.
+        over = [("/", "8:1", "/"), ("/home", "8:2", "/"), ("/mnt/data/work", "8:3", "/sub volume/work")]
+        self.assertEqual(sandbox.foreign(over, arguments, machine),
+                         ["/home/dev/.netrc", "/home/dev/code", "/home/dev/code/a/.git"])
+        self.assertEqual(sandbox.foreign(instance[:-1], arguments, machine), ["/mnt/data/work"])
 
     @unittest.skipUnless(sys.platform == "linux", "reads /proc")
     def test_this_process_mounts_are_read_with_their_escapes(self):
         found = sandbox.mounts()
         self.assertEqual(sandbox.foreign(found, ["--ro-bind", "/", "/"], found), [])
         self.assertIn("/", [point for point, _, _ in found])
-        with patch.object(Path, "read_bytes", return_value=b"36 35 98:0 /a\\040b /mnt/x\\134y rw - ext3 /dev/root rw\n"):
-            self.assertEqual(sandbox.mounts(), [("/mnt/x\\y", "98:0", "/a b")])
+        with patch.object(Path, "read_bytes", return_value=b"36 35 98:0 /a\\040b\x0bc /mnt/x\\134y rw - ext3 /dev/root rw\n"):
+            self.assertEqual(sandbox.mounts(), [("/mnt/x\\y", "98:0", "/a b\x0bc")])
 
     def test_no_bubblewrap_names_its_cause(self):
         installed = self.root / "bwrap"

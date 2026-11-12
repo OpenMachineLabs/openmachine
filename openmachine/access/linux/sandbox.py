@@ -219,7 +219,7 @@ def mounts(pid: int | str = "self") -> list[tuple[str, str, str]]:
         return os.fsdecode(re.sub(rb"\\([0-7]{3})", lambda escape: bytes([int(escape[1], 8)]), field))
 
     return [(text(fields[4]), text(fields[2]), text(fields[3]))
-            for fields in map(bytes.split, Path(f"/proc/{pid}/mountinfo").read_bytes().splitlines())]
+            for fields in (line.split(b" ") for line in Path(f"/proc/{pid}/mountinfo").read_bytes().split(b"\n") if line)]
 
 
 def _held(path: str, machine: list[tuple[str, str, str]]) -> tuple[str, str]:
@@ -231,30 +231,32 @@ def _held(path: str, machine: list[tuple[str, str, str]]) -> tuple[str, str]:
 
 
 def foreign(instance: list[tuple[str, str, str]], arguments: list[str], *machine: list[tuple[str, str, str]]) -> list[str]:
-    """The mount points of an instance that hold something its arguments did not ask for.
+    """The mount points where an instance holds something else than its arguments ask for.
 
     bubblewrap follows links when it mounts, and another instance that writes the same folder can swap a
     directory for a link meanwhile: the mount then holds the link's target, at the folder's path or at the
-    target's own, over what hides it. So each mount of the instance on one of the machine's devices is
-    counted against what the arguments ask for: each bind's source at its destination, the machine's
-    mounts below that source, and the devices bubblewrap puts in /dev. machine is the machine's mounts
-    before and after the instance started, since they change.
+    target's own, over what hides it. So the instance's mounts on the machine's devices are counted
+    against the arguments. Each bind is there, its source at its destination; and nothing is there
+    more often than the binds, the machine's mounts below their sources and the devices bubblewrap puts
+    in /dev account for. machine is the machine's mounts before and after the instance started, since
+    they change.
     """
-    binds = [(f"/dev/{name}",) * 2 for name in ("null", "zero", "full", "random", "urandom", "tty")] + [
-        (arguments[index + 1], arguments[index + 2]) for index, item in enumerate(arguments)
-        if item in ("--bind", "--ro-bind", "--dev-bind")]
-    asked = []
+    binds = [(arguments[index + 1], arguments[index + 2]) for index, item in enumerate(arguments)
+             if item in ("--bind", "--ro-bind", "--dev-bind")]
+    nodes = [(f"/dev/{name}",) * 2 for name in ("null", "zero", "full", "random", "urandom", "tty")]
+    asked, most = [], []
     for mounts in machine:
-        expected = collections.Counter()
+        asked.append(collections.Counter((point, *_held(source, mounts)) for source, point in binds))
+        most.append(asked[-1] + collections.Counter((point, *_held(source, mounts)) for source, point in nodes))
         for source, point in binds:
-            expected[(point, *_held(source, mounts))] += 1
             below = source.rstrip("/") + "/"
-            expected.update((point.rstrip("/") + "/" + inner[len(below):], device, root)
+            most[-1].update((point.rstrip("/") + "/" + inner[len(below):], device, root)
                             for inner, device, root in mounts if inner.startswith(below))
-        asked.append(expected)
     devices = {mount[1] for mounts in machine for mount in mounts}
     found = collections.Counter(mount for mount in instance if mount[1] in devices)
-    return sorted({mount[0] for mount, count in found.items() if count > max(expected[mount] for expected in asked)})
+    return sorted({mount[0] for mount, count in found.items() if count > max(expected[mount] for expected in most)}
+                  | {mount[0] for expected in asked for mount in expected
+                     if found[mount] < min(other[mount] for other in asked)})
 
 
 def scope() -> None:
