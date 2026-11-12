@@ -14,7 +14,9 @@ proposals. You do not need to use an AI agent to contribute.
   and open a focused pull request.
 - **Larger changes:** discuss the approach in an Issue before implementation.
   Changes to public interfaces, architecture, permissions or persisted state may
-  need an approved [Spec](.github/ISSUE_TEMPLATE/spec.md).
+  need an approved [Spec Issue](.github/ISSUE_TEMPLATE/spec.md). Once authorized,
+  proceed to implementation; no repository index or duplicate design file is
+  needed. See [Design and scope](MAINTAINERS.md#design-and-scope).
 - **Security vulnerabilities:** use [SECURITY.md](SECURITY.md), never a public
   Issue, pull request or community channel containing exploit details.
 

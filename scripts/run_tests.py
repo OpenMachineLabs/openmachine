@@ -246,10 +246,9 @@ def _old_manifest(root: Path, base_sha: str) -> dict | None:
 
 
 def _repository_only(path: str) -> bool:
-    # Keep retired docs classified so their deletion still selects repository checks.
     # connector/ is a Go module that its own CI job builds and tests.
     return (path in REPOSITORY_PATHS or
-            path.startswith(("spec/", "connector/")) or
+            path.startswith("connector/") or
             path.endswith(".md") or path.startswith("assets/") or
             (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".md", ".yml", ".yaml"))))
 
@@ -303,7 +302,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                 reasons.setdefault(path, set()).add(reason)
 
     if full or modules or any(path.startswith(".github/") or (
-            not path.endswith(".md") and not path.startswith(("assets/", "spec/", "connector/"))
+            not path.endswith(".md") and not path.startswith(("assets/", "connector/"))
             and path not in {"LICENSE", ".gitignore"}) for path in changes):
         add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
     if full:

@@ -66,7 +66,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], [])
 
-        self.write("spec/fixture/inputs.json", '{"format": 1}\n')
+        self.write("assets/diagram.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
         plan = runner.make_plan(self.root, self.base)
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], [])

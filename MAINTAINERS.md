@@ -5,10 +5,10 @@ boundaries. External contributors should start with [CONTRIBUTING.md](CONTRIBUTI
 
 ## Design and scope
 
-Code and tests describe implemented behavior. The [Spec index](spec/README.md)
-is an optional reference list of design Issues; it is neither an approval
-registry nor an implementation status ledger. Avoid unrelated changes,
-speculative modules and new dependencies without a demonstrated need.
+Code and tests describe implemented behavior. GitHub Issues own designs,
+approvals and acceptance; linked PRs record implementation and validation.
+Avoid unrelated changes, speculative modules and new dependencies without a
+demonstrated need.
 
 Use the repository's Issue templates according to the work:
 
@@ -24,17 +24,18 @@ Use the repository's Issue templates according to the work:
 
 An implementable Spec records requirements, boundaries, acceptance and relevant
 failure behavior. It becomes approved with explicit maintainer authorization in
-the Spec, a linked PR or the maintainer's current request; no index entry is
-required. A Spec may live in another Open Machine repository, including a private
-one. A public PR implementing it summarizes the scope it implements and never
-copies private details. A sufficiently explicit current user request can
+the Spec, a linked PR or the maintainer's current request. A Spec may live in
+another Open Machine repository, including a private one. A public PR implementing
+it summarizes the scope it implements and never copies private details.
+A sufficiently explicit current user request can
 authorize a change without another Spec. No draft, Survey, Roadmap or
 Feature Request silently authorizes implementation, production work or purchases.
 
-Store Spec and Survey details in the original GitHub Issues, not duplicate files.
-Add `spec/<issue-number>/` only for necessary attachments; product code must not
-treat them as runtime configuration. Historical approval never substitutes for
-current permission to merge, release or deploy.
+Keep Spec and Survey details, supporting attachments and progress in their
+original Issues and linked PRs. Once authorized, implementation can start
+without a repository index, mirrored design file, per-Issue directory or separate
+acceptance ledger. Historical approval never substitutes for current permission
+to merge, release or deploy.
 
 ## Git, review and publication
 
@@ -92,19 +93,12 @@ no private organization workflow is a prerequisite for community contributions.
 
 ## Testing and evidence
 
-Follow [test/README.md](test/README.md) for the canonical module ownership,
-test-layer selection, wheel verification, cache identity and compatibility checks.
-Useful entry points for an affected candidate are:
-
-```sh
-python3 scripts/run_tests.py --base origin/main --plan
-python3 scripts/premerge.py --base origin/main
-```
-
-The second command needs a clean committed worktree. Locked dependencies, packaging
-and shared runner changes require the full suite. A local PASS is not hosted CI
-evidence and neither proves deployment, native service or real-client acceptance.
-Do not remove necessary regression coverage or lower safety gates to obtain PASS.
+Use the [contributor checks](CONTRIBUTING.md#make-and-test-your-change);
+[test/README.md](test/README.md) owns test selection, full-verification triggers,
+wheel verification, cache identity and compatibility checks. A local PASS is not
+hosted CI evidence and neither proves deployment, native service or real-client
+acceptance. Do not remove necessary regression coverage or lower safety gates
+to obtain PASS.
 
 Repository checks preserve the public-information boundary, valid metadata,
 relative links and label API shape. Docs-only candidates run source checks without
