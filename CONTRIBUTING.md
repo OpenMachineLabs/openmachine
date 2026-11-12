@@ -104,7 +104,7 @@ Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
 
 | Command | Caller | Purpose |
 | --- | --- | --- |
-| `python -I -m openmachine.access capabilities` | Code host | Core's version, session kinds and policies |
+| `python -I -m openmachine.access capabilities` | Code host | Core's version, access protocol, session kinds and policies |
 | `python -I -m openmachine.access session --control-fd N` | Code host | Admit one session channel |
 | `python -I -m openmachine.access folders` | Code host, for Desktop | Check Workspace folders: one JSON request on stdin |
 | `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | Desktop | `status`, `configure`, `install`, `update`, `operation`, `continue` |
