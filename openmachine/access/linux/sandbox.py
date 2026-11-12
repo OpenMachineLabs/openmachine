@@ -1,6 +1,7 @@
 """bubblewrap confinement for Code's lifetimes on Linux: which bubblewrap, the instance's filesystem,
 the read denials and a process's identity across the instance's PID namespace."""
 
+import collections
 import ctypes
 import functools
 import glob
@@ -229,19 +230,31 @@ def _held(path: str, machine: list[tuple[str, str, str]]) -> tuple[str, str]:
     return device, "/" + "/".join(part for part in f"{root}/{path[len(point):]}".split("/") if part)
 
 
-def foreign(instance: list[tuple[str, str, str]], *machine: list[tuple[str, str, str]]) -> list[str]:
-    """The mount points of an instance that hold something else than the machine has at that path.
+def foreign(instance: list[tuple[str, str, str]], arguments: list[str], *machine: list[tuple[str, str, str]]) -> list[str]:
+    """The mount points of an instance that hold something its arguments did not ask for.
 
-    Every mount of an instance binds a path onto itself, but for the filesystems bubblewrap makes and
-    /dev/null over a hidden file. Another instance that writes the same folder can swap a directory for a
-    link while bubblewrap mounts, and the mount then holds the link's target. machine is the machine's
-    mounts before and after the instance started, since they change.
+    bubblewrap follows links when it mounts, and another instance that writes the same folder can swap a
+    directory for a link meanwhile: the mount then holds the link's target, at the folder's path or at the
+    target's own, over what hides it. So each mount of the instance on one of the machine's devices is
+    counted against what the arguments ask for: each bind's source at its destination, the machine's
+    mounts below that source, and the devices bubblewrap puts in /dev. machine is the machine's mounts
+    before and after the instance started, since they change.
     """
+    binds = [(f"/dev/{name}",) * 2 for name in ("null", "zero", "full", "random", "urandom", "tty")] + [
+        (arguments[index + 1], arguments[index + 2]) for index, item in enumerate(arguments)
+        if item in ("--bind", "--ro-bind", "--dev-bind")]
+    asked = []
+    for mounts in machine:
+        expected = collections.Counter()
+        for source, point in binds:
+            expected[(point, *_held(source, mounts))] += 1
+            below = source.rstrip("/") + "/"
+            expected.update((point.rstrip("/") + "/" + inner[len(below):], device, root)
+                            for inner, device, root in mounts if inner.startswith(below))
+        asked.append(expected)
     devices = {mount[1] for mounts in machine for mount in mounts}
-    return [point for point, device, root in instance
-            if device in devices and not any(
-                (point, device, root) in mounts or (device, root) in (_held(point, mounts), _held("/dev/null", mounts))
-                for mounts in machine)]
+    found = collections.Counter(mount for mount in instance if mount[1] in devices)
+    return sorted({mount[0] for mount, count in found.items() if count > max(expected[mount] for expected in asked)})
 
 
 def scope() -> None:

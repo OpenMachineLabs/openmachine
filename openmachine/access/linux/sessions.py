@@ -197,8 +197,12 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
 def _start_spawner(command: list[str], private: Path) -> dict:
     """Start bubblewrap with the spawner as the instance's first process; fail closed unless its identity,
     its membership and the instance's mounts verify."""
+    try:
+        machine = sandbox.mounts()
+    except (OSError, IndexError) as error:
+        raise Fault("lifetime_unverifiable", "This machine's mounts cannot be read; nothing was launched.",
+                    effect="known_no_effect") from error
     ready_read, ready_write = os.pipe()
-    machine = sandbox.mounts()
     try:
         process = subprocess.Popen([*command, str(private), str(ready_write)], stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, pass_fds=[ready_write],
@@ -224,7 +228,7 @@ def _start_spawner(command: list[str], private: Path) -> dict:
                     connection.connect("spawner")
                 pid = sandbox.peer(connection)
             marker = sandbox.namespace(pid)
-            moved = sandbox.foreign(sandbox.mounts(pid), machine, sandbox.mounts())
+            moved = sandbox.foreign(sandbox.mounts(pid), command, machine, sandbox.mounts())
         except (OSError, ValueError, IndexError) as error:
             raise Fault("lifetime_unverifiable", "The lifetime's spawner is not reachable; nothing was launched.",
                         effect="known_no_effect") from error

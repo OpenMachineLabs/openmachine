@@ -426,10 +426,6 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
             # There is no bubblewrap to run.
             "no bubblewrap": ("from pathlib import Path as _W\nfrom openmachine.access.linux import sandbox as _b\n"
                               "_b.bubblewrap = lambda: _W('/nonexistent/bwrap')\n", "lifetime_unverifiable"),
-            # A mount holds another path than its own, as when a directory was swapped for a link meanwhile.
-            "foreign mount": ("from openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
-                              f"_b.arguments = lambda **given: [*_arguments(**given), '--bind', {str(self.account)!r}, "
-                              f"{str(self.root)!r}]\n", "lifetime_unverifiable"),
             # The spawner is found in this supervisor's own PID namespace.
             "own namespace": ("import os\nfrom openmachine.access.linux import sandbox as _b\n_namespace = _b.namespace\n"
                               "_b.namespace = lambda pid: _namespace(os.getpid())\n", "lifetime_unverifiable"),
@@ -447,6 +443,25 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 self.assertFalse((self.state / "code" / lifetime / "record.json").exists())
                 self.assertEqual(self.session(lifetime, command="echo again")[1:3], (0, "again\n"))
                 self.kill(lifetime)
+
+    def test_a_directory_swapped_for_a_link_while_the_instance_mounts_refuses_it(self):
+        folder, hidden = self.root / "folder", self.account / ".ssh"
+        for path in (folder / "sub/.git", hidden / ".git"):
+            path.mkdir(parents=True)
+        (hidden / "key").write_text("secret\n")
+        # As another instance that writes the folder can: after the search, before bubblewrap mounts.
+        swap = ("import os\nfrom openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
+                f"def _swapped(**given):\n    found = _arguments(**given)\n    os.rename({str(folder / 'sub')!r}, {str(folder / 'moved')!r})\n"
+                f"    os.symlink({os.path.relpath(hidden, folder)!r}, {str(folder / 'sub')!r})\n    return found\n_b.arguments = _swapped\n")
+        lifetime = self.lifetime()
+        process, reply = self.start(self.request(lifetime, "workspace", "exec", f"cat {hidden}/key; echo x > {hidden}/written",
+                                                 folders=[str(folder)]), swap)
+        out, _ = process.communicate(timeout=60)
+        self.assertEqual((reply["status"], out), ("denied", b""), reply)
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unverifiable", "known_no_effect"))
+        self.assertIn(f"mounted something else at {hidden}", reply["error"]["message"])
+        self.assertEqual(self.leftover(), [])
+        self.assertFalse((hidden / "written").exists())
 
     def test_a_command_runs_only_once_the_supervisor_has_checked_its_own_credentials(self):
         lifetime = self.lifetime()

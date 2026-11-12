@@ -178,17 +178,27 @@ class SandboxArgumentTests(unittest.TestCase):
             ("/home/dev/code", "8:2", "/dev/code"), ("/home/dev/code/a/.git", "8:2", "/dev/code/a/.git"),
             ("/mnt/data/work", "8:3", "/sub volume/work"),
         ]
-        self.assertEqual(sandbox.foreign(instance, machine), [])
+        arguments = ["--unshare-pid", "--ro-bind", "/", "/", "--proc", "/proc", "--tmpfs", "/tmp",
+                     "--ro-bind", "/dev/null", "/home/dev/.netrc", "--bind", "/home/dev/code", "/home/dev/code",
+                     "--ro-bind", "/home/dev/code/a/.git", "/home/dev/code/a/.git", "--bind", "/mnt/data/work", "/mnt/data/work"]
+        self.assertEqual(sandbox.foreign(instance, arguments, machine), [])
         # A mount the machine had only before, or only after, the instance started is the machine's.
-        self.assertEqual(sandbox.foreign([*instance, ("/media/usb", "8:9", "/")], machine, [*machine, ("/media/usb", "8:9", "/")]), [])
-        # A directory swapped for a link while bubblewrap mounted: the link's target, at the path or elsewhere.
-        swapped = [("/home/dev/code/a", "8:2", "/dev/.ssh"), ("/home/dev/.ssh", "8:2", "/dev/code/a"), ("/home/dev/code", "8:1", "/etc")]
-        self.assertEqual(sandbox.foreign([*instance, *swapped], machine), [point for point, _, _ in swapped])
+        usb = ("/media/usb", "8:9", "/")
+        self.assertEqual(sandbox.foreign([*instance, usb], arguments, machine, [*machine, usb]), [])
+        self.assertEqual(sandbox.foreign([*instance, usb], arguments, [*machine, usb], machine), [])
+        # A directory swapped for a link while bubblewrap mounted. The mount holds the link's target at the
+        # folder's path, or the folder at the target's, or, through a relative link, the target at its own
+        # path, over what hid it: also when the target is one of the machine's mounts, there once already.
+        for swapped in (("/home/dev/code/a", "8:2", "/dev/.ssh"), ("/home/dev/.ssh", "8:2", "/dev/code/a"),
+                        ("/home/dev/code", "8:1", "/etc"), ("/home/dev/.ssh", "8:2", "/dev/.ssh"), ("/home", "8:2", "/"),
+                        ("/home/dev/code", "8:2", "/dev/code"), ("/dev/shm", "0:5", "/shm")):
+            with self.subTest(swapped=swapped):
+                self.assertEqual(sandbox.foreign([*instance, swapped], arguments, machine), [swapped[0]])
 
     @unittest.skipUnless(sys.platform == "linux", "reads /proc")
     def test_this_process_mounts_are_read_with_their_escapes(self):
         found = sandbox.mounts()
-        self.assertEqual(sandbox.foreign(found, found), [])
+        self.assertEqual(sandbox.foreign(found, ["--ro-bind", "/", "/"], found), [])
         self.assertIn("/", [point for point, _, _ in found])
         with patch.object(Path, "read_bytes", return_value=b"36 35 98:0 /a\\040b /mnt/x\\134y rw - ext3 /dev/root rw\n"):
             self.assertEqual(sandbox.mounts(), [("/mnt/x\\y", "98:0", "/a b")])
