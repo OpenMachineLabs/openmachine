@@ -111,7 +111,9 @@ def unavailable() -> Fault:
 
 
 def git_entries(root: Path) -> list[Path]:
-    """Every .git entry in root and in the directories up to four levels below it; none is looked into."""
+    """What a search of root and of the directories up to four levels below it holds read-only: every .git
+    entry, none of which is looked into, and every directory that cannot be read. Its owner can restore
+    its mode, and so could restricted work that may write it."""
     found, pending, read = [], [(root, 0)], 0
     while pending:
         directory, depth = pending.pop()
@@ -128,21 +130,23 @@ def git_entries(root: Path) -> list[Path]:
                     elif depth < DEPTH and entry.is_dir(follow_symlinks=False):
                         pending.append((Path(entry.path), depth + 1))
         except OSError:
-            continue  # What this user cannot list, its restricted work cannot either.
+            found.append(directory)
     return found
 
 
 def _fixed(path: Path) -> bool:
     """Whether a protected path exists, as something a mount can hold in place."""
     try:
-        linked = stat.S_ISLNK(path.lstat().st_mode)
+        if not stat.S_ISLNK(path.lstat().st_mode):
+            return True
+    except FileNotFoundError:
+        return False
     except OSError:
-        return False  # Missing, or where this user cannot look, and so its restricted work cannot either.
-    if linked:
-        # A mount lands on a link's target and leaves the name free to be replaced.
-        raise Fault("scope_unsupported", f"{path} is a link, which a Workspace session cannot protect. Replace it "
-                    "with a real file or directory, or change the folder in the Console.", effect="known_no_effect")
-    return True
+        pass  # Its directory cannot be searched now; its owner can restore that mode.
+    # A mount lands on a link's target and leaves the name free to be replaced.
+    raise Fault("scope_unsupported", f"{path} is a link or cannot be examined, so a Workspace session cannot "
+                "protect it. Make it a real file or directory, or change the folder in the Console.",
+                effect="known_no_effect")
 
 
 def _masks(paths: list[Path], exposed: dict[Path, str]) -> list[str]:
@@ -171,8 +175,8 @@ def _masks(paths: list[Path], exposed: dict[Path, str]) -> list[str]:
 
 def protection(roots: dict[Path, list[Path]]) -> list[str]:
     """Read-only mounts over what the owner's tools later run outside a sandbox: at the top of each root
-    the protected names and .mcp.json, and each .git entry. A link among them is a Fault; more mounts than
-    one instance takes is TooLarge.
+    the protected names and .mcp.json, and each entry of git_entries. A link among them is a Fault; more
+    mounts than one instance takes is TooLarge.
 
     A mount holds a path, not a name. So each .git, a repository's directory or a worktree's or submodule's
     file, is wholly read-only, and every directory between it and its root is bound onto itself: a directory

@@ -384,6 +384,15 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 while self.leftover() and time.monotonic() < deadline:
                     time.sleep(0.05)
                 self.assertEqual(self.leftover(), [])
+        # A supervisor that dies before it has recorded the instance: the instance ends with it.
+        process, reply = self.start(self.request(self.lifetime(), "workspace", "exec", "echo ran", folders=[str(folder)]),
+                                    "import os, signal\nfrom openmachine.access import sessions as _s\n"
+                                    "_s.Lifetime.save = lambda self, record: os.kill(os.getpid(), signal.SIGKILL)\n")
+        self.assertEqual((reply, process.communicate(timeout=60)[0], process.returncode), ({}, b"", -signal.SIGKILL))
+        deadline = time.monotonic() + 10
+        while self.leftover() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(self.leftover(), [])
         # A record that cannot be read removes nothing and holds no admission.
         for text in ("{", "{}", '{"instances": [1], "placeholders": []}', '{"instances": [{}], "placeholders": [1]}'):
             with self.subTest(record=text):
@@ -589,6 +598,30 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertIn(" M file.txt", out)
         self.assertIn("2 files changed", out)
         subprocess.run([*GIT, "-C", str(full), "fsck", "--strict"], check=True, capture_output=True)
+
+    def test_what_cannot_be_searched_or_reserved_now_is_not_writable_later(self):
+        # The folder's owner can restore a mode, and so can its restricted work wherever it writes.
+        searched, reserved = self.root / "searched", self.root / "reserved"
+        self.repository(searched / "locked/repo")
+        reserved.mkdir()
+        for path, mode in ((searched / "locked", 0o000), (reserved, 0o555)):
+            path.chmod(mode)
+            self.addCleanup(path.chmod, 0o755)
+        hook = searched / "locked/repo/.git/hooks/pre-commit"
+        reply, code, _, err = self.session(self.lifetime(), "workspace", f"chmod 755 {searched}/locked; echo x > {hook}",
+                                           folders=[str(searched)])
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertNotEqual(code, 0, err)
+        reply, _, _, _ = self.session(self.lifetime(), "workspace", f"chmod 755 {reserved}; mkdir {reserved}/.claude; "
+                                      f"echo x > {reserved}/.claude/settings.json", folders=[str(reserved)])
+        if os.getuid():  # Root creates the placeholders whatever the mode.
+            self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"]),
+                             ("denied", "scope_unsupported", "known_no_effect"), reply)
+            self.assertIn(str(reserved), reply["error"]["message"])
+        for path in (searched / "locked", reserved):
+            path.chmod(0o755)
+        self.assertFalse(hook.exists())
+        self.assertFalse((reserved / ".claude/settings.json").exists())
 
     def placeholders(self):
         return sorted(json.loads((self.state / "code/sandbox.json").read_text())["placeholders"])

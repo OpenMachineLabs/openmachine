@@ -95,9 +95,23 @@ def _git_identity() -> dict[str, str]:
     return found
 
 
-def _grant(request: sessions.SessionRequest) -> str:
-    return digest(json.dumps({"policy": request.policy, "folders": request.folders},
-                             sort_keys=True, separators=(",", ":")))
+def _scope(request: sessions.SessionRequest, state: Path) -> "rules.Scope | None":
+    """A Workspace session's folders, checked on each admission: one whose path changed grants nothing."""
+    if request.folders is None:
+        return None
+    control = rules.control_paths(state)
+    return rules.Scope(tuple(rules.folders(request.folders, control, admission=True)), control)
+
+
+def _record(lifetime: sessions.Lifetime, request: sessions.SessionRequest) -> dict:
+    """The lifetime's record, read under its lock: new, or one of the request's policy and folders."""
+    grant = digest(json.dumps({"policy": request.policy, "folders": request.folders},
+                              sort_keys=True, separators=(",", ":")))
+    record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
+    if record["policy"] != request.policy or record.get("grant_sha256") != grant:
+        raise Fault("lifetime_changed", "This lifetime's policy or folders changed; start sessions in a new "
+                    "lifetime.", effect="known_no_effect")
+    return record
 
 
 def _stable_client() -> Path:

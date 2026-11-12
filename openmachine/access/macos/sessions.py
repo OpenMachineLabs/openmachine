@@ -56,21 +56,14 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         raise Fault("scope_unsupported", "Restricted Code sessions need the macOS Seatbelt lifetime backend.",
                     effect="known_no_effect")
     program, argv = sessions._argv(request, account)
-    scope = None
-    if request.folders is not None:  # Re-checked on each admission: a folder whose path changed grants nothing.
-        control = rules.control_paths(state)
-        scope = rules.Scope(tuple(rules.folders(request.folders, control, admission=True)), control)
+    scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
     home = persistent_home()
     runtime = _runtime(request.lifetime)
     lifetime = sessions.Lifetime(state, request.lifetime)
-    grant = restricted._grant(request)
     with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
-        if record["policy"] != request.policy or record.get("grant_sha256") != grant:
-            raise Fault("lifetime_changed", "This lifetime's policy or folders changed; start sessions in a new "
-                        "lifetime.", effect="known_no_effect")
+        record = restricted._record(lifetime, request)
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
         # instance may run Core's copy of om-code, except instances started before that copy existed: a
         # routed session starts a new instance once there, which cannot see the earlier one's jobs.

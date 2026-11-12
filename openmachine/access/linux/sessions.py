@@ -35,22 +35,15 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     if bubblewrap is None:
         raise sandbox.unavailable()
     program, argv = sessions._argv(request, account)
-    scope = None
-    if request.folders is not None:  # Re-checked on each admission: a folder whose path changed grants nothing.
-        control = rules.control_paths(state)
-        scope = rules.Scope(tuple(rules.folders(request.folders, control, admission=True)), control)
+    scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
     home = persistent_home()
     # The lifetime's directory in the runtime tree, bound into its instance: the spawner listens in it.
     private = private_directory(sandbox.runtime(rules.account_home()) / restricted.digest(request.lifetime)[:12])
     lifetime = sessions.Lifetime(state, request.lifetime)
-    grant = restricted._grant(request)
     with lifetime.lock():
-        record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
-        if record["policy"] != request.policy or record.get("grant_sha256") != grant:
-            raise Fault("lifetime_changed", "This lifetime's policy or folders changed; start sessions in a new "
-                        "lifetime.", effect="known_no_effect")
+        record = restricted._record(lifetime, request)
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable.
         newest = record["instances"][-1] if record["instances"] else None
         instance = newest if newest and restricted._spawner_alive(newest) else None
@@ -67,16 +60,15 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
                 instance = None
         if instance is None:
             # Folders, worktrees and what is protected in them are fixed when an instance starts.
-            instance = _start_instance(bubblewrap, scope, state, home, private)
-            try:
-                record["instances"].append(instance)
-                lifetime.save(record)
-            except BaseException as error:
-                _end(instance)  # No instance runs that no record names.
-                if isinstance(error, OSError):
+            instance, release = _start_instance(bubblewrap, scope, state, home, private)
+            with release:  # Closed unanswered, however this process ends: no instance runs that no record names.
+                try:
+                    record["instances"].append(instance)
+                    lifetime.save(record)
+                    release.sendall(b"\0")
+                except OSError as error:
                     raise Fault("lifetime_unavailable", "The lifetime's record could not be saved; nothing was "
                                 "launched.", effect="known_no_effect") from error
-                raise
             # Connect before another admission can start a newer instance, which rebinds the socket; a
             # connection made first still reaches its own spawner.
             connection = restricted._connect(private, instance)
@@ -133,9 +125,11 @@ def _remove(known: dict) -> None:
     known["placeholders"] = []
 
 
-def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, home: Path, private: Path) -> dict:
-    """Start one instance. Its placeholders, the empty directories under the protected names that do not
-    exist, so that none can be created later, are created first and removed once no instance lives.
+def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, home: Path,
+                    private: Path) -> tuple[dict, socket.socket]:
+    """Start one instance, which serves once its release is sent a byte. Its placeholders, the empty
+    directories under the protected names that do not exist, so that none can be created later, are created
+    first and removed once no instance lives.
 
     Instances of other lifetimes mount over the same directories, and removing one from under a mount
     frees its name there. So one record for this user holds every live instance and every placeholder.
@@ -165,22 +159,26 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
             _remove(known)
         placeholders = [root / name for root in roots for name in sandbox.PROTECTED if not os.path.lexists(root / name)]
         known["placeholders"] = list(dict.fromkeys([*known["placeholders"], *map(str, placeholders)]))
-        instance = None
+        release = None
         try:
             save_json(record, known)  # Before any exists, so that none is left unrecorded.
             for path in placeholders:
                 try:
                     path.mkdir()
-                except OSError:
-                    pass  # What this user cannot create here, its restricted work cannot either.
+                except FileExistsError:
+                    pass  # Made meanwhile: held as what it is, or refused as a link.
+                except OSError as error:  # The folder's owner can restore its mode, and so can restricted work.
+                    raise Fault("scope_unsupported", f"{path} cannot be created to protect it. Make the folder "
+                                "writable, or change it in the Console.", effect="known_no_effect") from error
             hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state]
             arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
-            instance = _start_spawner([str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
+            instance, release = _start_spawner(
+                [str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
             known["instances"].append(instance)
             save_json(record, known)
         except BaseException as error:
-            if instance:
-                _end(instance)  # No instance runs that this record does not name.
+            if release:
+                release.close()  # No instance runs that this record does not name.
             elif not known["instances"]:
                 _remove(known)
                 try:
@@ -191,32 +189,32 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
                 raise Fault("lifetime_unavailable", "The lifetime's sandbox could not be started; nothing was "
                             "launched.", effect="known_no_effect") from error
             raise
-    return instance
+    return instance, release
 
 
-def _start_spawner(command: list[str], private: Path) -> dict:
+def _start_spawner(command: list[str], private: Path) -> tuple[dict, socket.socket]:
     """Start bubblewrap with the spawner as the instance's first process; fail closed unless its identity,
-    its membership and the instance's mounts verify."""
+    its membership and the instance's mounts verify. The spawner serves once the returned socket is sent a
+    byte and ends, with its instance, if the socket closes first."""
     try:
         machine = sandbox.mounts()
     except (OSError, IndexError) as error:
         raise Fault("lifetime_unverifiable", "This machine's mounts cannot be read; nothing was launched.",
                     effect="known_no_effect") from error
-    ready_read, ready_write = os.pipe()
+    release, ready = socket.socketpair()
     try:
-        process = subprocess.Popen([*command, str(private), str(ready_write)], stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, pass_fds=[ready_write],
-                                   start_new_session=True)
+        with ready:
+            process = subprocess.Popen([*command, str(private), str(ready.fileno())], stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={},
+                                       pass_fds=[ready.fileno()], start_new_session=True)
     except OSError as error:
-        os.close(ready_read)
+        release.close()
         raise Fault("lifetime_unverifiable", "The lifetime's sandbox did not start; nothing was launched.",
                     effect="known_no_effect") from error
-    finally:
-        os.close(ready_write)
     try:
         # Bounded: this runs under the lifetime lock that every admission needs.
-        reported = (os.read(ready_read, 64)  # The spawner's start time once it listens; nothing if it ended.
-                    if select.select([ready_read], [], [], restricted.ACKNOWLEDGE_SECONDS)[0] else b"")
+        reported = (release.recv(64)  # The spawner's start time once it listens; nothing if it ended.
+                    if select.select([release], [], [], restricted.ACKNOWLEDGE_SECONDS)[0] else b"")
         if not reported.isdigit():
             raise Fault("lifetime_unverifiable", "The lifetime's sandbox did not start; nothing was launched.",
                         effect="known_no_effect")
@@ -237,17 +235,16 @@ def _start_spawner(command: list[str], private: Path) -> dict:
                         "nothing was launched.", effect="known_no_effect")
         spawner = restricted._confirm_spawner(f"{pid} {int(reported)}".encode(), marker)
     except BaseException:
+        release.close()
         os.killpg(process.pid, signal.SIGKILL)  # Still an unreaped child, so its PID is its own.
         process.wait()
         raise
-    finally:
-        os.close(ready_read)
-    return {"marker": marker, "pid": spawner.pid, "start": spawner.start}
+    return {"marker": marker, "pid": spawner.pid, "start": spawner.start}, release
 
 
 def _spawner() -> None:
     """The instance's first process: listen in the lifetime's directory, report this process's start time
-    and serve launches."""
+    and serve launches once the supervisor has recorded the instance."""
     directory, ready = Path(sys.argv[1]), int(sys.argv[2])
     sandbox.scope()
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -259,5 +256,6 @@ def _spawner() -> None:
         listener.bind("spawner")
     listener.listen(128)  # A burst of sessions waits here; a full queue refuses the next at once.
     os.write(ready, str(sandbox.start(os.getpid())).encode())
-    os.close(ready)
-    restricted._serve(listener, vouch=True)
+    if os.read(ready, 1):  # Nothing: the supervisor ended first, and with this process ends the instance.
+        os.close(ready)
+        restricted._serve(listener, vouch=True)
