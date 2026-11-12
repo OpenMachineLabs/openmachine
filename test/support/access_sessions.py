@@ -131,7 +131,7 @@ class SessionFixture(object):
         """Leave a secret and shell startup files in the default sandbox home and in two keyed ones. Then, from
         a login shell of each home, Read only and in Workspace sessions of one folder and then another, and
         with the other homes as folders where the folder rule takes them, try to read and change the others:
-        it runs its own startup file and nothing else comes of it."""
+        it runs its own startup file and nothing else comes of it, nor of a default home left unsafe."""
         keyed = sessions.keyed_homes(default)
         homes = {None: default / "home", "a" * 32: keyed / ("a" * 32) / "home", "b" * 32: keyed / ("b" * 32) / "home"}
         startup = (".profile", ".zprofile", ".bash_profile")  # A login sh, zsh or bash reads exactly one.
@@ -160,6 +160,15 @@ class SessionFixture(object):
         for key, home in homes.items():
             self.assertEqual([(home / name).read_text() for name in startup], [f"echo STARTUP-{key}\n"] * 3)
             self.assertFalse((home / "planted").exists())
+        # What a session of the default home makes of it refuses only that home's sessions: a keyed
+        # lifetime that runs and a new one are still admitted.
+        running = self.lifetime()
+        self.assertEqual(self.session(running, home="a" * 32)[1], 0)
+        self.addCleanup(lambda: [path.chmod(0o700) for path in (default / "cache", default)])
+        self.assertEqual(self.session(self.lifetime(), command="chmod 755 $XDG_CACHE_HOME $XDG_CACHE_HOME/..")[1], 0)
+        self.assertEqual(self.session(self.lifetime())[0]["error"]["code"], "persistent_home_unsafe")
+        for lifetime, key in ((running, "a" * 32), (self.lifetime(), "b" * 32)):
+            self.assertEqual(self.session(lifetime, command="echo ok", home=key)[1:3], (0, "ok\n"))
 
     def a_changed_home_is_refused(self, default):
         """A lifetime keeps the home it started with, the default one or the one of a key, and a request

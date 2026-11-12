@@ -61,15 +61,14 @@ def persistent_home(default: Path, key: str | None) -> tuple[Path, list[Path]]:
     of a key.
     """
     keyed = sessions.keyed_homes(default)
-    if key is None:
-        private_home(default)
-    else:
-        try:
-            default.mkdir(mode=0o700)
-        except FileExistsError:
-            pass
     _owner_only(keyed)
-    return (default, [keyed]) if key is None else (private_home(keyed / key), [default, keyed])
+    if key is None:
+        return private_home(default), [keyed]
+    try:
+        default.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    return private_home(keyed / key), [default, keyed]
 
 
 def _owner_only(path: Path) -> bool:
