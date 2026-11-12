@@ -202,7 +202,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(lines[1], "PermissionError" if landlock_scopes() else "connected")
         self.assertEqual(lines[2:], [str(uid), f"bus= runtime=/run/user/{uid}", lines[-1]], out)
         self.assertNotEqual(lines[-1], "escape=0")
-        self.assertEqual(err.count(MISSING), 2, err)
+        self.assertEqual(err.count("cannot access"), 2, err)  # Neither file of the machine's /tmp is here.
         with self.assertRaises(BlockingIOError):
             listener.accept()
         self.assertFalse(Path("/tmp/kept").exists() or Path("/dev/shm/kept").exists() or Path("/run/x").exists())
