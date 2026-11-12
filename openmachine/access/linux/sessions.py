@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -57,8 +58,12 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         if instance:
             try:
                 connection = restricted._connect(private, instance)
-            except Fault:
-                _end(instance)  # Its own work removed or replaced the socket, which it can write.
+            except Fault as fault:
+                # Its own work can write the socket: with none there, or another process's, the instance is
+                # ended. A spawner that is only busy keeps its lifetime's work.
+                if not isinstance(fault.__cause__, (FileNotFoundError, ConnectionRefusedError, type(None))):
+                    raise
+                _end(instance)
                 instance = None
         if instance is None:
             # Folders, worktrees and what is protected in them are fixed when an instance starts.
@@ -81,11 +86,17 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     cwd = request.folders[0] if request.folders else str(home / "home")  # Workspace starts in its first folder.
     body = json.dumps({"program": program, "argv": argv, "env": environment, "cwd": cwd,
                        "tty": request.terminal is not None}).encode()
-    connection.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
-    socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])
-    connection.sendall(body)
-    # The command's own byte, or the start of the spawner's report that nothing started.
-    first, ancillary, _, _ = connection.recvmsg(1, socket.CMSG_SPACE(struct.calcsize("3i")))
+    try:
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        socket.send_fds(connection, [struct.pack("!I", len(body))], [0, 1, 2])
+        connection.sendall(body)
+        # The command's own byte, or the start of the spawner's report that nothing started.
+        first, ancillary, _, _ = connection.recvmsg(1, socket.CMSG_SPACE(struct.calcsize("3i")))
+    except OSError:
+        first = b""
+    if not first:  # A command executes only once it reads this supervisor's answer, which was not sent.
+        raise Fault("lifetime_unavailable", "The lifetime's spawner did not answer; nothing was launched.",
+                    effect="known_no_effect")
     replies = connection.makefile("rb")
     vouched = None
     if first == b"\0":
@@ -106,7 +117,10 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
 def _end(instance: dict) -> None:
     """Kill an instance through its spawner, its first process, while that still is the recorded one."""
     if restricted._spawner_alive(instance):
-        os.kill(instance["pid"], signal.SIGKILL)
+        try:
+            os.kill(instance["pid"], signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def _remove(known: dict) -> None:
@@ -130,54 +144,61 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
     roots = {}
     for index, root in enumerate([] if scope is None else scope.grants()):
         try:
-            roots[root] = sandbox.git_entries(root)
-        except sandbox.TooLarge:
-            if index < len(scope.folders):
-                raise rules.FolderFault("folder_too_large", index, str(root)) from None
-            # A worktree that the folder rule refuses is not granted.
+            added = roots | {root: sandbox.git_entries(root)}
+            sandbox.protection(added)
+        except (sandbox.TooLarge, Fault) as refusal:
+            if index >= len(scope.folders):
+                continue  # A worktree that the folder rule refuses is not granted.
+            if isinstance(refusal, Fault):
+                raise
+            raise rules.FolderFault("folder_too_large", index, str(root)) from None
+        roots = added
     record = state / "code" / "sandbox.json"  # Beside the lifetimes, whose names hold no dot.
     with lease(record.with_suffix(".lock"), wait=True):
         try:
             known = json.loads(record.read_text())
-            known = {"instances": list(known["instances"]), "placeholders": list(known["placeholders"])}
-        except (FileNotFoundError, ValueError, KeyError, TypeError):
-            known = {"instances": [], "placeholders": []}  # An unreadable record removes nothing.
-        known["instances"] = [item for item in known["instances"] if restricted._spawner_alive(item)]
+            known = {"instances": [item for item in known["instances"] if restricted._spawner_alive(item)],
+                     "placeholders": list(map(str, known["placeholders"]))}
+        except (OSError, ValueError, KeyError, TypeError):
+            known = {"instances": [], "placeholders": []}  # A missing or unreadable record removes nothing.
         if not known["instances"]:
             _remove(known)
         placeholders = [root / name for root in roots for name in sandbox.PROTECTED if not os.path.lexists(root / name)]
         known["placeholders"] = list(dict.fromkeys([*known["placeholders"], *map(str, placeholders)]))
-        save_json(record, known)  # Before any exists, so that none is left unrecorded.
         instance = None
         try:
+            save_json(record, known)  # Before any exists, so that none is left unrecorded.
             for path in placeholders:
                 try:
                     path.mkdir()
                 except OSError:
                     pass  # What this user cannot create here, its restricted work cannot either.
             hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state]
-            try:
-                arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
-            except sandbox.TooLarge:
-                raise Fault("folder_too_large", "The Workspace folders hold more repositories than one sandbox "
-                            "protects; choose smaller folders in the Console.", effect="known_no_effect") from None
+            arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
             instance = _start_spawner([str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
             known["instances"].append(instance)
             save_json(record, known)
-        except BaseException:
+        except BaseException as error:
             if instance:
                 _end(instance)  # No instance runs that this record does not name.
             elif not known["instances"]:
                 _remove(known)
-                save_json(record, known)
+                try:
+                    save_json(record, known)
+                except OSError:
+                    pass  # The next start removes nothing that is not there.
+            if isinstance(error, (OSError, sandbox.TooLarge)):  # The record, or a folder that changed meanwhile.
+                raise Fault("lifetime_unavailable", "The lifetime's sandbox could not be started; nothing was "
+                            "launched.", effect="known_no_effect") from error
             raise
     return instance
 
 
 def _start_spawner(command: list[str], private: Path) -> dict:
-    """Start bubblewrap with the spawner as the instance's first process; fail closed unless its identity
-    and membership verify."""
+    """Start bubblewrap with the spawner as the instance's first process; fail closed unless its identity,
+    its membership and the instance's mounts verify."""
     ready_read, ready_write = os.pipe()
+    machine = sandbox.mounts()
     try:
         process = subprocess.Popen([*command, str(private), str(ready_write)], stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, pass_fds=[ready_write],
@@ -203,9 +224,13 @@ def _start_spawner(command: list[str], private: Path) -> dict:
                     connection.connect("spawner")
                 pid = sandbox.peer(connection)
             marker = sandbox.namespace(pid)
-        except OSError as error:
+            moved = sandbox.foreign(sandbox.mounts(pid), machine, sandbox.mounts())
+        except (OSError, ValueError, IndexError) as error:
             raise Fault("lifetime_unverifiable", "The lifetime's spawner is not reachable; nothing was launched.",
                         effect="known_no_effect") from error
+        if moved:
+            raise Fault("lifetime_unverifiable", f"The lifetime's sandbox mounted something else at {moved[0]}; "
+                        "nothing was launched.", effect="known_no_effect")
         spawner = restricted._confirm_spawner(f"{pid} {int(reported)}".encode(), marker)
     except BaseException:
         os.killpg(process.pid, signal.SIGKILL)  # Still an unreaped child, so its PID is its own.
@@ -223,9 +248,12 @@ def _spawner() -> None:
     sandbox.scope()
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with restricted._Inside(directory):
-        Path("spawner").unlink(missing_ok=True)
+        try:
+            Path("spawner").unlink(missing_ok=True)
+        except OSError:
+            shutil.rmtree("spawner")  # A directory, which the lifetime's earlier work left at the name.
         listener.bind("spawner")
-    listener.listen(16)
+    listener.listen(128)  # A burst of sessions waits here; a full queue refuses the next at once.
     os.write(ready, str(sandbox.start(os.getpid())).encode())
     os.close(ready)
     restricted._serve(listener, vouch=True)

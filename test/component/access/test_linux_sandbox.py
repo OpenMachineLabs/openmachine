@@ -55,9 +55,19 @@ class SandboxArgumentTests(unittest.TestCase):
         for expected in (["--unshare-pid"], ["--ro-bind", "/", "/"], ["--proc", "/proc"], ["--dev", "/dev"], ["--tmpfs", "/tmp"],
                          ["--tmpfs", "/run"], ["--cap-drop", "ALL"] if os.getuid() == 0 else ["--unshare-user"]):
             self.assertIn(" ".join(expected), " ".join(probed))
-        with patch.object(sandbox.os, "getuid", return_value=0):
-            self.assertEqual(sandbox._base()[:2], ["--cap-drop", "ALL"])
-            self.assertNotIn("--unshare-user", sandbox._base())
+        # Root keeps its user and gets no capability; what /proc holds beside the processes is read-only.
+        proc = self.root / "proc"
+        for name in ("sys", "42", "acpi"):
+            (proc / name).mkdir(parents=True)
+        (proc / "sysrq-trigger").write_text("")
+        (proc / "self").symlink_to("42")
+        scandir = os.scandir
+        with patch.object(sandbox.os, "getuid", return_value=0), patch.object(sandbox.os, "scandir", lambda path: scandir(proc)):
+            base = sandbox._base()
+        self.assertEqual(base[:2], ["--cap-drop", "ALL"])
+        self.assertNotIn("--unshare-user", base)
+        self.assertEqual(pairs(base, "--ro-bind"), ["/", *(str(proc / name) for name in ("acpi", "sys", "sysrq-trigger"))])
+        self.assertLess(base.index("/proc"), base.index(str(proc / "acpi")))
 
     def test_read_denials_are_physical_paths(self):
         home, elsewhere = self.root / "home", self.root / "elsewhere"
@@ -134,7 +144,7 @@ class SandboxArgumentTests(unittest.TestCase):
         self.assertEqual(sorted(readonly[-4:]), sorted(str(folder / name) for name in (".claude", ".mcp.json", ".git", "vendor/lib/.git")))
         self.assertGreater(arguments.index(str(folder)), max(index for index, item in enumerate(arguments) if item == "--remount-ro"))
         # More mounts than one bubblewrap takes are refused, not passed on for it to fail.
-        with patch.object(sandbox, "MAX_ARGUMENTS", len(arguments) - 1), self.assertRaises(sandbox.TooLarge):
+        with patch.object(sandbox, "MAX_PROTECTION", 3 * 6 - 1), self.assertRaises(sandbox.TooLarge):
             self.instance({folder: sandbox.git_entries(folder)})
 
     def test_a_protected_name_that_is_a_link_cannot_be_held_in_place(self):
@@ -158,6 +168,30 @@ class SandboxArgumentTests(unittest.TestCase):
         self.assertIsNone(sandbox.sender([(socket.SOL_SOCKET, socket.SCM_CREDENTIALS, unseen)]))
         self.assertIsNone(sandbox.sender([(socket.SOL_SOCKET, socket.SCM_RIGHTS, credentials)]))
         self.assertIsNone(sandbox.sender([]))
+
+    def test_an_instance_mount_that_holds_another_path_is_found(self):
+        machine = [("/", "8:1", "/"), ("/dev", "0:5", "/"), ("/home", "8:2", "/"), ("/mnt/data", "8:3", "/sub volume")]
+        instance = [
+            ("/", "0:90", "/"), ("/", "8:1", "/"), ("/home", "8:2", "/"),  # bubblewrap's root, then the machine's
+            ("/proc", "0:91", "/"), ("/tmp", "0:92", "/"),  # filesystems bubblewrap made
+            ("/dev/null", "0:5", "/null"), ("/home/dev/.netrc", "0:5", "/null"),  # /dev/null, also over a hidden file
+            ("/home/dev/code", "8:2", "/dev/code"), ("/home/dev/code/a/.git", "8:2", "/dev/code/a/.git"),
+            ("/mnt/data/work", "8:3", "/sub volume/work"),
+        ]
+        self.assertEqual(sandbox.foreign(instance, machine), [])
+        # A mount the machine had only before, or only after, the instance started is the machine's.
+        self.assertEqual(sandbox.foreign([*instance, ("/media/usb", "8:9", "/")], machine, [*machine, ("/media/usb", "8:9", "/")]), [])
+        # A directory swapped for a link while bubblewrap mounted: the link's target, at the path or elsewhere.
+        swapped = [("/home/dev/code/a", "8:2", "/dev/.ssh"), ("/home/dev/.ssh", "8:2", "/dev/code/a"), ("/home/dev/code", "8:1", "/etc")]
+        self.assertEqual(sandbox.foreign([*instance, *swapped], machine), [point for point, _, _ in swapped])
+
+    @unittest.skipUnless(sys.platform == "linux", "reads /proc")
+    def test_this_process_mounts_are_read_with_their_escapes(self):
+        found = sandbox.mounts()
+        self.assertEqual(sandbox.foreign(found, found), [])
+        self.assertIn("/", [point for point, _, _ in found])
+        with patch.object(Path, "read_bytes", return_value=b"36 35 98:0 /a\\040b /mnt/x\\134y rw - ext3 /dev/root rw\n"):
+            self.assertEqual(sandbox.mounts(), [("/mnt/x\\y", "98:0", "/a b")])
 
     def test_no_bubblewrap_names_its_cause(self):
         installed = self.root / "bwrap"

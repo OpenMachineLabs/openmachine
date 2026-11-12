@@ -126,6 +126,13 @@ class GitHubClientTests(unittest.TestCase):
                 self.refused(directory / "om-code")
             self.assertEqual(self.check(self.client), self.client)
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux keeps the sandbox home under the account home")
+    def test_on_linux_a_home_that_cannot_be_created_refuses_before_anything_starts(self):
+        from openmachine.access.linux import sessions as linux
+        with patch.object(rules, "account_home", return_value=self.client), self.assertRaises(Fault) as caught:
+            linux.persistent_home()  # The account home is a file here.
+        self.assertEqual((caught.exception.code, caught.exception.effect), ("persistent_home_unsafe", "known_no_effect"))
+
     @unittest.skipUnless(sys.platform == "darwin", "macOS keeps restricted runtime trees and ACLs")
     def test_clients_where_restricted_work_writes_are_refused_by_physical_identity(self):
         runtime = self.root / "omc/abc/om-code"

@@ -6,6 +6,7 @@ import functools
 import glob
 import os
 from pathlib import Path
+import re
 import socket
 import stat
 import struct
@@ -23,15 +24,13 @@ HOME_DENIED = (".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/
 SYSTEM_DENIED = ("/etc/shadow", "/etc/gshadow", "/etc/sudoers", "/etc/sudoers.d", "/etc/ssh/ssh_host_*_key")
 # No Workspace folder lies in or holds one of these.
 SYSTEM = ("/etc", "/usr", "/bin", "/sbin", "/lib*", "/boot", "/var", "/dev", "/proc", "/sys", "/run", "/tmp")
-# Kernel controls that root's ownership alone can write, with no capability: read-only in every instance.
-KERNEL = ("/proc/sys", "/proc/sysrq-trigger", "/proc/irq", "/proc/bus", "/proc/fs")
 GPU = ("/dev/nvidia*", "/dev/dri", "/dev/kfd")
 # What the owner's tools later run outside any sandbox, at the top of a Workspace folder or worktree.
 PROTECTED = (".vscode", ".idea", ".claude", ".codex", ".agents", ".cursor", ".gemini", ".husky")
 DEPTH = 4
 MAX_ENTRIES = 100_000
 MAX_REPOSITORIES = 500  # In one folder or worktree.
-MAX_ARGUMENTS = 8900  # bubblewrap takes 9000, the spawner's command among them.
+MAX_PROTECTION = 8000  # Arguments: bubblewrap takes 9000 in all.
 PROBE_SECONDS = 10
 
 
@@ -63,12 +62,15 @@ def system_directories() -> list[Path]:
 
 def _base() -> list[str]:
     """What every instance and the probe share: new user (unless root), PID and IPC namespaces, a read-only root,
-    a private /dev, /proc with its kernel controls read-only, /tmp, and /run that holds only the lifetime's
-    own runtime directory."""
+    a private /dev, /proc, /tmp, and /run that holds only the lifetime's own runtime directory."""
     root = os.getuid() == 0
+    # The kernel's controls in /proc belong to root, whose ownership alone writes many of them, with no
+    # capability: everything there but the processes is the machine's own, read-only.
+    kernel = sorted(entry.path for entry in os.scandir("/proc")
+                    if not entry.name.isdigit() and not entry.is_symlink()) if root else []
     return [*(["--cap-drop", "ALL"] if root else ["--unshare-user"]), "--unshare-pid", "--unshare-ipc", "--as-pid-1",
             "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-            *(item for path in KERNEL if os.path.exists(path) for item in ("--ro-bind", path, path)),
+            *(item for path in kernel for item in ("--ro-bind", path, path)),
             "--tmpfs", "/tmp", "--tmpfs", "/run",
             "--perms", "0700", "--dir", f"/run/user/{os.getuid()}", "--chdir", "/"]
 
@@ -133,8 +135,8 @@ def _fixed(path: Path) -> bool:
     """Whether a protected path exists, as something a mount can hold in place."""
     try:
         linked = stat.S_ISLNK(path.lstat().st_mode)
-    except FileNotFoundError:
-        return False
+    except OSError:
+        return False  # Missing, or where this user cannot look, and so its restricted work cannot either.
     if linked:
         # A mount lands on a link's target and leaves the name free to be replaced.
         raise Fault("scope_unsupported", f"{path} is a link, which a Workspace session cannot protect. Replace it "
@@ -166,14 +168,10 @@ def _masks(paths: list[Path], exposed: dict[Path, str]) -> list[str]:
     return found
 
 
-def protected(root: Path, entries: list[Path]) -> list[Path]:
-    """What exists of a root's protected paths: its top-level names and its .git entries. A link among them
-    is a Fault."""
-    return [path for path in (*(root / name for name in (*PROTECTED, ".mcp.json")), *entries) if _fixed(path)]
-
-
-def _protection(roots: dict[Path, list[Path]]) -> list[str]:
-    """Read-only mounts over what the owner's tools later run outside a sandbox.
+def protection(roots: dict[Path, list[Path]]) -> list[str]:
+    """Read-only mounts over what the owner's tools later run outside a sandbox: at the top of each root
+    the protected names and .mcp.json, and each .git entry. A link among them is a Fault; more mounts than
+    one instance takes is TooLarge.
 
     A mount holds a path, not a name. So each .git, a repository's directory or a worktree's or submodule's
     file, is wholly read-only, and every directory between it and its root is bound onto itself: a directory
@@ -181,9 +179,11 @@ def _protection(roots: dict[Path, list[Path]]) -> list[str]:
     """
     pinned, readonly = set(), []
     for root, entries in roots.items():
-        readonly += protected(root, entries)
+        readonly += [path for path in (*(root / name for name in (*PROTECTED, ".mcp.json")), *entries) if _fixed(path)]
         for entry in entries:
             pinned.update(parent for parent in entry.parents if parent != root and parent.is_relative_to(root))
+    if 3 * (len(pinned) + len(readonly)) > MAX_PROTECTION:
+        raise TooLarge
     return ([item for path in sorted(pinned) for item in ("--bind", str(path), str(path))]
             + [item for path in readonly for item in ("--ro-bind", str(path), str(path))])
 
@@ -192,8 +192,7 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     """One instance's bubblewrap arguments: read the machine except what is hidden, the denied areas and
     Core's control paths, and write only the sandbox home, the Workspace roots, the lifetime's directory
     in the runtime tree and its own /tmp and /run. roots maps each writable folder and worktree to its
-    .git entries; client is the directory of Core's copy of the om-code client. TooLarge when the folders
-    together hold more repositories than one instance protects."""
+    .git entries; client is the directory of Core's copy of the om-code client."""
     found = _base()
     for path in (path for pattern in GPU for path in glob.glob(pattern)):
         found += ["--dev-bind", path, path]
@@ -210,10 +209,39 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     found += _masks([*hidden, private.parent], exposed)
     for path in (home, *roots):
         found += ["--bind", str(path), str(path)]
-    found += _protection(roots)
-    if len(found) > MAX_ARGUMENTS:
-        raise TooLarge
-    return found
+    return found + protection(roots)
+
+
+def mounts(pid: int | str = "self") -> list[tuple[str, str, str]]:
+    """Each mount a process sees, in order: its mount point, its device and its root within that device."""
+    def text(field: bytes) -> str:
+        return os.fsdecode(re.sub(rb"\\([0-7]{3})", lambda escape: bytes([int(escape[1], 8)]), field))
+
+    return [(text(fields[4]), text(fields[2]), text(fields[3]))
+            for fields in map(bytes.split, Path(f"/proc/{pid}/mountinfo").read_bytes().splitlines())]
+
+
+def _held(path: str, machine: list[tuple[str, str, str]]) -> tuple[str, str]:
+    """The device and the root within it of what the machine has at a path."""
+    point, device, root = max((mount for mount in reversed(machine)
+                               if path == mount[0] or path.startswith(mount[0].rstrip("/") + "/")),
+                              key=lambda mount: len(mount[0]))
+    return device, "/" + "/".join(part for part in f"{root}/{path[len(point):]}".split("/") if part)
+
+
+def foreign(instance: list[tuple[str, str, str]], *machine: list[tuple[str, str, str]]) -> list[str]:
+    """The mount points of an instance that hold something else than the machine has at that path.
+
+    Every mount of an instance binds a path onto itself, but for the filesystems bubblewrap makes and
+    /dev/null over a hidden file. Another instance that writes the same folder can swap a directory for a
+    link while bubblewrap mounts, and the mount then holds the link's target. machine is the machine's
+    mounts before and after the instance started, since they change.
+    """
+    devices = {mount[1] for mounts in machine for mount in mounts}
+    return [point for point, device, root in instance
+            if device in devices and not any(
+                (point, device, root) in mounts or (device, root) in (_held(point, mounts), _held("/dev/null", mounts))
+                for mounts in machine)]
 
 
 def scope() -> None:

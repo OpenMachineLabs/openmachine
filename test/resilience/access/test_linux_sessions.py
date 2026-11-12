@@ -24,6 +24,21 @@ GIT = ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.inval
        "-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always"]
 
 
+# Every file of /proc outside the processes' own directories that opens for writing.
+WRITABLE_CONTROLS = """
+import os
+for directory, names, files in os.walk('/proc'):
+    if directory == '/proc':
+        names[:] = [name for name in names if not name.isdigit() and not os.path.islink('/proc/' + name)]
+    for name in files:
+        try:
+            os.close(os.open(os.path.join(directory, name), os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            continue
+        print('WRITABLE', os.path.join(directory, name))
+"""
+
+
 def detached(token):
     """fork, setsid, fork: a job in a new session whose command line holds token, writing a heartbeat."""
     script = ("import os,sys,time\nif os.fork(): sys.exit(0)\nos.setsid()\nif os.fork(): sys.exit(0)\n"
@@ -125,7 +140,8 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
             "cat /etc/shadow /etc/gshadow /etc/sudoers; ls -A /etc/sudoers.d | wc -l; echo x >> /etc/passwd; "
             # Root owns the kernel's controls, and ownership alone would write them: the same value back.
             "for control in kernel/core_pattern kernel/modprobe kernel/sysrq; do "
-            "cat /proc/sys/$control >> /proc/sys/$control || echo refused 1>&2; done; true"))
+            "cat /proc/sys/$control >> /proc/sys/$control || echo refused 1>&2; done; "
+            f"python3 -c {shlex.quote(WRITABLE_CONTROLS)}; true"))
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertEqual(out.split()[0], "0")
         self.assertNotIn("chown=0", out)
@@ -133,6 +149,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(out.split()[3:], ["0"], out + err)  # Nothing of the secrets, and an empty directory.
         self.assertIn(READ_ONLY, err)
         self.assertEqual(err.count("refused"), 3, err)
+        self.assertNotIn("WRITABLE", out)
 
     def test_the_unreadable_areas_and_the_control_paths_are_empty(self):
         for item in sandbox.HOME_DENIED:
@@ -324,8 +341,8 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         socket_path = self.instance_directory(lifetime) / "spawner"
         replace = ("import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); "
                    "time.sleep(60)")
-        for count, command in ((2, f"rm {socket_path}"),
-                               (3, f"rm {socket_path}; setsid python3 -c {shlex.quote(replace)} {socket_path} "
+        for count, command in ((2, f"rm {socket_path}"), (3, f"rm {socket_path}; mkdir {socket_path}"),
+                               (4, f"rm -r {socket_path}; setsid python3 -c {shlex.quote(replace)} {socket_path} "
                                    "</dev/null >/dev/null 2>&1 & sleep 0.5")):
             with self.subTest(command=command):
                 self.assertEqual(self.session(lifetime, command=command)[1], 0)
@@ -333,6 +350,18 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 self.assertEqual((reply["status"], out), ("admitted", "job=1\n"), reply)
                 self.assertEqual(len(self.instances(lifetime)), count)
                 self.assertEqual(len(self.leftover()), 2)  # One bubblewrap and its spawner.
+
+    def test_a_burst_of_sessions_keeps_the_lifetimes_instance_and_its_work(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime, command=detached("burst-job"))[1], 0)
+        started = [self.launch(self.request(lifetime, "read_only", "exec", "true")) for _ in range(40)]
+        for process, control in started:
+            with control:
+                control.makefile("rb").readline()
+            process.communicate(timeout=60)
+        reply, _, out, _ = self.session(lifetime, command=f"{running('burst-job')}; echo job=$?")
+        self.assertEqual((reply["status"], out), ("admitted", "job=0\n"), reply)
+        self.assertEqual(len(self.instances(lifetime)), 1)
 
     def test_an_instance_that_no_record_names_is_ended(self):
         folder = self.root / "folder"
@@ -356,23 +385,31 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                     time.sleep(0.05)
                 self.assertEqual(self.leftover(), [])
         # A record that cannot be read removes nothing and holds no admission.
-        (self.state / "code/sandbox.json").write_text("{")
-        self.assertEqual(self.session(self.lifetime(), "workspace", "true", folders=[str(folder)])[1], 0)
-        self.assertEqual(sorted(os.listdir(folder)), sorted(sandbox.PROTECTED))
+        for text in ("{", "{}", '{"instances": [1], "placeholders": []}', '{"instances": [{}], "placeholders": [1]}'):
+            with self.subTest(record=text):
+                (self.state / "code/sandbox.json").write_text(text)
+                lifetime = self.lifetime()
+                self.assertEqual(self.session(lifetime, "workspace", "true", folders=[str(folder)])[1], 0)
+                self.assertEqual(sorted(os.listdir(folder)), sorted(sandbox.PROTECTED))
+                self.kill(lifetime)
 
     def test_a_stopped_spawner_bounds_admission(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)
         os.kill(self.instances(lifetime)[0]["pid"], signal.SIGSTOP)
         started = time.monotonic()
-        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
+        process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran > $HOME/ran"),
                                     "from openmachine.access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
-        # The request may already be queued at the spawner: a retry is not known to be safe.
-        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("launch_unverified", "effect_unknown"))
+        # A request queued at the spawner starts nothing: its command would execute only on this
+        # supervisor's answer, and the supervisor is gone.
+        self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unavailable", "known_no_effect"))
         for stream in (process.stdin, process.stdout, process.stderr):
             stream.close()
+        os.kill(self.instances(lifetime)[0]["pid"], signal.SIGCONT)
+        self.assertEqual(self.session(lifetime, command="echo next")[2], "next\n")
+        self.assertFalse((self.home / "ran").exists())
 
     def leftover(self):
         """Processes whose command line names this test's account home, as every spawner's does."""
@@ -386,6 +423,13 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
             # The self-test classifies this supervisor, which is outside, as a member.
             "self-test": ("from openmachine.access.linux import sandbox as _b\n_b.member = lambda pid, marker: True\n",
                           "lifetime_unverifiable"),
+            # There is no bubblewrap to run.
+            "no bubblewrap": ("from pathlib import Path as _W\nfrom openmachine.access.linux import sandbox as _b\n"
+                              "_b.bubblewrap = lambda: _W('/nonexistent/bwrap')\n", "lifetime_unverifiable"),
+            # A mount holds another path than its own, as when a directory was swapped for a link meanwhile.
+            "foreign mount": ("from openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
+                              f"_b.arguments = lambda **given: [*_arguments(**given), '--bind', {str(self.account)!r}, "
+                              f"{str(self.root)!r}]\n", "lifetime_unverifiable"),
             # The spawner is found in this supervisor's own PID namespace.
             "own namespace": ("import os\nfrom openmachine.access.linux import sandbox as _b\n_namespace = _b.namespace\n"
                               "_b.namespace = lambda pid: _namespace(os.getpid())\n", "lifetime_unverifiable"),
@@ -562,7 +606,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.repository(many / "one")
         self.repository(many / "two")
         few = "from openmachine.access.linux import sandbox as _b\n_b.MAX_REPOSITORIES = 1\n"
-        mounts = "from openmachine.access.linux import sandbox as _b\n_b.MAX_ARGUMENTS = 40\n"
+        mounts = "from openmachine.access.linux import sandbox as _b\n_b.MAX_PROTECTION = 5\n"
         for folder, prelude, code in ((large, small, "folder_too_large"), (many, few, "folder_too_large"),
                                       (many, mounts, "folder_too_large"), (linked, "", "scope_unsupported")):
             with self.subTest(code=code):
@@ -571,6 +615,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 out, _ = process.communicate(timeout=60)
                 self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], out),
                                  ("denied", code, "known_no_effect", b""))
+                self.assertIn(str(folder), reply["error"]["message"])
                 self.assertIn("Console", reply["error"]["message"])
                 self.assertEqual(self.leftover(), [])
         self.assertEqual(os.listdir(target), [])
@@ -588,6 +633,16 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual((reply["status"], process.returncode), ("admitted", 1), err)
         self.assertTrue((code / "new").exists())
         self.assertFalse((wide / "new").exists())
+        # Nor is a worktree with a link at a protected name.
+        linked_worktree = self.root / "linked-worktree"
+        subprocess.run([*GIT, "-C", str(code), "worktree", "add", "-q", "-b", "linked", str(linked_worktree)], check=True,
+                       capture_output=True)
+        (linked_worktree / ".claude").symlink_to(target)
+        reply, status, _, err = self.session(self.lifetime(), "workspace", f"echo x > {code}/more && echo x > {linked_worktree}/new",
+                                             folders=[str(code)])
+        self.assertEqual((reply["status"], status), ("admitted", 1), err)
+        self.assertTrue((code / "more").exists())
+        self.assertFalse((linked_worktree / "new").exists())
 
     def test_terminal_loss_leaves_nohup_work_running(self):
         lifetime = self.lifetime()

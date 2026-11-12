@@ -127,7 +127,7 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
     longer the stored one.
     """
     home, denied = _areas()
-    found = []
+    found, roots = [], {}
     for index, text in enumerate(paths):
         try:
             fd = os.open(text, os.O_RDONLY | os.O_DIRECTORY)
@@ -152,7 +152,8 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
             raise FolderFault(code, index, text)
         if sys.platform == "linux" and not admission:
             try:
-                sandbox.protected(path, sandbox.git_entries(path))
+                roots[path] = sandbox.git_entries(path)
+                sandbox.protection(roots)  # With the folders before it, as one instance protects them all.
             except sandbox.TooLarge:
                 raise FolderFault("folder_too_large", index, text) from None
             except Fault:  # A link at a protected name, which an instance refuses.

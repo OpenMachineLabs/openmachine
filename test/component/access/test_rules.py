@@ -195,6 +195,13 @@ class LinuxFolderRuleTests(unittest.TestCase):
             # Admission leaves the search to the instance's start.
             self.assertEqual(self.check(self.code, admission=True), [self.code])
 
+    def test_the_folder_check_counts_what_one_instance_protects_over_all_folders(self):
+        for folder in (self.code, self.notes):
+            (folder / ".git").mkdir()
+        with patch.object(rules.sandbox, "MAX_PROTECTION", 5):  # One read-only mount takes three arguments.
+            self.assertEqual(self.check(self.code), [self.code])
+            self.refused("folder_too_large", 1, self.code, self.notes)
+
     def test_the_folder_check_refuses_a_link_at_a_protected_name(self):
         (self.code / "sub").mkdir()
         for link in (self.code / ".vscode", self.code / "sub/.git"):
