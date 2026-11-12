@@ -33,7 +33,7 @@ class ProfileTests(unittest.TestCase):
         home, writable, worktree = self.root / "H", self.root / "Dev (1)+x/core", self.root / "wt"
         for path in (home, writable, worktree):
             path.mkdir(parents=True)
-        arguments = dict(home=home, folders=[writable, worktree], private=self.root / "T/omc/lifetime",
+        arguments = dict(home=home, others=[self.root / "homes"], folders=[writable, worktree], private=self.root / "T/omc/lifetime",
                          control=[self.root / "state"], denied=[self.root / "home/Library"],
                          exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om-code")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
@@ -50,7 +50,7 @@ class ProfileTests(unittest.TestCase):
             nested = seatbelt.profile(**arguments)  # A Git dir the profile cannot name stays fully denied.
             self.assertNotIn('qu"ote', nested)
             with self.assertRaises(Fault) as caught:
-                seatbelt.profile(home=home, folders=[self.root / 'quote"d'], private=self.root, control=[],
+                seatbelt.profile(home=home, others=[], folders=[self.root / 'quote"d'], private=self.root, control=[],
                                  denied=[], exceptions=[], executable=self.root / "omc/om-code")
             self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
@@ -81,6 +81,10 @@ class ProfileTests(unittest.TestCase):
         tail = [protected,
                 rf'(allow file-write-unlink (require-all {inside} (regex #"^(/.*)?/\.git$") (vnode-type REGULAR-FILE SYMLINK)))',
                 "(deny file-clone (vnode-type DIRECTORY))", config,
+                # Every other sandbox home stays closed inside a folder too, but for the home that lies among them.
+                f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (require-all (require-any '
+                f'(subpath "{self.root / "homes"}")) (require-not (subpath "{home}"))))',
+                f'(allow file-read-metadata (literal "{self.root / "homes"}"))',
                 f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))']
         self.assertEqual(lines[lines.index(freeze):], [freeze, *tail])
         self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
@@ -116,7 +120,7 @@ class ProfileTests(unittest.TestCase):
     def test_only_the_named_executable_runs_inside_a_denied_area(self):
         client, denied = self.root / "home/Library/om/om-code", self.root / "home/Library"
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
-            text = seatbelt.profile(home=self.root / "H", folders=[], private=self.root / "T/p", control=[self.root / "state"],
+            text = seatbelt.profile(home=self.root / "H", others=[], folders=[], private=self.root / "T/p", control=[self.root / "state"],
                                     denied=[denied], exceptions=[], executable=client)
         allow = f'(allow file-read* process-exec (literal "{client}"))'
         lines = text.splitlines()

@@ -19,15 +19,15 @@ from openmachine.foundation.state import lease, private_directory, save_json
 SPAWNER = "from openmachine.access.linux import sessions; sessions._spawner()"
 
 
-def persistent_home() -> Path:
-    """The one owner-only restricted-mode home of this OS user; unconfined code never trusts its contents."""
+def persistent_home(key: str | None) -> tuple[Path, list[Path]]:
+    """This OS user's sandbox home for a session and where every other one is (restricted.persistent_home)."""
     home = sandbox.home(rules.account_home())
     try:
         home.parent.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         raise Fault("persistent_home_unsafe", f"{home.parent} cannot be created; nothing was launched.",
                     effect="known_no_effect") from error
-    return restricted.private_home(home)
+    return restricted.persistent_home(home, key)
 
 
 def _admit_restricted(request: sessions.SessionRequest, account, state: Path) -> tuple:
@@ -38,7 +38,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
-    home = persistent_home()
+    home, others = persistent_home(request.home)
     # The lifetime's directory in the runtime tree, bound into its instance: the spawner listens in it.
     private = private_directory(sandbox.runtime(rules.account_home()) / restricted.digest(request.lifetime)[:12])
     lifetime = sessions.Lifetime(state, request.lifetime)
@@ -60,7 +60,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
                 instance = None
         if instance is None:
             # Folders, worktrees and what is protected in them are fixed when an instance starts.
-            instance, release = _start_instance(bubblewrap, scope, state, home, private)
+            instance, release = _start_instance(bubblewrap, scope, state, home, others, private)
             with release:  # Closed unanswered, however this process ends: no instance runs that no record names.
                 try:
                     record["instances"].append(instance)
@@ -125,7 +125,7 @@ def _remove(known: dict) -> None:
     known["placeholders"] = []
 
 
-def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, home: Path,
+def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, home: Path, others: list[Path],
                     private: Path) -> tuple[dict, socket.socket]:
     """Start one instance, which serves once its release is sent a byte. Its placeholders, the empty
     directories under the protected names that do not exist, so that none can be created later, are created
@@ -170,7 +170,7 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
                 except OSError as error:  # The folder's owner can restore its mode, and so can restricted work.
                     raise Fault("scope_unsupported", f"{path} cannot be created to protect it. Make the folder "
                                 "writable, or change it in the Console.", effect="known_no_effect") from error
-            hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state]
+            hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state, *others]
             arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
             instance, release = _start_spawner(
                 [str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)

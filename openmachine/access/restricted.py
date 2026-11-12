@@ -1,4 +1,4 @@
-"""What the restricted backends share: the persistent home's layout, Core's copy of the om-code client,
+"""What the restricted backends share: the persistent homes' layout, Core's copy of the om-code client,
 process identity, and an instance's spawner with its launch frames, relay and exit report."""
 
 import errno
@@ -49,27 +49,41 @@ def environment(base: dict, private: Path) -> dict:
                    "npm_config_cache": str(private / "cache" / "npm")}
 
 
-def private_home(home: Path) -> Path:
-    """Create or check the owner-only restricted-mode home; unconfined code never trusts its contents.
+def persistent_home(default: Path, key: str | None) -> tuple[Path, list[Path]]:
+    """Create or check this OS user's persistent sandbox homes. Returns the one a session uses, the default
+    one or the one of the key its request names, made on first use, and where every other one is: the
+    default home and the directory of the keyed ones, which may hold the session's own.
 
-    Every restricted policy and lifetime shares it, so a later session may run what an earlier one left
-    here, such as shell startup files or cached packages, but only inside the later session's own sandbox.
+    Every restricted session of one home shares it, whatever its policy and lifetime, so a later session
+    may run what an earlier one left there, such as shell startup files or cached packages, but only
+    inside its own sandbox. A sandbox reads and writes no home but its own, so nothing left in one home
+    reaches a session of another. The others exist before any sandbox starts, so that a mount can hide them.
     """
+    keyed = sessions.keyed_homes(default)
+    private_home(default)
+    _owner_only(keyed)
+    return (default, [keyed]) if key is None else (private_home(keyed / key), [default, keyed])
+
+
+def _owner_only(path: Path) -> bool:
+    """Create or check one owner-only directory that is no link and carries no ACL; whether it was created."""
     try:
-        home.mkdir(mode=0o700)
+        path.mkdir(mode=0o700)
         created = True
     except FileExistsError:
         created = False
-    for path in (home, *(home / name for name in ("home", "cache", "config", "data", "state"))):
-        if path != home:
-            try:
-                path.mkdir(mode=0o700)
-            except FileExistsError:
-                pass
-        info = path.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or seatbelt.has_acl(path):
-            raise Fault("persistent_home_unsafe", "The persistent sandbox home must hold owner-only directories without "
-                        "links or ACLs; move it aside to recreate it.", effect="known_no_effect")
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or seatbelt.has_acl(path):
+        raise Fault("persistent_home_unsafe", "The persistent sandbox home must hold owner-only directories without "
+                    "links or ACLs; move it aside to recreate it.", effect="known_no_effect")
+    return created
+
+
+def private_home(home: Path) -> Path:
+    """Create or check one owner-only sandbox home; unconfined code never trusts its contents."""
+    created = _owner_only(home)
+    for name in ("home", "cache", "config", "data", "state"):
+        _owner_only(home / name)
     if created:
         identity = _git_identity()
         if identity:
@@ -104,12 +118,12 @@ def _scope(request: sessions.SessionRequest, state: Path) -> "rules.Scope | None
 
 
 def _record(lifetime: sessions.Lifetime, request: sessions.SessionRequest) -> dict:
-    """The lifetime's record, read under its lock: new, or one of the request's policy and folders."""
-    grant = digest(json.dumps({"policy": request.policy, "folders": request.folders},
+    """The lifetime's record, read under its lock: new, or one of the request's policy, folders and home."""
+    grant = digest(json.dumps({"policy": request.policy, "folders": request.folders, "home": request.home},
                               sort_keys=True, separators=(",", ":")))
     record = lifetime.read() or {"format": 1, "policy": request.policy, "grant_sha256": grant, "instances": []}
     if record["policy"] != request.policy or record.get("grant_sha256") != grant:
-        raise Fault("lifetime_changed", "This lifetime's policy or folders changed; start sessions in a new "
+        raise Fault("lifetime_changed", "This lifetime's policy, folders or home changed; start sessions in a new "
                     "lifetime.", effect="known_no_effect")
     return record
 

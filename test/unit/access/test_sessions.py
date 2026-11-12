@@ -14,7 +14,7 @@ from openmachine.access.linux import sandbox
 from openmachine.access.macos import seatbelt as macos
 from openmachine.foundation.sanitize import Fault
 
-VALID = {"protocol": 3, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test",
+VALID = {"protocol": 4, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test",
          "connection": "100.64.0.2 52144 100.64.0.1 22"}
 FOLDERS = ["/Users/dev/code", "/Users/dev/Documents/notes"]
 BROKER = "https://127.0.0.1:41234"
@@ -34,9 +34,15 @@ class RequestTests(unittest.TestCase):
         self.assertEqual((request.kind, request.terminal.term, request.environment), ("exec", "xterm-256color",
                                                                                       {"LANG": "en_US.UTF-8"}))
         self.assertEqual(self.parse(VALID | {"policy": "workspace", "folders": FOLDERS}).folders, FOLDERS)
+        # Any policy may name a sandbox home; without one, the default home is used.
+        for policy in ({"policy": "read_only"}, {"policy": "full_access"}):
+            self.assertEqual(self.parse(VALID | policy | {"home": "0123456789abcdef" * 2}).home, "0123456789abcdef" * 2)
+        self.assertIsNone(self.parse(VALID).home)
 
     def test_inconsistent_or_unsafe_requests_are_rejected_before_any_effect(self):
-        for change in ({"protocol": 2}, {"extra": 1}, {"lifetime": "../x"}, {"lifetime": "x" * 65},
+        for change in ({"protocol": 3}, {"protocol": 5}, {"protocol": "4"}, {"extra": 1},
+                       *({"home": value} for value in (1, "", "a" * 31, "a" * 33, "A" * 32, "g" * 32, "a" * 32 + "\n",
+                                                       "../" + "a" * 29, "a" * 15 + "/" + "a" * 16)), {"lifetime": "../x"}, {"lifetime": "x" * 65},
                        {"kind": "shell"}, {"kind": "exec", "command": None}, {"command": "a\0b"},
                        {"policy": "admin"}, {"policy": "workspace"}, {"folders": FOLDERS},
                        {"policy": "workspace", "folders": []}, {"policy": "workspace", "folders": FOLDERS * 17},
@@ -107,7 +113,7 @@ class RequestTests(unittest.TestCase):
             policies = capabilities()["policies"]
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "workspace": "platform_unsupported"})
-        self.assertEqual(capabilities()["protocol"], 3)
+        self.assertEqual(capabilities()["protocol"], 4)
         self.assertEqual(capabilities()["github"], "https")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             self.assertNotIn("github_client", capabilities())

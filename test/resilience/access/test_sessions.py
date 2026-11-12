@@ -16,7 +16,7 @@ import unittest
 
 from openmachine.access import sessions
 from openmachine.access.macos import seatbelt as macos
-from test.support.access_sessions import CLIENT_NAME, CONNECTION, HOME, USER, SessionFixture, members
+from test.support.access_sessions import CLIENT_NAME, CONNECTION, HOME, HOMES, USER, SessionFixture, members
 
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
@@ -293,6 +293,16 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                 self.assertEqual((reply["error"]["code"], reply["error"]["effect"], code, out),
                                  ("lifetime_changed", "known_no_effect", 1, ""))
 
+    def test_a_changed_home_is_refused_in_either_direction(self):
+        self.a_changed_home_is_refused()
+
+    def test_each_sandbox_home_is_closed_to_the_sessions_of_every_other(self):
+        code, notes = self.root / "code", self.root / "notes"
+        for path in (code, notes):
+            path.mkdir()
+        # Whatever the folders become: other folders, or the other homes themselves.
+        self.homes_are_closed(HOME.parent, lambda others: ([str(code)], [str(notes)], [str(code), *map(str, others)]))
+
     def test_forwarded_signals_reach_the_command_group_but_not_detached_work(self):
         lifetime = self.lifetime()
         kept = int(self.session(lifetime, command=detached("kept"))[2].split()[-1])
@@ -559,6 +569,13 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, err = self.session(self.lifetime(), "full_access", "echo HOME=$HOME; exit 3")
         self.assertEqual((reply["status"], code, out), ("admitted", 3, f"HOME={ACCOUNT_HOME}\n"), err)
 
+    def test_full_access_takes_a_sandbox_home_and_uses_none(self):
+        lifetime, key = self.lifetime(), "f" * 32
+        for extra in ({"home": key}, {}, {"home": "e" * 32}):  # Nor does its lifetime keep one.
+            reply, code, out, err = self.session(lifetime, "full_access", "echo HOME=$HOME", **extra)
+            self.assertEqual((reply["status"], code, out), ("admitted", 0, f"HOME={ACCOUNT_HOME}\n"), err)
+        self.assertFalse((HOMES / key).exists())
+
     def test_a_command_starts_with_default_signal_actions(self):
         """A POSIX shell sets no trap for a signal ignored when it started, as Python's SIGPIPE and nohup's SIGHUP are."""
         process, reply = self.start(self.request(self.lifetime(), "full_access", "exec", "/bin/sh -c 'trap : HUP PIPE; trap'"),
@@ -589,7 +606,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
 
     def test_a_request_that_does_not_validate_starts_nothing(self):
         lifetime = self.lifetime()
-        for extra in ({"protocol": 2}, {"connection": "100.64.0.2 52144"}, {"user": "openmachine-nobody"}, {"command": None}, {"kind": "sftp"}, {"policy": "admin"},
+        for extra in ({"protocol": 3}, {"home": "A" * 32}, {"connection": "100.64.0.2 52144"}, {"user": "openmachine-nobody"}, {"command": None}, {"kind": "sftp"}, {"policy": "admin"},
                       {"policy": "workspace"}, {"folders": ["/tmp"]},
                       {"environment": {"PATH": "/tmp"}}, {"lifetime": "../escape"}, {"unexpected": True}):
             with self.subTest(extra=extra):

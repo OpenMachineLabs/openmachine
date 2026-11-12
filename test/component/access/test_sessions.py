@@ -27,36 +27,56 @@ class PersistentHomeTests(unittest.TestCase):
     def setUp(self):
         name = f"om-access-component-{os.getpid()}-{{uid}}"  # Owned by this process; never another run's home.
         self.home = STICKY_ROOT / name.format(uid=os.getuid())
-        self.addCleanup(shutil.rmtree, self.home, True)
+        self.homes = sessions.keyed_homes(self.home)
+        for path in (self.home, self.homes):
+            self.addCleanup(shutil.rmtree, path, True)
         for target, value in (("SHARED", STICKY_ROOT), ("HOME_NAME", name)):
             patcher = patch.object(sessions, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def unsafe(self):
+    def unsafe(self, key=None):
         with self.assertRaises(Fault) as caught:
-            backend.persistent_home()
+            backend.persistent_home(key)
         self.assertEqual(caught.exception.code, "persistent_home_unsafe")
 
     def test_the_home_is_created_owner_only_with_only_the_git_identity(self):
         with patch.object(restricted, "_git_identity", return_value={"name": "Dev", "email": "dev@example.invalid"}):
-            self.assertEqual(backend.persistent_home(), self.home)
+            self.assertEqual(backend.persistent_home(None), (self.home, [self.homes]))
         for name in ("", "home", "cache", "config", "data", "state"):
             self.assertEqual((self.home / name).stat().st_mode & 0o777, 0o700, name)
         config = self.home / "home" / ".gitconfig"
         self.assertEqual(config.read_text(), "[user]\n\tname = Dev\n\temail = dev@example.invalid\n")
         config.write_text("changed by confined work\n")
         with patch.object(restricted, "_git_identity", return_value={"name": "Other"}):
-            backend.persistent_home()
+            backend.persistent_home(None)
         self.assertEqual(config.read_text(), "changed by confined work\n")
 
+    def test_a_home_of_a_key_is_made_beside_the_default_one_like_it(self):
+        key = "0123456789abcdef" * 2
+        with patch.object(restricted, "_git_identity", return_value={"name": "Dev"}):
+            self.assertEqual(backend.persistent_home(key), (self.homes / key, [self.home, self.homes]))
+        for path in (self.homes, self.home, *(self.homes / key / name for name in ("", "home", "cache", "config", "data", "state"))):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700, path)
+        self.assertEqual((self.homes / key / "home/.gitconfig").read_text(), "[user]\n\tname = Dev\n")
+        # Every sandbox denies the directory of the keyed homes, so no session starts while it is unsafe.
+        (self.homes / key / "state").chmod(0o750)
+        self.unsafe(key)
+        backend.persistent_home(None)
+        self.homes.rename(self.homes.with_suffix(".aside"))
+        self.addCleanup(shutil.rmtree, self.homes.with_suffix(".aside"), True)
+        self.homes.symlink_to(self.homes.with_suffix(".aside"))
+        self.addCleanup(self.homes.unlink)
+        self.unsafe(key)
+        self.unsafe()
+
     def test_links_loose_modes_and_unprotected_parents_are_refused(self):
-        backend.persistent_home()
+        backend.persistent_home(None)
         (self.home / "cache").rmdir()
         (self.home / "cache").symlink_to(Path.home())
         self.unsafe()
         (self.home / "cache").unlink()
-        backend.persistent_home()
+        backend.persistent_home(None)
         self.home.chmod(0o755)
         self.unsafe()
         self.home.chmod(0o700)
@@ -64,7 +84,7 @@ class PersistentHomeTests(unittest.TestCase):
             subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(self.home / "data")], check=True)
             self.unsafe()
             subprocess.run(["/bin/chmod", "-N", str(self.home / "data")], check=True)
-        backend.persistent_home()
+        backend.persistent_home(None)
         with tempfile.TemporaryDirectory() as owned, patch.object(sessions, "SHARED", Path(owned)):
             if os.getuid() == 0:
                 os.chown(owned, 65534, -1)  # Any owner but root is refused, as this user is when not root.
@@ -86,7 +106,7 @@ class GitHubClientTests(unittest.TestCase):
         self.client.chmod(0o755)
 
     def check(self, client):
-        request = sessions.parse(json.dumps({"protocol": 3, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
+        request = sessions.parse(json.dumps({"protocol": 4, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
             "connection": "127.0.0.1 1 127.0.0.1 22",
             "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "https://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
@@ -116,11 +136,16 @@ class GitHubClientTests(unittest.TestCase):
         if sys.platform == "darwin":
             with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
                 self.refused(self.client)  # inside the persistent home, which restricted work may write
+                keyed = sessions.keyed_homes(self.client.parent) / "key/om-code"
+                keyed.parent.mkdir(parents=True, mode=0o755)
+                shutil.copy(self.client, keyed)
+                self.refused(keyed)  # and inside the home of a key
 
     @unittest.skipUnless(sys.platform == "linux", "Linux keeps the sandbox home and runtime tree under the account home")
     def test_on_linux_clients_where_restricted_work_writes_are_refused(self):
         with patch.object(rules, "account_home", return_value=self.root):
-            for directory in (sandbox.home(self.root) / "home/bin", sandbox.runtime(self.root) / "abc"):
+            for directory in (sandbox.home(self.root) / "home/bin", sandbox.runtime(self.root) / "abc",
+                              sessions.keyed_homes(sandbox.home(self.root)) / ("a" * 32) / "home"):
                 directory.mkdir(parents=True, mode=0o755)
                 shutil.copy(self.client, directory / "om-code")
                 self.refused(directory / "om-code")
@@ -130,7 +155,7 @@ class GitHubClientTests(unittest.TestCase):
     def test_on_linux_a_home_that_cannot_be_created_refuses_before_anything_starts(self):
         from openmachine.access.linux import sessions as linux
         with patch.object(rules, "account_home", return_value=self.client), self.assertRaises(Fault) as caught:
-            linux.persistent_home()  # The account home is a file here.
+            linux.persistent_home(None)  # The account home is a file here.
         self.assertEqual((caught.exception.code, caught.exception.effect), ("persistent_home_unsafe", "known_no_effect"))
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS keeps restricted runtime trees and ACLs")
@@ -150,7 +175,7 @@ class GitHubClientTests(unittest.TestCase):
                 self.refused(self.client)
         # A restricted profile runs only Core's copy, never the host's file.
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
-            text = backend._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
+            text = backend._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home", [])
         self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)
         self.assertNotIn(str(self.client), text)
 

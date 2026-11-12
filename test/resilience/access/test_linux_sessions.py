@@ -500,6 +500,18 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 self.assertEqual((reply["error"]["code"], reply["error"]["effect"], code, out),
                                  ("lifetime_changed", "known_no_effect", 1, ""))
 
+    def test_a_changed_home_is_refused_in_either_direction(self):
+        self.a_changed_home_is_refused()
+
+    def test_each_sandbox_home_is_closed_to_the_sessions_of_every_other(self):
+        code, notes = self.root / "code", self.root / "notes"
+        for path in (code, notes):
+            path.mkdir()
+        self.homes_are_closed(sandbox.home(self.account), lambda others: ([str(code)], [str(notes)]))
+        # No folder opens another home: the rule refuses every one under a hidden entry of the account home.
+        reply = self.session(self.lifetime(), "workspace", folders=[str(sandbox.home(self.account) / "home")], home="a" * 32)[0]
+        self.assertEqual((reply["status"], reply["error"]["code"]), ("denied", "folder_protected"), reply)
+
     def test_workspace_writes_only_its_folders_and_starts_in_the_first(self):
         code, notes, outside = self.root / "code", self.root / "notes", self.root / "outside"
         for path in (notes, outside):
