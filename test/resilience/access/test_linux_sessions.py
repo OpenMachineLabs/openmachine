@@ -187,9 +187,12 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
             "    try:\n        s.connect(name.replace('@', chr(0))); print('connected')\n"
             "    except OSError as e:\n        print(type(e).__name__)",
             "for fd in range(3, 256):\n    try:\n        os.write(fd, b'x')\n    except OSError:\n        continue\n    print('WRITABLE', fd)"])
+        host = Path(f"/tmp/om-access-{os.getpid()}")  # Any file of the machine's /tmp.
+        host.write_text("x\n")
+        self.addCleanup(host.unlink)
         lifetime = self.lifetime()
         reply, code, out, err = self.session(lifetime, command=(
-            f"python3 -c {shlex.quote(probes)} {path} @om-access-{os.getpid()}; ls -A /tmp /dev/shm /run/user/{uid} | grep -v -e : -e '^$'; "
+            f"python3 -c {shlex.quote(probes)} {path} @om-access-{os.getpid()}; ls -A /dev/shm /run/user/{uid} | grep -v -e : -e '^$'; ls {path} {host}; "
             f"ls /run/user; echo bus=$DBUS_SESSION_BUS_ADDRESS runtime=$XDG_RUNTIME_DIR; systemd-run --user --wait true; "
             f"echo escape=$?; echo kept > /tmp/kept && echo kept > /run/user/{uid}/kept && echo kept > /dev/shm/kept; "
             "echo x > /run/x; true"))
@@ -199,12 +202,14 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(lines[1], "PermissionError" if landlock_scopes() else "connected")
         self.assertEqual(lines[2:], [str(uid), f"bus= runtime=/run/user/{uid}", lines[-1]], out)
         self.assertNotEqual(lines[-1], "escape=0")
+        self.assertEqual(err.count(MISSING), 2, err)
         with self.assertRaises(BlockingIOError):
             listener.accept()
         self.assertFalse(Path("/tmp/kept").exists() or Path("/dev/shm/kept").exists() or Path("/run/x").exists())
         # A later session of the lifetime finds them; another lifetime's instance has its own.
         self.assertEqual(self.session(lifetime, command=f"cat /tmp/kept /run/user/{uid}/kept /dev/shm/kept")[2], "kept\n" * 3)
-        self.assertEqual(self.session(self.lifetime(), command=f"ls -A /tmp /run/user/{uid} /dev/shm | grep -v :")[2].strip(), "")
+        _, _, out, err = self.session(self.lifetime(), command=f"cat /tmp/kept /run/user/{uid}/kept /dev/shm/kept")
+        self.assertEqual((out, err.count(MISSING)), ("", 3))
 
     def routing(self, client):
         broker = "https://127.0.0.1:41234"
