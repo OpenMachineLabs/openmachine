@@ -219,7 +219,7 @@ def profile(*, home: Path, others: list[Path], folders: list[Path], private: Pat
                      f'(regex #"{PROTECTED_CONFIG_REGEX}")))')
     lines += [f"(deny file-read* file-read-data {WRITES} process-exec (require-all (require-any "
               f"{_filters('subpath', others)}) (require-not (subpath {_literal(home)}))))",
-              # realpath must stat each directory above the home, never list it.
+              # realpath stats the directory above a keyed home; none of these is listed.
               f"(allow file-read-metadata {_filters('literal', others)})",
               f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})"]
     return "\n".join(lines) + "\n"

@@ -38,12 +38,12 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
-    home, others = persistent_home(request.home)
     # The lifetime's directory in the runtime tree, bound into its instance: the spawner listens in it.
     private = private_directory(sandbox.runtime(rules.account_home()) / restricted.digest(request.lifetime)[:12])
     lifetime = sessions.Lifetime(state, request.lifetime)
     with lifetime.lock():
         record = restricted._record(lifetime, request)
+        home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable.
         newest = record["instances"][-1] if record["instances"] else None
         instance = newest if newest and restricted._spawner_alive(newest) else None

@@ -50,14 +50,14 @@ def environment(base: dict, private: Path) -> dict:
 
 
 def persistent_home(default: Path, key: str | None) -> tuple[Path, list[Path]]:
-    """Create or check this OS user's persistent sandbox homes. Returns the one a session uses, the default
-    one or the one of the key its request names, made on first use, and where every other one is: the
-    default home and the directory of the keyed ones, which may hold the session's own.
+    """Create or check this OS user's persistent sandbox homes. Returns the session's, the default one or
+    that of its key, and where every other one is: the default home and the directory of the keyed ones,
+    which may hold the session's own.
 
     Every restricted session of one home shares it, whatever its policy and lifetime, so a later session
     may run what an earlier one left there, such as shell startup files or cached packages, but only
-    inside its own sandbox. A sandbox reads and writes no home but its own, so nothing left in one home
-    reaches a session of another. The others exist before any sandbox starts, so that a mount can hide them.
+    inside its own sandbox, which reads and writes no other home. The others exist before any sandbox
+    starts, so that a mount can hide them.
     """
     keyed = sessions.keyed_homes(default)
     private_home(default)

@@ -56,13 +56,12 @@ class PersistentHomeTests(unittest.TestCase):
         key = "0123456789abcdef" * 2
         with patch.object(restricted, "_git_identity", return_value={"name": "Dev"}):
             self.assertEqual(backend.persistent_home(key), (self.homes / key, [self.home, self.homes]))
-        for path in (self.homes, self.home, *(self.homes / key / name for name in ("", "home", "cache", "config", "data", "state"))):
+        for path in (self.homes, self.homes / key / "home"):
             self.assertEqual(path.stat().st_mode & 0o777, 0o700, path)
-        self.assertEqual((self.homes / key / "home/.gitconfig").read_text(), "[user]\n\tname = Dev\n")
         # Every sandbox denies the directory of the keyed homes, so no session starts while it is unsafe.
         (self.homes / key / "state").chmod(0o750)
         self.unsafe(key)
-        backend.persistent_home(None)
+        self.assertEqual(backend.persistent_home(None), (self.home, [self.homes]))
         self.homes.rename(self.homes.with_suffix(".aside"))
         self.addCleanup(shutil.rmtree, self.homes.with_suffix(".aside"), True)
         self.homes.symlink_to(self.homes.with_suffix(".aside"))

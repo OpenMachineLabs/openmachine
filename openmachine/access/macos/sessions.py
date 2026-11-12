@@ -55,11 +55,11 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
-    home, others = persistent_home(request.home)
     runtime = _runtime(request.lifetime)
     lifetime = sessions.Lifetime(state, request.lifetime)
     with lifetime.lock():
         record = restricted._record(lifetime, request)
+        home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
         # instance may run Core's copy of om-code, except instances started before that copy existed: a
         # routed session starts a new instance once there, which cannot see the earlier one's jobs.
