@@ -10,9 +10,9 @@ import sys
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openmachine import __version__
-from openmachine.access import rules, sessions
-from openmachine.access.macos import seatbelt
-from openmachine.access.macos import sessions as restricted
+from openmachine.access import restricted, rules, sessions
+from openmachine.access.linux import sandbox, sessions as linux
+from openmachine.access.macos import seatbelt, sessions as macos
 from openmachine.config import DEFAULT_STATE
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory
@@ -40,7 +40,10 @@ def folders_reply(state: Path, raw: bytes) -> dict:
 
 
 def capabilities() -> dict:
-    reason = seatbelt.lifetime_unavailable_reason()
+    if sys.platform == "linux":
+        reason = None if sandbox.bubblewrap() else "sandbox_unavailable"
+    else:
+        reason = seatbelt.lifetime_unavailable_reason()
     confined = "available" if reason is None else reason
     # github names the routing form Core takes, so a host and Core that disagree on it route nothing.
     value = {"version": __version__, "protocol": sessions.PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "https",
@@ -78,7 +81,7 @@ def session(control: int, state: Path) -> None:
         if request.policy == "full_access":
             launch = sessions._admit_full(request, account, state)
         else:
-            launch = restricted._admit_restricted(request, account, state)
+            launch = (linux if sys.platform == "linux" else macos)._admit_restricted(request, account, state)
     except (Fault, OSError, ValueError) as error:
         failure = (error if isinstance(error, Fault) else
                    Fault("launch_unverified", "The session did not start cleanly; its command may be running.",
@@ -91,7 +94,7 @@ def session(control: int, state: Path) -> None:
         # Like sshd: the command's whole process group (its own PID after setsid), never detached sessions.
         # Installed before the reply, so no forwarded signal can arrive first and end this relay instead.
         for signum in FORWARDED:
-            signal.signal(signum, lambda number, _: seatbelt.signal_group(child, marker, number))
+            signal.signal(signum, lambda number, _: restricted.signal_group(child, marker, number))
     _reply(control, {"status": "admitted", "policy": request.policy, "pid": launch[0]})
     os.close(control)
     if request.policy == "full_access":

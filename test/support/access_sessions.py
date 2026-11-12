@@ -15,6 +15,7 @@ import tempfile
 import time
 import uuid
 
+from openmachine.access import restricted
 from openmachine.access.macos import seatbelt as macos
 
 # Restricted homes go under the root-owned sticky temp directory, never the real /Users/Shared, with a name
@@ -25,7 +26,7 @@ HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 # Core's copy of om-code is per user too; each test process keeps its own.
 CLIENT_NAME = f"client-{os.getpid()}"
 BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
-        "from openmachine.access.macos import sessions as restricted; "
+        "from openmachine.access import restricted; "
         f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; restricted.CLIENT_NAME = {CLIENT_NAME!r}; "
         "from openmachine.access.__main__ import main; sys.exit(main(sys.argv[1:]))")
 USER = pwd.getpwuid(os.getuid()).pw_name
@@ -33,8 +34,12 @@ CONNECTION = "100.64.0.2 52144 100.64.0.1 22"
 
 
 class SessionFixture(object):
+    BASE = "/tmp"  # Where each test's files live.
+    prelude = ""  # Runs first in every launcher of this test.
+    python = sys.executable  # Runs every launcher of this test.
+
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="om-access-", dir="/tmp")
+        temporary = tempfile.TemporaryDirectory(prefix="om-access-", dir=self.BASE)
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.state = self.root / "state"
@@ -63,11 +68,11 @@ class SessionFixture(object):
                 for instance in json.loads(record.read_text()).get("instances", []):
                     end(instance["marker"])
             if sys.platform == "darwin":
-                shutil.rmtree(macos.user_temp() / "omc" / macos.digest(name)[:12], ignore_errors=True)
+                shutil.rmtree(macos.user_temp() / "omc" / restricted.digest(name)[:12], ignore_errors=True)
 
     def command(self, *args, prelude=""):
         """prelude runs first in the launcher process, for fault injection."""
-        return [sys.executable, "-I", "-c", prelude + BOOT, "--config", str(self.config), "--state-dir",
+        return [self.python, "-I", "-c", self.prelude + prelude + BOOT, "--config", str(self.config), "--state-dir",
                 str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
@@ -176,7 +181,7 @@ class SessionFixture(object):
 def members(marker):
     """PIDs of every process in the lifetime instance with this marker."""
     listed = subprocess.run(["/bin/ps", "-A", "-o", "pid="], capture_output=True, text=True, check=True).stdout
-    return [pid for pid in map(int, listed.split()) if pid > 1 and macos.member(pid, marker) is True]
+    return [pid for pid in map(int, listed.split()) if pid > 1 and restricted.backend.member(pid, marker) is True]
 
 
 def end(marker, seconds=10):
@@ -186,6 +191,6 @@ def end(marker, seconds=10):
         if time.monotonic() > deadline:
             raise AssertionError(f"lifetime members remain: {found}")
         for pid in found:
-            if (current := macos.birth(pid)) is not None:
-                macos.signal_member(current, marker, signal.SIGKILL)
+            if (current := restricted.birth(pid)) is not None:
+                restricted.signal_member(current, marker, signal.SIGKILL)
         time.sleep(0.05)

@@ -8,18 +8,23 @@
         "openmachine/access/git.py",
         "openmachine/access/linux/__init__.py",
         "openmachine/access/linux/environment.py",
+        "openmachine/access/linux/sandbox.py",
+        "openmachine/access/linux/sessions.py",
         "openmachine/access/macos/__init__.py",
         "openmachine/access/macos/seatbelt.py",
         "openmachine/access/macos/sessions.py",
+        "openmachine/access/restricted.py",
         "openmachine/access/rules.py",
         "openmachine/access/sessions.py"
       ],
       "tests": [
         "test/component/access/test_git.py",
         "test/component/access/test_linux.py",
+        "test/component/access/test_linux_sandbox.py",
         "test/component/access/test_macos.py",
         "test/component/access/test_rules.py",
         "test/component/access/test_sessions.py",
+        "test/resilience/access/test_linux_sessions.py",
         "test/resilience/access/test_sessions.py",
         "test/unit/access/test_sessions.py"
       ],

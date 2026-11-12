@@ -31,6 +31,12 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+      - name: Install what builds the static bubblewrap
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config libcap-dev
       - name: Build exact Core and checked offline payload
         env:
           TARGET: ${{ matrix.target }}

@@ -15,6 +15,11 @@
       "build": "20261003",
       "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
       "sha256": "4595c5589fff7bf0cb158d9a88a797e0d791fa33830770fcb7bf3f4b104feeae"
+    },
+    "bubblewrap": {
+      "version": "0.13.1",
+      "url": "https://github.com/containers/bubblewrap/releases/download/v0.13.1/bubblewrap-0.13.1.tar.xz",
+      "sha256": "0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d"
     }
   },
   "linux-aarch64": {
@@ -24,6 +29,11 @@
       "build": "20261003",
       "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.13.16%2B20261003-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
       "sha256": "6e9641400f8debd9b7924b27b5ff0662c372852382e291a76c450c7b67414cf6"
+    },
+    "bubblewrap": {
+      "version": "0.13.1",
+      "url": "https://github.com/containers/bubblewrap/releases/download/v0.13.1/bubblewrap-0.13.1.tar.xz",
+      "sha256": "0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d"
     }
   }
 }

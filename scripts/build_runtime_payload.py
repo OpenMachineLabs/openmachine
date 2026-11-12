@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 
@@ -38,6 +40,30 @@ def extract(source: Path, destination: Path) -> None:
 
 def run(argv: list[str], env: dict[str, str]) -> None:
     subprocess.run(argv, cwd="/", env=env, stdin=subprocess.DEVNULL, check=True, timeout=300)
+
+
+def bubblewrap(item: dict, cache: Path, output: Path) -> None:
+    """Build the pinned bubblewrap release, statically linked, as the payload's bwrap: the sandbox of
+    restricted sessions on a machine whose own bubblewrap is missing. Needs meson, ninja, pkg-config, a C
+    compiler and the static libcap."""
+    archive = cache / (item["sha256"] + ".tar.xz")
+    fetch(item, archive)
+    with tempfile.TemporaryDirectory() as work:
+        extract(archive, Path(work))
+        source, build = Path(work) / ("bubblewrap-" + item["version"]), Path(work) / "build"
+        env = payload.environment()
+        run(["meson", "setup", str(build), str(source), "--buildtype=release", "--prefer-static", "-Dc_link_args=-static",
+             "-Dselinux=disabled", "-Dman=disabled", "-Dtests=false", "-Dbash_completion=disabled",
+             "-Dzsh_completion=disabled"], env)
+        run(["ninja", "-C", str(build), "bwrap"], env)
+        built = (build / "bwrap").read_bytes()
+        headers, (size, count) = struct.unpack_from("<Q", built, 32)[0], struct.unpack_from("<HH", built, 54)
+        if any(struct.unpack_from("<I", built, headers + index * size)[0] == 3 for index in range(count)):
+            raise ValueError("the built bwrap asks for a dynamic loader")  # A PT_INTERP program header.
+        (output / "bwrap").write_bytes(built)
+        (output / "bwrap").chmod(0o755)
+        shutil.copyfile(source / "COPYING", output / "bwrap.COPYING")
+    run([str(output / "bwrap"), "--version"], env)
 
 
 def main() -> None:
@@ -99,12 +125,20 @@ def main() -> None:
         if not entry.is_file() or entry.is_symlink():
             raise ValueError("Unexpected generated entry point")
         entry.unlink()
+    notices = ""
+    if "bubblewrap" in inputs:
+        bubblewrap(inputs["bubblewrap"], cache, output)
+        notices = ("bwrap: bubblewrap " + inputs["bubblewrap"]["version"] + ", LGPL-2.0-or-later (bwrap.COPYING), built unmodified "
+                   "from " + inputs["bubblewrap"]["url"] + " (SHA-256 " + inputs["bubblewrap"]["sha256"] + ") by "
+                   "scripts/build_runtime_payload.py and statically linked with the build host's libcap (BSD-3-Clause or "
+                   "GPL-2.0-only) and GNU C Library (LGPL-2.1-or-later).\n\n")
     (output / "THIRD_PARTY_NOTICES.md").write_text(
         "# Runtime inputs\n\n"
         "Python: python-build-standalone " + inputs["python"]["build"] +
         "; retain python/lib/python3.13/LICENSE.txt and all bundled dependency licenses.\n\n"
         "Source and build recipe: https://github.com/astral-sh/python-build-standalone/tree/" + inputs["python"]["build"] + ".\n\n"
-        "Original input URLs/digests are in manifest.json. Dependency licenses remain in their wheels "
+        + notices +
+        "Python's original input URL and digest are in manifest.json. Dependency licenses remain in their wheels "
         "and installed distribution metadata. Product publication must fulfill the corresponding-source "
         "and notice obligations for all bundled components; this assembly is not signed product acceptance.\n")
     manifest = {"format": 1, "target": payload.TARGETS[args.target],

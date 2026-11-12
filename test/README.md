@@ -163,7 +163,10 @@ the original-operation records are compatibility contracts.
 ## Evidence boundaries
 
 Disposable state and short owned processes are not native acceptance. Restricted
-session tests need macOS Seatbelt; on other hosts they are skipped, not passed.
+session tests need macOS Seatbelt or, on Linux, a bubblewrap that builds the
+sandbox, which stock Ubuntu does not allow until an administrator does; elsewhere
+they are skipped, not passed. The Linux ones keep their files under the account's
+home, since the sandbox hides `/tmp`.
 Full Access sessions and management run on macOS and Linux; root cases run only
 where the runner is root, such as a disposable Linux container.
 Run installation checks only on authorized disposable resources, never against
