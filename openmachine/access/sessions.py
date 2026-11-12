@@ -200,8 +200,7 @@ def _client(request: SessionRequest) -> Path | None:
     if request.github is None:
         return None
     client = Path(request.github.client)
-    account = rules.account_home()
-    restricted = ([sandbox.home(account), sandbox.runtime(account)] if sys.platform == "linux" else
+    restricted = ([sandbox.home(rules.account_home()), sandbox.runtime(rules.account_home())] if sys.platform == "linux" else
                   [SHARED / HOME_NAME.format(uid=os.getuid()), seatbelt.user_temp() / "omc"])
     try:
         info, parent = client.lstat(), client.parent.lstat()

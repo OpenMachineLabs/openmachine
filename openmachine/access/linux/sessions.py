@@ -21,7 +21,11 @@ SPAWNER = "from openmachine.access.linux import sessions; sessions._spawner()"
 def persistent_home() -> Path:
     """The one owner-only restricted-mode home of this OS user; unconfined code never trusts its contents."""
     home = sandbox.home(rules.account_home())
-    home.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        home.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise Fault("persistent_home_unsafe", f"{home.parent} cannot be created; nothing was launched.",
+                    effect="known_no_effect") from error
     return restricted.private_home(home)
 
 
@@ -49,17 +53,31 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable.
         newest = record["instances"][-1] if record["instances"] else None
         instance = newest if newest and restricted._spawner_alive(newest) else None
+        connection = None
+        if instance:
+            try:
+                connection = restricted._connect(private, instance)
+            except Fault:
+                _end(instance)  # Its own work removed or replaced the socket, which it can write.
+                instance = None
         if instance is None:
             # Folders, worktrees and what is protected in them are fixed when an instance starts.
             instance = _start_instance(bubblewrap, scope, state, home, private)
-            record["instances"].append(instance)
-            lifetime.save(record)
+            try:
+                record["instances"].append(instance)
+                lifetime.save(record)
+            except BaseException as error:
+                _end(instance)  # No instance runs that no record names.
+                if isinstance(error, OSError):
+                    raise Fault("lifetime_unavailable", "The lifetime's record could not be saved; nothing was "
+                                "launched.", effect="known_no_effect") from error
+                raise
+            # Connect before another admission can start a newer instance, which rebinds the socket; a
+            # connection made first still reaches its own spawner.
+            connection = restricted._connect(private, instance)
         environment = restricted.environment(sessions._environment(request, account, stable), home) | request.environment | (
             request.github.environment if request.github else {}) | {
             "TMPDIR": "/tmp", "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}  # The instance's own.
-        # Connect before another admission can start a newer instance, which rebinds the socket; a
-        # connection made first still reaches its own spawner.
-        connection = restricted._connect(private, instance)
     cwd = request.folders[0] if request.folders else str(home / "home")  # Workspace starts in its first folder.
     body = json.dumps({"program": program, "argv": argv, "env": environment, "cwd": cwd,
                        "tty": request.terminal is not None}).encode()
@@ -85,6 +103,22 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     return vouched.pid, vouched, instance["marker"], replies
 
 
+def _end(instance: dict) -> None:
+    """Kill an instance through its spawner, its first process, while that still is the recorded one."""
+    if restricted._spawner_alive(instance):
+        os.kill(instance["pid"], signal.SIGKILL)
+
+
+def _remove(known: dict) -> None:
+    """Remove the recorded placeholders that are still empty. Only while no instance lives."""
+    for path in known["placeholders"]:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
+    known["placeholders"] = []
+
+
 def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, home: Path, private: Path) -> dict:
     """Start one instance. Its placeholders, the empty directories under the protected names that do not
     exist, so that none can be created later, are created first and removed once no instance lives.
@@ -105,29 +139,38 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
     with lease(record.with_suffix(".lock"), wait=True):
         try:
             known = json.loads(record.read_text())
-        except FileNotFoundError:
-            known = {"instances": [], "placeholders": []}
+            known = {"instances": list(known["instances"]), "placeholders": list(known["placeholders"])}
+        except (FileNotFoundError, ValueError, KeyError, TypeError):
+            known = {"instances": [], "placeholders": []}  # An unreadable record removes nothing.
         known["instances"] = [item for item in known["instances"] if restricted._spawner_alive(item)]
         if not known["instances"]:
-            for path in known["placeholders"]:
-                try:
-                    os.rmdir(path)  # Only one that is still empty.
-                except OSError:
-                    pass
-            known["placeholders"] = []
+            _remove(known)
         placeholders = [root / name for root in roots for name in sandbox.PROTECTED if not os.path.lexists(root / name)]
         known["placeholders"] = list(dict.fromkeys([*known["placeholders"], *map(str, placeholders)]))
         save_json(record, known)  # Before any exists, so that none is left unrecorded.
-        for path in placeholders:
+        instance = None
+        try:
+            for path in placeholders:
+                try:
+                    path.mkdir()
+                except OSError:
+                    pass  # What this user cannot create here, its restricted work cannot either.
+            hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state]
             try:
-                path.mkdir()
-            except OSError:
-                pass  # What this user cannot create here, its restricted work cannot either.
-        hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state]
-        arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
-        instance = _start_spawner([str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
-        known["instances"].append(instance)
-        save_json(record, known)
+                arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
+            except sandbox.TooLarge:
+                raise Fault("folder_too_large", "The Workspace folders hold more repositories than one sandbox "
+                            "protects; choose smaller folders in the Console.", effect="known_no_effect") from None
+            instance = _start_spawner([str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
+            known["instances"].append(instance)
+            save_json(record, known)
+        except BaseException:
+            if instance:
+                _end(instance)  # No instance runs that this record does not name.
+            elif not known["instances"]:
+                _remove(known)
+                save_json(record, known)
+            raise
     return instance
 
 
@@ -135,10 +178,16 @@ def _start_spawner(command: list[str], private: Path) -> dict:
     """Start bubblewrap with the spawner as the instance's first process; fail closed unless its identity
     and membership verify."""
     ready_read, ready_write = os.pipe()
-    process = subprocess.Popen([*command, str(private), str(ready_write)], stdin=subprocess.DEVNULL,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, pass_fds=[ready_write],
-                               start_new_session=True)
-    os.close(ready_write)
+    try:
+        process = subprocess.Popen([*command, str(private), str(ready_write)], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={}, pass_fds=[ready_write],
+                                   start_new_session=True)
+    except OSError as error:
+        os.close(ready_read)
+        raise Fault("lifetime_unverifiable", "The lifetime's sandbox did not start; nothing was launched.",
+                    effect="known_no_effect") from error
+    finally:
+        os.close(ready_write)
     try:
         # Bounded: this runs under the lifetime lock that every admission needs.
         reported = (os.read(ready_read, 64)  # The spawner's start time once it listens; nothing if it ended.

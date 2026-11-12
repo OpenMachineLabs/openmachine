@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import runpy
+import struct
 import subprocess
 import sys
 import tarfile
@@ -83,7 +84,7 @@ class PayloadBuilderTests(unittest.TestCase):
         with tarfile.open(release, "w:xz") as archive:
             archive.add(source, "bubblewrap-9.9")
         item = {"version": "9.9", "url": "https://example.invalid/unused", "sha256": hashlib.sha256(release.read_bytes()).hexdigest()}
-        cache, output, ran = self.root / "cache", self.root / "output", []
+        cache, output, ran, kinds = self.root / "cache", self.root / "output", [], [1, 6]  # PT_LOAD, PT_PHDR
         for path in (cache, output):
             path.mkdir()
         release.rename(cache / (item["sha256"] + ".tar.xz"))
@@ -93,7 +94,9 @@ class PayloadBuilderTests(unittest.TestCase):
             if argv[0] == "ninja":
                 self.assertEqual((Path(argv[2]).parent / "bubblewrap-9.9/COPYING").read_text(), "LGPL\n")
                 Path(argv[2]).mkdir()
-                (Path(argv[2]) / "bwrap").write_text("#!/bin/sh\n")
+                (Path(argv[2]) / "bwrap").write_bytes(  # An ELF header's program header table, as far as it is read.
+                    bytes(32) + struct.pack("<Q", 64) + bytes(14) + struct.pack("<HH", 56, len(kinds)) + bytes(6)
+                    + b"".join(struct.pack("<I", kind) + bytes(52) for kind in kinds))
 
         builder = runpy.run_path(str(SCRIPT))
         builder["bubblewrap"].__globals__["run"] = run
@@ -103,6 +106,10 @@ class PayloadBuilderTests(unittest.TestCase):
         self.assertEqual((output / "bwrap").stat().st_mode & 0o777, 0o755)
         self.assertEqual((output / "bwrap.COPYING").read_text(), "LGPL\n")
         self.assertEqual(payload.inventory(output)["bwrap"]["executable"], True)
+        kinds.append(3)  # PT_INTERP: dynamically linked, which an old machine's loader may not run.
+        with self.assertRaisesRegex(ValueError, "dynamic loader"):
+            builder["bubblewrap"](item, cache, self.root)
+        self.assertFalse((self.root / "bwrap").exists())
         # A release that differs from its pin builds nothing.
         (cache / (item["sha256"] + ".tar.xz")).write_bytes(b"other")
         with self.assertRaises(ValueError):

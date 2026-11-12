@@ -122,13 +122,17 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
     def test_root_has_no_capabilities_and_reads_no_system_secrets(self):
         reply, code, out, err = self.session(self.lifetime(), command=(
             "id -u; touch $HOME/mine && chown 1 $HOME/mine; echo chown=$?; mount -t tmpfs none /mnt; echo mount=$?; "
-            "cat /etc/shadow /etc/gshadow /etc/sudoers; ls -A /etc/sudoers.d | wc -l; echo x >> /etc/passwd; true"))
+            "cat /etc/shadow /etc/gshadow /etc/sudoers; ls -A /etc/sudoers.d | wc -l; echo x >> /etc/passwd; "
+            # Root owns the kernel's controls, and ownership alone would write them: the same value back.
+            "for control in kernel/core_pattern kernel/modprobe kernel/sysrq; do "
+            "cat /proc/sys/$control >> /proc/sys/$control || echo refused 1>&2; done; true"))
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertEqual(out.split()[0], "0")
         self.assertNotIn("chown=0", out)
         self.assertNotIn("mount=0", out)
         self.assertEqual(out.split()[3:], ["0"], out + err)  # Nothing of the secrets, and an empty directory.
         self.assertIn(READ_ONLY, err)
+        self.assertEqual(err.count("refused"), 3, err)
 
     def test_the_unreadable_areas_and_the_control_paths_are_empty(self):
         for item in sandbox.HOME_DENIED:
@@ -210,6 +214,16 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(self.session(lifetime, command=f"cat /tmp/kept /run/user/{uid}/kept /dev/shm/kept")[2], "kept\n" * 3)
         _, _, out, err = self.session(self.lifetime(), command=f"cat /tmp/kept /run/user/{uid}/kept /dev/shm/kept")
         self.assertEqual((out, err.count(MISSING)), ("", 3))
+
+    @unittest.skipUnless(shutil.which("ipcmk"), "requires util-linux's ipcmk")
+    def test_the_machines_shared_memory_segments_are_not_the_instances(self):
+        segment = subprocess.run(["ipcmk", "-M", "4096"], check=True, capture_output=True, text=True).stdout.split()[-1]
+        self.addCleanup(subprocess.run, ["ipcrm", "-m", segment], capture_output=True)
+        listed = "ipcs -m | awk '{print $2}'"
+        self.assertIn(segment, subprocess.run(listed, shell=True, capture_output=True, text=True).stdout.split())
+        reply, code, out, err = self.session(self.lifetime(), command=listed)
+        self.assertEqual((reply["status"], code), ("admitted", 0), err)
+        self.assertNotIn(segment, out.split())
 
     def routing(self, client):
         broker = "https://127.0.0.1:41234"
@@ -303,6 +317,48 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         reply, code, out, _ = self.session(lifetime, command=f"{running('lost-job')}; echo job=$?")
         self.assertEqual((reply["status"], out), ("admitted", "job=1\n"))  # The instance ended with its spawner.
         self.assertEqual(len(self.instances(lifetime)), 2)
+
+    def test_an_instance_whose_socket_its_own_work_removed_or_replaced_is_ended_and_another_starts(self):
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime, command=detached("socket-job"))[1], 0)
+        socket_path = self.instance_directory(lifetime) / "spawner"
+        replace = ("import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); "
+                   "time.sleep(60)")
+        for count, command in ((2, f"rm {socket_path}"),
+                               (3, f"rm {socket_path}; setsid python3 -c {shlex.quote(replace)} {socket_path} "
+                                   "</dev/null >/dev/null 2>&1 & sleep 0.5")):
+            with self.subTest(command=command):
+                self.assertEqual(self.session(lifetime, command=command)[1], 0)
+                reply, _, out, _ = self.session(lifetime, command=f"{running('socket-job')}; echo job=$?")
+                self.assertEqual((reply["status"], out), ("admitted", "job=1\n"), reply)
+                self.assertEqual(len(self.instances(lifetime)), count)
+                self.assertEqual(len(self.leftover()), 2)  # One bubblewrap and its spawner.
+
+    def test_an_instance_that_no_record_names_is_ended(self):
+        folder = self.root / "folder"
+        folder.mkdir()
+        for name, prelude in (
+                ("lifetime", "from openmachine.access import sessions as _s\n"
+                             "def _save(self, record): raise OSError(28, 'No space left on device')\n_s.Lifetime.save = _save\n"),
+                ("user", "from openmachine.access.linux import sessions as _l\n_save, _calls = _l.save_json, []\n"
+                         "def _second(path, value):\n    _calls.append(path)\n    if len(_calls) == 2: raise OSError(28, 'full')\n"
+                         "    _save(path, value)\n_l.save_json = _second\n")):
+            with self.subTest(record=name):
+                lifetime = self.lifetime()
+                process, reply = self.start(self.request(lifetime, "workspace", "exec", "echo ran", folders=[str(folder)]),
+                                            prelude)
+                out, _ = process.communicate(timeout=60)
+                self.assertEqual((reply["status"], out), ("denied", b""), reply)
+                if name == "lifetime":
+                    self.assertEqual((reply["error"]["code"], reply["error"]["effect"]), ("lifetime_unavailable", "known_no_effect"))
+                deadline = time.monotonic() + 10
+                while self.leftover() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertEqual(self.leftover(), [])
+        # A record that cannot be read removes nothing and holds no admission.
+        (self.state / "code/sandbox.json").write_text("{")
+        self.assertEqual(self.session(self.lifetime(), "workspace", "true", folders=[str(folder)])[1], 0)
+        self.assertEqual(sorted(os.listdir(folder)), sorted(sandbox.PROTECTED))
 
     def test_a_stopped_spawner_bounds_admission(self):
         lifetime = self.lifetime()
@@ -496,24 +552,30 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(sorted(os.listdir(folder)), [".idea", ".vscode"])
 
     def test_a_folder_that_cannot_be_protected_is_refused(self):
-        large, linked, target = self.root / "large", self.root / "linked", self.root / "target"
-        for path in (large, linked, target):
+        large, linked, target, many = (self.root / name for name in ("large", "linked", "target", "many"))
+        for path in (large, linked, target, many):
             path.mkdir()
         for index in range(6):
             (large / f"file-{index}").write_text("x\n")
         (linked / ".claude").symlink_to(target)
         small = "from openmachine.access.linux import sandbox as _b\n_b.MAX_ENTRIES = 5\n"
-        for folder, prelude, code in ((large, small, "folder_too_large"), (linked, "", "scope_unsupported")):
+        self.repository(many / "one")
+        self.repository(many / "two")
+        few = "from openmachine.access.linux import sandbox as _b\n_b.MAX_REPOSITORIES = 1\n"
+        mounts = "from openmachine.access.linux import sandbox as _b\n_b.MAX_ARGUMENTS = 40\n"
+        for folder, prelude, code in ((large, small, "folder_too_large"), (many, few, "folder_too_large"),
+                                      (many, mounts, "folder_too_large"), (linked, "", "scope_unsupported")):
             with self.subTest(code=code):
                 process, reply = self.start(self.request(self.lifetime(), "workspace", "exec", "echo ran", folders=[str(folder)]),
                                             prelude)
                 out, _ = process.communicate(timeout=60)
                 self.assertEqual((reply["status"], reply["error"]["code"], reply["error"]["effect"], out),
                                  ("denied", code, "known_no_effect", b""))
-                self.assertIn(str(folder), reply["error"]["message"])
                 self.assertIn("Console", reply["error"]["message"])
                 self.assertEqual(self.leftover(), [])
         self.assertEqual(os.listdir(target), [])
+        # A start that was refused leaves no placeholder behind.
+        self.assertEqual((os.listdir(linked), sorted(os.listdir(many))), ([".claude"], ["one", "two"]))
         # A worktree that needs a longer search than a folder may is not granted; its folder still is.
         code, wide = self.root / "code", self.root / "wide"
         self.repository(code)

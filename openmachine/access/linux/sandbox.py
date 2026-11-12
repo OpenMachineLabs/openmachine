@@ -18,21 +18,26 @@ SYSTEM_BWRAP = Path("/usr/bin/bwrap")  # Tried first: Ubuntu's AppArmor rules at
 # Unreadable in restricted sessions, relative to the account home: credentials, histories, keyrings, browsers.
 HOME_DENIED = (".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gh", ".config/gcloud", ".netrc",
                ".git-credentials", ".npmrc", ".pypirc", ".bash_history", ".zsh_history", ".sh_history", ".python_history",
-               ".local/share/keyrings", ".password-store", ".mozilla", ".config/google-chrome", ".config/chromium")
+               ".local/share/fish/fish_history", ".local/share/keyrings", ".password-store", ".mozilla", ".config/google-chrome", ".config/chromium")
 # The system secrets a root session could read.
 SYSTEM_DENIED = ("/etc/shadow", "/etc/gshadow", "/etc/sudoers", "/etc/sudoers.d", "/etc/ssh/ssh_host_*_key")
 # No Workspace folder lies in or holds one of these.
 SYSTEM = ("/etc", "/usr", "/bin", "/sbin", "/lib*", "/boot", "/var", "/dev", "/proc", "/sys", "/run", "/tmp")
+# Kernel controls that root's ownership alone can write, with no capability: read-only in every instance.
+KERNEL = ("/proc/sys", "/proc/sysrq-trigger", "/proc/irq", "/proc/bus", "/proc/fs")
 GPU = ("/dev/nvidia*", "/dev/dri", "/dev/kfd")
 # What the owner's tools later run outside any sandbox, at the top of a Workspace folder or worktree.
 PROTECTED = (".vscode", ".idea", ".claude", ".codex", ".agents", ".cursor", ".gemini", ".husky")
 DEPTH = 4
 MAX_ENTRIES = 100_000
+MAX_REPOSITORIES = 500  # In one folder or worktree.
+MAX_ARGUMENTS = 8900  # bubblewrap takes 9000, the spawner's command among them.
 PROBE_SECONDS = 10
 
 
 class TooLarge(Exception):
-    """A folder holds more entries than the search for its repositories reads."""
+    """A folder holds more entries than the search for its repositories reads, or more repositories than
+    one instance protects."""
 
 
 def home(account: Path) -> Path:
@@ -57,18 +62,25 @@ def system_directories() -> list[Path]:
 
 
 def _base() -> list[str]:
-    """What every instance and the probe share: new user (unless root) and PID namespaces, a read-only root,
-    and a private /dev, /proc, /tmp and /run that holds only the lifetime's own runtime directory."""
+    """What every instance and the probe share: new user (unless root), PID and IPC namespaces, a read-only root,
+    a private /dev, /proc with its kernel controls read-only, /tmp, and /run that holds only the lifetime's
+    own runtime directory."""
     root = os.getuid() == 0
-    return [*(["--cap-drop", "ALL"] if root else ["--unshare-user"]), "--unshare-pid", "--as-pid-1",
-            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run",
+    return [*(["--cap-drop", "ALL"] if root else ["--unshare-user"]), "--unshare-pid", "--unshare-ipc", "--as-pid-1",
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            *(item for path in KERNEL if os.path.exists(path) for item in ("--ro-bind", path, path)),
+            "--tmpfs", "/tmp", "--tmpfs", "/run",
             "--perms", "0700", "--dir", f"/run/user/{os.getuid()}", "--chdir", "/"]
+
+
+def _candidates() -> tuple[Path, Path]:
+    return SYSTEM_BWRAP, Path(sys.base_prefix).parent / "bwrap"
 
 
 @functools.cache
 def bubblewrap() -> Path | None:
     """The first bubblewrap that builds the sandbox here: the system's, else the payload's static copy."""
-    for candidate in (SYSTEM_BWRAP, Path(sys.base_prefix).parent / "bwrap"):
+    for candidate in _candidates():
         try:
             if subprocess.run([candidate, *_base(), "true"], stdin=subprocess.DEVNULL, capture_output=True,
                               timeout=PROBE_SECONDS).returncode == 0:
@@ -88,7 +100,10 @@ def unavailable() -> Fault:
              "24.04 also `apt install apparmor-profiles`, copy /usr/share/apparmor/extra-profiles/bwrap-userns-restrict "
              "to /etc/apparmor.d and run `apparmor_parser -r` on the copy."
              if restricted and os.getuid() else
-             "This machine does not allow the namespaces the sandbox needs, as a container that forbids them does not.")
+             "None is installed; an administrator can install the system's bubblewrap package."
+             if not any(candidate.exists() for candidate in _candidates()) else
+             "The one installed is older than 0.5, or this machine does not allow the namespaces the sandbox needs, "
+             "as a container that forbids them does not.")
     return Fault("scope_unsupported", f"Read only and Workspace sessions need bubblewrap. {cause}", effect="known_no_effect")
 
 
@@ -105,6 +120,8 @@ def git_entries(root: Path) -> list[Path]:
                         raise TooLarge(str(root))
                     if entry.name == ".git":
                         found.append(Path(entry.path))
+                        if len(found) > MAX_REPOSITORIES:
+                            raise TooLarge(str(root))
                     elif depth < DEPTH and entry.is_dir(follow_symlinks=False):
                         pending.append((Path(entry.path), depth + 1))
         except OSError:
@@ -149,6 +166,12 @@ def _masks(paths: list[Path], exposed: dict[Path, str]) -> list[str]:
     return found
 
 
+def protected(root: Path, entries: list[Path]) -> list[Path]:
+    """What exists of a root's protected paths: its top-level names and its .git entries. A link among them
+    is a Fault."""
+    return [path for path in (*(root / name for name in (*PROTECTED, ".mcp.json")), *entries) if _fixed(path)]
+
+
 def _protection(roots: dict[Path, list[Path]]) -> list[str]:
     """Read-only mounts over what the owner's tools later run outside a sandbox.
 
@@ -158,11 +181,9 @@ def _protection(roots: dict[Path, list[Path]]) -> list[str]:
     """
     pinned, readonly = set(), []
     for root, entries in roots.items():
-        readonly += [path for path in (root / name for name in (*PROTECTED, ".mcp.json")) if _fixed(path)]
+        readonly += protected(root, entries)
         for entry in entries:
-            if _fixed(entry):
-                readonly.append(entry)
-                pinned.update(parent for parent in entry.parents if parent != root and parent.is_relative_to(root))
+            pinned.update(parent for parent in entry.parents if parent != root and parent.is_relative_to(root))
     return ([item for path in sorted(pinned) for item in ("--bind", str(path), str(path))]
             + [item for path in readonly for item in ("--ro-bind", str(path), str(path))])
 
@@ -171,7 +192,8 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     """One instance's bubblewrap arguments: read the machine except what is hidden, the denied areas and
     Core's control paths, and write only the sandbox home, the Workspace roots, the lifetime's directory
     in the runtime tree and its own /tmp and /run. roots maps each writable folder and worktree to its
-    .git entries; client is the directory of Core's copy of the om-code client."""
+    .git entries; client is the directory of Core's copy of the om-code client. TooLarge when the folders
+    together hold more repositories than one instance protects."""
     found = _base()
     for path in (path for pattern in GPU for path in glob.glob(pattern)):
         found += ["--dev-bind", path, path]
@@ -188,7 +210,10 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     found += _masks([*hidden, private.parent], exposed)
     for path in (home, *roots):
         found += ["--bind", str(path), str(path)]
-    return found + _protection(roots)
+    found += _protection(roots)
+    if len(found) > MAX_ARGUMENTS:
+        raise TooLarge
+    return found
 
 
 def scope() -> None:

@@ -67,7 +67,8 @@ class SandboxArgumentTests(unittest.TestCase):
         denied = sandbox.read_denials(home)
         self.assertIn(elsewhere, denied)
         self.assertNotIn(home / ".aws", denied)
-        for name in (".ssh", ".gnupg", ".config/gh", ".netrc", ".bash_history", ".local/share/keyrings"):
+        for name in (".ssh", ".gnupg", ".config/gh", ".netrc", ".bash_history", ".local/share/fish/fish_history",
+                     ".local/share/keyrings"):
             self.assertIn(home / name, denied)
 
     def test_what_is_hidden_is_an_empty_read_only_directory_or_an_empty_file(self):
@@ -101,8 +102,9 @@ class SandboxArgumentTests(unittest.TestCase):
         (outside / ".git").mkdir(parents=True)
         (folder / "link").symlink_to(outside, target_is_directory=True)
         self.assertEqual(sorted(sandbox.git_entries(folder)), sorted(expected))
-        with patch.object(sandbox, "MAX_ENTRIES", 3), self.assertRaises(sandbox.TooLarge):
-            sandbox.git_entries(folder)
+        for limit in ("MAX_ENTRIES", "MAX_REPOSITORIES"):
+            with self.subTest(limit=limit), patch.object(sandbox, limit, 3), self.assertRaises(sandbox.TooLarge):
+                sandbox.git_entries(folder)
 
     def instance(self, roots):
         home, private = self.root / "sandbox-home", self.root / "runtime/lifetime"
@@ -131,6 +133,9 @@ class SandboxArgumentTests(unittest.TestCase):
         # Read-only last, over what exists: the protected names, .mcp.json and each .git.
         self.assertEqual(sorted(readonly[-4:]), sorted(str(folder / name) for name in (".claude", ".mcp.json", ".git", "vendor/lib/.git")))
         self.assertGreater(arguments.index(str(folder)), max(index for index, item in enumerate(arguments) if item == "--remount-ro"))
+        # More mounts than one bubblewrap takes are refused, not passed on for it to fail.
+        with patch.object(sandbox, "MAX_ARGUMENTS", len(arguments) - 1), self.assertRaises(sandbox.TooLarge):
+            self.instance({folder: sandbox.git_entries(folder)})
 
     def test_a_protected_name_that_is_a_link_cannot_be_held_in_place(self):
         folder, target = self.root / "folder", self.root / "target"
@@ -155,9 +160,14 @@ class SandboxArgumentTests(unittest.TestCase):
         self.assertIsNone(sandbox.sender([]))
 
     def test_no_bubblewrap_names_its_cause(self):
-        for restricted, uid, expected in (("1\n", 1000, "apparmor_parser"), ("1\n", 0, "container"), ("0\n", 1000, "container"),
-                                          (OSError(), 1000, "container")):
+        installed = self.root / "bwrap"
+        installed.write_text("")
+        for restricted, uid, system, expected in (
+                ("1\n", 1000, installed, "apparmor_parser"), ("1\n", 0, installed, "container"),
+                ("0\n", 1000, installed, "older than 0.5"), (OSError(), 1000, installed, "container"),
+                ("0\n", 1000, self.root / "missing", "None is installed")):
             with self.subTest(restricted=restricted, uid=uid), patch.object(sandbox.os, "getuid", return_value=uid), \
+                    patch.object(sandbox, "SYSTEM_BWRAP", system), patch.object(sys, "base_prefix", str(self.root / "none/python")), \
                     patch.object(Path, "read_text", side_effect=[restricted]):
                 fault = sandbox.unavailable()
             self.assertEqual((fault.code, fault.effect), ("scope_unsupported", "known_no_effect"))

@@ -152,9 +152,11 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
             raise FolderFault(code, index, text)
         if sys.platform == "linux" and not admission:
             try:
-                sandbox.git_entries(path)
+                sandbox.protected(path, sandbox.git_entries(path))
             except sandbox.TooLarge:
                 raise FolderFault("folder_too_large", index, text) from None
+            except Fault:  # A link at a protected name, which an instance refuses.
+                raise FolderFault("folder_unsupported", index, text) from None
         found.append(path)
     for index, path in enumerate(found):
         # A duplicate refuses the later one; a folder inside another refuses the inner one.

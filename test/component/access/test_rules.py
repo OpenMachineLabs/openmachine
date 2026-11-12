@@ -195,6 +195,16 @@ class LinuxFolderRuleTests(unittest.TestCase):
             # Admission leaves the search to the instance's start.
             self.assertEqual(self.check(self.code, admission=True), [self.code])
 
+    def test_the_folder_check_refuses_a_link_at_a_protected_name(self):
+        (self.code / "sub").mkdir()
+        for link in (self.code / ".vscode", self.code / "sub/.git"):
+            with self.subTest(link=link):
+                link.symlink_to(self.notes)
+                self.refused("folder_unsupported", 0, self.code)
+                self.assertEqual(self.check(self.code, admission=True), [self.code])  # The instance's start refuses it.
+                link.unlink()
+        self.assertEqual(self.check(self.code), [self.code])
+
 
 class WorktreeGrantTests(unittest.TestCase):
     def setUp(self):

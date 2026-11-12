@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tarfile
 import tempfile
@@ -55,7 +56,11 @@ def bubblewrap(item: dict, cache: Path, output: Path) -> None:
              "-Dselinux=disabled", "-Dman=disabled", "-Dtests=false", "-Dbash_completion=disabled",
              "-Dzsh_completion=disabled"], env)
         run(["ninja", "-C", str(build), "bwrap"], env)
-        shutil.copyfile(build / "bwrap", output / "bwrap")
+        built = (build / "bwrap").read_bytes()
+        headers, (size, count) = struct.unpack_from("<Q", built, 32)[0], struct.unpack_from("<HH", built, 54)
+        if any(struct.unpack_from("<I", built, headers + index * size)[0] == 3 for index in range(count)):
+            raise ValueError("the built bwrap asks for a dynamic loader")  # A PT_INTERP program header.
+        (output / "bwrap").write_bytes(built)
         (output / "bwrap").chmod(0o755)
         shutil.copyfile(source / "COPYING", output / "bwrap.COPYING")
     run([str(output / "bwrap"), "--version"], env)
