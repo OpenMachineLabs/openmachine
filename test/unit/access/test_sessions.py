@@ -7,10 +7,9 @@ import unittest
 from unittest.mock import patch
 
 import openmachine
-from openmachine.access import sessions
+from openmachine.access import restricted, sessions
 from openmachine.access.__main__ import capabilities
 from openmachine.access.macos import seatbelt as macos
-from openmachine.access.macos import sessions as restricted
 from openmachine.foundation.sanitize import Fault
 
 VALID = {"protocol": 3, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test",
@@ -148,7 +147,7 @@ class SessionAccountTests(unittest.TestCase):
 
 class LaunchAcknowledgmentTests(unittest.TestCase):
     def test_only_an_explicit_pre_exec_errno_proves_nothing_ran(self):
-        self.assertEqual(restricted.started({"pid": 41, "start": 7}), macos.Birth(41, 7))
+        self.assertEqual(restricted.started({"pid": 41, "start": 7}), restricted.Birth(41, 7))
         with self.assertRaises(Fault) as caught:
             restricted.started({"errno": 2})
         self.assertEqual((caught.exception.code, caught.exception.effect), ("launch_failed", "known_no_effect"))
@@ -163,8 +162,8 @@ class SpawnerSelfTestTests(unittest.TestCase):
 
     def confirm(self, reported, births, verdicts):
         sent = []
-        with (patch.object(macos, "birth", lambda pid: births.pop(0) if births else None),
-              patch.object(macos, "member", lambda pid, marker: verdicts[pid]),
+        with (patch.object(restricted, "birth", lambda pid: births.pop(0) if births else None),
+              patch.object(restricted.backend, "member", lambda pid, marker: verdicts[pid]),
               patch.object(restricted.os, "getpid", return_value=7),
               patch.object(restricted.os, "kill", lambda pid, signum: sent.append(pid))):
             try:
@@ -174,17 +173,17 @@ class SpawnerSelfTestTests(unittest.TestCase):
                 return None, sent
 
     def test_a_spawner_that_passes_keeps_its_reported_birth(self):
-        self.assertEqual(self.confirm(b"41 900", [macos.Birth(41, 900)] * 2, {41: True, 7: False}),
-                         (macos.Birth(41, 900), []))
+        self.assertEqual(self.confirm(b"41 900", [restricted.Birth(41, 900)] * 2, {41: True, 7: False}),
+                         (restricted.Birth(41, 900), []))
 
     def test_a_failed_self_test_kills_only_the_same_birth(self):
-        same = macos.Birth(41, 900)
+        same = restricted.Birth(41, 900)
         for name, births, verdicts, killed in (
                 ("not a member", [same, same], {41: False, 7: False}, [41]),
                 ("supervisor confined too", [same, same, same, same], {41: True, 7: True}, [41]),
-                ("pid reused before the check", [macos.Birth(41, 901)] * 2, {41: False, 7: False}, []),
-                ("pid reused during the check", [same, macos.Birth(41, 901), macos.Birth(41, 901)], {41: True, 7: False}, []),
-                ("pid reused before the kill", [same, macos.Birth(41, 901)], {41: True, 7: True}, []),
+                ("pid reused before the check", [restricted.Birth(41, 901)] * 2, {41: False, 7: False}, []),
+                ("pid reused during the check", [same, restricted.Birth(41, 901), restricted.Birth(41, 901)], {41: True, 7: False}, []),
+                ("pid reused before the kill", [same, restricted.Birth(41, 901)], {41: True, 7: True}, []),
                 ("gone", [], {41: None, 7: False}, [])):
             with self.subTest(case=name):
                 self.assertEqual(self.confirm(b"41 900", list(births), verdicts), (None, killed))
@@ -192,7 +191,7 @@ class SpawnerSelfTestTests(unittest.TestCase):
     def test_no_reported_birth_signals_nothing(self):
         for reported in (b"", b"41", b"41 x", b"41 900 1"):
             with self.subTest(reported=reported):
-                self.assertEqual(self.confirm(reported, [macos.Birth(41, 900)] * 4, {41: False, 7: False}), (None, []))
+                self.assertEqual(self.confirm(reported, [restricted.Birth(41, 900)] * 4, {41: False, 7: False}), (None, []))
 
 
 class LifetimeRuleTests(unittest.TestCase):

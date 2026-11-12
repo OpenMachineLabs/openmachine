@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from openmachine.access import restricted
 from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 
@@ -189,7 +190,7 @@ class ProfileTests(unittest.TestCase):
                 "SSH_CONNECTION": "100.64.0.2 52144 100.64.0.1 22", "SSH_CLIENT": "100.64.0.2 52144 22",
                 "SSH_AUTH_SOCK": "/tmp/agent", "GIT_DIR": "/elsewhere", "GITHUB_TOKEN": "secret", "OPENMACHINE_STATE": "x"}
         private = self.root / "private"
-        environment = seatbelt.environment(base, private)
+        environment = restricted.environment(base, private)
         self.assertEqual({key for key in environment if key in base}, {"PATH", "LANG", "LC_ALL", "TERM", "HOME", "SSH_CONNECTION", "SSH_CLIENT"})
         self.assertEqual((environment["HOME"], environment["TMPDIR"]), (str(private / "home"), str(private / "tmp") + "/"))
 

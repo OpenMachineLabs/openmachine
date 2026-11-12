@@ -3,14 +3,11 @@
 import ctypes
 import errno
 import functools
-import hashlib
 import os
 from pathlib import Path
-import pwd
 import re
 import stat
 import sys
-from typing import NamedTuple
 
 from openmachine.foundation.sanitize import Fault
 
@@ -34,7 +31,6 @@ SECRET_DIRECTORIES = (".ssh", ".aws", ".azure", ".gnupg", ".kube")
 SECRET_FILES = r"\.env(\.[^/]*)?|\.netrc|\.pypirc|credentials(\.json)?|secrets\.toml|id_rsa|id_ed25519|[^/]*\.(key|p12|pfx)"
 SECRET_DIRECTORY_REGEX = r"^(/.*)?/(" + "|".join(re.escape(name) for name in SECRET_DIRECTORIES) + r")(/.*)?$"
 SECRET_FILE_REGEX = r"^(/.*)?/(" + SECRET_FILES + r")$"
-KEPT_ENVIRONMENT = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "SSH_CONNECTION", "SSH_CLIENT")
 # Git files that later run code outside any sandbox, relative to a .git directory: hooks, configuration
 # and commondir redirects of the repository and of every worktree and submodule Git dir nested in it.
 PROTECTED_GIT = r"((modules|worktrees)/.+/)?(hooks(/.*)?|config(\.worktree)?|commondir)"
@@ -72,10 +68,6 @@ def unavailable_reason() -> str | None:
 def user_temp() -> Path:
     """Per-user Darwin temp (DARWIN_USER_TEMP_DIR), independent of $TMPDIR."""
     return Path(os.confstr(65537)).resolve(strict=True)
-
-
-def account_home() -> Path:
-    return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 
 
 def read_denials(home: Path) -> tuple[list[Path], list[Path]]:
@@ -227,19 +219,6 @@ def profile(*, home: Path, folders: list[Path], private: Path, control: list[Pat
     return "\n".join(lines) + "\n"
 
 
-def digest(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-def environment(base: dict, private: Path) -> dict:
-    """Construct the command environment; nothing else from the service is inherited."""
-    kept = {key: value for key, value in base.items() if key in KEPT_ENVIRONMENT or key.startswith("LC_")}
-    return kept | {"HOME": str(private / "home"), "TMPDIR": str(private / "tmp") + "/",
-                   "XDG_CACHE_HOME": str(private / "cache"), "XDG_CONFIG_HOME": str(private / "config"),
-                   "XDG_DATA_HOME": str(private / "data"), "XDG_STATE_HOME": str(private / "state"),
-                   "npm_config_cache": str(private / "cache" / "npm")}
-
-
 def apply(text: str) -> None:
     """Confine the calling process and every descendant; call only in the child before exec."""
     library = ctypes.CDLL(LIBRARY)
@@ -268,12 +247,6 @@ class _BSDInfo(ctypes.Structure):
                 ("pgid", ctypes.c_uint32), ("pjobc", ctypes.c_uint32), ("tdev", ctypes.c_uint32),
                 ("tpgid", ctypes.c_uint32), ("nice", ctypes.c_int32), ("start_sec", ctypes.c_uint64),
                 ("start_usec", ctypes.c_uint64)]
-
-
-class Birth(NamedTuple):
-    """A process identity that a reused PID cannot match: PID plus kernel start time."""
-    pid: int
-    start: int
 
 
 @functools.cache
@@ -330,14 +303,14 @@ def lifetime_rules(marker: str, runtime: Path) -> str:
     ]) + "\n"
 
 
-def birth(pid: int) -> Birth | None:
-    """The live identity of pid, or None once it is gone or a zombie."""
+def start(pid: int) -> int | None:
+    """The kernel start time of a live pid, or None once it is gone or a zombie."""
     _, _, info = _native()
     value = _BSDInfo()
     if (info(pid, _PROC_PIDTBSDINFO, 0, ctypes.byref(value), ctypes.sizeof(value)) != ctypes.sizeof(value)
             or value.status == _ZOMBIE):
         return None
-    return Birth(pid, value.start_sec * 1_000_000 + value.start_usec)
+    return value.start_sec * 1_000_000 + value.start_usec
 
 
 def member(pid: int, marker: str) -> bool | None:
@@ -354,30 +327,6 @@ def member(pid: int, marker: str) -> bool | None:
     return allowed == 0 and denied == 1
 
 
-def signal_member(target: Birth, marker: str, signum: int) -> bool:
-    """Signal only the same birth identity, and only while it is still a member."""
-    current = birth(target.pid)
-    if current is None or current.start != target.start or member(target.pid, marker) is not True:
-        return False
-    current = birth(target.pid)
-    if current is None or current.start != target.start:
-        return False
-    try:
-        os.kill(target.pid, signum)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-def signal_group(leader: Birth, marker: str, signum: int) -> bool:
-    """Signal a session command's process group, as sshd does, while its leader is verifiably unchanged.
-
-    The group id is the leader's PID and every group member descends from it, so it stays in the lifetime.
-    """
-    if not signal_member(leader, marker, 0):
-        return False
-    try:
-        os.killpg(leader.pid, signum)
-    except ProcessLookupError:
-        return False
-    return True
+def peer(connection) -> int:
+    """The PID at the other end of a connected Unix socket."""
+    return connection.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import fcntl
 import os
+import pwd
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -76,6 +77,10 @@ def control_paths(state: Path) -> tuple[Path, ...]:
     return tuple(found)
 
 
+def account_home() -> Path:
+    return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+
+
 def _inside(path: Path, other: Path) -> bool:
     if sys.platform == "darwin":  # macOS volumes match names in any case; refuse every spelling.
         path, other = Path(str(path).casefold()), Path(str(other).casefold())
@@ -89,7 +94,7 @@ def folders(paths: list[str], control: tuple[Path, ...], *, admission: bool) -> 
     is at the Mac. Admission reads none, so that no privacy prompt holds a launch, and refuses a folder
     whose kernel path is no longer the stored one.
     """
-    home = seatbelt.account_home()
+    home = account_home()
     # Everything the profile denies before a folder's allow, which would re-open it: the denied areas,
     # devices and Core's runtime trees.
     denied = [*seatbelt.read_denials(home)[0], Path("/dev"), seatbelt.user_temp() / "omc"]

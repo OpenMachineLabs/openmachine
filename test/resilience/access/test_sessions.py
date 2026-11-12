@@ -139,7 +139,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         # This admission pauses under the lifetime lock, just before it connects; meanwhile a routed
         # session waits for the lock, then starts a newer instance that rebinds the socket.
         holding = self.root / "holding"
-        pause = ("import time\nfrom openmachine.access.macos import sessions as _s\n_connect = _s._connect\n"
+        pause = ("import time\nfrom openmachine.access import restricted as _s\n_connect = _s._connect\n"
                  f"def _paused(lifetime, instance):\n open({str(holding)!r}, 'w').close()\n time.sleep(3)\n"
                  " return _connect(lifetime, instance)\n_s._connect = _paused\n")
         paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
@@ -155,7 +155,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         (first, second), prelude = self.clients()
         lifetime = self.lifetime()
         self.admitted(lifetime, "true", prelude, second)  # Core holds a copy of another client
-        remove = ("from openmachine.access.macos import sessions as _s\n_install = _s._install\n"
+        remove = ("from openmachine.access import restricted as _s\n_install = _s._install\n"
                   "def _removed(client):\n client.unlink()\n return _install(client)\n_s._install = _removed\n")
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran", github=self.routing(first)),
                                     prelude + remove)
@@ -244,7 +244,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertTrue(self.stopped(instance["pid"]))
         started = time.monotonic()
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
-                                    "from openmachine.access.macos import sessions as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
+                                    "from openmachine.access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
         # The request may already be queued at the spawner: a retry is not known to be safe.
@@ -256,7 +256,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_a_spawner_that_never_reports_ready_releases_the_lifetime(self):
         lifetime = self.lifetime()
         # The spawner enters its sandbox and then stalls before it reports ready.
-        prelude = ("import time\nfrom openmachine.access.macos import seatbelt as _m, sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+        prelude = ("import time\nfrom openmachine.access import restricted as _s\nfrom openmachine.access.macos import seatbelt as _m\n_s.SPAWN_SECONDS = 1\n"
                    "_apply = _m.apply\ndef _stall(text):\n _apply(text)\n time.sleep(120)\n_m.apply = _stall\n")
         started = time.monotonic()
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"), prelude)
@@ -272,7 +272,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         noted = self.state / "intermediate"
         # The intermediate process stalls before it can fork the spawner.
-        prelude = ("import os, time\nfrom openmachine.access.macos import sessions as _s\n_s.SPAWN_SECONDS = 1\n"
+        prelude = ("import os, time\nfrom openmachine.access import restricted as _s\n_s.SPAWN_SECONDS = 1\n"
                    f"def _stall():\n open({str(noted)!r}, 'w').write(str(os.getpid()))\n time.sleep(120)\n"
                    "os.setsid = _stall\n")
         started = time.monotonic()

@@ -24,7 +24,7 @@ class FolderRuleTests(unittest.TestCase):
         for path in (self.code, self.notes, self.home / "Library/LaunchAgents", self.home / ".ssh", self.home / ".local/state"):
             path.mkdir(parents=True)
         self.control = (self.home / ".local/state",)
-        home = patch.object(rules.seatbelt, "account_home", return_value=self.home)
+        home = patch.object(rules, "account_home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
 
@@ -72,7 +72,7 @@ class FolderRuleTests(unittest.TestCase):
             with self.subTest(code=code, path=path):
                 self.refused(code, 1, self.notes, path)
         # The account database or a control path may spell a name in another case than the disk does.
-        with patch.object(rules.seatbelt, "account_home", return_value=Path(str(self.home).swapcase())):
+        with patch.object(rules, "account_home", return_value=Path(str(self.home).swapcase())):
             self.refused("folder_too_broad", 0, self.home)
         self.control = (Path(str(self.code).swapcase()),)
         self.refused("folder_conflict", 0, self.code)

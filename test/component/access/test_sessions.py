@@ -14,9 +14,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import sessions
+from openmachine.access import restricted, sessions
 from openmachine.access.macos import seatbelt as macos
-from openmachine.access.macos import sessions as restricted
+from openmachine.access.macos import sessions as backend
 from openmachine.foundation.sanitize import Fault
 
 STICKY_ROOT = Path("/tmp").resolve()  # Root-owned and sticky on macOS and Linux.
@@ -34,28 +34,28 @@ class PersistentHomeTests(unittest.TestCase):
 
     def unsafe(self):
         with self.assertRaises(Fault) as caught:
-            restricted.persistent_home()
+            backend.persistent_home()
         self.assertEqual(caught.exception.code, "persistent_home_unsafe")
 
     def test_the_home_is_created_owner_only_with_only_the_git_identity(self):
         with patch.object(restricted, "_git_identity", return_value={"name": "Dev", "email": "dev@example.invalid"}):
-            self.assertEqual(restricted.persistent_home(), self.home)
+            self.assertEqual(backend.persistent_home(), self.home)
         for name in ("", "home", "cache", "config", "data", "state"):
             self.assertEqual((self.home / name).stat().st_mode & 0o777, 0o700, name)
         config = self.home / "home" / ".gitconfig"
         self.assertEqual(config.read_text(), "[user]\n\tname = Dev\n\temail = dev@example.invalid\n")
         config.write_text("changed by confined work\n")
         with patch.object(restricted, "_git_identity", return_value={"name": "Other"}):
-            restricted.persistent_home()
+            backend.persistent_home()
         self.assertEqual(config.read_text(), "changed by confined work\n")
 
     def test_links_loose_modes_and_unprotected_parents_are_refused(self):
-        restricted.persistent_home()
+        backend.persistent_home()
         (self.home / "cache").rmdir()
         (self.home / "cache").symlink_to(Path.home())
         self.unsafe()
         (self.home / "cache").unlink()
-        restricted.persistent_home()
+        backend.persistent_home()
         self.home.chmod(0o755)
         self.unsafe()
         self.home.chmod(0o700)
@@ -63,7 +63,7 @@ class PersistentHomeTests(unittest.TestCase):
             subprocess.run(["/bin/chmod", "+a", "everyone deny delete", str(self.home / "data")], check=True)
             self.unsafe()
             subprocess.run(["/bin/chmod", "-N", str(self.home / "data")], check=True)
-        restricted.persistent_home()
+        backend.persistent_home()
         with tempfile.TemporaryDirectory() as owned, patch.object(sessions, "SHARED", Path(owned)):
             if os.getuid() == 0:
                 os.chown(owned, 65534, -1)  # Any owner but root is refused, as this user is when not root.
@@ -132,7 +132,7 @@ class GitHubClientTests(unittest.TestCase):
                 self.refused(self.client)
         # A restricted profile runs only Core's copy, never the host's file.
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
-            text = restricted._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
+            text = backend._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home")
         self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)
         self.assertNotIn(str(self.client), text)
 
@@ -173,7 +173,7 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         socket.send_fds(launcher, [struct.pack("!I", len(body))], [null, null, null])
         os.close(null)
         launcher.sendall(body)
-        with patch.object(macos, "birth", birth):
+        with patch.object(restricted, "birth", birth):
             try:
                 pid = restricted._spawn(spawner)
             except OSError:
@@ -184,7 +184,7 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
         return pid, frame
 
     def test_a_command_that_exits_at_once_still_reports_its_real_birth(self):
-        real, seen = macos.birth, []
+        real, seen = restricted.birth, []
 
         def slow(pid):
             time.sleep(0.3)  # Long enough for an ungated child to exec and exit.
@@ -193,7 +193,7 @@ class SpawnAcknowledgmentTests(unittest.TestCase):
 
         pid, frame = self.spawn(["/usr/bin/true"], slow)
         self.assertIsNotNone(seen[0])
-        self.assertEqual(restricted.started(frame), macos.Birth(pid, seen[0].start))
+        self.assertEqual(restricted.started(frame), restricted.Birth(pid, seen[0].start))
 
     def test_an_unreadable_birth_withholds_the_launch(self):
         ran = self.root / "ran"

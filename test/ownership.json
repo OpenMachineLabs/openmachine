@@ -11,6 +11,7 @@
         "openmachine/access/macos/__init__.py",
         "openmachine/access/macos/seatbelt.py",
         "openmachine/access/macos/sessions.py",
+        "openmachine/access/restricted.py",
         "openmachine/access/rules.py",
         "openmachine/access/sessions.py"
       ],
