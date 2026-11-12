@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 
-from openmachine.access import restricted
+from openmachine.access import restricted, sessions
 from openmachine.access.macos import seatbelt as macos
 
 # Restricted homes go under the root-owned sticky temp directory, never the real /Users/Shared, with a name
@@ -23,6 +23,7 @@ from openmachine.access.macos import seatbelt as macos
 SHARED = Path("/private/tmp" if sys.platform == "darwin" else "/tmp")
 HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
 HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
+HOMES = sessions.keyed_homes(HOME.parent)  # Where the homes that requests name by key are.
 # Core's copy of om-code is per user too; each test process keeps its own.
 CLIENT_NAME = f"client-{os.getpid()}"
 BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
@@ -51,7 +52,8 @@ class SessionFixture(object):
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(HOME.parent, ignore_errors=True)
+        for path in (HOME.parent, HOMES):
+            shutil.rmtree(path, ignore_errors=True)
         if sys.platform == "darwin":
             shutil.rmtree(macos.user_temp() / "omc" / CLIENT_NAME, ignore_errors=True)
 
@@ -76,7 +78,7 @@ class SessionFixture(object):
                 str(self.state), *args]
 
     def request(self, lifetime, policy, kind, command=None, **extra):
-        value = {"protocol": 3, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, "connection": CONNECTION,
+        value = {"protocol": 4, "user": USER, "lifetime": lifetime, "policy": policy, "kind": kind, "connection": CONNECTION,
                  **extra}
         if command is not None:
             value["command"] = command
@@ -124,6 +126,64 @@ class SessionFixture(object):
         commands.write_text(batch)
         return subprocess.run(["sftp", "-b", str(commands), "-D", f"{sys.executable} {wrapper}"],
                               capture_output=True, text=True, timeout=60)
+
+    def homes_are_closed(self, default, *, as_folders):
+        """Leave a secret and shell startup files in the default sandbox home and in two keyed ones. Then, from
+        a login shell of each home, Read only and in Workspace sessions of one folder and then another, and
+        with the other homes as folders where the folder rule takes them, try to read and change the others:
+        it runs its own startup file and nothing else comes of it, nor of a default home left unsafe."""
+        keyed = sessions.keyed_homes(default)
+        homes = {None: default / "home", "a" * 32: keyed / ("a" * 32) / "home", "b" * 32: keyed / ("b" * 32) / "home"}
+        startup = (".profile", ".zprofile", ".bash_profile")  # A login sh, zsh or bash reads exactly one.
+        left = [home / name for home in homes.values() for name in (*startup, "secret")]
+        self.addCleanup(lambda: [path.unlink(missing_ok=True) for path in left])  # Later shells run none of it.
+        folders = [self.root / "code", self.root / "notes"]
+        for folder in folders:
+            folder.mkdir()
+        for key, home in homes.items():
+            reply, code, out, err = self.session(self.lifetime(), command=(
+                f"echo HOME=$HOME; echo SECRET-{key} > secret; for name in {' '.join(startup)}; do "
+                f"echo echo STARTUP-{key} > $name; done"), **({"home": key} if key else {}))
+            self.assertEqual((reply["status"], code, out), ("admitted", 0, f"HOME={home}\n"), err)
+        for key, home in homes.items():
+            others = [other for other in homes.values() if other != home]
+            typed = "".join(f"cat {other}/secret {str(other).swapcase()}/secret; ls -A {other.parent}; echo x > {other}/planted\n"
+                            + "".join(f"echo echo PLANTED >> {other}/{name}\n" for name in startup) for other in others)
+            if key is None:
+                typed += f"ls -A {keyed}\n"  # The keys are not listed either.
+            granted = [[str(folders[0])], [str(folders[1])], *([[str(folders[0]), *map(str, others)]] if as_folders else [])]
+            for policy, extra in (("read_only", {}), *(("workspace", {"folders": item}) for item in granted)):
+                with self.subTest(home=key, policy=policy, **extra):
+                    reply, code, out, err = self.admit(self.request(self.lifetime(), policy, "shell", **extra,
+                                                                    **({"home": key} if key else {})), typed.encode())
+                    self.assertEqual((reply["status"], out), ("admitted", f"STARTUP-{key}\n"), err)
+        for key, home in homes.items():
+            self.assertEqual([(home / name).read_text() for name in startup], [f"echo STARTUP-{key}\n"] * 3)
+            self.assertFalse((home / "planted").exists())
+        # What a session of the default home makes of it refuses only that home's sessions: a keyed
+        # lifetime that runs and a new one are still admitted.
+        running = self.lifetime()
+        self.assertEqual(self.session(running, home="a" * 32)[1], 0)
+        self.addCleanup(lambda: [path.chmod(0o700) for path in (default / "cache", default)])
+        self.assertEqual(self.session(self.lifetime(), command="chmod 755 $XDG_CACHE_HOME $XDG_CACHE_HOME/..")[1], 0)
+        self.assertEqual(self.session(self.lifetime())[0]["error"]["code"], "persistent_home_unsafe")
+        for lifetime, key in ((running, "a" * 32), (self.lifetime(), "b" * 32)):
+            self.assertEqual(self.session(lifetime, command="echo ok", home=key)[1:3], (0, "ok\n"))
+
+    def a_changed_home_is_refused(self, default):
+        """A lifetime keeps the home it started with, the default one or the one of a key, and a request
+        that names another makes none."""
+        first, second = "c" * 32, "d" * 32
+        for started, then, refused in (({}, {"home": first}, first), ({"home": first}, {}, None),
+                                       ({"home": first}, {"home": second}, second)):
+            with self.subTest(started=started, then=then):
+                lifetime = self.lifetime()
+                self.assertEqual(self.session(lifetime, **started)[1], 0)
+                reply, code, out, _ = self.session(lifetime, command="echo ran", **then)
+                self.assertEqual((reply["error"]["code"], reply["error"]["effect"], code, out),
+                                 ("lifetime_changed", "known_no_effect", 1, ""))
+                if refused:
+                    self.assertFalse((sessions.keyed_homes(default) / refused).exists())
 
     def wait_for(self, path, seconds=10):
         deadline = time.monotonic() + seconds

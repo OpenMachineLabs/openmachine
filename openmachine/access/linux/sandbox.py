@@ -41,7 +41,7 @@ class TooLarge(Exception):
 
 
 def home(account: Path) -> Path:
-    """The persistent sandbox home of the OS user whose home is account."""
+    """The default persistent sandbox home of the OS user whose home is account."""
     return account / ".local/share/openmachine-sandbox"
 
 
@@ -204,10 +204,11 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     resolver = os.path.realpath("/etc/resolv.conf")
     if resolver.startswith("/run/") and os.path.exists(resolver):
         found += ["--ro-bind", resolver, resolver]
-    # What stays inside what is hidden: of the runtime tree, the lifetime's directory and the client; and
-    # Core's own Python and packages, wherever they live, so that the spawner can run.
+    # What stays inside what is hidden: of the runtime tree, the lifetime's directory and the client; a home
+    # of a key, among the others; and Core's own Python and packages, wherever they live, so that the
+    # spawner can run.
     python = [Path(os.path.realpath(item)) for item in (sys.prefix, sys.base_prefix, *sys.path) if os.path.isdir(item)]
-    exposed = dict.fromkeys(python, "--ro-bind") | {client: "--ro-bind", private: "--bind"}
+    exposed = dict.fromkeys(python, "--ro-bind") | {client: "--ro-bind", private: "--bind", home: "--bind"}
     for path in sorted(exposed):
         if path.is_relative_to("/tmp") or path.is_relative_to("/run"):
             found += [exposed[path], str(path), str(path)]

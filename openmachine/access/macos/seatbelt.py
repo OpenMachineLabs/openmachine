@@ -134,10 +134,12 @@ def nested_git_dirs(git_dir: Path) -> list[Path]:
     return found[:MAX_NESTED_GIT]
 
 
-def profile(*, home: Path, folders: list[Path], private: Path, control: list[Path],
+def profile(*, home: Path, others: list[Path], folders: list[Path], private: Path, control: list[Path],
             denied: list[Path], exceptions: list[Path], executable: Path) -> str:
     """Generate one profile: read the machine except denied areas, write only the sandbox home, the
     Workspace folders and the private tree, and run only the named executable inside a denied area.
+    others holds every other sandbox home, and the home may lie in one of them: nothing there but the
+    home is read or written, inside a Workspace folder too.
 
     For the same operation Seatbelt applies the last matching rule, so each later block narrows or
     re-allows the one before it and the protected and control denials come last. A later broader
@@ -215,7 +217,11 @@ def profile(*, home: Path, folders: list[Path], private: Path, control: list[Pat
     if folders:
         lines.append(f"(deny {WRITES} (require-all (require-any {_filters('subpath', folders)}) "
                      f'(regex #"{PROTECTED_CONFIG_REGEX}")))')
-    lines.append(f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})")
+    lines += [f"(deny file-read* file-read-data {WRITES} process-exec (require-all (require-any "
+              f"{_filters('subpath', others)}) (require-not (subpath {_literal(home)}))))",
+              # realpath stats the directory above a keyed home; none of these is listed.
+              f"(allow file-read-metadata {_filters('literal', others)})",
+              f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})"]
     return "\n".join(lines) + "\n"
 
 

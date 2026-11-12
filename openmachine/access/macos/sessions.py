@@ -16,12 +16,8 @@ from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import private_directory
 
 
-def persistent_home() -> Path:
-    """The one owner-only restricted-mode home of this OS user; unconfined code never trusts its contents.
-
-    Every restricted policy and lifetime shares it, so a later session may run what an earlier one left
-    here, such as shell startup files or cached packages, but only inside the later session's own sandbox.
-    """
+def persistent_home(key: str | None) -> tuple[Path, list[Path]]:
+    """This OS user's sandbox home for a session and where every other one is (restricted.persistent_home)."""
     root = sessions.SHARED
     try:
         parent = root.lstat()
@@ -30,7 +26,7 @@ def persistent_home() -> Path:
     if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX:
         raise Fault("persistent_home_unsafe", "The shared parent must be root-owned and protect its entries.",
                     effect="known_no_effect")
-    return restricted.private_home(root / sessions.HOME_NAME.format(uid=os.getuid()))
+    return restricted.persistent_home(root / sessions.HOME_NAME.format(uid=os.getuid()), key)
 
 
 def _runtime(lifetime: str) -> Path:
@@ -44,10 +40,10 @@ def _runtime(lifetime: str) -> Path:
     return root
 
 
-def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path) -> str:
+def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path, home: Path, others: list[Path]) -> str:
     denied, exceptions = seatbelt.read_denials(rules.account_home())
     control = list(dict.fromkeys([*rules.control_paths(state), state]))
-    return seatbelt.profile(home=home, folders=[] if scope is None else scope.grants(), private=runtime,
+    return seatbelt.profile(home=home, others=others, folders=[] if scope is None else scope.grants(), private=runtime,
                             control=control, denied=denied, exceptions=exceptions, executable=restricted._stable_client())
 
 
@@ -59,11 +55,11 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     scope = restricted._scope(request, state)
     client = sessions._client(request)
     stable = restricted._install(client) if client else None
-    home = persistent_home()
     runtime = _runtime(request.lifetime)
     lifetime = sessions.Lifetime(state, request.lifetime)
     with lifetime.lock():
         record = restricted._record(lifetime, request)
+        home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
         # instance may run Core's copy of om-code, except instances started before that copy existed: a
         # routed session starts a new instance once there, which cannot see the earlier one's jobs.
@@ -72,7 +68,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         instance = newest if usable else None
         if instance is None:
             # Folders and worktrees are fixed when an instance starts; later sessions reuse them.
-            text = _restricted_profile(scope, state, runtime, home)
+            text = _restricted_profile(scope, state, runtime, home, others)
             # Publish the marker before anything starts, so a failed save, a lost launcher or a stalled
             # spawner never leaves a running instance that no record names.
             instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None, "client": str(restricted._stable_client())}

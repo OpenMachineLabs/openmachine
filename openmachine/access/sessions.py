@@ -25,7 +25,7 @@ from openmachine.access.macos import seatbelt
 from openmachine.foundation.sanitize import Fault
 from openmachine.foundation.state import lease, private_directory, save_json
 
-PROTOCOL = 3
+PROTOCOL = 4
 MAX_REQUEST = 256 * 1024
 SHARED = Path("/Users/Shared")
 HOME_NAME = "openmachine-code-{uid}"
@@ -78,11 +78,13 @@ class GitHub(BaseModel):
 class SessionRequest(BaseModel):
     """One SSH channel after Go verified Cloud authority; Core verifies paths and applies confinement."""
     model_config = ConfigDict(extra="forbid", strict=True)
-    protocol: Literal[3]
+    protocol: Literal[4]
     user: Annotated[str, Field(min_length=1, max_length=255)]
     lifetime: LifetimeId
     policy: Literal["read_only", "workspace", "full_access"]
     folders: rules.Folders | None = None
+    # The sandbox home a restricted session uses instead of the default one; a Full Access session uses none.
+    home: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")] | None = None
     kind: Literal["shell", "exec", "sftp"]
     # SSH_CONNECTION: "<client> <port> <server> <port>", literal addresses.
     connection: Annotated[str, Field(max_length=128)]
@@ -115,7 +117,7 @@ def parse(raw: bytes) -> SessionRequest:
     try:
         return SessionRequest.model_validate_json(raw)
     except ValidationError as error:
-        raise Fault("request_invalid", "Use access protocol 3 with a valid session request.",
+        raise Fault("request_invalid", "Use access protocol 4 with a valid session request.",
                     effect="known_no_effect") from error
 
 
@@ -141,6 +143,11 @@ class Lifetime:
 
     def lock(self):
         return lease(self.directory / "lock", wait=True)
+
+
+def keyed_homes(default: Path) -> Path:
+    """The directory, beside the default persistent sandbox home, of the homes that requests name by key."""
+    return default.with_name(default.name + "-homes")
 
 
 def _account(user: str) -> pwd.struct_passwd:
@@ -195,13 +202,14 @@ def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Pa
 def _client(request: SessionRequest) -> Path | None:
     """The host's om-code client: an executable regular file at its own physical path. The file and its
     directory belong to root or this user, with no group or other write and no ACL, and lie outside the
-    persistent home and every restricted runtime tree, where restricted work could replace what Full
+    persistent homes and every restricted runtime tree, where restricted work could replace what Full
     sessions run."""
     if request.github is None:
         return None
     client = Path(request.github.client)
-    restricted = ([sandbox.home(rules.account_home()), sandbox.runtime(rules.account_home())] if sys.platform == "linux" else
-                  [SHARED / HOME_NAME.format(uid=os.getuid()), seatbelt.user_temp() / "omc"])
+    home, runtime = ((sandbox.home(rules.account_home()), sandbox.runtime(rules.account_home())) if sys.platform == "linux" else
+                     (SHARED / HOME_NAME.format(uid=os.getuid()), seatbelt.user_temp() / "omc"))
+    restricted = [home, keyed_homes(home), runtime]
     try:
         info, parent = client.lstat(), client.parent.lstat()
         valid = (stat.S_ISREG(info.st_mode) and os.path.realpath(client) == str(client) and os.access(client, os.X_OK)
@@ -211,7 +219,7 @@ def _client(request: SessionRequest) -> Path | None:
         raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
     if not valid:
         raise Fault("github_client_invalid", "The om-code client must be an executable file only its owner can change, "
-                    "outside the persistent home and Core's runtime trees.", effect="known_no_effect")
+                    "outside the persistent homes and Core's runtime trees.", effect="known_no_effect")
     return client
 
 
