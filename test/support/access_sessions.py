@@ -141,11 +141,11 @@ class SessionFixture(object):
             self.assertEqual((reply["status"], code, out), ("admitted", 0, f"HOME={home}\n"), err)
         for key, home in homes.items():
             others = [other for other in homes.values() if other != home]
-            typed = "".join(f"cat {other}/secret {str(other).swapcase()}/secret; ls {other.parent} {keyed.parent}/*/{other.parent.name}; "
+            typed = "".join(f"cat {other}/secret {str(other).swapcase()}/secret; ls -A {other.parent}; "
                             f"echo x > {other}/planted; echo echo PLANTED >> {other}/{name}\n"
                             for other in others for name in startup)
             if key is None:
-                typed += f"ls {keyed}\n"  # The keys are not listed either.
+                typed += f"ls -A {keyed}\n"  # The keys are not listed either.
             for policy, extra in (("read_only", {}), *(("workspace", {"folders": item}) for item in folders(others))):
                 with self.subTest(home=key, policy=policy, **extra):
                     reply, code, out, err = self.admit(self.request(self.lifetime(), policy, "shell", **extra,
