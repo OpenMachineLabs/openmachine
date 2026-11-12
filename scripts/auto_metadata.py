@@ -84,7 +84,7 @@ def file_label(paths):
         return None
 
     def category(path):
-        if path.startswith(("docs/", "spec/", "assets/")) or path in {
+        if path.startswith(("docs/", "assets/")) or path in {
             "README.md", "CONTRIBUTING.md", "MAINTAINERS.md",
             "CODE_OF_CONDUCT.md", "SECURITY.md",
         }:

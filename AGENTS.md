@@ -13,8 +13,8 @@ delta. The safety rules below apply regardless of either.
 
 - A Spec approved by a maintainer authorizes its scope wherever it lives,
   including another Open Machine repository. A sufficiently explicit current
-  user request can authorize a change. Listing in the
-  [Spec index](spec/README.md) is optional, not an approval step.
+  user request can authorize a change. Keep designs and approvals in GitHub
+  Issues, following [Design and scope](MAINTAINERS.md#design-and-scope).
 - Surveys, drafts, Feature Requests, Roadmaps and superseded Specs are evidence,
   not approval. [MAINTAINERS.md](MAINTAINERS.md#design-and-scope) defines each
   Issue type.
@@ -32,7 +32,6 @@ any more-specific `AGENTS.md` before changing their scope.
 | `openmachine/` | Runtime package; module owners are in [CONTRIBUTING.md](CONTRIBUTING.md#module-owners) |
 | `test/` | All Python tests; layers and ownership are in [test/README.md](test/README.md) |
 | `scripts/` | Repository checks and test runners |
-| `spec/` | Spec index and necessary attachments; Spec and Survey bodies stay in Issues |
 | `.github/` | Issue and PR templates, managed labels and CI workflows |
 | `connector/` | Standalone Go network module; [connector/README.md](connector/README.md) has its build and test commands |
 
@@ -86,21 +85,8 @@ Run commands with Python 3.12 or newer from the locked virtual environment in
 interpreter fails before checking anything. Use `upstream/main` as the base
 when working from a fork.
 
-```sh
-# Documentation and repository-only changes
-python scripts/check_repository.py
-python -m unittest discover -s test/repository -p 'test_*.py'
-
-# Focused code change; replace access with the owning module
-python scripts/run_tests.py --module access --layer unit
-
-# Affected checks; local premerge is available when current CI evidence is absent
-python scripts/run_tests.py --base origin/main --plan
-python scripts/run_tests.py --base origin/main
-python scripts/premerge.py --base origin/main
-```
-
-Packaging, locked dependencies and shared runner changes need the
+Use the [contributor checks](CONTRIBUTING.md#make-and-test-your-change).
+Packaging, locked dependencies and shared runner changes need
 [full verification](test/README.md#full-verification-and-cache-identity).
 Never lower requirements or delete necessary cases to obtain a pass. Report
 PASS, FAIL and NOT RUN separately; a local pass or CI is not product acceptance.
@@ -116,19 +102,7 @@ PASS, FAIL and NOT RUN separately; a local pass or CI is not product acceptance.
 - Opening a PR does not authorize merging, closing a Spec, releasing or
   deploying; each needs its own explicit authority.
 
-Complete every explicitly authorized deliverable before the final response.
-Progress reports and ordinary tool or test failures are not reasons to hand off.
-Reuse still-valid authorization instead of asking again, and stop once the
-requested delivery and its scoped acceptance are done.
-
-A timeout, disconnect or missing reply does not prove that nothing happened.
-On resumption or uncertainty, read the original execution, task or PR by its ID
-and inspect the destination before acting again; never replay an effect whose
-outcome is unknown. Only a request proven rejected before any effect may be
-corrected and resubmitted, under a new ID. The
-[delivery rules](CONTRIBUTING.md#complete-the-authorized-delivery)
-has the full recovery rules.
-
-If truly blocked, report the evidence, the safe recovery you attempted and the
-exact remaining work. Do not end with only a promise to continue, and do not
-expand scope to avoid the blocker.
+Follow the [delivery and recovery rules](CONTRIBUTING.md#complete-the-authorized-delivery)
+through every authorized deliverable. Reuse still-valid authorization, and stop
+when the requested delivery and scoped acceptance are complete. Do not expand
+scope to avoid a blocker.
