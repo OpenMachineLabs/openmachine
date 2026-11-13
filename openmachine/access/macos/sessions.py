@@ -81,7 +81,8 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         environment = restricted.environment(sessions._environment(request, account, stable), home) | request.environment | (
             request.github.environment if request.github else {}) | {
             # zsh writes here-documents under TMPPREFIX (default /tmp/zsh), not TMPDIR.
-            "TMPDIR": str(session_tmp) + "/", "TMPPREFIX": str(session_tmp / "zsh"), "TMUX_TMPDIR": str(runtime / "tmux")}
+            "TMPDIR": str(session_tmp) + "/", "TMPPREFIX": str(session_tmp / "zsh"), "TMUX_TMPDIR": str(runtime / "tmux"),
+            "xcrun_db": str(home / "cache/xcrun_db")}
         # Connect before another admission can start a newer instance, which rebinds the socket; a
         # connection made first still reaches its own spawner.
         connection = restricted._connect(lifetime.directory, instance)

@@ -72,7 +72,9 @@ class ProfileTests(unittest.TestCase):
         protected = (f'(deny {seatbelt.WRITES} (regex #"{seatbelt.PROTECTED_REGEX}") '
                      f'(regex #"{seatbelt.PROTECTED_IDE_REGEX}"))')
         freeze = f'(deny file-write-create file-write-unlink (regex #"{seatbelt.NESTED_GIT_REGEX}"))'
-        self.assertGreater(lines.index(freeze), lines.index(f'(allow file-read* file-write* (prefix "{self.root / "T/xcrun_db"}"))'))
+        cache = f'(deny file-read* file-read-data {seatbelt.WRITES} (prefix "{self.root / "T/xcrun_db"}"))'
+        self.assertLess(lines.index(writes), lines.index(cache))
+        self.assertLess(lines.index(cache), lines.index(freeze))
         inside = (f'(require-any (subpath "{home}") (subpath "{writable}") (subpath "{worktree}") '
                   f'(subpath "{self.root / "T/omc/lifetime"}"))')
         # Agent and hook manager configuration is protected inside the folders only, never in the sandbox home.

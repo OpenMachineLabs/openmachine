@@ -187,7 +187,9 @@ def profile(*, home: Path, others: list[Path], folders: list[Path], private: Pat
     lines.append(f'(deny file-read-data (regex #"{SECRET_DIRECTORY_REGEX}"))')
     lines.append(f'(deny file-read-data (require-all (regex #"{SECRET_FILE_REGEX}") (vnode-type REGULAR-FILE)))')
     lines.append(f"(allow file-read* file-read-data file-write* process-exec {_filters('subpath', writable + [private])})")
-    lines.append(f"(allow file-read* file-write* (prefix {_literal(str(xcrun))}))")
+    # Developer shims use a cache in the sandbox home. Never trust the shared cache,
+    # including contents left by older restricted instances.
+    lines.append(f"(deny file-read* file-read-data {WRITES} (prefix {_literal(str(xcrun))}))")
     # Every exception below also requires a writable root, so it never re-allows a path outside one.
     inside = f"(require-any {_filters('subpath', writable + [private])})"
     # Nested Git dirs stay in place and nothing is made beside them: in .git/modules and .git/worktrees, only

@@ -300,6 +300,36 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_each_sandbox_home_is_closed_to_the_sessions_of_every_other(self):
         self.homes_are_closed(HOME.parent, as_folders=True)
 
+    def test_developer_tools_use_only_their_own_sandbox_home_cache(self):
+        # A harmless fixture beside the OS cache exercises the same denial without changing that cache.
+        shared = macos.user_temp() / f"xcrun_db-test-{self.root.name}"
+        shared.write_text("shared-cache-fixture\n")
+        self.addCleanup(shared.unlink)
+        folder = self.root / "project"
+        folder.mkdir()
+        homes = {None: HOME.parent, "a" * 32: HOMES / ("a" * 32), "b" * 32: HOMES / ("b" * 32)}
+        for key, home in homes.items():
+            for policy, extra in (("read_only", {}), ("workspace", {"folders": [str(folder)]})):
+                with self.subTest(home=key, policy=policy):
+                    reply, code, out, err = self.session(self.lifetime(), policy, command=(
+                        '/usr/bin/git --version && /usr/bin/clang --version && printf "CACHE=%s\\n" "$xcrun_db"'),
+                        **extra, **({"home": key} if key else {}))
+                    self.assertEqual((reply["status"], code, err), ("admitted", 0, ""))
+                    self.assertIn("git version ", out)
+                    self.assertIn("Apple clang version ", out)
+                    self.assertIn(f"CACHE={home / 'cache/xcrun_db'}\n", out)
+                    self.assertTrue((home / "cache/xcrun_db").is_file())
+                    # Neither the shared cache nor another home's cache can be read or written.
+                    paths = [shared, *(other / "cache/xcrun_db" for other in homes.values()
+                                       if other != home and (other / "cache/xcrun_db").exists())]
+                    for path in paths:
+                        reply, code, out, err = self.session(self.lifetime(), policy, command=(
+                            f"cat {shlex.quote(str(path))}; echo changed >> {shlex.quote(str(path))}"),
+                            **extra, **({"home": key} if key else {}))
+                        self.assertEqual((reply["status"], code, out), ("admitted", 1, ""), err)
+                        self.assertGreaterEqual(err.count(DENIED), 2, err)
+        self.assertEqual(shared.read_text(), "shared-cache-fixture\n")
+
     def test_forwarded_signals_reach_the_command_group_but_not_detached_work(self):
         lifetime = self.lifetime()
         kept = int(self.session(lifetime, command=detached("kept"))[2].split()[-1])
