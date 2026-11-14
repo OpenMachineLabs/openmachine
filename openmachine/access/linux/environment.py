@@ -1,7 +1,6 @@
 """The system part of a Linux session's environment, as `ssh host command` gives it: the system variable
 files, the default PATH, and the user's runtime directory and bus. Not a PAM login: no limits or logind."""
 
-import os
 from pathlib import Path
 import re
 import stat

@@ -316,14 +316,13 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
             "test/resilience/execution/test_process.py", "test/component/server/test_dispatch.py",
         })
 
-    def test_first_manifest_migration_is_explicitly_reported_as_full(self):
+    def test_a_baseline_without_a_manifest_is_rejected(self):
         self.git("rm", "test/ownership.json")
         self.commit()
         base_without_manifest = self.git("rev-parse", "HEAD")
         self.save_manifest()
-        plan = runner.make_plan(self.root, base_without_manifest)
-        self.assertEqual(plan["scope"], "full")
-        self.assertTrue(any("predates" in reason for reason in plan["full_reasons"]))
+        with self.assertRaisesRegex(ValueError, "baseline ownership manifest"):
+            runner.make_plan(self.root, base_without_manifest)
 
 
     def test_zero_test_collection_is_an_error_not_a_successful_unittest_exit(self):

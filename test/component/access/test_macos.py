@@ -1,6 +1,5 @@
 """macOS Seatbelt profile, toolchain, environment and private-home construction."""
 
-import os
 from pathlib import Path
 import re
 import tempfile

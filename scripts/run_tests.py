@@ -6,7 +6,6 @@ import ast
 import hashlib
 import importlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -28,8 +27,7 @@ GLOBAL_PATHS = {
 REPOSITORY_PATHS = {
     "AGENTS.md", "CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
     "CODE_OF_CONDUCT.md", "README.md", "LICENSE", ".gitignore",
-    "examples/config.toml",
-    ".github/AGENTS.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/pull_request_template.md", ".github/labels.json",
+    ".github/AGENTS.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/labels.json",
     ".github/workflows/metadata.yml", ".github/workflows/labels.yml",
     ".github/workflows/spec-development.yml", "scripts/check_repository.py",
 }
@@ -233,14 +231,11 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
     return value
 
 
-def _old_manifest(root: Path, base_sha: str) -> dict | None:
+def _old_manifest(root: Path, base_sha: str) -> dict:
     result = subprocess.run(["git", "-C", str(root), "show", f"{base_sha}:{MANIFEST}"],
                             capture_output=True, text=True, timeout=30)
     if result.returncode:
-        # Absence is supported only for the first architecture migration.
-        if MANIFEST in git(root, "ls-tree", "-r", "--name-only", base_sha).splitlines():
-            raise ValueError("could not read the baseline ownership manifest")
-        return None
+        raise ValueError("could not read the baseline ownership manifest")
     # A baseline may name a layer this runner retired; its tests only map what the candidate deleted.
     return validate_manifest(json.loads(result.stdout), layers=None)
 
@@ -307,8 +302,6 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
         add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
     if full:
         full_reasons.append("explicit full verification")
-    if old is None:
-        full_reasons.append("baseline predates test ownership; verify the complete migration")
     for path in sorted(changes & GLOBAL_PATHS):
         full_reasons.append(f"global verification or dependency change: {path}")
     if modules:
@@ -319,8 +312,6 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
     for path in sorted(changes):
         known = path == MANIFEST or path in GLOBAL_PATHS or _repository_only(path)
         for manifest in (current, old):
-            if manifest is None:
-                continue
             for name, entry in manifest["modules"].items():
                 # A deleted path of a module the current manifest no longer has retires it: no behavior remains.
                 retired = path not in files and name not in current["modules"]
@@ -353,20 +344,16 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
             prefix = str(PurePosixPath(path).parent) + "/"
             consumers = {test for test in all_tests if test.startswith(prefix)}
             for manifest in (current, old):
-                if manifest is not None:
-                    for helper, tests in manifest["support"].items():
-                        if helper.startswith(prefix):
-                            consumers.update(set(tests) & all_tests)
+                for helper, tests in manifest["support"].items():
+                    if helper.startswith(prefix):
+                        consumers.update(set(tests) & all_tests)
             # A fully retired test package has no surviving behavior to select.
             if consumers or any(name.startswith(prefix) for name in files):
                 required_paths.setdefault(path, set()).update(consumers)
             add(consumers, f"test package: {path}")
         if not known:
-            if old is None and path.startswith("test/") and path not in files:
-                # Deleted tests from the pre-manifest layout are covered by this full migration.
-                continue
             full_reasons.append(f"unmapped path: {path}")
-    if MANIFEST in changes and old is not None:
+    if MANIFEST in changes:
         for name in set(old["modules"]) | set(current["modules"]):
             before, after = old["modules"].get(name), current["modules"].get(name)
             if before != after:
@@ -523,7 +510,7 @@ def execute_plan(root: Path, plan: dict) -> dict:
             environment = temporary / "venv"
             stages["environment"] = run_command([sys.executable, "-m", "venv", str(environment)],
                                                 cwd=root, stage="create isolated environment")
-            python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            python = environment / "bin/python"
             stages["dependencies"] = run_command([str(python), "-m", "pip", "install", "-r", str(root / "requirements.lock")],
                                                  cwd=root, stage="install locked dependencies")
             wheels = temporary / "wheels"
