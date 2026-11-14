@@ -5,7 +5,11 @@ __pycache__/
 build/
 dist/
 .venv
+venv/
 .env
 .envrc
 .cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.log
