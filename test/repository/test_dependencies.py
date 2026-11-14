@@ -49,7 +49,7 @@ class RuntimeTests(DependencyFixture, unittest.TestCase):
     def test_import_check_accepts_type_only_dependencies(self):
         self.assert_import_contract({
             "openmachine.access.git": ("import os\nfrom typing import TYPE_CHECKING\n"
-                                           "if TYPE_CHECKING:\n    from openmachine.config import Settings\n"
+                                           "if TYPE_CHECKING:\n    from openmachine.config import DEFAULT_STATE\n"
                                            "import typing\nif typing.TYPE_CHECKING:\n    import openmachine.service", False),
         })
 

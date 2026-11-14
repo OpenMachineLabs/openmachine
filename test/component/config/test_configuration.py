@@ -22,14 +22,20 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_only_the_local_machine_with_local_transport_loads(self):
         self.path.parent.mkdir()
-        self.path.write_text(TEXT)
-        self.assertEqual(load(self.path).machines["local"].transport, "local")
+        for text in (TEXT, '# Local machine\n' + TEXT, 'machines.local = {transport = "local"}\n'):
+            self.path.write_text(text)
+            self.assertIsNone(load(self.path))
         for text in ('schema_version = 1\n' + TEXT, TEXT + 'local_access = "full_access"\n',
                      TEXT + '[workspaces.project]\nmachine = "local"\nroot = "/tmp"\n', TEXT + "[skills]\nroots = []\n",
-                     '[machines.remote]\ntransport = "local"\n', '[machines.local]\ntransport = "ssh"\n', "", "[machines"):
+                     '[machines.remote]\ntransport = "local"\n', '[machines.local]\ntransport = "ssh"\n',
+                     TEXT + '[machines.remote]\ntransport = "local"\n', '[machines]\n', 'machines = []\n',
+                     '[machines.local]\ntransport = true\n', '[machines.local]\ntransport = ["local"]\n',
+                     '[machines.local.transport]\nkind = "local"\n', "", "[machines"):
             with self.subTest(text=text):
                 self.path.write_text(text)
                 self.fault("invalid_config", lambda: load(self.path))
+        self.path.write_bytes(b"\xff")
+        self.fault("invalid_config", lambda: load(self.path))
         self.path.unlink()
         self.fault("config_unavailable", lambda: load(self.path))
 

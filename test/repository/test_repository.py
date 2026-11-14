@@ -20,16 +20,15 @@ class RepositoryChecks(unittest.TestCase):
     def test_metadata_accepts_content_without_presentation_gates(self):
         for title in ['Repair login.', 'fixup! temporary work', '[Custom] A useful report',
                       '\u4fee\u590d\u767b\u5f55', 'A' * 120]:
-            for kind in ('pr', 'issue'):
-                obj = {'title': title, 'body': 'A concise explanation without fixed headings.',
-                       'labels': [{'name': 'spec'}]}
-                self.assertEqual(rules.metadata_errors(obj, kind), [])
+            obj = {'title': title, 'body': 'A concise explanation without fixed headings.',
+                   'labels': [{'name': 'spec'}]}
+            self.assertEqual(rules.metadata_errors(obj), [])
         obj = {'title': 'Update', 'body': '\u4e2d\u6587 path example'}
-        self.assertEqual(rules.metadata_errors(obj, 'pr'), [])
+        self.assertEqual(rules.metadata_errors(obj), [])
         for bad in [None, '', '  ', 5, 'line\nbreak']:
-            self.assertTrue(rules.metadata_errors({**obj, 'title': bad}, 'pr'))
+            self.assertTrue(rules.metadata_errors({**obj, 'title': bad}))
         for bad in [None, '', ' \n', 5, 'bad\0control']:
-            self.assertTrue(rules.metadata_errors({**obj, 'body': bad}, 'pr'))
+            self.assertTrue(rules.metadata_errors({**obj, 'body': bad}))
 
     def test_unicode_data_and_style_do_not_hide_broken_links(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -82,19 +81,14 @@ class RepositoryChecks(unittest.TestCase):
                 page.write_text(text + "\n")
                 with self.subTest(file=text):
                     self.assertEqual(bool(rules.file_errors(page, root)), text in forbidden)
-        for kind in ("pr", "issue"):
-            title = "docs(repo): describe the scope"
-            body = "Describe the scoped change and its checks.\n"
-            self.assertEqual(rules.metadata_errors({"title": title, "body": body}, kind), [])
-            for text in forbidden:
-                with self.subTest(kind=kind, field="body", text=text):
-                    self.assertTrue(rules.metadata_errors(
-                        {"title": title, "body": body + text}, kind
-                    ))
-                with self.subTest(kind=kind, field="title", text=text):
-                    self.assertTrue(rules.metadata_errors(
-                        {"title": title + " " + text, "body": body}, kind
-                    ))
+        title = "docs(repo): describe the scope"
+        body = "Describe the scoped change and its checks.\n"
+        self.assertEqual(rules.metadata_errors({"title": title, "body": body}), [])
+        for text in forbidden:
+            with self.subTest(field="body", text=text):
+                self.assertTrue(rules.metadata_errors({"title": title, "body": body + text}))
+            with self.subTest(field="title", text=text):
+                self.assertTrue(rules.metadata_errors({"title": title + " " + text, "body": body}))
 
 
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
@@ -173,10 +167,10 @@ class RepositoryChecks(unittest.TestCase):
             arguments = ["--mode", "metadata", "--event-name", "pull_request", "--event-path", str(event)]
             with patch.object(rules, "git", side_effect=AssertionError("Metadata must not read source")), \
                     patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push", "GITHUB_EVENT_PATH": "/absent/event.json"}):
-                self.assertEqual(self.checker(arguments)[0], bool(rules.metadata_errors(obj, "pr")))
+                self.assertEqual(self.checker(arguments)[0], bool(rules.metadata_errors(obj)))
                 obj["body"] = " "
                 event.write_text(json.dumps({"pull_request": obj}))
-                self.assertEqual(self.checker(arguments)[0], bool(rules.metadata_errors(obj, "pr")))
+                self.assertEqual(self.checker(arguments)[0], bool(rules.metadata_errors(obj)))
                 for incomplete in (["--mode", "metadata"], arguments[:-2], ["--event-path", str(event)]):
                     with self.subTest(arguments=incomplete), redirect_stderr(io.StringIO()), \
                             self.assertRaises(SystemExit) as failure:
@@ -261,7 +255,7 @@ class RepositoryChecks(unittest.TestCase):
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()
         obj = {"title": "docs(repo): describe $(false) literally", "body": body + "\n`exit 1`\n"}
-        self.assertEqual(rules.metadata_errors(obj, "pr"), [])
+        self.assertEqual(rules.metadata_errors(obj), [])
 
 
 if __name__ == "__main__":

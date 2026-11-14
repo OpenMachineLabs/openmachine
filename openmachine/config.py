@@ -4,10 +4,6 @@ import os
 from pathlib import Path
 import stat
 import tomllib
-from typing import Annotated, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
 from openmachine.foundation.sanitize import Fault
 
 DEFAULT_CONFIG = Path.home() / ".config/openmachine/config.toml"
@@ -15,22 +11,12 @@ DEFAULT_STATE = Path.home() / ".local/state/openmachine"
 TEXT = '[machines.local]\ntransport = "local"\n'
 
 
-class Machine(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    transport: Literal["local"]
-
-
-class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    machines: Annotated[dict[Literal["local"], Machine], Field(min_length=1)]
-
-
-def load(path: Path) -> Settings:
+def load(path: Path) -> None:
     try:
         with path.open("rb") as source:
-            return Settings.model_validate(tomllib.load(source))
-    except (ValidationError, tomllib.TOMLDecodeError) as error:
-        # Validation exceptions contain input values; do not print them.
+            if tomllib.load(source) != tomllib.loads(TEXT):
+                raise ValueError("unsupported configuration")
+    except ValueError as error:
         raise Fault("invalid_config", 'The configuration must hold exactly [machines.local] with transport "local".') from error
     except OSError as error:
         raise Fault("config_unavailable", "Cannot read configuration; run manage configure or select an existing --config file.") from error

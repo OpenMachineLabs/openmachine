@@ -34,12 +34,6 @@ def public_boundary_errors(text: str) -> list[str]:
     return errors
 
 
-def title_errors(title: str, kind: str) -> list[str]:
-    if not isinstance(title, str) or not title.strip() or not title.isprintable():
-        return ["title must be nonempty printable text"]
-    return []
-
-
 def label_errors(labels: object) -> list[str]:
     if not isinstance(labels, list) or not labels:
         return ["labels must be a nonempty list"]
@@ -73,10 +67,13 @@ def file_errors(path: Path, root: Path) -> list[str]:
     return errors
 
 
-def metadata_errors(obj: dict, kind: str) -> list[str]:
+def metadata_errors(obj: dict) -> list[str]:
     if not isinstance(obj, dict):
         return ["metadata must be a JSON object"]
-    errors = title_errors(obj.get("title"), kind)
+    errors = []
+    title = obj.get("title")
+    if not isinstance(title, str) or not title.strip() or not title.isprintable():
+        errors.append("title must be nonempty printable text")
     body = obj.get("body")
     if not isinstance(body, str) or not body.strip():
         return errors + ["body must briefly explain the change or question"]
@@ -119,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         kind = "pr" if event_name == "pull_request" else "issue"
         obj = event["pull_request"] if kind == "pr" else event["issue"]
         if kind != "issue" or not isinstance(obj, dict) or not obj.get("pull_request"):
-            errors += metadata_errors(obj, kind)
+            errors += metadata_errors(obj)
     for error in errors:
         print(f"FAIL: {error}", file=sys.stderr)
     if not errors:
