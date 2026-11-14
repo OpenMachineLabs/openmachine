@@ -540,15 +540,17 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertIn("reached", self.session(lifetime, command=f"python3 -c {shlex.quote(client)}")[2])
         self.assertNotIn("reached", self.session(self.lifetime(), command=f"python3 -c {shlex.quote(client)}")[2])
 
-    @unittest.skipUnless(shutil.which("tmux", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin"),
-                         "tmux is not installed")
     def test_real_tmux_survives_sessions_in_its_lifetime(self):
+        tmux = shutil.which("tmux", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin")
+        if tmux is None:
+            self.skipTest("tmux is not installed")
+        tmux = shlex.quote(tmux)
         lifetime = self.lifetime()
-        reply, code, _, err = self.session(lifetime, command=f"tmux new-session -d -s om 'while :; do date > $HOME/tmux.beat; sleep 0.2; done'")
+        reply, code, _, err = self.session(lifetime, command=f"{tmux} new-session -d -s om 'while :; do date > $HOME/tmux.beat; sleep 0.2; done'")
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertTrue(self.beating(HOME / "tmux.beat"))
-        self.assertIn("om", self.session(lifetime, command="tmux ls")[2])
-        self.assertNotEqual(self.session(self.lifetime(), command="tmux ls")[1], 0)
+        self.assertIn("om", self.session(lifetime, command=f"{tmux} ls")[2])
+        self.assertNotEqual(self.session(self.lifetime(), command=f"{tmux} ls")[1], 0)
 
     @unittest.skipUnless(Path("/usr/bin/sftp").exists(), "requires the OpenSSH sftp client")
     def test_sftp_runs_the_server_inside_the_sandbox(self):

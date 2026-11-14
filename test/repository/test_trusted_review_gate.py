@@ -1,7 +1,6 @@
 """Regression checks for the public repository's trusted maintainer review gate."""
 import copy
 import importlib.util
-import json
 import pathlib
 import unittest
 
@@ -211,7 +210,6 @@ class GatePublicationTests(unittest.TestCase):
                 gate.os.environ["GITHUB_EVENT_NAME"] = original
 
     def test_workflow_hints_are_not_authorizations(self):
-        api = FakeAPI(pull())
         original = gate.os.environ.get("GITHUB_EVENT_NAME")
         try:
             gate.os.environ["GITHUB_EVENT_NAME"] = "workflow_run"
@@ -219,10 +217,10 @@ class GatePublicationTests(unittest.TestCase):
                                       "workflow_id": gate.SIGNAL_WORKFLOW_ID,
                                       "event": "pull_request_review",
                                       "display_title": "Review policy PR #123"}}
-            self.assertEqual(gate.event_numbers(event, api), [123])
+            self.assertEqual(gate.event_numbers(event), [123])
             event["workflow_run"]["workflow_id"] = -1
             with self.assertRaises(ValueError):
-                gate.event_numbers(event, api)
+                gate.event_numbers(event)
         finally:
             if original is None:
                 gate.os.environ.pop("GITHUB_EVENT_NAME", None)

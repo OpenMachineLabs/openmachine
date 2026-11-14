@@ -126,7 +126,7 @@ class API:
             "target_url": f"https://github.com/{REPO}/pull/{number}"})
 
 
-def event_numbers(event, api):
+def event_numbers(event):
     name = os.environ.get("GITHUB_EVENT_NAME")
     if name == "schedule":
         return []
@@ -155,7 +155,7 @@ def event_numbers(event, api):
 
 def targets(event, api):
     """Hinted PRs first, then every open PR, so a superseded queued run loses nothing."""
-    return list(dict.fromkeys(event_numbers(event, api) + api.opens()))
+    return list(dict.fromkeys(event_numbers(event) + api.opens()))
 
 
 # Open PRs sharing a HEAD share one commit status: any block wins, then any approval.

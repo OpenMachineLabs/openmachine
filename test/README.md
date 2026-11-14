@@ -75,9 +75,8 @@ python3 scripts/premerge.py --base origin/main --full
 python3 scripts/run_tests.py --full
 ```
 
-The initial ownership migration, release version bumps, changes to locked
-dependencies or packaging, and changes to the shared runner or code-quality
-workflow require full verification. Ordinary module, fixture, test or ownership additions select their
+Release version bumps, changes to locked dependencies or packaging, and changes
+to the shared runner or code-quality workflow require full verification. Ordinary module, fixture, test or ownership additions select their
 affected checks. An ownership-manifest edit selects the changed entries' old and
 new tests and boundaries; it does not automatically select every module.
 `--full` cannot be combined with a focused module or layer.
