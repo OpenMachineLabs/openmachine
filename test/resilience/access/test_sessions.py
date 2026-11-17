@@ -88,7 +88,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         (first, second), prelude = self.clients()
         lifetime, stable = self.lifetime(), self.stable()
         # The session runs Core's copy by name, never the host's file, and cannot replace the copy.
-        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | sort; echo PATH=$PATH; om hi; {first}; "
+        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; "
                                  f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
         self.assertIn("OM_BROKER=https://127.0.0.1:41234\nOM_BROKER_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)

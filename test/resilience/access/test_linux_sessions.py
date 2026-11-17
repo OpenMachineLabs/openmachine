@@ -258,7 +258,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         first, second = clients
         lifetime, stable = self.lifetime(), sandbox.runtime(self.account) / CLIENT_NAME / "om"
         reply, code, out, err = self.session(lifetime, command=(
-            f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | sort; echo PATH=$PATH; om hi; {first}; echo x >> {stable}; "
+            f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; echo x >> {stable}; "
             f"rm {stable}; ls {stable.parent.parent}; {detached('routed-job')}"), github=self.routing(first))
         self.assertEqual(reply["status"], "admitted", reply)
         self.assertIn("OM_BROKER=https://127.0.0.1:41234\nOM_BROKER_CAPABILITY=" + "c" * 43, out)
