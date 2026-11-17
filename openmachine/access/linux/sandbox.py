@@ -46,7 +46,7 @@ def home(account: Path) -> Path:
 
 
 def runtime(account: Path) -> Path:
-    """Core's runtime tree: its copy of the om-code client and each lifetime's directory."""
+    """Core's runtime tree: its copy of the om client and each lifetime's directory."""
     return account / ".local/state/openmachine-sandbox"
 
 
@@ -197,7 +197,7 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     """One instance's bubblewrap arguments: read the machine except what is hidden, the denied areas and
     Core's control paths, and write only the sandbox home, the Workspace roots, the lifetime's directory
     in the runtime tree and its own /tmp and /run. roots maps each writable folder and worktree to its
-    .git entries; client is the directory of Core's copy of the om-code client."""
+    .git entries; client is the directory of Core's copy of the om client."""
     found = _base()
     for path in (path for pattern in GPU for path in glob.glob(pattern)):
         found += ["--dev-bind", path, path]

@@ -24,6 +24,24 @@ CHAT_SESSION = re.compile(
 )
 
 
+# The daemon's retired names, which om and openmachine replace. The pattern is written so that it does
+# not match its own source.
+RETIRED = re.compile(r"(?i)(?<![a-z])o[m][-_ ]?code|openmachine[-_.]code")
+
+
+def retired_errors(name: str, path: Path) -> list[str]:
+    """A retired name in a listed path, or in the content of a file of any suffix that decodes as UTF-8."""
+    errors = ["rename the retired name in this path to om or openmachine"] if RETIRED.search(name) else []
+    if path.is_file():
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            text = ""
+        if RETIRED.search(text):
+            errors.append("replace the retired name with om or openmachine")
+    return errors
+
+
 def public_boundary_errors(text: str) -> list[str]:
     errors = []
     if any(match[1].lower().removesuffix(".git") != "openmachine"
@@ -106,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         paths = git(ROOT, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split("\0")
         for name in filter(None, paths):
             path = ROOT / name
+            errors.extend(f"{name}: {error}" for error in retired_errors(name, path))
             if path.is_file() and (path.suffix in TEXT_SUFFIXES or path.name in {"LICENSE", ".gitignore"}):
                 errors.extend(f"{name}: {error}" for error in file_errors(path, ROOT))
         errors += label_errors(json.loads((ROOT / ".github/labels.json").read_text()))

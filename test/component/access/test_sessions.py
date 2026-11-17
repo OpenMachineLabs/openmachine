@@ -103,13 +103,13 @@ class PersistentHomeTests(unittest.TestCase):
 
 
 class GitHubClientTests(unittest.TestCase):
-    """The om-code client a session may run is one file that only root or this user can replace."""
+    """The om client a session may run is one file that only root or this user can replace."""
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="om-client-", dir="/tmp")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.client = self.root / "bin/om-code"
+        self.client = self.root / "bin/om"
         self.client.parent.mkdir(mode=0o755)
         self.client.write_text("#!/bin/sh\n")
         self.client.chmod(0o755)
@@ -117,7 +117,7 @@ class GitHubClientTests(unittest.TestCase):
     def check(self, client):
         request = sessions.parse(json.dumps({"protocol": 4, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
             "connection": "127.0.0.1 1 127.0.0.1 22",
-            "github": {"client": str(client), "environment": {"OM_CODE_BROKER": "https://127.0.0.1:1", "OM_CODE_CAPABILITY": "c" * 43,
+            "github": {"client": str(client), "environment": {"OM_BROKER": "https://127.0.0.1:1", "OM_BROKER_CAPABILITY": "c" * 43,
                        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
         return sessions._client(request)
 
@@ -145,7 +145,7 @@ class GitHubClientTests(unittest.TestCase):
         if sys.platform == "darwin":
             with patch.object(sessions, "SHARED", self.root), patch.object(sessions, "HOME_NAME", "bin"):
                 self.refused(self.client)  # inside the persistent home, which restricted work may write
-                keyed = sessions.keyed_homes(self.client.parent) / "key/om-code"
+                keyed = sessions.keyed_homes(self.client.parent) / "key/om"
                 keyed.parent.mkdir(parents=True, mode=0o755)
                 shutil.copy(self.client, keyed)
                 self.refused(keyed)  # and inside the home of a key
@@ -156,8 +156,8 @@ class GitHubClientTests(unittest.TestCase):
             for directory in (sandbox.home(self.root) / "home/bin", sandbox.runtime(self.root) / "abc",
                               sessions.keyed_homes(sandbox.home(self.root)) / ("a" * 32) / "home"):
                 directory.mkdir(parents=True, mode=0o755)
-                shutil.copy(self.client, directory / "om-code")
-                self.refused(directory / "om-code")
+                shutil.copy(self.client, directory / "om")
+                self.refused(directory / "om")
             self.assertEqual(self.check(self.client), self.client)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux keeps the sandbox home under the account home")
@@ -169,7 +169,7 @@ class GitHubClientTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS keeps restricted runtime trees and ACLs")
     def test_clients_where_restricted_work_writes_are_refused_by_physical_identity(self):
-        runtime = self.root / "omc/abc/om-code"
+        runtime = self.root / "omc/abc/om"
         runtime.parent.mkdir(parents=True, mode=0o755)
         shutil.copy(self.client, runtime)
         with patch.object(macos, "user_temp", return_value=self.root):
@@ -185,7 +185,7 @@ class GitHubClientTests(unittest.TestCase):
         # A restricted profile runs only Core's copy, never the host's file.
         with patch.object(macos, "user_temp", return_value=self.root / "T"):
             text = backend._restricted_profile(None, self.root / "state", self.root / "T/p", self.root / "home", [])
-        self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om-code"}"))', text)
+        self.assertIn(f'(allow file-read* process-exec (literal "{self.root / "T/omc/client/om"}"))', text)
         self.assertNotIn(str(self.client), text)
 
     @unittest.skipUnless(sys.platform == "darwin", "Core keeps its copy in the macOS user temporary directory")
@@ -194,13 +194,13 @@ class GitHubClientTests(unittest.TestCase):
             stable = restricted._install(self.client)
             copied = stable.stat()
             self.assertEqual((stable, stable.read_text(), stat.S_IMODE(copied.st_mode)),
-                             (self.root / "T/omc/client/om-code", "#!/bin/sh\n", 0o755))
+                             (self.root / "T/omc/client/om", "#!/bin/sh\n", 0o755))
             self.assertEqual(restricted._install(self.client).stat().st_ino, copied.st_ino)  # unchanged: kept
-            update = self.root / "next/om-code"  # as an update installs a new file elsewhere
+            update = self.root / "next/om"  # as an update installs a new file elsewhere
             update.parent.mkdir(mode=0o755)
             update.write_text("#!/bin/sh\necho next\n")
             self.assertEqual(restricted._install(update), stable)
-            self.assertEqual((stable.read_text(), [p.name for p in stable.parent.iterdir()]), ("#!/bin/sh\necho next\n", ["om-code"]))
+            self.assertEqual((stable.read_text(), [p.name for p in stable.parent.iterdir()]), ("#!/bin/sh\necho next\n", ["om"]))
             update.unlink()  # removed meanwhile, as by a later update
             with self.assertRaises(Fault) as caught:
                 restricted._install(update)

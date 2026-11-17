@@ -1,4 +1,4 @@
-"""What the restricted backends share: the persistent homes' layout, Core's copy of the om-code client,
+"""What the restricted backends share: the persistent homes' layout, Core's copy of the om client,
 process identity, and an instance's spawner with its launch frames, relay and exit report."""
 
 import errno
@@ -28,7 +28,7 @@ from openmachine.foundation.state import private_directory
 
 # The platform's start(pid), member(pid, marker) and peer(connection).
 backend = sandbox if sys.platform == "linux" else seatbelt
-CLIENT_NAME = "client"  # Core's copy of the host's om-code lives in this directory of the runtime tree.
+CLIENT_NAME = "client"  # Core's copy of the host's om lives in this directory of the runtime tree.
 MAX_FRAME = 512 * 1024
 SPAWN_SECONDS = 5
 # Each launcher step up to the spawner's acknowledgment; longer than one stalled launch the spawner waits out.
@@ -136,10 +136,10 @@ def _record(lifetime: sessions.Lifetime, request: sessions.SessionRequest) -> di
 
 
 def _stable_client() -> Path:
-    """Core's copy of the host's om-code, the one client every restricted instance may run. Restricted
+    """Core's copy of the host's om, the one client every restricted instance may run. Restricted
     work cannot write here, and an update replaces the file in place, so it needs no new instance."""
     runtime = sandbox.runtime(rules.account_home()) if sys.platform == "linux" else seatbelt.user_temp() / "omc"
-    return runtime / CLIENT_NAME / "om-code"
+    return runtime / CLIENT_NAME / "om"
 
 
 def _install(client: Path) -> Path:
@@ -168,7 +168,7 @@ def _install(client: Path) -> Path:
             finally:
                 staged.unlink(missing_ok=True)
     except (OSError, Fault) as error:
-        raise Fault("github_client_invalid", "Core could not keep its copy of the om-code client.",
+        raise Fault("github_client_invalid", "Core could not keep its copy of the om client.",
                     effect="known_no_effect") from error
     return stable
 

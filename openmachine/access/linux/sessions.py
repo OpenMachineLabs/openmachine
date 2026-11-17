@@ -72,7 +72,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
             # Connect before another admission can start a newer instance, which rebinds the socket; a
             # connection made first still reaches its own spawner.
             connection = restricted._connect(private, instance)
-        environment = restricted.environment(sessions._environment(request, account, stable), home) | request.environment | (
+        environment = restricted.environment(sessions._environment(request, account, stable, first=True), home) | request.environment | (
             request.github.environment if request.github else {}) | {
             "TMPDIR": "/tmp", "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}  # The instance's own.
     cwd = request.folders[0] if request.folders else str(home / "home")  # Workspace starts in its first folder.

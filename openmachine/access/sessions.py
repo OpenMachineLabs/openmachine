@@ -28,7 +28,7 @@ from openmachine.foundation.state import lease, private_directory, save_json
 PROTOCOL = 4
 MAX_REQUEST = 256 * 1024
 SHARED = Path("/Users/Shared")
-HOME_NAME = "openmachine-code-{uid}"
+HOME_NAME = "openmachine-sandbox-{uid}"
 DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 SFTP_SERVERS = ("/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server",
                 "/usr/lib/ssh/sftp-server")
@@ -48,7 +48,7 @@ GITHUB_COUNT = 11
 
 
 class GitHub(BaseModel):
-    """The host's Git routing for one session, and its om-code client, which restricted sessions run as
+    """The host's Git routing for one session, and its om client, which restricted sessions run as
     Core's copy (github_client in capabilities)."""
     model_config = ConfigDict(extra="forbid", strict=True)
     environment: Annotated[dict[str, Annotated[str, Field(pattern=r"^[\x20-\x7e]{0,1024}$")]],
@@ -57,14 +57,14 @@ class GitHub(BaseModel):
 
     @model_validator(mode="after")
     def _routing(self):
-        environment, broker = self.environment, self.environment.get("OM_CODE_BROKER", "")
+        environment, broker = self.environment, self.environment.get("OM_BROKER", "")
         count = environment.get("GIT_CONFIG_COUNT", "")
         if (not re.fullmatch(BROKER, broker) or int(broker.rsplit(":", 1)[1]) > 65535
-                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment.get("OM_CODE_CAPABILITY", ""))
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment.get("OM_BROKER_CAPABILITY", ""))
                 or not re.fullmatch(r"[1-9][0-9]?", count) or int(count) > GITHUB_COUNT):
             raise ValueError("github routing needs a loopback broker, a capability and a Git configuration count")
         pairs = [(f"GIT_CONFIG_KEY_{index}", f"GIT_CONFIG_VALUE_{index}") for index in range(int(count))]
-        if set(environment) != {"OM_CODE_BROKER", "OM_CODE_CAPABILITY", "GIT_CONFIG_COUNT", *(name for pair in pairs for name in pair)}:
+        if set(environment) != {"OM_BROKER", "OM_BROKER_CAPABILITY", "GIT_CONFIG_COUNT", *(name for pair in pairs for name in pair)}:
             raise ValueError("github routing carries exactly its own variables")
         scoped = re.compile(rf"url\.{re.escape(broker)}/[\x21-\x7e]*\.insteadOf|(credential|http)\.{re.escape(broker)}\.[A-Za-z]{{1,32}}")
         if not all(scoped.fullmatch(environment[key]) for key, _ in pairs):
@@ -186,10 +186,15 @@ def _system_path() -> str:
     return ":".join(dict.fromkeys(entries)) or DEFAULT_PATH
 
 
-def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Path | None = None) -> dict:
+def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Path | None = None,
+                 first: bool = False) -> dict:
+    """The session's environment, with the client's directory on PATH so the session finds om by name: first
+    for Core's copy in restricted sessions, so no other om on the system PATH runs instead; last for the
+    host's client in Full sessions."""
     environment = linux.system(account.pw_uid) if sys.platform == "linux" else {"PATH": _system_path()}
     if client is not None:
-        environment["PATH"] += ":" + str(client.parent)  # so the session finds om-code by name
+        environment["PATH"] = (f"{client.parent}:{environment['PATH']}" if first
+                               else f"{environment['PATH']}:{client.parent}")
     client_address, client_port, _, server_port = request.connection.split(" ")
     environment |= {"USER": account.pw_name, "LOGNAME": account.pw_name, "SHELL": account.pw_shell or "/bin/sh",
                     "HOME": account.pw_dir, "SSH_CONNECTION": request.connection,
@@ -200,7 +205,7 @@ def _environment(request: SessionRequest, account: pwd.struct_passwd, client: Pa
 
 
 def _client(request: SessionRequest) -> Path | None:
-    """The host's om-code client: an executable regular file at its own physical path. The file and its
+    """The host's om client: an executable regular file at its own physical path. The file and its
     directory belong to root or this user, with no group or other write and no ACL, and lie outside the
     persistent homes and every restricted runtime tree, where restricted work could replace what Full
     sessions run."""
@@ -216,9 +221,9 @@ def _client(request: SessionRequest) -> Path | None:
                  and all(item.st_uid in (0, os.getuid()) and not item.st_mode & 0o022 for item in (info, parent))
                  and not seatbelt.has_acl(client) and not seatbelt.has_acl(client.parent) and not _within(client, restricted))
     except OSError as error:
-        raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
+        raise Fault("github_client_invalid", "The om client is unavailable.", effect="known_no_effect") from error
     if not valid:
-        raise Fault("github_client_invalid", "The om-code client must be an executable file only its owner can change, "
+        raise Fault("github_client_invalid", "The om client must be an executable file only its owner can change, "
                     "outside the persistent homes and Core's runtime trees.", effect="known_no_effect")
     return client
 
@@ -238,7 +243,7 @@ def _within(client: Path, roots: list[Path]) -> bool:
     try:
         ancestry = [os.stat(item) for item in [client, *client.parents]]
     except OSError as error:
-        raise Fault("github_client_invalid", "The om-code client is unavailable.", effect="known_no_effect") from error
+        raise Fault("github_client_invalid", "The om client is unavailable.", effect="known_no_effect") from error
     return any((item.st_dev, item.st_ino) in identities for item in ancestry)
 
 

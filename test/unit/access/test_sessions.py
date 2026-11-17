@@ -18,11 +18,11 @@ VALID = {"protocol": 4, "user": "dev", "lifetime": "life-1", "policy": "read_onl
          "connection": "100.64.0.2 52144 100.64.0.1 22"}
 FOLDERS = ["/Users/dev/code", "/Users/dev/Documents/notes"]
 BROKER = "https://127.0.0.1:41234"
-ROUTING = {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
+ROUTING = {"OM_BROKER": BROKER, "OM_BROKER_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
            "GIT_CONFIG_KEY_0": f"url.{BROKER}/github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
            "GIT_CONFIG_KEY_1": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_1": "",
-           "GIT_CONFIG_KEY_2": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_2": "!'/opt/om/om-code' git-credential"}
-GITHUB = {"environment": ROUTING, "client": "/opt/om/om-code"}
+           "GIT_CONFIG_KEY_2": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_2": "!'/opt/om/om' git-credential"}
+GITHUB = {"environment": ROUTING, "client": "/opt/om/om"}
 
 
 class RequestTests(unittest.TestCase):
@@ -60,9 +60,9 @@ class RequestTests(unittest.TestCase):
     def test_github_routing_carries_exactly_its_variables_with_bounded_values(self):
         self.assertEqual(self.parse(VALID | {"github": GITHUB}).github.environment, ROUTING)
         self.assertIsNone(self.parse(VALID).github)
-        changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_CODE_OTHER": "x"}, {"OM_CODE_BROKER": "https://localhost:41234"},
-                   {"OM_CODE_BROKER": "http://127.0.0.1:41234"}, {"OM_CODE_BROKER": "https://127.0.0.1:0"},
-                   {"OM_CODE_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"}, {"GIT_CONFIG_COUNT": "03"},
+        changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_BROKER_OTHER": "x"}, {"OM_BROKER": "https://localhost:41234"},
+                   {"OM_BROKER": "http://127.0.0.1:41234"}, {"OM_BROKER": "https://127.0.0.1:0"},
+                   {"OM_BROKER_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"}, {"GIT_CONFIG_COUNT": "03"},
                    {"GIT_CONFIG_KEY_0": "core.fsmonitor"}, {"GIT_CONFIG_KEY_0": "credential.helper"},
                    {"GIT_CONFIG_KEY_0": "url.https://example.com/.insteadOf"}, {"GIT_CONFIG_KEY_1": f"credential.{BROKER}x.helper"},
                    {"GIT_CONFIG_VALUE_0": "line\nbreak"}, {"GIT_CONFIG_VALUE_0": "x" * 1025}, {"GIT_CONFIG_KEY_9": "x"}]
@@ -72,9 +72,9 @@ class RequestTests(unittest.TestCase):
             self.assertEqual((caught.exception.code, caught.exception.effect), ("request_invalid", "known_no_effect"))
         missing = dict(ROUTING)
         del missing["GIT_CONFIG_VALUE_2"]
-        for github in ({"environment": missing, "client": "/opt/om/om-code"}, GITHUB | {"client": "om-code"},
-                       GITHUB | {"client": "/opt/om/../om-code"}, GITHUB | {"client": "/opt/o:m/om-code"},
-                       GITHUB | {"client": "/opt/om/om-code\0"}, GITHUB | {"client": "/opt/om/om-code\x7f"},
+        for github in ({"environment": missing, "client": "/opt/om/om"}, GITHUB | {"client": "om"},
+                       GITHUB | {"client": "/opt/om/../om"}, GITHUB | {"client": "/opt/o:m/om"},
+                       GITHUB | {"client": "/opt/om/om\0"}, GITHUB | {"client": "/opt/om/om\x7f"},
                        GITHUB | {"extra": 1}):
             with self.subTest(github=github), self.assertRaises(Fault):
                 self.parse(VALID | {"github": github})
@@ -83,7 +83,7 @@ class RequestTests(unittest.TestCase):
                                  ("http://127.0.0.1:41234", False)):
             github = GITHUB | {"environment": {name: value.replace(BROKER, broker) for name, value in ROUTING.items()}}
             if accepted:
-                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["OM_CODE_BROKER"], broker)
+                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["OM_BROKER"], broker)
             else:
                 with self.subTest(broker=broker), self.assertRaises(Fault):
                     self.parse(VALID | {"github": github})
@@ -91,14 +91,14 @@ class RequestTests(unittest.TestCase):
         for count in (11, 12):
             entries = {f"GIT_CONFIG_{kind}_{index}": f"http.{BROKER}.sslVerify" if kind == "KEY" else "false"
                        for index in range(count) for kind in ("KEY", "VALUE")}
-            github = GITHUB | {"environment": {"OM_CODE_BROKER": BROKER, "OM_CODE_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": str(count)} | entries}
+            github = GITHUB | {"environment": {"OM_BROKER": BROKER, "OM_BROKER_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": str(count)} | entries}
             if count == 11:
                 self.assertEqual(self.parse(VALID | {"github": github}).github.environment["GIT_CONFIG_COUNT"], "11")
             else:
                 with self.assertRaises(Fault):
                     self.parse(VALID | {"github": github})
 
-    def test_capabilities_report_the_core_version_om_code_records(self):
+    def test_capabilities_report_the_core_version_om_records(self):
         version = capabilities()["version"]
         self.assertEqual(version, openmachine.__version__)
         self.assertRegex(version, r"^[0-9A-Za-z.+-]{1,32}$")
@@ -115,7 +115,7 @@ class RequestTests(unittest.TestCase):
             self.assertNotIn("github_client", capabilities())
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \
                 patch.object(macos, "user_temp", return_value=Path("/private/var/folders/x/T")):
-            self.assertEqual(capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om-code")
+            self.assertEqual(capabilities()["github_client"], "/private/var/folders/x/T/omc/client/om")
 
     def test_on_linux_restricted_policies_follow_the_bubblewrap_probe(self):
         self.enterContext(patch.object(sys, "platform", "linux"))
@@ -128,7 +128,7 @@ class RequestTests(unittest.TestCase):
         with patch.object(sandbox, "bubblewrap", return_value=Path("/usr/bin/bwrap")):
             value = capabilities()
         self.assertEqual(value["policies"], {"full_access": "available", "read_only": "available", "workspace": "available"})
-        self.assertEqual(value["github_client"], "/home/dev/.local/state/openmachine-sandbox/client/om-code")
+        self.assertEqual(value["github_client"], "/home/dev/.local/state/openmachine-sandbox/client/om")
 
 
 class SessionAccountTests(unittest.TestCase):
@@ -155,11 +155,14 @@ class SessionAccountTests(unittest.TestCase):
         for platform in ("darwin", "linux"):
             with self.subTest(platform=platform), patch.object(sessions.sys, "platform", platform), \
                     patch.object(sessions.linux, "system", return_value={"PATH": "/usr/bin", "LANG": "en_US.UTF-8", "USER": "x"}):
-                environment = sessions._environment(request, self.ACCOUNT, Path("/opt/om/om-code"))
+                environment = sessions._environment(request, self.ACCOUNT, Path("/opt/om/om"))
+                restricted_path = sessions._environment(request, self.ACCOUNT, Path("/opt/om/om"), first=True)["PATH"]
             self.assertEqual({key: environment[key] for key in ("SSH_CONNECTION", "SSH_CLIENT", "USER", "HOME", "LANG")},
                              {"SSH_CONNECTION": "fd7a:115c:a1e0::2 52144 fd7a:115c:a1e0::1 22",
                               "SSH_CLIENT": "fd7a:115c:a1e0::2 52144 22", "USER": "dev", "HOME": "/home/dev", "LANG": "C.UTF-8"})
-            self.assertTrue(environment["PATH"].endswith(":/opt/om"))
+            self.assertTrue(environment["PATH"].endswith(":/opt/om"))  # Full sessions append the host's client.
+            # Restricted sessions find Core's copy before any other om on the system PATH.
+            self.assertTrue(restricted_path.startswith("/opt/om:"))
         self.assertTrue(environment["PATH"].startswith("/usr/bin:"))  # Linux takes PATH from the system files.
 
 

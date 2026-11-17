@@ -34,7 +34,7 @@ class ProfileTests(unittest.TestCase):
             path.mkdir(parents=True)
         arguments = dict(home=home, others=[self.root / "homes"], folders=[writable, worktree], private=self.root / "T/omc/lifetime",
                          control=[self.root / "state"], denied=[self.root / "home/Library"],
-                         exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om-code")
+                         exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(**arguments)
             # Protection is by name: a .git file changes nothing, and nested Git dirs that exist gain only
@@ -50,7 +50,7 @@ class ProfileTests(unittest.TestCase):
             self.assertNotIn('qu"ote', nested)
             with self.assertRaises(Fault) as caught:
                 seatbelt.profile(home=home, others=[], folders=[self.root / 'quote"d'], private=self.root, control=[],
-                                 denied=[], exceptions=[], executable=self.root / "omc/om-code")
+                                 denied=[], exceptions=[], executable=self.root / "omc/om")
             self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
         self.assertEqual(lines[:2], ["(version 1)", "(deny default)"])
@@ -119,7 +119,7 @@ class ProfileTests(unittest.TestCase):
         self.assertNotIn("appleevents", text.lower())
 
     def test_only_the_named_executable_runs_inside_a_denied_area(self):
-        client, denied = self.root / "home/Library/om/om-code", self.root / "home/Library"
+        client, denied = self.root / "home/Library/om/om", self.root / "home/Library"
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(home=self.root / "H", others=[], folders=[], private=self.root / "T/p", control=[self.root / "state"],
                                     denied=[denied], exceptions=[], executable=client)
