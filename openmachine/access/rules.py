@@ -73,7 +73,7 @@ class Scope:
 def control_paths(state: Path) -> tuple[Path, ...]:
     """Core, Connector and Code host configuration and state; denied to restricted work even inside a folder."""
     candidates = [state, DEFAULT_CONFIG.parent, DEFAULT_STATE, DEFAULT_STATE.parent / "openmachine-connector",
-                  DEFAULT_STATE.parent / "openmachine-code"]
+                  DEFAULT_STATE.parent / "openmachine-om"]
     found = []
     for path in candidates:
         resolved = Path(os.path.realpath(path))

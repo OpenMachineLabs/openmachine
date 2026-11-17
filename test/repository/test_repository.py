@@ -91,6 +91,37 @@ class RepositoryChecks(unittest.TestCase):
                 self.assertTrue(rules.metadata_errors({"title": title + " " + text, "body": body}))
 
 
+    def test_retired_names_fail_in_paths_and_any_utf8_content(self):
+        # Built by concatenation, so this file passes the check it tests.
+        retired = ("o" + "m-code github pr list", "OM_" + "CODE_BROKER=x", "X-O" + "M-Code-Proof", "o" + "mcode",
+                   "OM " + "Code", "app.openmachine" + ".code", "~/.local/state/openmachine" + "-code",
+                   "/Users/Shared/openmachine" + "_code-501")
+        allowed = ("from code", "custom code", "X-OM-Protocol: 4", "OM_BROKER", "openmachine-om", "omc/client/om",
+                   "/Users/Shared/openmachine-sandbox-501", "app.openmachine.om")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for text in retired + allowed:
+                for suffix in (".py", ".plist", ""):
+                    with self.subTest(text=text, suffix=suffix):
+                        path = root / f"file{suffix}"
+                        path.write_text(f"before {text} after\n")
+                        self.assertEqual(bool(rules.retired_errors(path.name, path)), text in retired)
+            binary = root / "binary.bin"
+            binary.write_bytes(b"\xff" + ("o" + "m-code").encode())
+            self.assertEqual(rules.retired_errors(binary.name, binary), [])
+            for name in ("x/o" + "m-code", "LaunchAgents/app.openmachine" + ".code.plist", "test/O" + "M_code.txt"):
+                with self.subTest(name=name):
+                    self.assertTrue(rules.retired_errors(name, root / "absent"))
+            self.assertEqual(rules.retired_errors("test/from_code.py", root / "absent"), [])
+            (root / ".github").mkdir()
+            (root / ".github/labels.json").write_text(json.dumps([
+                {"name": "maintenance", "color": "ffffff", "description": "Maintenance."}]))
+            (root / "notes.txt").write_text("o" + "m-code\n")  # outside TEXT_SUFFIXES
+            with patch.object(rules, "ROOT", root), patch.object(rules, "git", return_value="notes.txt\0"):
+                result, _, err = self.checker(["--mode", "source"])
+            self.assertEqual(result, 1)
+            self.assertIn("notes.txt: replace the retired name", err)
+
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
         frontmatter = template.split("---", 2)[1]

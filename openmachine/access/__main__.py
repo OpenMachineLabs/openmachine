@@ -109,7 +109,7 @@ def session(control: int, state: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -I -m openmachine.access")
-    parser.add_argument("--config", type=Path)  # om-code passes it; access reads no configuration.
+    parser.add_argument("--config", type=Path)  # om passes it; access reads no configuration.
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("capabilities", help="Print the version, supported protocol, kinds and policies")

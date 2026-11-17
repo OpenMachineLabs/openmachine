@@ -32,7 +32,8 @@ def persistent_home(key: str | None) -> tuple[Path, list[Path]]:
 def _runtime(lifetime: str) -> Path:
     """Per-lifetime runtime tree: per-session TMPDIRs and the lifetime's own tmux namespace.
 
-    Names stay short because tmux appends /tmux-UID/default and AF_UNIX paths are limited to 104 bytes.
+    The tree's root, omc in the user's temporary directory, is Open Machine Core's. Names stay short
+    because tmux appends /tmux-UID/default and AF_UNIX paths are limited to 104 bytes.
     """
     root = private_directory(private_directory(seatbelt.user_temp() / "omc") / restricted.digest(lifetime)[:12])
     for name in ("tmp", "tmux"):
@@ -61,7 +62,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         record = restricted._record(lifetime, request)
         home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
-        # instance may run Core's copy of om-code, except instances started before that copy existed: a
+        # instance may run Core's copy of om, except instances started before that copy existed: a
         # routed session starts a new instance once there, which cannot see the earlier one's jobs.
         newest = record["instances"][-1] if record["instances"] else None
         usable = newest and restricted._spawner_alive(newest) and (stable is None or newest.get("client") == str(stable))
@@ -78,7 +79,7 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
             lifetime.save(record)
         session_tmp = runtime / "tmp" / uuid.uuid4().hex[:8]
         session_tmp.mkdir(mode=0o700)
-        environment = restricted.environment(sessions._environment(request, account, stable), home) | request.environment | (
+        environment = restricted.environment(sessions._environment(request, account, stable, first=True), home) | request.environment | (
             request.github.environment if request.github else {}) | {
             # zsh writes here-documents under TMPPREFIX (default /tmp/zsh), not TMPDIR.
             "TMPDIR": str(session_tmp) + "/", "TMPPREFIX": str(session_tmp / "zsh"), "TMUX_TMPDIR": str(runtime / "tmux"),

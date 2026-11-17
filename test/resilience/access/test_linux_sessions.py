@@ -170,7 +170,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         project.mkdir()
         (project / ".env").write_text("ENV-PROJECT\n")
         default = self.root / "default/.local/state/openmachine"
-        hosts = [default.parent / "openmachine-code", default.parent / "openmachine-connector"]
+        hosts = [default.parent / "openmachine-om", default.parent / "openmachine-connector"]
         for path in hosts:
             path.mkdir(parents=True, mode=0o700)
             (path / "host").write_text("SECRET host\n")
@@ -244,7 +244,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
 
     def routing(self, client):
         broker = "https://127.0.0.1:41234"
-        return {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+        return {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
                 "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
                 "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
 
@@ -252,27 +252,27 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         clients = []
         for name in ("a", "b"):  # Each in a denied area, so only Core's copy can run.
             (self.account / ".ssh" / name).mkdir(parents=True, mode=0o755)
-            clients.append(self.account / ".ssh" / name / "om-code")
-            clients[-1].write_text(f"#!/bin/sh\necho om-code-{name} \"$@\"\n")
+            clients.append(self.account / ".ssh" / name / "om")
+            clients[-1].write_text(f"#!/bin/sh\necho om-{name} \"$@\"\n")
             clients[-1].chmod(0o755)
         first, second = clients
-        lifetime, stable = self.lifetime(), sandbox.runtime(self.account) / CLIENT_NAME / "om-code"
+        lifetime, stable = self.lifetime(), sandbox.runtime(self.account) / CLIENT_NAME / "om"
         reply, code, out, err = self.session(lifetime, command=(
-            f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; {first}; echo x >> {stable}; "
+            f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; echo x >> {stable}; "
             f"rm {stable}; ls {stable.parent.parent}; {detached('routed-job')}"), github=self.routing(first))
         self.assertEqual(reply["status"], "admitted", reply)
-        self.assertIn("OM_CODE_BROKER=https://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
-        self.assertRegex(out, rf"PATH=\S+:{stable.parent}\n")
-        self.assertIn("om-code-a hi", out)
+        self.assertIn("OM_BROKER=https://127.0.0.1:41234\nOM_BROKER_CAPABILITY=" + "c" * 43, out)
+        self.assertRegex(out, rf"PATH={stable.parent}:\S+\n")
+        self.assertIn("om-a hi", out)
         self.assertEqual((err.count(MISSING), err.count(READ_ONLY)), (1, 2), err)
         # Of the runtime tree, an instance sees the client and its own lifetime's directory.
         self.assertEqual(sorted(out.splitlines()[-2:]), sorted([CLIENT_NAME, self.instance_directory(lifetime).name]))
-        # After the host's client changes, as after an om-code update, sessions run the new copy in the
+        # After the host's client changes, as after an om update, sessions run the new copy in the
         # same instance, where a job started before the change is still running.
-        reply, code, out, err = self.session(lifetime, command=f"om-code && {running('routed-job')} && echo same",
+        reply, code, out, err = self.session(lifetime, command=f"om && {running('routed-job')} && echo same",
                                              github=self.routing(second))
-        self.assertEqual(out.split(), ["om-code-b", "same"], err)
-        self.assertEqual(self.session(lifetime, command="env | grep -c OM_CODE")[2], "0\n")
+        self.assertEqual(out.split(), ["om-b", "same"], err)
+        self.assertEqual(self.session(lifetime, command="env | grep -c OM_BROKER")[2], "0\n")
         self.assertEqual(len(self.instances(lifetime)), 1)
 
     def instance_directory(self, lifetime):
@@ -281,7 +281,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
     def test_a_client_restricted_work_could_replace_is_refused(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[0]["status"], "admitted")  # Core creates the persistent home
-        for client in (self.home / "om-code", self.instance_directory(lifetime) / "om-code"):
+        for client in (self.home / "om", self.instance_directory(lifetime) / "om"):
             client.write_text("#!/bin/sh\n")
             client.chmod(0o755)
             reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))

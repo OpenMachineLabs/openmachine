@@ -24,7 +24,7 @@ SHARED = Path("/private/tmp" if sys.platform == "darwin" else "/tmp")
 HOME_NAME = f"om-access-test-{os.getpid()}-{{uid}}"
 HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 HOMES = sessions.keyed_homes(HOME.parent)  # Where the homes that requests name by key are.
-# Core's copy of om-code is per user too; each test process keeps its own.
+# Core's copy of om is per user too; each test process keeps its own.
 CLIENT_NAME = f"client-{os.getpid()}"
 BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
         "from openmachine.access import restricted; "

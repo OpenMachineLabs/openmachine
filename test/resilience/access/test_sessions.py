@@ -53,20 +53,20 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
     def routing(self, client):
         broker = "https://127.0.0.1:41234"
-        return {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+        return {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
                 "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
                 "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
 
     def clients(self):
-        """Two om-code clients, each beside another program, in a directory the profile denies."""
+        """Two om clients, each beside another program, in a directory the profile denies."""
         denied, clients = self.root / "denied", []
         for name in ("a", "b"):
             (denied / name).mkdir(parents=True, mode=0o755)
-            for program in ("om-code", "other"):
+            for program in ("om", "other"):
                 path = denied / name / program
                 path.write_text(f"#!/bin/sh\necho {program}-{name} \"$@\"\n")
                 path.chmod(0o755)
-            clients.append(denied / name / "om-code")
+            clients.append(denied / name / "om")
         prelude = f"from openmachine.access.macos import seatbelt; seatbelt.SYSTEM_DENIED = seatbelt.SYSTEM_DENIED + ({str(denied)!r},); "
         return clients, prelude
 
@@ -82,29 +82,29 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         return [item.get("client") for item in json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]]
 
     def stable(self):
-        return macos.user_temp() / "omc" / CLIENT_NAME / "om-code"
+        return macos.user_temp() / "omc" / CLIENT_NAME / "om"
 
     def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
         (first, second), prelude = self.clients()
         lifetime, stable = self.lifetime(), self.stable()
         # The session runs Core's copy by name, never the host's file, and cannot replace the copy.
-        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_CODE|GIT_CONFIG)' | sort; echo PATH=$PATH; om-code hi; {first}; "
+        out, err = self.admitted(lifetime, f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; "
                                  f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
-        self.assertIn("OM_CODE_BROKER=https://127.0.0.1:41234\nOM_CODE_CAPABILITY=" + "c" * 43, out)
+        self.assertIn("OM_BROKER=https://127.0.0.1:41234\nOM_BROKER_CAPABILITY=" + "c" * 43, out)
         self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
-        self.assertRegex(out, rf"PATH=\S+:{stable.parent}\n")
-        self.assertIn("om-code-a hi", out)
+        self.assertRegex(out, rf"PATH={stable.parent}:\S+\n")
+        self.assertIn("om-a hi", out)
         self.assertNotIn("other-a", out)
         self.assertEqual(err.count(DENIED), 4, err)
         self.assertFalse((HOME / "linked").exists())
         self.assertNotIn("x", stable.read_text().split())
-        # After the host's client changes, as after an om-code update, sessions run the new copy in the
+        # After the host's client changes, as after an om update, sessions run the new copy in the
         # same instance, where a job started before the change can still be signaled.
         job = self.admitted(lifetime, detached("routed"), prelude, first)[0].strip()
-        out, err = self.admitted(lifetime, f"om-code; kill -0 {job} && echo signaled", prelude, second)
-        self.assertEqual(out.split(), ["om-code-b", "signaled"], err)
+        out, err = self.admitted(lifetime, f"om; kill -0 {job} && echo signaled", prelude, second)
+        self.assertEqual(out.split(), ["om-b", "signaled"], err)
         # A session without routing (as SFTP) shares that instance and sees none of the variables.
-        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_CODE", prelude)[0], "0\n")
+        self.assertEqual(self.admitted(lifetime, "env | grep -c OM_BROKER", prelude)[0], "0\n")
         self.assertEqual(self.instances(lifetime), [str(stable)])
 
     def test_only_the_newest_instance_admits(self):
@@ -112,7 +112,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         (first, _), prelude = self.clients()
         lifetime, stable = self.lifetime(), str(self.stable())
         self.admitted(lifetime, "true", prelude)
-        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertIn("om-a", self.admitted(lifetime, "om", prelude, first)[0])
         self.assertEqual(self.instances(lifetime), [stable])
         # An instance from before Core kept its copy cannot run it: unrouted sessions still use it, and
         # the first routed one starts a new instance.
@@ -121,7 +121,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         del value["instances"][-1]["client"]
         record.write_text(json.dumps(value))
         self.admitted(lifetime, "true", prelude)
-        self.assertIn("om-code-a", self.admitted(lifetime, "om-code", prelude, first)[0])
+        self.assertIn("om-a", self.admitted(lifetime, "om", prelude, first)[0])
         self.assertEqual(self.instances(lifetime), [None, stable])
         # Once the newest spawner is lost, the next session starts another instance, though an older one lives.
         spawner = json.loads(record.read_text())["instances"][-1]["pid"]
@@ -145,7 +145,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
                  " return _connect(lifetime, instance)\n_s._connect = _paused\n")
         paused, control = self.launch(self.request(lifetime, "read_only", "exec", "echo paused"), prelude + pause)
         self.assertTrue(self.wait_for(holding))  # it holds the lifetime lock
-        self.assertIn("om-code-a y", self.admitted(lifetime, "om-code y", prelude, first)[0])
+        self.assertIn("om-a y", self.admitted(lifetime, "om y", prelude, first)[0])
         with control:
             reply = json.loads(control.makefile("rb").readline() or b"{}")
         out, _ = paused.communicate(timeout=60)
@@ -167,7 +167,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_a_client_restricted_work_could_replace_is_refused(self):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[0]["status"], "admitted")  # Core creates the persistent home
-        client = HOME / "om-code"
+        client = HOME / "om"
         client.write_text("#!/bin/sh\n")
         client.chmod(0o755)
         reply, _, _, _ = self.session(lifetime, command="true", github=self.routing(client))
@@ -176,7 +176,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
     def test_the_code_host_and_connector_state_are_control_paths(self):
         """The Code host and the Connector keep keys and sign-in beside Core's state; no session reads them."""
         default = self.root / "home/.local/state/openmachine"
-        hosts = [default.parent / "openmachine-code", default.parent / "openmachine-connector"]
+        hosts = [default.parent / "openmachine-om", default.parent / "openmachine-connector"]
         for path in hosts:
             path.mkdir(parents=True, mode=0o700)
             (path / "host").write_text("private\n")
@@ -566,14 +566,14 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
 
 class FullAccessSessionTests(SessionFixture, unittest.TestCase):
     def test_github_routing_reaches_a_full_session(self):
-        client = self.root / "bin/om-code"
+        client = self.root / "bin/om"
         client.parent.mkdir(mode=0o755)
         client.write_text("#!/bin/sh\necho client \"$@\"\n")
         client.chmod(0o755)
         broker = "https://127.0.0.1:41234"
-        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+        github = {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1048576"}}
-        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_CODE_BROKER $GIT_CONFIG_KEY_0; om-code ok",
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_BROKER $GIT_CONFIG_KEY_0; om ok",
                                              github=github)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
         self.assertEqual(out.splitlines(), [f"{broker} http.{broker}.postBuffer", "client ok"])
@@ -581,7 +581,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
     def test_a_link_at_the_persistent_home_name_never_refuses_a_full_session(self):
         """/Users/Shared is world-writable and sticky: another local user may create this user's home name
         as a link, here to an ancestor of the client, before any restricted session creates the home."""
-        client = self.root / "bin/om-code"
+        client = self.root / "bin/om"
         client.parent.mkdir(mode=0o755)
         client.write_text("#!/bin/sh\necho client\n")
         client.chmod(0o755)
@@ -589,9 +589,9 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         HOME.parent.symlink_to(self.root)
         self.addCleanup(HOME.parent.unlink)
         broker = "https://127.0.0.1:41234"
-        github = {"client": str(client), "environment": {"OM_CODE_BROKER": broker, "OM_CODE_CAPABILITY": "c" * 43,
+        github = {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}
-        reply, code, out, err = self.session(self.lifetime(), "full_access", "om-code", github=github)
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "om", github=github)
         self.assertEqual((reply["status"], code, out), ("admitted", 0, "client\n"), err)
 
     def test_full_access_is_an_ordinary_shell(self):
