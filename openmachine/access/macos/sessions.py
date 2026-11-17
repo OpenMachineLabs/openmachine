@@ -32,7 +32,8 @@ def persistent_home(key: str | None) -> tuple[Path, list[Path]]:
 def _runtime(lifetime: str) -> Path:
     """Per-lifetime runtime tree: per-session TMPDIRs and the lifetime's own tmux namespace.
 
-    The tree's root, omc in the user's temporary directory, is Open Machine Core's. Names stay short because tmux appends /tmux-UID/default and AF_UNIX paths are limited to 104 bytes.
+    The tree's root, omc in the user's temporary directory, is Open Machine Core's. Names stay short
+    because tmux appends /tmux-UID/default and AF_UNIX paths are limited to 104 bytes.
     """
     root = private_directory(private_directory(seatbelt.user_temp() / "omc") / restricted.digest(lifetime)[:12])
     for name in ("tmp", "tmux"):
