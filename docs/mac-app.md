@@ -4,8 +4,8 @@ The Open Machine app for Mac is closed source. It is the window, the menu bar
 and the installer. What your Mac allows (network, identity, permission, rules
 and logs) is decided by the open engine in this repository, which the app
 reaches only through the local interfaces below. This page says what the app
-does and does not do, and how to check that the engine files on your Mac are
-those of a public release.
+does and does not do, and how to check the engine files on your Mac against
+their inventories.
 
 ## What is open
 
@@ -182,18 +182,10 @@ Report security problems as [SECURITY.md](../SECURITY.md) says.
 
 ## Check the engine files on your Mac
 
-Starting with the first app release built from this repository, each app
-release publishes the inventories of the engine files it ships as a prerelease
-of this repository tagged `mac/<app version>`, on the public commit they were
-built from: the bundle's `manifest.json` and Core's payload `manifest.json`.
-GitHub never marks a prerelease as latest, so the app's release check skips
-them.
-
-Find your app version (use `~/Applications` if the app is there) and the files
-in use:
+The bundle and Core's payload each hold an inventory, `manifest.json`, that
+lists their files. Find the files in use:
 
 ```sh
-plutil -extract CFBundleShortVersionString raw /Applications/OpenMachine.app/Contents/Info.plist
 agent="$HOME/Library/Application Support/OpenMachine/Code/agent.json"
 bundle="$(dirname "$(plutil -extract daemon raw "$agent")")"
 core="$(plutil -extract python raw "$agent")"; core="${core%/python/bin/python3}"
@@ -206,8 +198,7 @@ is the SHA-256 of the `manifest.json` inside. The app carries its own copies, wh
 inventories are
 `OpenMachine.app/Contents/Resources/runtime/connector.app/Contents/Resources/bundle/manifest.json`
 and `OpenMachine.app/Contents/Resources/runtime/payload/manifest.json`. The
-copies in use can be from an earlier app version; then compare them with that
-version's Release.
+copies in use can be from an earlier app version.
 
 Read their versions. On a Mac, `om` has no `version` command; it has one only on
 Linux.
@@ -216,14 +207,6 @@ Linux.
 plutil -extract version raw "$bundle/manifest.json"    # om and device identity
 plutil -extract core.version raw "$core/manifest.json"
 plutil -extract core.commit raw "$core/manifest.json"  # the public commit
-```
-
-Download the two inventories from the Release. Each pair must show the same
-hash:
-
-```sh
-shasum -a 256 "$bundle/manifest.json" ~/Downloads/<bundle inventory>
-shasum -a 256 "$core/manifest.json" ~/Downloads/<Core inventory>
 ```
 
 Check every file against its `manifest.json`:
@@ -262,9 +245,9 @@ A file that differs prints `FAILED`, and a link that points elsewhere
 `LINK DIFFERS`. Any other path printed is a file the inventory does not list;
 there should be none.
 
-Passing shows that the files are the ones released for that public commit. It
-does not show that anyone can rebuild them bit for bit, and we make no such
-claim: Mac builds sign every native file (`om`, the Python runtime, native
+Passing shows that every file matches its inventory; it cannot show that the
+inventory itself is unchanged. It does not show that anyone can rebuild the
+files bit for bit, and we make no such claim: Mac builds sign every native file (`om`, the Python runtime, native
 libraries and native code in Core's wheels) with our Developer ID before writing
 the inventory, so an unsigned build of the same commit gives other hashes for
 those files. [`scripts/build_bundle.py`](../scripts/build_bundle.py) builds the
