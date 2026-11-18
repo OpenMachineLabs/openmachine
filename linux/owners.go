@@ -156,7 +156,7 @@ func (m *machine) coreState() string { return filepath.Join(m.home, ".local/stat
 func (m *machine) manage(payload string, args ...string) (map[string]any, error) {
 	argv := []string{m.rec.Core.Python, "-I", m.rec.Core.Path, "--contract", "1"}
 	if payload != "" {
-		argv = []string{filepath.Join(payload, "python/bin/python3"), "-I", "-B", "-m", "openmachine.cli",
+		argv = []string{filepath.Join(payload, "python/bin/python3"), "-I", "-B", "-m", "openmachine_access.cli",
 			"--config", m.coreConfig(), "--state-dir", m.coreState(), "manage", "--contract", "1"}
 	}
 	out, _, err := m.call(60*time.Second, nil, append(argv, args...)...)

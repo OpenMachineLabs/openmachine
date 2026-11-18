@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import stat
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 PROTOCOL = 1
 # Contract 29: Code only, with no Tasks, Executions or service process.
@@ -43,7 +43,7 @@ try:
     if read(selected / "installation.json")["identity"] != identity or selected.resolve() != selected:
         raise ValueError("installation identity changed")
     python = str(selected / "bin/python")
-    os.execv(python, [python, "-I", "-m", "openmachine.cli", "--config", config,
+    os.execv(python, [python, "-I", "-m", "openmachine_access.cli", "--config", config,
                      "--state-dir", state, "manage", *sys.argv[1:]])
 except (OSError, ValueError, KeyError, TypeError):
     print(json.dumps({"management_contract": 1, "status": "incompatible",

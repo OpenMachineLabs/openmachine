@@ -57,7 +57,7 @@ personal data.
 | `scripts/verify-logs.mjs` | `node --test test/verifier/verify-logs.test.mjs` |
 | The network library (`connector/`) | its [README](connector/README.md#test). `om` builds against the version `go.mod` names, not this folder; to try a change in both, use an uncommitted `go work init . ./connector` |
 | A dependency | `python scripts/check_licenses.py` (needs both lock files installed), and add the new license if it is allowed |
-| Core (`openmachine/`) | `python scripts/run_tests.py --base upstream/main`; [test/README.md](test/README.md) explains the layers |
+| Core (`access/`) | `python scripts/run_tests.py --base upstream/main`; [test/README.md](test/README.md) explains the layers |
 | Documentation and repository files | `python scripts/check_repository.py` |
 
 Before review, commit and run the same gate CI runs for Core:

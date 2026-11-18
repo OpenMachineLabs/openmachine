@@ -7,12 +7,12 @@ import sys
 import unittest
 from unittest.mock import patch
 
-import openmachine
-from openmachine.access import restricted, rules, sessions
-from openmachine.access.__main__ import capabilities
-from openmachine.access.linux import sandbox
-from openmachine.access.macos import seatbelt as macos
-from openmachine.foundation.sanitize import Fault
+import openmachine_access
+from openmachine_access import restricted, rules, sessions
+from openmachine_access.__main__ import capabilities
+from openmachine_access.linux import sandbox
+from openmachine_access.macos import seatbelt as macos
+from openmachine_access.foundation.sanitize import Fault
 
 VALID = {"protocol": 4, "user": "dev", "lifetime": "life-1", "policy": "read_only", "kind": "exec", "command": "make test",
          "connection": "100.64.0.2 52144 100.64.0.1 22"}
@@ -100,7 +100,7 @@ class RequestTests(unittest.TestCase):
 
     def test_capabilities_report_the_core_version_om_records(self):
         version = capabilities()["version"]
-        self.assertEqual(version, openmachine.__version__)
+        self.assertEqual(version, openmachine_access.__version__)
         self.assertRegex(version, r"^[0-9A-Za-z.+-]{1,32}$")
 
     def test_restricted_policies_follow_the_lifetime_backend(self):

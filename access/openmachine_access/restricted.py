@@ -20,11 +20,11 @@ import termios
 from typing import NamedTuple
 import uuid
 
-from openmachine.access import rules, sessions
-from openmachine.access.linux import sandbox
-from openmachine.access.macos import seatbelt
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
+from openmachine_access import rules, sessions
+from openmachine_access.linux import sandbox
+from openmachine_access.macos import seatbelt
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory
 
 # The platform's start(pid), member(pid, marker) and peer(connection).
 backend = sandbox if sys.platform == "linux" else seatbelt

@@ -11,8 +11,8 @@ import time
 import unittest
 import uuid
 
-from openmachine.foundation.state import lease
-from openmachine.service import maintenance, payload
+from openmachine_access.foundation.state import lease
+from openmachine_access.service import maintenance, payload
 from test.support.service_cases import FIRST, ServiceCaseFixture
 
 
@@ -23,7 +23,7 @@ class MaintenanceProcessTests(ServiceCaseFixture, unittest.TestCase):
         # This interrupted phase admits no effect: the real module validates the inherited lock and exits.
         original = maintenance._operation_path(self.state, FIRST).read_bytes()
         with lease(self.state / "service/operation.lock") as lock:
-            process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine.service.maintenance", str(self.state),
+            process = subprocess.Popen([sys.executable, "-I", "-m", "openmachine_access.service.maintenance", str(self.state),
                                         FIRST, str(lock.fileno())], cwd="/", stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(lock.fileno(),),
                                        start_new_session=True)
@@ -42,7 +42,7 @@ class NativeFirstUseTests(unittest.TestCase):
         manifest = payload.verify(source, digest)
         root = Path(tempfile.mkdtemp(prefix="om-first-", dir="/tmp")).resolve()
         config, state, operation = root / "config.toml", root / "state", uuid.uuid4().hex
-        command = [str(source / "python/bin/python3"), "-I", "-B", "-m", "openmachine.cli",
+        command = [str(source / "python/bin/python3"), "-I", "-B", "-m", "openmachine_access.cli",
                    "--config", str(config), "--state-dir", str(state), "manage", "--contract", "1"]
         evidence = {"fixture": str(root), "operation_id": operation, "steps": []}
 
@@ -65,7 +65,7 @@ class NativeFirstUseTests(unittest.TestCase):
             self.assertEqual(observed["status"], "completed", observed)
             status = call("status")
             self.assertEqual((status["status"], status["product_version"]), ("installed", manifest["core"]["version"]))
-            capabilities = subprocess.run([status["entry"]["access_python"], "-I", "-m", "openmachine.access", "capabilities"],
+            capabilities = subprocess.run([status["entry"]["access_python"], "-I", "-m", "openmachine_access", "capabilities"],
                                           cwd="/", capture_output=True, text=True, timeout=30)
             self.assertEqual(json.loads(capabilities.stdout)["version"], manifest["core"]["version"])
             # Retained payload directories are sealed read-only during install.

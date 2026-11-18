@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import restricted
-from openmachine.access.macos import seatbelt
-from openmachine.foundation.sanitize import Fault
+from openmachine_access import restricted
+from openmachine_access.macos import seatbelt
+from openmachine_access.foundation.sanitize import Fault
 
 
 class ProfileTests(unittest.TestCase):

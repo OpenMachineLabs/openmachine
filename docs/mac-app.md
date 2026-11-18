@@ -24,7 +24,7 @@ The app uses six local interfaces, all defined here:
 | --- | --- | --- |
 | `om`'s owner-only socket, `~/.local/state/openmachine-om/daemon.sock`: `status`, `watch`, `folders` | [`daemon/daemon.go`](../daemon/daemon.go) | show whether this Mac is connected, the machines list, this Mac's permission and your account; check Workspace folders |
 | Device identity's commands `setup`, `companion` (sign-in, sign-out, `policy`, `remote-access` and reads), `inspect`, `upgrade` | [`device/openmachine_device/cli.py`](../device/openmachine_device/cli.py) | set up, sign in and out, set this Mac's permission, pass on your On or Off, switch bundles |
-| Core's `manage --contract 1`: from the payload the app carries to install and update Core, and while no binding is saved; otherwise from the `manage.py` Core installs | [`openmachine/cli.py`](../openmachine/cli.py), [`openmachine/service/`](../openmachine/service) | install and update Core, read its status and follow its operations |
+| Core's `manage --contract 1`: from the payload the app carries to install and update Core, and while no binding is saved; otherwise from the `manage.py` Core installs | [`access/openmachine_access/cli.py`](../access/openmachine_access/cli.py), [`service/`](../access/openmachine_access/service) | install and update Core, read its status and follow its operations |
 | `remote-access.json` | [`remote_access.py`](../device/openmachine_device/remote_access.py) | pass on your On or Off |
 | The bundle's and Core's payload's `manifest.json` | [`scripts/build_bundle.py`](../scripts/build_bundle.py), [`scripts/build_runtime_payload.py`](../scripts/build_runtime_payload.py) | check the bundle's files and links before using it; read Core's version, commit and target before installing it |
 | `om daemon -core-python PATH -core-state DIR -core-config FILE` | [`cmd/om/main.go`](../cmd/om/main.go) | start `om` with Core's interpreter, configuration and state |
@@ -131,8 +131,10 @@ The app's own requests are these two:
   HTTPS from GitHub's or Google's image servers. Its window can load nothing
   else from the network.
 
-It opens the Console's Machines page and sign-in page in your browser; the
-browser makes those requests.
+In your browser it opens the Console's Machines page, its sign-in page and
+the page of a machine `om` lists; the browser makes those requests. It puts
+text on the clipboard only when you copy a listed machine's name or its
+`ssh <alias>.om` command, the latter only with a valid alias.
 
 It never calls the service and holds no credential for it: no device key and no
 token. Device identity proves itself to the service with the device key it
@@ -144,7 +146,8 @@ keeps in `~/.local/state/openmachine-connector`.
 each connection problem: UTC time, app version, a fixed event name and a short
 error code, with no paths, accounts or contents. It is owner-only. At 256 KiB
 it is renamed `connection.log.1`, so at most two files exist. The app never
-reads or sends it; you may send it to the developers yourself.
+reads or sends it; Settings can show it in Finder, and you may send it to the
+developers yourself.
 
 ### Files the app keeps
 

@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access.linux import sandbox
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.linux import sandbox
+from openmachine_access.foundation.sanitize import Fault
 
 
 def pairs(arguments, flag):

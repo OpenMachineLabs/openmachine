@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import stat
 import tomllib
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 DEFAULT_CONFIG = Path.home() / ".config/openmachine/config.toml"
 DEFAULT_STATE = Path.home() / ".local/state/openmachine"

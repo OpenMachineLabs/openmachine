@@ -14,11 +14,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import restricted, rules, sessions
-from openmachine.access.linux import sandbox
-from openmachine.access.macos import seatbelt as macos
-from openmachine.access.macos import sessions as backend
-from openmachine.foundation.sanitize import Fault
+from openmachine_access import restricted, rules, sessions
+from openmachine_access.linux import sandbox
+from openmachine_access.macos import seatbelt as macos
+from openmachine_access.macos import sessions as backend
+from openmachine_access.foundation.sanitize import Fault
 
 STICKY_ROOT = Path("/tmp").resolve()  # Root-owned and sticky on macOS and Linux.
 
@@ -162,7 +162,7 @@ class GitHubClientTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "linux", "Linux keeps the sandbox home under the account home")
     def test_on_linux_a_home_that_cannot_be_created_refuses_before_anything_starts(self):
-        from openmachine.access.linux import sessions as linux
+        from openmachine_access.linux import sessions as linux
         with patch.object(rules, "account_home", return_value=self.client), self.assertRaises(Fault) as caught:
             linux.persistent_home(None)  # The account home is a file here.
         self.assertEqual((caught.exception.code, caught.exception.effect), ("persistent_home_unsafe", "known_no_effect"))

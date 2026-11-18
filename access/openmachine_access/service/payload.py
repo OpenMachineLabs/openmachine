@@ -10,8 +10,8 @@ import shutil
 import stat
 import sys
 
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory
 
 MANIFEST_LIMIT = 4 * 1024 * 1024
 FILE_LIMIT = 20000

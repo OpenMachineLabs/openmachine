@@ -10,11 +10,11 @@ from typing import Annotated
 
 from pydantic import Field
 
-from openmachine.access import git
-from openmachine.access.linux import sandbox
-from openmachine.access.macos import seatbelt
-from openmachine.config import DEFAULT_CONFIG, DEFAULT_STATE
-from openmachine.foundation.sanitize import Fault
+from openmachine_access import git
+from openmachine_access.linux import sandbox
+from openmachine_access.macos import seatbelt
+from openmachine_access.config import DEFAULT_CONFIG, DEFAULT_STATE
+from openmachine_access.foundation.sanitize import Fault
 
 # An absolute path without NUL or control characters; the folder rule decides everything else.
 Folder = Annotated[str, Field(max_length=1024, pattern=r"^/[^\x00-\x1f\x7f]*$")]

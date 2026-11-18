@@ -113,11 +113,12 @@ in which any file differs from the SHA-256 its `manifest.json` lists.
 locked packages in `device/requirements.lock`, `om` built from the working
 tree with the Go version `go.mod` pins, the license texts of every Go module
 `om` links, and `manifest.json`. Its version is the repository's, from
-`openmachine/__init__.py`. `--target linux-x86_64` or `linux-aarch64` builds
-the Linux bundle on a host of that target: `om` is one static binary, and the
-wheels are `manylinux2014`, for glibc 2.17. On a Mac, `--sign-identity` signs
-the native files with an existing Developer ID identity; notarization and
-publication are separate steps, done by the release owner.
+`access/openmachine_access/__init__.py`. `--target linux-x86_64` or
+`linux-aarch64` builds the Linux bundle on a host of that target: `om` is one
+static binary, and the wheels are `manylinux2014`, for glibc 2.17. On a Mac,
+`--sign-identity` signs the native files with an existing Developer ID
+identity; notarization and publication are separate steps, done by the release
+owner.
 
 ```bash
 python scripts/build_bundle.py --python-archive cpython-3.12.<n>+<build>-<platform>-install_only.tar.gz \

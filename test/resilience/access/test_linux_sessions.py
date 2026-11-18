@@ -14,8 +14,8 @@ import sys
 import time
 import unittest
 
-from openmachine.access.linux import sandbox
-from openmachine.access import restricted, sessions
+from openmachine_access.linux import sandbox
+from openmachine_access import restricted, sessions
 from test.support.access_sessions import CLIENT_NAME, SessionFixture
 
 READ_ONLY = "Read-only file system"
@@ -67,7 +67,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.account = self.root / "account"
         self.account.mkdir()
         self.home = sandbox.home(self.account) / "home"
-        self.prelude = ("from pathlib import Path as _P\nfrom openmachine.access import rules as _r\n"
+        self.prelude = ("from pathlib import Path as _P\nfrom openmachine_access import rules as _r\n"
                         f"_r.account_home = lambda: _P({str(self.account)!r})\n")
 
     def instances(self, lifetime):
@@ -367,9 +367,9 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         folder = self.root / "folder"
         folder.mkdir()
         for name, prelude in (
-                ("lifetime", "from openmachine.access import sessions as _s\n"
+                ("lifetime", "from openmachine_access import sessions as _s\n"
                              "def _save(self, record): raise OSError(28, 'No space left on device')\n_s.Lifetime.save = _save\n"),
-                ("user", "from openmachine.access.linux import sessions as _l\n_save, _calls = _l.save_json, []\n"
+                ("user", "from openmachine_access.linux import sessions as _l\n_save, _calls = _l.save_json, []\n"
                          "def _second(path, value):\n    _calls.append(path)\n    if len(_calls) == 2: raise OSError(28, 'full')\n"
                          "    _save(path, value)\n_l.save_json = _second\n")):
             with self.subTest(record=name):
@@ -386,7 +386,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 self.assertEqual(self.leftover(), [])
         # A supervisor that dies before it has recorded the instance: the instance ends with it.
         process, reply = self.start(self.request(self.lifetime(), "workspace", "exec", "echo ran", folders=[str(folder)]),
-                                    "import os, signal\nfrom openmachine.access import sessions as _s\n"
+                                    "import os, signal\nfrom openmachine_access import sessions as _s\n"
                                     "_s.Lifetime.save = lambda self, record: os.kill(os.getpid(), signal.SIGKILL)\n")
         self.assertEqual((reply, process.communicate(timeout=60)[0], process.returncode), ({}, b"", -signal.SIGKILL))
         deadline = time.monotonic() + 10
@@ -408,7 +408,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         os.kill(self.instances(lifetime)[0]["pid"], signal.SIGSTOP)
         started = time.monotonic()
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran > $HOME/ran"),
-                                    "from openmachine.access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
+                                    "from openmachine_access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n")
         self.assertEqual(process.wait(timeout=60), 1)
         self.assertLess(time.monotonic() - started, 30)
         # A request queued at the spawner starts nothing: its command would execute only on this
@@ -427,16 +427,16 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
     def test_an_instance_that_does_not_verify_is_ended_and_nothing_runs(self):
         cases = {
             # The spawner never reports that it listens.
-            "never ready": ("from openmachine.access.linux import sessions as _l\n_l.SPAWNER = 'import time; time.sleep(120)'\n",
+            "never ready": ("from openmachine_access.linux import sessions as _l\n_l.SPAWNER = 'import time; time.sleep(120)'\n",
                             "lifetime_unverifiable"),
             # The self-test classifies this supervisor, which is outside, as a member.
-            "self-test": ("from openmachine.access.linux import sandbox as _b\n_b.member = lambda pid, marker: True\n",
+            "self-test": ("from openmachine_access.linux import sandbox as _b\n_b.member = lambda pid, marker: True\n",
                           "lifetime_unverifiable"),
             # There is no bubblewrap to run.
-            "no bubblewrap": ("from pathlib import Path as _W\nfrom openmachine.access.linux import sandbox as _b\n"
+            "no bubblewrap": ("from pathlib import Path as _W\nfrom openmachine_access.linux import sandbox as _b\n"
                               "_b.bubblewrap = lambda: _W('/nonexistent/bwrap')\n", "lifetime_unverifiable"),
             # The spawner is found in this supervisor's own PID namespace.
-            "own namespace": ("import os\nfrom openmachine.access.linux import sandbox as _b\n_namespace = _b.namespace\n"
+            "own namespace": ("import os\nfrom openmachine_access.linux import sandbox as _b\n_namespace = _b.namespace\n"
                               "_b.namespace = lambda pid: _namespace(os.getpid())\n", "lifetime_unverifiable"),
         }
         for name, (prelude, code) in cases.items():
@@ -444,7 +444,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
                 lifetime = self.lifetime()
                 started = time.monotonic()
                 process, reply = self.start(self.request(lifetime, "read_only", "exec", "echo ran"),
-                                            "from openmachine.access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n" + prelude)
+                                            "from openmachine_access import restricted as _s\n_s.ACKNOWLEDGE_SECONDS = 1\n" + prelude)
                 out, _ = process.communicate(timeout=60)
                 self.assertLess(time.monotonic() - started, 30)
                 self.assertEqual((reply["error"]["code"], reply["error"]["effect"], out), (code, "known_no_effect", b""))
@@ -463,7 +463,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         for name, target, message in (("sub", hidden, f"mounted something else at {hidden}"), (".claude", Path("/"), "did not start")):
             with self.subTest(target=target):
                 # As another instance that writes the folder can: after the search, before bubblewrap mounts.
-                swap = ("import os\nfrom openmachine.access.linux import sandbox as _b\n_arguments = _b.arguments\n"
+                swap = ("import os\nfrom openmachine_access.linux import sandbox as _b\n_arguments = _b.arguments\n"
                         f"def _swapped(**given):\n    found = _arguments(**given)\n"
                         f"    os.rename({str(folder / name)!r}, {str(folder / 'moved')!r})\n"
                         f"    os.symlink({os.path.relpath(target, folder)!r}, {str(folder / name)!r})\n    return found\n"
@@ -483,7 +483,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         lifetime = self.lifetime()
         self.assertEqual(self.session(lifetime)[1], 0)
         # The credentials the kernel attached name a process outside the instance: this launcher.
-        prelude = "import os\nfrom openmachine.access.linux import sandbox as _b\n_b.sender = lambda ancillary: os.getpid()\n"
+        prelude = "import os\nfrom openmachine_access.linux import sandbox as _b\n_b.sender = lambda ancillary: os.getpid()\n"
         process, reply = self.start(self.request(lifetime, "read_only", "exec", "touch $HOME/ran"), prelude)
         out, _ = process.communicate(timeout=60)
         self.assertEqual((reply["error"]["code"], reply["error"]["effect"], process.returncode),
@@ -666,11 +666,11 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         for index in range(6):
             (large / f"file-{index}").write_text("x\n")
         (linked / ".claude").symlink_to(target)
-        small = "from openmachine.access.linux import sandbox as _b\n_b.MAX_ENTRIES = 5\n"
+        small = "from openmachine_access.linux import sandbox as _b\n_b.MAX_ENTRIES = 5\n"
         self.repository(many / "one")
         self.repository(many / "two")
-        few = "from openmachine.access.linux import sandbox as _b\n_b.MAX_REPOSITORIES = 1\n"
-        mounts = "from openmachine.access.linux import sandbox as _b\n_b.MAX_PROTECTION = 5\n"
+        few = "from openmachine_access.linux import sandbox as _b\n_b.MAX_REPOSITORIES = 1\n"
+        mounts = "from openmachine_access.linux import sandbox as _b\n_b.MAX_PROTECTION = 5\n"
         for folder, prelude, code in ((large, small, "folder_too_large"), (many, few, "folder_too_large"),
                                       (many, mounts, "folder_too_large"), (linked, "", "scope_unsupported")):
             with self.subTest(code=code):
@@ -745,7 +745,7 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
 class UnavailableSandboxTests(SessionFixture, unittest.TestCase):
     def test_a_machine_where_no_bubblewrap_builds_the_sandbox_refuses_restricted_sessions(self):
         # Neither the system's bubblewrap nor a payload's copy exists.
-        prelude = ("import sys\nfrom pathlib import Path as _P\nfrom openmachine.access.linux import sandbox as _b\n"
+        prelude = ("import sys\nfrom pathlib import Path as _P\nfrom openmachine_access.linux import sandbox as _b\n"
                    f"_b.SYSTEM_BWRAP = _P('/bin/false')\nsys.base_prefix = {str(self.root / 'python')!r}\n")
         reported = json.loads(subprocess.run(self.command("capabilities", prelude=prelude), capture_output=True, check=True).stdout)
         self.assertEqual(reported["policies"], {"full_access": "available", "read_only": "sandbox_unavailable",

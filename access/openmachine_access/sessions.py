@@ -19,11 +19,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from openmachine.access import rules
-from openmachine.access.linux import environment as linux, sandbox
-from openmachine.access.macos import seatbelt
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine_access import rules
+from openmachine_access.linux import environment as linux, sandbox
+from openmachine_access.macos import seatbelt
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import lease, private_directory, save_json
 
 PROTOCOL = 4
 MAX_REQUEST = 256 * 1024

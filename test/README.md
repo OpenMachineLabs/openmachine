@@ -149,17 +149,16 @@ client acceptance.
 ## Compatibility and packaging
 
 The import check owns every installed production module and checks absolute,
-relative, function-local and re-export edges plus cycles. It also holds the
-access launcher to `openmachine`, `openmachine.access`, `openmachine.foundation`
-and `openmachine.config`. Type-only imports do not pull unexpected runtime
-dependencies into unrelated owners. Explicit checks do not model all implicit
-initialization/dynamic imports; full-source review covers those limits. Do not
-add a dynamic import to evade them.
+relative, function-local and re-export edges plus cycles. It also keeps the
+access launcher from importing `service` or `cli`. Type-only imports do not
+pull unexpected runtime dependencies into unrelated owners. Explicit checks do
+not model all implicit initialization/dynamic imports; full-source review
+covers those limits. Do not add a dynamic import to evade them.
 
-Preserve the `openmachine.access`, `openmachine.cli` and
-`openmachine.service.maintenance` module entry points: `om`, the Mac app and
-Core's installed management entry run them. State and lock paths, file ownership and
-the original-operation records are compatibility contracts.
+Preserve the `openmachine_access`, `openmachine_access.cli` and
+`openmachine_access.service.maintenance` module entry points: `om`, the Mac app
+and Core's installed management entry run them. State and lock paths, file
+ownership and the original-operation records are compatibility contracts.
 
 ## Evidence boundaries
 

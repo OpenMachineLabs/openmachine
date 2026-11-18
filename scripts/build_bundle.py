@@ -43,9 +43,9 @@ def digest(path: Path) -> str:
 
 def release_version() -> str:
     """The repository's one version, which the bundle, om and Core share."""
-    found = re.search(r'^__version__ = "(\d+\.\d+\.\d+)"$', (ROOT / "openmachine/__init__.py").read_text(), re.MULTILINE)
+    found = re.search(r'^__version__ = "(\d+\.\d+\.\d+)"$', (ROOT / "access/openmachine_access/__init__.py").read_text(), re.MULTILINE)
     if not found:
-        raise ValueError("openmachine/__init__.py declares no version")
+        raise ValueError("access/openmachine_access/__init__.py declares no version")
     return found[1]
 
 

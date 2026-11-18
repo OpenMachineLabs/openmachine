@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory, save_json
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory, save_json
 
 from . import payload, processes
 from . import state as service_state
@@ -28,7 +28,7 @@ def prepare(state: Path, retained: Path, payload_sha256: str) -> dict:
         if processes.run(argv, timeout=180, env=env).returncode:
             raise Fault("installation_failed", "Candidate installation failed; the selection is untouched.")
     # The candidate check: the installed access launcher answers with the declared version.
-    checked = processes.run([str(destination / "bin/python"), "-I", "-m", "openmachine.access", "capabilities"], env=env)
+    checked = processes.run([str(destination / "bin/python"), "-I", "-m", "openmachine_access", "capabilities"], env=env)
     try:
         if checked.returncode or json.loads(checked.stdout)["version"] != version:
             raise ValueError("candidate version")

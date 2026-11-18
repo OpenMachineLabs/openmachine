@@ -17,7 +17,7 @@ SPEC.loader.exec_module(premerge)
 class PremergeChecks(RepositoryFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         self.commit()
         self.environment = {"python": "fixture"}
 

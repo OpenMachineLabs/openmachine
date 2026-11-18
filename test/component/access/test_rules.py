@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access import rules
-from openmachine.access.__main__ import folders_reply
+from openmachine_access import rules
+from openmachine_access.__main__ import folders_reply
 
 
 @unittest.skipUnless(sys.platform == "darwin", "folders resolve through the macOS F_GETPATH")

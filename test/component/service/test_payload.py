@@ -6,8 +6,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from openmachine.foundation.state import private_directory
-from openmachine.service import payload
+from openmachine_access.foundation.state import private_directory
+from openmachine_access.service import payload
 from test.support.payload_cases import PayloadCaseFixture
 
 

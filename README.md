@@ -65,7 +65,7 @@ Everything that decides what happens on your machine is open source, here:
 | --- | --- | --- |
 | `om` | [`cmd/om`](cmd/om), [`daemon/`](daemon), [`linux/`](linux) | Joins the private network, serves OM SSH, matches rules, records logs, relays Git to GitHub without a token on the machine; on Linux, also installs, updates and runs the product. See [docs/om.md](docs/om.md). |
 | Device identity | [`device/`](device) | This machine's key, sign-in and sign-out, its permission, and the bundle it runs. See [docs/device.md](docs/device.md). |
-| Core | [`openmachine/`](openmachine) | Starts each session with the access you chose: Read only or Workspace, sandboxed with macOS Seatbelt or Linux bubblewrap, or Full access, which is not sandboxed. |
+| Core | [`access/`](access) | Starts each session with the access you chose: Read only or Workspace, sandboxed with macOS Seatbelt or Linux bubblewrap, or Full access, which is not sandboxed. |
 | Network library | [`connector/`](connector) | Joins one device to the private network; a Go module of its own. |
 
 Closed source, run by us:
@@ -88,7 +88,7 @@ build.
 
 ## Versions
 
-The repository has one version, in [`openmachine/__init__.py`](openmachine/__init__.py).
+The repository has one version, in [`access/openmachine_access/__init__.py`](access/openmachine_access/__init__.py).
 A release tags one commit with both `vX.Y.Z` and `connector/vX.Y.Z`; tags are
 never moved. Before 1.0, the Go packages make no API stability promise.
 

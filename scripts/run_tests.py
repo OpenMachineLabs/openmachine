@@ -17,10 +17,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "test/ownership.json"
+PACKAGE = "access/openmachine_access/"  # Core's one Python package; access/ is its import root
 LAYERS = ("repository", "unit", "component", "resilience")
 GLOBAL_PATHS = {
     # The release version: a release bump verifies the complete candidate it tags.
-    "openmachine/__init__.py",
+    PACKAGE + "__init__.py",
     "requirements.lock", "pyproject.toml", "scripts/run_tests.py",
     "scripts/premerge.py", ".github/workflows/quality.yml",
 }
@@ -200,7 +201,7 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
         missing = sorted(references - files)
         if missing:
             raise ValueError("stale ownership paths: " + ", ".join(missing))
-        production = {path for path in files if path.endswith(".py") and path.startswith("openmachine/")}
+        production = {path for path in files if path.endswith(".py") and path.startswith(PACKAGE)}
         tests = {path for path in files if path.startswith("test/")
                  and PurePosixPath(path).name.startswith("test_") and path.endswith(".py")}
         helpers = {path for path in files if path.startswith("test/") and path.endswith(".py")
@@ -211,7 +212,7 @@ def validate_manifest(value: object, files: set[str] | None = None, root: Path |
             for path in sorted(candidates - owners.keys()):
                 parents = list(PurePosixPath(path).parents)
                 for parent in parents:
-                    if str(parent) in {".", "openmachine", "test", *[f"test/{layer}" for layer in LAYERS]}:
+                    if str(parent) in {".", "access", PACKAGE.rstrip("/"), "test", *[f"test/{layer}" for layer in LAYERS]}:
                         continue
                     matches = {owner for known, owner in owners.items() if PurePosixPath(known).parent == parent}
                     if matches:
@@ -286,7 +287,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
     required_paths: dict[str, set[str]] = {}
     full_reasons = []
     mapped = {path for entry in current["modules"].values() for key in ("sources", "tests") for path in entry[key]}
-    unowned = {path for path in files if path.startswith("openmachine/") and path.endswith(".py")} | all_tests
+    unowned = {path for path in files if path.startswith(PACKAGE) and path.endswith(".py")} | all_tests
     if unowned - mapped and (full or modules or any(not _repository_only(path) for path in changes)):
         full_reasons.append("unmapped source or test: complete discovery")
 
@@ -365,7 +366,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                 add(old["support"].get(path, []), f"fixture ownership changed: {path}")
                 add(current["support"].get(path, []), f"fixture ownership changed: {path}")
     for path, retained in required_paths.items():
-        product_path = path.startswith("openmachine/") or (
+        product_path = path.startswith(PACKAGE) or (
             path.startswith("test/") and PurePosixPath(path).name.startswith("test_")
             and not path.startswith("test/repository/"))
         behavior = {test for test in retained if not test.startswith("test/repository/")} if product_path else retained
@@ -377,7 +378,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
         reasons = {path: why for path, why in reasons.items() if path.split("/")[1] == layer}
     selected = sorted(reasons, key=lambda path: (LAYERS.index(path.split("/")[1]), path))
     product = [path for path in selected if not path.startswith("test/repository/")]
-    changed_product = any(path.startswith("openmachine/") for path in changes)
+    changed_product = any(path.startswith(PACKAGE) for path in changes)
     changed_tests = any(path.startswith("test/") and PurePosixPath(path).name.startswith("test_")
                         and path.endswith(".py") and not path.startswith(("test/repository/", *DEVICE_PATHS))
                         for path in changes)
@@ -444,19 +445,20 @@ class TimedResult(unittest.TextTestResult):
 
 def run_files(root: Path, paths: list[str], *, installed: bool, source: bool = False) -> dict:
     if source:
-        sys.path.insert(0, str(root))
+        sys.path.insert(0, str(root / "access"))
     else:
         # Keep the checkout out of product imports when exercising the installed wheel.
-        sys.path[:] = [path for path in sys.path if path and Path(path).resolve() != root.resolve()]
+        checkout = {root.resolve(), (root / "access").resolve()}
+        sys.path[:] = [path for path in sys.path if path and Path(path).resolve() not in checkout]
     # Test modules always live under the candidate's test tree. Build the package
     # explicitly so focused files do not depend on parent __init__.py scaffolding.
     package = types.ModuleType("test")
     package.__path__ = [str(root / "test")]
     sys.modules["test"] = package
     if installed or source:
-        product = importlib.import_module("openmachine")
+        product = importlib.import_module("openmachine_access")
         origin = Path(product.__file__).resolve()
-        if origin.is_relative_to((root / "openmachine").resolve()) != source:
+        if origin.is_relative_to((root / PACKAGE).resolve()) != source:
             raise ValueError(f"unexpected candidate import location: {origin}")
         print(f"Candidate: {origin}", flush=True)
     suites = {}
@@ -517,7 +519,7 @@ def execute_plan(root: Path, plan: dict) -> dict:
             stages["wheel build"] = run_command([str(python), "-m", "pip", "wheel", "--no-deps",
                                                  "--no-build-isolation", ".", "--wheel-dir", str(wheels)],
                                                 cwd=root, stage="build candidate wheel")
-            artifacts = list(wheels.glob("openmachine-*.whl"))
+            artifacts = list(wheels.glob("openmachine_access-*.whl"))
             if len(artifacts) != 1:
                 raise ValueError("expected exactly one newly built candidate wheel")
             stages["wheel install"] = run_command([str(python), "-m", "pip", "install", "--no-deps",

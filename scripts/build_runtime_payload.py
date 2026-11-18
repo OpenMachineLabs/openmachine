@@ -14,7 +14,7 @@ import tempfile
 import urllib.request
 import zipfile
 
-from openmachine.service import payload
+from openmachine_access.service import payload
 
 
 def fetch(item: dict, destination: Path) -> None:
@@ -87,9 +87,9 @@ def main() -> None:
         if len(metadata) != 1:
             parser.error("Select one Core wheel.")
         package = BytesParser().parsebytes(archive.read(metadata[0]))
-        if package["Name"] != "openmachine" or not package["Version"]:
+        if package["Name"] != "openmachine-access" or not package["Version"]:
             parser.error("The selected wheel is not Open Machine.")
-        if archive.read("openmachine/service/payload.py") != Path(payload.__file__).read_bytes():
+        if archive.read("openmachine_access/service/payload.py") != Path(payload.__file__).read_bytes():
             parser.error("Install the selected Core wheel in the build environment before running this script.")
         version = package["Version"]
     inputs = json.loads(Path(__file__).with_name("runtime-inputs.json").read_text())[args.target]
@@ -116,9 +116,9 @@ def main() -> None:
     original_entries = set((output / "python/bin").iterdir())
     run([python, "-I", "-B", "-m", "pip", "install", "--no-index", "--find-links", str(wheels),
          "--no-deps", "--only-binary=:all:", "--no-compile", "-r", str(output / "requirements.lock"),
-         "openmachine==" + version], env)
+         "openmachine-access==" + version], env)
     run([python, "-I", "-B", "-m", "pip", "check"], env)
-    run([python, "-I", "-B", "-m", "openmachine.access", "capabilities"], env)
+    run([python, "-I", "-B", "-m", "openmachine_access", "capabilities"], env)
     # Generated entry-point scripts contain the build path. The relocatable
     # bootstrap uses python -m; the final venv creates its own correct entries.
     for entry in set((output / "python/bin").iterdir()) - original_entries:

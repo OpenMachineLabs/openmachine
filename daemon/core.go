@@ -65,7 +65,7 @@ func (e *coreDenied) Error() string {
 const launchTimeout = 30 * time.Second // Core's own launch steps are bounded by about 15 s
 
 func (c Core) command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, c.Python, append(append([]string{"-I", "-m", "openmachine.access"}, c.Args...), args...)...)
+	cmd := exec.CommandContext(ctx, c.Python, append(append([]string{"-I", "-m", "openmachine_access"}, c.Args...), args...)...)
 	// Nothing of this daemon's environment, such as the network library's
 	// process-wide settings, reaches Core or the command.
 	cmd.Env = []string{"HOME=" + c.Home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}

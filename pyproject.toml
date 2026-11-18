@@ -3,7 +3,7 @@ requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openmachine"
+name = "openmachine-access"
 dynamic = ["version"]
 description = "Your AI. Your machines. Let your coding agent work on every machine you own, with the access you choose."
 readme = "README.md"
@@ -12,7 +12,7 @@ license = "Apache-2.0"
 dependencies = ["pydantic==2.13.5"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["openmachine"]
+packages = ["access/openmachine_access"]
 
 [tool.hatch.version]
-path = "openmachine/__init__.py"
+path = "access/openmachine_access/__init__.py"

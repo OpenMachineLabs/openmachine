@@ -10,10 +10,10 @@ import stat
 import struct
 import uuid
 
-from openmachine.access import restricted, rules, sessions
-from openmachine.access.macos import seatbelt
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
+from openmachine_access import restricted, rules, sessions
+from openmachine_access.macos import seatbelt
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory
 
 
 def persistent_home(key: str | None) -> tuple[Path, list[Path]]:

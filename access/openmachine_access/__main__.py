@@ -1,4 +1,4 @@
-"""python -I -m openmachine.access: the one Code launch boundary for the Go host."""
+"""python -I -m openmachine_access: the one Code launch boundary for the Go host."""
 
 import argparse
 import json
@@ -9,13 +9,13 @@ import sys
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from openmachine import __version__
-from openmachine.access import restricted, rules, sessions
-from openmachine.access.linux import sandbox, sessions as linux
-from openmachine.access.macos import seatbelt, sessions as macos
-from openmachine.config import DEFAULT_STATE
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
+from openmachine_access import __version__
+from openmachine_access import restricted, rules, sessions
+from openmachine_access.linux import sandbox, sessions as linux
+from openmachine_access.macos import seatbelt, sessions as macos
+from openmachine_access.config import DEFAULT_STATE
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory
 
 FORWARDED = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2,
              signal.SIGALRM, signal.SIGABRT)
@@ -108,7 +108,7 @@ def session(control: int, state: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -I -m openmachine.access")
+    parser = argparse.ArgumentParser(prog="python -I -m openmachine_access")
     parser.add_argument("--config", type=Path)  # om passes it; access reads no configuration.
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
