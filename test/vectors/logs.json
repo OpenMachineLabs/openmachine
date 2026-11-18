@@ -1,0 +1,320 @@
+{
+ "seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+ "key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+ "records": [
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":1,\"at\":\"2026-11-16T08:40:00.000Z\",\"type\":\"boot\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"version\":\"0.0.20\",\"sig\":\"6wpVP6gMZpqd3mHK1eZCcjuFHuUja6us8AHgz5D2WgKAFi7hc-G0vgPncCalBxgvPGX4RRI52scmrv46HlhvCw\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:1\nat:24:2026-11-16T08:40:00.000Z\ntype:4:boot\ndevice:36:dev_0123456789abcdef0123456789abcdef\nversion:6:0.0.20\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":2,\"at\":\"2026-11-16T08:40:01.007Z\",\"type\":\"connect\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"app\":\"Claude Code\",\"access\":\"workspace\",\"folder\":\"/srv/app\",\"grant\":3,\"source_grant\":5,\"policy\":2,\"sig\":\"spGNuIc6JfG_y-2Gj1wcFn-__q3WaORUkwnaN9e58VBO3uV_jMdjedKewB7bBeUtsjywHfsOA2k6BGn3OPKHAg\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:2\nat:24:2026-11-16T08:40:01.007Z\ntype:7:connect\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\napp:11:Claude Code\naccess:9:workspace\nfolder:8:/srv/app\ngrant:1:3\nsource_grant:1:5\npolicy:1:2\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":3,\"at\":\"2026-11-16T08:40:02.014Z\",\"type\":\"refuse\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"app\":\"Codex\",\"reason\":\"user\",\"stage\":\"transport\",\"message\":\"log in as dana; other users are refused\",\"sig\":\"fdNhB8RuU-wTDv5lDdfZw3G9ugeHmnXoDdTQRn8kJFquQI2v1nbpL085-kIVWuaPxty8_zJS2Ne2WFeFghYzDw\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:3\nat:24:2026-11-16T08:40:02.014Z\ntype:6:refuse\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\napp:5:Codex\nreason:4:user\nstage:9:transport\nmessage:39:log in as dana; other users are refused\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":4,\"at\":\"2026-11-16T08:40:03.021Z\",\"type\":\"start\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"kind\":\"exec\",\"terminal\":1,\"command\":\"echo \\\"héllo <wörld> & 日本\\\" TOKEN=[hidden]\",\"script\":\"set -e\\nmake test\\n\",\"cut\":1,\"sig\":\"t_oLiUy53K97pBYJf4gEARtNrKaScNDHklSa_rMb_XmiJ00MN245C82hk98_atzmjcmJrxRPjYmxD3sUBqy9CA\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:4\nat:24:2026-11-16T08:40:03.021Z\ntype:5:start\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nkind:4:exec\nterminal:1:1\ncommand:46:echo \"héllo <wörld> & 日本\" TOKEN=[hidden]\nscript:17:set -e\nmake test\n\ncut:1:1\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":5,\"at\":\"2026-11-16T08:40:04.028Z\",\"type\":\"start\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"kind\":\"sftp\",\"sig\":\"le6fcLz_N450VVAf97fuYdqzSNaXUQxPEKPi0Yu6NMkyPco6miJmkEt4-wro7Y0HQE5taAUyJ0bnDP3p9lyaBg\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:5\nat:24:2026-11-16T08:40:04.028Z\ntype:5:start\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nkind:4:sftp\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":6,\"at\":\"2026-11-16T08:40:05.035Z\",\"type\":\"end\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"exit\":0,\"sig\":\"0QuQGGwolHgyN1gyVMtzxxdPOdW0DC9V6c12o4_1HhM05Gg_pMdBhttV4C-_k3JFyhlmuBljA-NIYP5xnaUgCw\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:6\nat:24:2026-11-16T08:40:05.035Z\ntype:3:end\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nexit:1:0\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":7,\"at\":\"2026-11-16T08:40:06.042Z\",\"type\":\"end\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"exit\":137,\"sig\":\"eYMhny4X2LFdL5Bw0kjA0c-HNXeLvpS1tOf3WDyXnfyMKk0f7YG9FF5vkEhUM-a_Cpa7Dyse2YOwRgqqvGhUCw\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:7\nat:24:2026-11-16T08:40:06.042Z\ntype:3:end\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nexit:3:137\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":8,\"at\":\"2026-11-16T08:40:07.049Z\",\"type\":\"end\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"signal\":\"TERM\",\"sig\":\"zX0Tu-5g_KCsemsrT8kvgfbN1cputTQWKrcP7b1dDj6QWApCvL1kLDBZdfdYl63V4aU-EM7ycizSPU4P8oQzBA\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:8\nat:24:2026-11-16T08:40:07.049Z\ntype:3:end\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nsignal:4:TERM\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":9,\"at\":\"2026-11-16T08:40:08.056Z\",\"type\":\"end\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"error\":\"core\",\"sig\":\"xCHPUShq1YYPIfYmKrDjJgzjDrGxKG9tQtQXQsY5xi_u4wwu5P2dfhlSbSZxybTsXX6Rev5FFux0elkFnyqKDg\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:1:9\nat:24:2026-11-16T08:40:08.056Z\ntype:3:end\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nerror:4:core\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":10,\"at\":\"2026-11-16T08:40:09.063Z\",\"type\":\"block\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"kind\":\"exec\",\"command\":\"sudo reboot\",\"rule\":\"Shut down or restart\",\"sig\":\"ywVi4nTcrE471dYYpjHuCgxNUK1Ti2m2Ah3R82TIqJEf1PKmEeu8t66VNngsL9xahR7NLptxLeUC_P7plubkAg\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:2:10\nat:24:2026-11-16T08:40:09.063Z\ntype:5:block\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nkind:4:exec\ncommand:11:sudo reboot\nrule:20:Shut down or restart\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":11,\"at\":\"2026-11-16T08:40:10.070Z\",\"type\":\"block\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"session\":\"00112233445566778899aabb\",\"kind\":\"exec\",\"sig\":\"QHllWKWBEap64nT5XgqkjtAfvNbu09c56Xd5ZsPscxJlxw3qAw0BSgVlxMnhjAvMZLmIZhL7RDv1e1Y--YPCCA\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:2:11\nat:24:2026-11-16T08:40:10.070Z\ntype:5:block\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nsession:24:00112233445566778899aabb\nkind:4:exec\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":12,\"at\":\"2026-11-16T08:40:11.077Z\",\"type\":\"block\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"kind\":\"forward\",\"rule\":\"lock\",\"host\":\"127.0.0.1\",\"port\":5432,\"sig\":\"acJ3kqbBdwK1iL0aDyGPI7HGY04NlYbS6mrvhesQOmqXUcSnd_FaKtPIYwM_vAqdbu055WCxsuKQ5hebnoliCQ\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:2:12\nat:24:2026-11-16T08:40:11.077Z\ntype:5:block\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nkind:7:forward\nrule:4:lock\nhost:9:127.0.0.1\nport:4:5432\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":13,\"at\":\"2026-11-16T08:40:12.084Z\",\"type\":\"forward\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"host\":\"localhost\",\"port\":65535,\"sig\":\"iu9uAp1AoBPWQSgYXiuEUTbUb4k6uDmszq4o5BCP1it9tU44a-0bFK4EFbZqZzw8yE109hQa-P2SSP3EjK-MCw\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:2:13\nat:24:2026-11-16T08:40:12.084Z\ntype:7:forward\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nhost:9:localhost\nport:5:65535\n"
+  },
+  {
+   "line": "{\"queue\":\"0123456789abcdef0123456789abcdef\",\"n\":14,\"at\":\"2026-11-16T08:40:13.091Z\",\"type\":\"disconnect\",\"device\":\"dev_0123456789abcdef0123456789abcdef\",\"visit\":\"vis_00112233445566778899aabbccddeeff\",\"source\":\"dev_fedcba9876543210fedcba9876543210\",\"reason\":\"done\",\"last\":\"2026-11-16T08:30:03.120Z\",\"sig\":\"TtKiuufBiiNdVmFaA28YlJsvW_ADF-UJDBsmj0WcoKJ30TZWf-7SxLDc8ygqeQyZDWv29H_5TuPMgFXl-5YwDg\"}",
+   "signed": "om-log-v1\nqueue:32:0123456789abcdef0123456789abcdef\nn:2:14\nat:24:2026-11-16T08:40:13.091Z\ntype:10:disconnect\ndevice:36:dev_0123456789abcdef0123456789abcdef\nvisit:36:vis_00112233445566778899aabbccddeeff\nsource:36:dev_fedcba9876543210fedcba9876543210\nreason:4:done\nlast:24:2026-11-16T08:30:03.120Z\n"
+  }
+ ],
+ "chain": [
+  "{\"v\":1,\"stream\":\"changes\",\"seq\":1,\"id\":\"chg_00000000000000000000000000000001\",\"time\":\"2026-11-16T08:40:03.123Z\",\"type\":\"signin\",\"account\":{\"id\":\"om_acme\",\"kind\":\"team\",\"name\":\"Acme\"},\"actor\":{\"kind\":\"person\",\"id\":\"om_dana\",\"name\":\"Dana Kim\",\"email\":\"dana@acme.example\"},\"origin\":{\"via\":\"console\",\"ip\":\"203.0.113.24\",\"city\":\"Singapore\",\"region\":\"\",\"country\":\"SG\"},\"data\":{\"provider\":\"github\"},\"prev\":\"0000000000000000000000000000000000000000000000000000000000000000\"}",
+  "{\"v\":1,\"stream\":\"changes\",\"seq\":2,\"id\":\"chg_00000000000000000000000000000002\",\"time\":\"2026-11-16T08:41:00.000Z\",\"type\":\"access.change\",\"account\":{\"id\":\"om_acme\",\"kind\":\"team\",\"name\":\"Acme\"},\"actor\":{\"kind\":\"person\",\"id\":\"om_dana\",\"name\":\"Dana Kim\",\"email\":\"dana@acme.example\"},\"origin\":{\"via\":\"console\",\"ip\":\"203.0.113.24\",\"city\":\"Singapore\",\"region\":\"\",\"country\":\"SG\"},\"machine\":{\"id\":\"dev_0123456789abcdef0123456789abcdef\",\"name\":\"prod-api\"},\"about\":{\"kind\":\"person\",\"id\":\"om_bob\",\"name\":\"Bob\"},\"data\":{\"before\":null,\"after\":\"read_only\",\"permission\":\"workspace\"},\"prev\":\"cc8f8c0c2049dd312fa5b771acf115b254a9be8237f65786cd89c6136701f40b\"}",
+  "{\"v\":1,\"stream\":\"changes\",\"seq\":3,\"id\":\"chg_00000000000000000000000000000003\",\"time\":\"2026-11-16T08:42:00.000Z\",\"type\":\"logs.gap\",\"account\":{\"id\":\"om_acme\",\"kind\":\"team\",\"name\":\"Acme\"},\"actor\":{\"kind\":\"cloud\"},\"origin\":{\"via\":\"cloud\"},\"machine\":{\"id\":\"dev_0123456789abcdef0123456789abcdef\",\"name\":\"prod-api\"},\"data\":{\"queue\":\"0123456789abcdef0123456789abcdef\",\"range\":[4,15]},\"prev\":\"ed7c7bfddc6a077cae270e29cacb3783484085899b8e4aae53a92c4c4381f822\"}"
+ ],
+ "redact": [
+  {
+   "in": "TOKEN=x curl -H 'Authorization: Bearer y' https://api.example/v1",
+   "out": "TOKEN=[hidden] curl -H 'Authorization: [hidden]' https://api.example/v1"
+  },
+  {
+   "in": "export API_KEY=\"abc def\" && run",
+   "out": "export API_KEY=[hidden] && run"
+  },
+  {
+   "in": "env DB_PASSWORD=hunter2 SECRET_TOKEN='a b' PATH=/bin ./run",
+   "out": "env DB_PASSWORD=[hidden] SECRET_TOKEN=[hidden] PATH=/bin ./run"
+  },
+  {
+   "in": "db_password=x; PASSWORD=abc\"def ghi\"jkl next",
+   "out": "db_password=[hidden]; PASSWORD=[hidden] next"
+  },
+  {
+   "in": "mysql --password hunter2 --user root",
+   "out": "mysql --password [hidden] --user root"
+  },
+  {
+   "in": "tool --api-key=abc123 --client-secret 'a b' --verbose",
+   "out": "tool --api-key=[hidden] --client-secret [hidden] --verbose"
+  },
+  {
+   "in": "tool --token --verbose",
+   "out": "tool --token --verbose"
+  },
+  {
+   "in": "curl -H \"X-Api-Key: k1\" -H \"Cookie: a=b; c=d\" --header 'Accept: text/plain' https://h",
+   "out": "curl -H \"X-Api-Key: [hidden]\" -H \"Cookie: [hidden]\" --header 'Accept: text/plain' https://h"
+  },
+  {
+   "in": "wget --header=Proxy-Authorization:abc https://h/f; ls",
+   "out": "wget --header=Proxy-Authorization:[hidden]; ls"
+  },
+  {
+   "in": "printf 'GET / HTTP/1.1\\n' | nc h 80 <<EOF\nAuthorization: Basic abc def\nHost: h\nEOF",
+   "out": "printf 'GET / HTTP/1.1\\n' | nc h 80 <<EOF\nAuthorization: [hidden]\nHost: h\nEOF"
+  },
+  {
+   "in": "git clone https://dana:s3cret@github.com/acme/app.git",
+   "out": "git clone https://dana:[hidden]@github.com/acme/app.git"
+  },
+  {
+   "in": "curl 'https://h/p?access_token=abc&page=2'",
+   "out": "curl 'https://h/p?access_token=[hidden]&page=2'"
+  },
+  {
+   "in": "echo ghp_0123456789abcdefghijABCDEFGHIJ012345 x=sk-ant-0123456789abcdef AKIAIOSFODNN7EXAMPLE",
+   "out": "echo [hidden] x=[hidden] [hidden]"
+  },
+  {
+   "in": "du disk-usage-report-2026-11-16-final risk-0123456789abcdef sk-short ghp_short",
+   "out": "du disk-usage-report-2026-11-16-final risk-0123456789abcdef sk-short ghp_short"
+  },
+  {
+   "in": "om up --key omkey_0123456789abcdefghijklmnopqrstuv",
+   "out": "om up --key [hidden]"
+  },
+  {
+   "in": "a(xoxb-0123456789-abcdefghij) npm_0123456789abcdefghij,pypi-0123456789abcdefghij",
+   "out": "a([hidden]) [hidden],[hidden]"
+  },
+  {
+   "in": "curl -d eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl https://h",
+   "out": "curl -d [hidden] https://h"
+  },
+  {
+   "in": "cat > k <<EOF\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA==\n-----END OPENSSH PRIVATE KEY-----\nEOF",
+   "out": "cat > k <<EOF\n[hidden]\nEOF"
+  },
+  {
+   "in": "echo '-----BEGIN PRIVATE KEY-----\nMIIE",
+   "out": "echo '[hidden]"
+  },
+  {
+   "in": "ls -la /srv/app && git status",
+   "out": "ls -la /srv/app && git status"
+  }
+ ],
+ "cut": [
+  {
+   "field": "command",
+   "in": [
+    [
+     "61",
+     5000
+    ]
+   ],
+   "out": [
+    [
+     "a",
+     4096
+    ]
+   ],
+   "cut": 1
+  },
+  {
+   "field": "command",
+   "in": [
+    [
+     "61",
+     4095
+    ],
+    [
+     "e697a5",
+     2
+    ]
+   ],
+   "out": [
+    [
+     "a",
+     4095
+    ]
+   ],
+   "cut": 1
+  },
+  {
+   "field": "command",
+   "in": [
+    [
+     "61",
+     4096
+    ]
+   ],
+   "out": [
+    [
+     "a",
+     4096
+    ]
+   ],
+   "cut": 0
+  },
+  {
+   "field": "command",
+   "in": [
+    [
+     "6c7320",
+     1
+    ],
+    [
+     "fffe",
+     1
+    ],
+    [
+     "207820",
+     1
+    ],
+    [
+     "e697",
+     1
+    ]
+   ],
+   "out": [
+    [
+     "ls � x �",
+     1
+    ]
+   ],
+   "cut": 0
+  },
+  {
+   "field": "command",
+   "in": [
+    [
+     "61",
+     4086
+    ],
+    [
+     "20544f4b454e3d",
+     1
+    ],
+    [
+     "73",
+     100
+    ]
+   ],
+   "out": [
+    [
+     "a",
+     4086
+    ],
+    [
+     " TOKEN=[hi",
+     1
+    ]
+   ],
+   "cut": 1
+  },
+  {
+   "field": "script",
+   "in": [
+    [
+     "73",
+     20000
+    ]
+   ],
+   "out": [
+    [
+     "s",
+     16384
+    ]
+   ],
+   "cut": 1
+  },
+  {
+   "field": "script",
+   "in": [
+    [
+     "01",
+     16384
+    ]
+   ],
+   "out": [
+    [
+     "\u0001",
+     4096
+    ]
+   ],
+   "cut": 1
+  }
+ ],
+ "sigv4": {
+  "request": {
+   "method": "PUT",
+   "url": "https://examplebucket.s3.amazonaws.com/test%24file.text",
+   "headers": {
+    "Date": "Fri, 24 May 2013 00:00:00 GMT",
+    "x-amz-storage-class": "REDUCED_REDUNDANCY"
+   },
+   "body": "Welcome to Amazon S3."
+  },
+  "key": "AKIAIOSFODNN7EXAMPLE",
+  "secret": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "region": "us-east-1",
+  "time": "2013-05-24T00:00:00Z",
+  "headers": {
+   "date": "Fri, 24 May 2013 00:00:00 GMT",
+   "x-amz-content-sha256": "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072",
+   "x-amz-date": "20130524T000000Z",
+   "x-amz-storage-class": "REDUCED_REDUNDANCY",
+   "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class,Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd"
+  }
+ },
+ "webhook": {
+  "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+  "id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+  "timestamp": 1614265330,
+  "body": "{\"test\": 2432232314}",
+  "signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+ }
+}

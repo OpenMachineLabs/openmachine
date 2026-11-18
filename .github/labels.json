@@ -1,33 +1,8 @@
 [
   {
-    "name": "spec",
-    "color": "5319e7",
-    "description": "A proposed or approved implementation design."
-  },
-  {
-    "name": "research",
-    "color": "0075ca",
-    "description": "Survey, research, experiment, or evidence synthesis."
-  },
-  {
-    "name": "benchmark",
-    "color": "1d76db",
-    "description": "A reproducible comparison under a frozen protocol."
-  },
-  {
     "name": "bug",
     "color": "d73a4a",
     "description": "An observed defect in existing behavior."
-  },
-  {
-    "name": "implementation",
-    "color": "0e8a16",
-    "description": "A scoped implementation increment for approved behavior."
-  },
-  {
-    "name": "feature",
-    "color": "a2eeef",
-    "description": "A new product capability or a long-term roadmap."
   },
   {
     "name": "feature-request",

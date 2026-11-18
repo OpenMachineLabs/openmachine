@@ -13,3 +13,8 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.log
+
+# om built at the root by go build ./cmd/om
+/om
+/go.work
+/go.work.sum

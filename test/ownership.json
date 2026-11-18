@@ -70,17 +70,14 @@
     "repository": {
       "boundary_tests": [],
       "sources": [
-        ".github/workflows/auto-metadata.yml",
         ".github/workflows/connector.yml",
-        "scripts/auto_metadata.py",
+        ".github/workflows/dco.yml",
+        "scripts/check_dco.py",
+        "scripts/check_licenses.py",
         "scripts/check_repository.py",
         "scripts/premerge.py",
         "scripts/run_tests.py",
-        ".github/workflows/review-policy-signal.yml",
-        ".github/workflows/trusted-review-gate.yml",
-        "scripts/trusted_review_gate.py",
         ".github/CODEOWNERS",
-        ".github/workflows/runtime-payload.yml",
         "assets/openmachine-banner.png",
         "assets/openmachine-hero.svg",
         "assets/button-download-light.svg",
@@ -91,12 +88,12 @@
         "assets/button-website-dark.svg"
       ],
       "tests": [
-        "test/repository/test_auto_metadata.py",
+        "test/repository/test_dco.py",
         "test/repository/test_dependencies.py",
+        "test/repository/test_licenses.py",
         "test/repository/test_premerge.py",
         "test/repository/test_repository.py",
-        "test/repository/test_runner.py",
-        "test/repository/test_trusted_review_gate.py"
+        "test/repository/test_runner.py"
       ]
     },
     "service_install": {
@@ -167,47 +164,6 @@
       "boundary_tests": [
         "test/component/service/test_maintenance.py"
       ]
-    },
-    "anthropic_illustrations": {
-      "sources": [
-        "skill-library/anthropic-style-illustrations/.gitignore",
-        "skill-library/anthropic-style-illustrations/SKILL.md",
-        "skill-library/anthropic-style-illustrations/examples/article.md",
-        "skill-library/anthropic-style-illustrations/examples/figure.json",
-        "skill-library/anthropic-style-illustrations/references/article-index.json",
-        "skill-library/anthropic-style-illustrations/references/design-patterns.md",
-        "skill-library/anthropic-style-illustrations/references/source-index.json",
-        "skill-library/anthropic-style-illustrations/references/usage.md",
-        "skill-library/anthropic-style-illustrations/requirements.txt",
-        "skill-library/anthropic-style-illustrations/scripts/illustrate.py"
-      ],
-      "tests": [
-        "test/skill-library/anthropic-style-illustrations/test_illustrate.py"
-      ],
-      "boundary_tests": []
-    },
-    "minimal_code": {
-      "sources": [
-        "skill-library/minimal-code/README.md",
-        "skill-library/minimal-code/SKILL.md",
-        "skill-library/minimal-code/evals/evals.json",
-        "skill-library/minimal-code/evals/files/bug-fix-in-place/durations.py",
-        "skill-library/minimal-code/evals/files/bug-fix-in-place/test_durations.py",
-        "skill-library/minimal-code/evals/files/issue-without-scope-creep/app.py",
-        "skill-library/minimal-code/evals/files/issue-without-scope-creep/requirements.txt",
-        "skill-library/minimal-code/evals/files/preserve-needed-validation/bank.py",
-        "skill-library/minimal-code/evals/files/preserve-needed-validation/test_bank.py",
-        "skill-library/minimal-code/evals/files/second-format-without-framework/cli.py",
-        "skill-library/minimal-code/evals/files/second-format-without-framework/report.py",
-        "skill-library/minimal-code/evals/files/second-format-without-framework/test_report.py",
-        "skill-library/minimal-code/evals/files/vectorize-with-parity/masked_mean.py",
-        "skill-library/minimal-code/evals/triggers.json",
-        "skill-library/minimal-code/references/ml.md"
-      ],
-      "tests": [
-        "test/skill-library/minimal-code/test_skill.py"
-      ],
-      "boundary_tests": []
     }
   },
   "support": {

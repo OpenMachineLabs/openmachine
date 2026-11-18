@@ -1,4 +1,4 @@
-- Related Issue or Spec (if applicable):
+- Related Issue (if applicable):
 
 ## Why
 What problem does this change address?

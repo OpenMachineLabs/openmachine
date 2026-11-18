@@ -1,0 +1,14 @@
+{
+  "description": "Public deterministic test vector. The test-only seed is bytes(range(32)); this is not an installation identity. signature is om-device-v1; signature_v2 is om-device-v2 at time.",
+  "origin": "https://api.openmachine.app",
+  "method": "POST",
+  "path": "/api/native-sessions/sssssssssssssssssssssssssssssssssssssssssss/status",
+  "challenge_id": "sssssssssssssssssssssssssssssssssssssssssss",
+  "challenge": "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M",
+  "body": "{}",
+  "body_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+  "signature": "KK-lAHspnjnG5uVh36Cs-wv6MF2JBPOEUqlfxD-Htp7hLhdXHk78Zv09sdeQ8g6autXc10OsFjTrKrhkReB0Dg",
+  "time": 1800000000,
+  "signature_v2": "oC0tnuRH2QpCUHQt_m5pTd_K8cAmOzpTdXcbRIjQ227D_dJTPI4i0AHjTCArKzJl9l02exfO21WFgZI5J8KeAg"
+}

@@ -17,7 +17,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "test/ownership.json"
-LAYERS = ("repository", "unit", "component", "skill-library", "resilience")
+LAYERS = ("repository", "unit", "component", "resilience")
 GLOBAL_PATHS = {
     # The release version: a release bump verifies the complete candidate it tags.
     "openmachine/__init__.py",
@@ -25,12 +25,13 @@ GLOBAL_PATHS = {
     "scripts/premerge.py", ".github/workflows/quality.yml",
 }
 REPOSITORY_PATHS = {
-    "AGENTS.md", "CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
-    "CODE_OF_CONDUCT.md", "README.md", "LICENSE", ".gitignore",
-    ".github/AGENTS.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/labels.json",
-    ".github/workflows/metadata.yml", ".github/workflows/labels.yml",
-    ".github/workflows/spec-development.yml", "scripts/check_repository.py",
+    "LICENSE", "NOTICE", ".gitignore", ".github/labels.json",
+    ".github/workflows/metadata.yml", ".github/workflows/labels.yml", "scripts/check_repository.py",
 }
+# om, device identity and their tests: the device workflow builds and tests them.
+DEVICE_PATHS = ("cmd/", "daemon/", "linux/", "device/", "test/daemon/", "test/device/", "test/linux/",
+                "test/vectors/", "test/verifier/", "go.mod", "go.sum", "scripts/build_bundle.py", "scripts/install.sh",
+                "scripts/verify-logs.mjs", ".github/workflows/device.yml")
 
 
 def git(root: Path, *args: str, check: bool = True) -> str:
@@ -64,7 +65,7 @@ def require_clean(root: Path) -> None:
 
 def inventory(root: Path) -> set[str]:
     names = set(filter(None, git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split("\0")))
-    return {name for name in names if (root / name).exists()}
+    return {name for name in names if (root / name).exists() and not name.startswith(DEVICE_PATHS)}
 
 
 def candidate_digest(root: Path, files: set[str]) -> str:
@@ -89,8 +90,6 @@ def test_path(value: object, layers: tuple[str, ...] | None = LAYERS) -> str:
     parts = PurePosixPath(path).parts
     if len(parts) < 3 or parts[0] != "test" or layers is not None and parts[1] not in layers:
         raise ValueError(f"test must have an explicit layer: {path}")
-    if parts[1] == "skill-library" and len(parts) < 4:
-        raise ValueError(f"skill-library tests require a named Skill directory: {path}")
     if not parts[-1].startswith("test_") or not path.endswith(".py"):
         raise ValueError(f"expected an exact test_*.py file: {path}")
     return path
@@ -241,9 +240,9 @@ def _old_manifest(root: Path, base_sha: str) -> dict:
 
 
 def _repository_only(path: str) -> bool:
-    # connector/ is a Go module that its own CI job builds and tests.
+    # connector/ is a Go module that its own CI job builds and tests, as the device workflow does the device side.
     return (path in REPOSITORY_PATHS or
-            path.startswith("connector/") or
+            path.startswith(("connector/", *DEVICE_PATHS)) or
             path.endswith(".md") or path.startswith("assets/") or
             (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".md", ".yml", ".yaml"))))
 
@@ -297,7 +296,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
                 reasons.setdefault(path, set()).add(reason)
 
     if full or modules or any(path.startswith(".github/") or (
-            not path.endswith(".md") and not path.startswith(("assets/", "connector/"))
+            not path.endswith(".md") and not path.startswith(("assets/", "connector/", *DEVICE_PATHS))
             and path not in {"LICENSE", ".gitignore"}) for path in changes):
         add((path for path in all_tests if path.startswith("test/repository/")), "repository checks")
     if full:
@@ -380,7 +379,7 @@ def make_plan(root: Path, base_ref: str | None = None, *, modules: list[str] | N
     product = [path for path in selected if not path.startswith("test/repository/")]
     changed_product = any(path.startswith("openmachine/") for path in changes)
     changed_tests = any(path.startswith("test/") and PurePosixPath(path).name.startswith("test_")
-                        and path.endswith(".py") and not path.startswith("test/repository/")
+                        and path.endswith(".py") and not path.startswith(("test/repository/", *DEVICE_PATHS))
                         for path in changes)
     needs_product = changed_product or changed_tests
     if (not selected and (modules or layer or full or needs_product)) or (needs_product and not product and layer != "repository"):

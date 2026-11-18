@@ -1,9 +1,15 @@
 # Tests
 
+This page covers Core's Python tests. `om`, device identity and the log
+verifier have their own tests in `test/daemon`, `test/linux`, `test/device`,
+`test/vectors` and `test/verifier`, which the `device` workflow runs and Core's
+runner leaves out; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#test-your-change).
+
 ## Isolated macOS first-use check
 
-For a native installation change, opt in with an explicitly trusted, owner-built
-payload and its reviewed manifest digest:
+For a native installation change, opt in with a payload you built and trust,
+and its manifest digest:
 
 ```sh
 OM_NATIVE_FIRST_USE=1 \
@@ -20,9 +26,7 @@ installation. Failed state and original IDs are retained with the exact CLI
 replies for diagnosis; successful runs remove only their own fixtures.
 
 The native case is skipped unless explicitly enabled. It proves a fresh local
-installation, not Code sessions, Cloud authorization or signed distribution.
-Reuse unchanged passing evidence; reserve those separate acceptance checks for
-changes that need them.
+installation, not OM SSH sessions, authorization or signed distribution.
 
 ## Choose the required scope
 
@@ -31,9 +35,9 @@ candidate before requesting review or merge:
 
 ```sh
 python3 scripts/run_tests.py --module access --layer unit
-python3 scripts/run_tests.py --base origin/main --plan
-python3 scripts/run_tests.py --base origin/main
-python3 scripts/premerge.py --base origin/main
+python3 scripts/run_tests.py --base upstream/main --plan
+python3 scripts/run_tests.py --base upstream/main
+python3 scripts/premerge.py --base upstream/main
 ```
 
 The first command runs the selected pure unit tests against the current checkout
@@ -51,9 +55,8 @@ Resolve a missing base or update the candidate's base relationship explicitly.
 
 `--plan` prints the changed paths, owning modules, selected files, layers and
 reasons without installing dependencies or running tests. A documentation-only change runs source/link checks without creating a product
-environment or running test suites. Issue templates retain repository tests, and
-validated Skill content retains its owning tests. An explicit module or layer
-with no tests is an error.
+environment or running test suites. Issue templates retain repository tests. An
+explicit module or layer with no tests is an error.
 
 `premerge.py` requires a clean committed worktree. It uses the same selector and
 runner as development and CI, checks repository rules before
@@ -71,7 +74,7 @@ current run; a directory name or a target budget is not a performance result.
 Request the complete layered suite explicitly when needed:
 
 ```sh
-python3 scripts/premerge.py --base origin/main --full
+python3 scripts/premerge.py --base upstream/main --full
 python3 scripts/run_tests.py --full
 ```
 
@@ -103,7 +106,6 @@ choose the final squash title.
 | --- | --- |
 | `unit/<module>/` | Pure parsing, validation, transformations and state decisions; no real server, process lifecycle or timed waiting. |
 | `component/<module>/` | Module behavior with local files, state stores and application collaborators. |
-| `skill-library/<skill-name>/` | Standalone Skill behavior tests; keep each Skill in its own named folder, with module boundaries in `ownership.json`. |
 | `resilience/<module>/` | Real owned processes, crash/restart, cancellation, lost replies and retained-state recovery. |
 | `repository/` | Repository hygiene, dependency direction, test selection and runner behavior. |
 | `support/` | Shared fixtures with discovered and declared consumers; no TestCase subclasses or test methods. |
@@ -155,8 +157,8 @@ initialization/dynamic imports; full-source review covers those limits. Do not
 add a dynamic import to evade them.
 
 Preserve the `openmachine.access`, `openmachine.cli` and
-`openmachine.service.maintenance` module entry points: the Code host, Desktop and
-the pinned management entry run them. State and lock paths, file ownership and
+`openmachine.service.maintenance` module entry points: `om`, the Mac app and
+Core's installed management entry run them. State and lock paths, file ownership and
 the original-operation records are compatibility contracts.
 
 ## Evidence boundaries
