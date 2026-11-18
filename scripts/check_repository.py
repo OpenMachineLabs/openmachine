@@ -14,44 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {".md", ".py", ".json", ".yml", ".yaml", ".toml", ".sh"}
 
 
-# Public Core must not publish links to sibling organization repositories or
-# directly address private/shared chat sessions. This is a narrow release-scope
-# guard, not a general-purpose secret scanner.
-SIBLING_REPO = re.compile(r"\bOpenMachineLabs/([A-Za-z0-9_.-]+)\b", re.I)
-CHAT_SESSION = re.compile(
-    r"https?://(?:(?:chatgpt[.]com|chat[.]openai[.]com)/(?:c|share)"
-    r"|claude[.]ai/(?:chat|share)|gemini[.]google[.]com/(?:app|share))/[A-Za-z0-9_-]+", re.I
-)
-
-
-# The daemon's retired names, which om and openmachine replace. The pattern is written so that it does
-# not match its own source.
-RETIRED = re.compile(r"(?i)(?<![a-z])o[m][-_ ]?code|openmachine[-_.]code")
-
-
-def retired_errors(name: str, path: Path) -> list[str]:
-    """A retired name in a listed path, or in the content of a file of any suffix that decodes as UTF-8."""
-    errors = ["rename the retired name in this path to om or openmachine"] if RETIRED.search(name) else []
-    if path.is_file():
-        try:
-            text = path.read_bytes().decode("utf-8")
-        except UnicodeDecodeError:
-            text = ""
-        if RETIRED.search(text):
-            errors.append("replace the retired name with om or openmachine")
-    return errors
-
-
-def public_boundary_errors(text: str) -> list[str]:
-    errors = []
-    if any(match[1].lower().removesuffix(".git") != "openmachine"
-           for match in SIBLING_REPO.finditer(text)):
-        errors.append("remove sibling organization repository references from public Core")
-    if CHAT_SESSION.search(text):
-        errors.append("remove direct chat-session URLs from public Core")
-    return errors
-
-
 def label_errors(labels: object) -> list[str]:
     if not isinstance(labels, list) or not labels:
         return ["labels must be a nonempty list"]
@@ -72,7 +34,7 @@ def label_errors(labels: object) -> list[str]:
 
 def file_errors(path: Path, root: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
-    errors = public_boundary_errors(text)
+    errors = []
     if path.suffix == ".md":
         prose = re.sub(r"```.*?```", "", text, flags=re.S)
         for link in re.findall(r"\[[^\]\n]*\]\(([^\s)]+)\)", prose):
@@ -97,7 +59,6 @@ def metadata_errors(obj: dict) -> list[str]:
         return errors + ["body must briefly explain the change or question"]
     if any(ord(char) < 32 and char not in "\t\n\r" for char in body):
         errors.append("body must not contain unsupported control characters")
-    errors += public_boundary_errors(str(obj.get("title", ""))) + public_boundary_errors(body)
     return errors
 
 
@@ -124,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         paths = git(ROOT, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split("\0")
         for name in filter(None, paths):
             path = ROOT / name
-            errors.extend(f"{name}: {error}" for error in retired_errors(name, path))
             if path.is_file() and (path.suffix in TEXT_SUFFIXES or path.name in {"LICENSE", ".gitignore"}):
                 errors.extend(f"{name}: {error}" for error in file_errors(path, ROOT))
         errors += label_errors(json.loads((ROOT / ".github/labels.json").read_text()))

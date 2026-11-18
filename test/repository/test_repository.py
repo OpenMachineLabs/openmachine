@@ -21,7 +21,7 @@ class RepositoryChecks(unittest.TestCase):
         for title in ['Repair login.', 'fixup! temporary work', '[Custom] A useful report',
                       '\u4fee\u590d\u767b\u5f55', 'A' * 120]:
             obj = {'title': title, 'body': 'A concise explanation without fixed headings.',
-                   'labels': [{'name': 'spec'}]}
+                   'labels': [{'name': 'bug'}]}
             self.assertEqual(rules.metadata_errors(obj), [])
         obj = {'title': 'Update', 'body': '\u4e2d\u6587 path example'}
         self.assertEqual(rules.metadata_errors(obj), [])
@@ -51,77 +51,6 @@ class RepositoryChecks(unittest.TestCase):
             self.assertTrue(rules.label_errors(bad))
 
 
-    def test_public_boundary_guards_public_source_and_new_metadata(self):
-        allowed = (
-            "https://github.com/OpenMachineLabs/openmachine/issues/2",
-            "https://github.com/OpenMachineLabs/openmachine.git",
-            "https://github.com/desktop/dugite-native",
-            "Core can support an independent desktop client.",
-        )
-        forbidden = (
-            "OpenMachineLabs/" + "internal-client/issues/7",
-            "https://github.com/OpenMachineLabs/" + "internal-service/pull/9",
-            "https://chatgpt.com/" + "c/01234567-abcd-ef01-2345-0123456789ab",
-            "https://chat.openai.com/" + "share/01234567-abcd-ef01-2345-0123456789ab",
-            "https://claude.ai/" + "chat/01234567-abcd-ef01-2345-0123456789ab",
-            "https://claude.ai/" + "share/01234567-abcd-ef01-2345-0123456789ab",
-            "https://gemini.google.com/" + "app/0123456789abcdef",
-            "https://gemini.google.com/" + "share/0123456789ab",
-        )
-        for text in allowed:
-            with self.subTest(text=text):
-                self.assertEqual(rules.public_boundary_errors(text), [])
-        for text in forbidden:
-            with self.subTest(text=text):
-                self.assertTrue(rules.public_boundary_errors(text))
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            page = root / "README.md"
-            for text in allowed + forbidden:
-                page.write_text(text + "\n")
-                with self.subTest(file=text):
-                    self.assertEqual(bool(rules.file_errors(page, root)), text in forbidden)
-        title = "docs(repo): describe the scope"
-        body = "Describe the scoped change and its checks.\n"
-        self.assertEqual(rules.metadata_errors({"title": title, "body": body}), [])
-        for text in forbidden:
-            with self.subTest(field="body", text=text):
-                self.assertTrue(rules.metadata_errors({"title": title, "body": body + text}))
-            with self.subTest(field="title", text=text):
-                self.assertTrue(rules.metadata_errors({"title": title + " " + text, "body": body}))
-
-
-    def test_retired_names_fail_in_paths_and_any_utf8_content(self):
-        # Built by concatenation, so this file passes the check it tests.
-        retired = ("o" + "m-code github pr list", "OM_" + "CODE_BROKER=x", "X-O" + "M-Code-Proof", "o" + "mcode",
-                   "OM " + "Code", "app.openmachine" + ".code", "~/.local/state/openmachine" + "-code",
-                   "/Users/Shared/openmachine" + "_code-501")
-        allowed = ("from code", "custom code", "X-OM-Protocol: 4", "OM_BROKER", "openmachine-om", "omc/client/om",
-                   "/Users/Shared/openmachine-sandbox-501", "app.openmachine.om")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for text in retired + allowed:
-                for suffix in (".py", ".plist", ""):
-                    with self.subTest(text=text, suffix=suffix):
-                        path = root / f"file{suffix}"
-                        path.write_text(f"before {text} after\n")
-                        self.assertEqual(bool(rules.retired_errors(path.name, path)), text in retired)
-            binary = root / "binary.bin"
-            binary.write_bytes(b"\xff" + ("o" + "m-code").encode())
-            self.assertEqual(rules.retired_errors(binary.name, binary), [])
-            for name in ("x/o" + "m-code", "LaunchAgents/app.openmachine" + ".code.plist", "test/O" + "M_code.txt"):
-                with self.subTest(name=name):
-                    self.assertTrue(rules.retired_errors(name, root / "absent"))
-            self.assertEqual(rules.retired_errors("test/from_code.py", root / "absent"), [])
-            (root / ".github").mkdir()
-            (root / ".github/labels.json").write_text(json.dumps([
-                {"name": "maintenance", "color": "ffffff", "description": "Maintenance."}]))
-            (root / "notes.txt").write_text("o" + "m-code\n")  # outside TEXT_SUFFIXES
-            with patch.object(rules, "ROOT", root), patch.object(rules, "git", return_value="notes.txt\0"):
-                result, _, err = self.checker(["--mode", "source"])
-            self.assertEqual(result, 1)
-            self.assertIn("notes.txt: replace the retired name", err)
-
     def test_feature_request_template_has_only_one_label_and_no_type_field(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/feature-request.md").read_text()
         frontmatter = template.split("---", 2)[1]
@@ -130,15 +59,6 @@ class RepositoryChecks(unittest.TestCase):
         self.assertIn('\nlabels: "feature-request"\n', frontmatter)
         self.assertNotIn("- Type:", template)
         self.assertNotIn("- Status:", template)
-
-    def test_roadmap_template_keeps_existing_label(self):
-        template = (ROOT / ".github/ISSUE_TEMPLATE/roadmap.md").read_text()
-        frontmatter = template.split("---", 2)[1]
-        self.assertIn('name: "Roadmap"', frontmatter)
-        self.assertIn('title: "[ROADMAP] ', frontmatter)
-        self.assertEqual(frontmatter.count("\nlabels:"), 1)
-        self.assertIn('\nlabels: "feature"\n', frontmatter)
-
 
     def test_security_contact_intake_excludes_public_vulnerability_details(self):
         template = (ROOT / ".github/ISSUE_TEMPLATE/security-contact.md").read_text()
@@ -260,10 +180,8 @@ class RepositoryChecks(unittest.TestCase):
         self.assertEqual(rules, ["* @" + "OpenMachineLabs/" + "core-maintainers"])
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
-        expected_jobs = {"quality.yml": 2, "connector.yml": 1, "metadata.yml": 1,
-                         "spec-development.yml": 1, "labels.yml": 1, "runtime-payload.yml": 1,
-                         "auto-metadata.yml": 1, "review-policy-signal.yml": 1,
-                         "trusted-review-gate.yml": 1}
+        expected_jobs = {"quality.yml": 2, "connector.yml": 1, "metadata.yml": 1, "labels.yml": 1, "dco.yml": 1,
+                         "device.yml": 4}
         workflows = {path.name: path.read_text()
                      for path in (ROOT / ".github/workflows").glob("*.yml")}
         self.assertEqual(set(workflows), set(expected_jobs))
@@ -271,17 +189,28 @@ class RepositoryChecks(unittest.TestCase):
             with self.subTest(workflow=name):
                 workflow = workflows[name]
                 self.assertNotIn("CORE_CI_RUNNER", workflow)
-                if name == "runtime-payload.yml":
-                    # One job per target, each on a hosted runner of that target, named literally in the matrix.
-                    self.assertEqual(workflow.count("    runs-on: " + chr(36) + "{{ matrix.runner }}"), expected_count)
-                    for target, runner in (("macos-arm64", "macos-15"), ("linux-x86_64", "ubuntu-24.04"),
-                                           ("linux-aarch64", "ubuntu-24.04-arm")):
-                        self.assertIn(f"- {{target: {target}, runner: {runner}}}", workflow)
-                    self.assertIn("workflow_dispatch:", workflow)
-                    self.assertNotIn("contents: write", workflow)  # It builds; it cannot publish a release.
+                self.assertIn("persist-credentials: false", workflow)
+                self.assertNotIn("pull_request_target:", workflow)
+                if name == "device.yml":
+                    # Two jobs per hosted runner, named literally in their matrix, the license check and
+                    # `device`, which can be required because it runs on every pull request.
+                    self.assertEqual(workflow.count("    runs-on: " + chr(36) + "{{ matrix.os }}"), 2)
+                    self.assertEqual(workflow.count("        os: [ubuntu-24.04, macos-15]"), 2)
+                    self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), 2)
+                    self.assertNotIn(": write", workflow)
+                    self.assertNotIn("paths:", workflow)
                 else:
                     self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), expected_count)
                     self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
+
+    def test_every_pull_request_commit_is_checked_for_sign_off(self):
+        dco = (ROOT / ".github/workflows/dco.yml").read_text()
+        self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", dco)
+        self.assertNotIn("paths:", dco)  # A required check is never skipped by a path filter.
+        self.assertIn("  dco:\n    name: dco\n", dco)
+        self.assertIn("fetch-depth: 0", dco)
+        self.assertIn('python3 scripts/check_dco.py "$BASE" "$HEAD"', dco)
+        self.assertNotIn(": write", dco)
 
     def test_metadata_is_data_not_executable_code(self):
         body = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text()

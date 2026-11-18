@@ -61,5 +61,7 @@ on pull requests that change this module and on every `main` push.
 
 ## License
 
-MIT; see [LICENSE](LICENSE). Dependencies keep their own licenses; see
+Copyright 2026 Open Machine Technologies, Inc. Licensed under Apache-2.0; see
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Versions before 0.2.31 keep the
+license they were released under. Dependencies keep their own licenses; see
 [third-party licenses](THIRD_PARTY_LICENSES.md).

@@ -13,7 +13,7 @@ class DependencyFixture(object):
             "openmachine": (),
             "openmachine.foundation.*": ("openmachine.foundation.*",),
             "openmachine.config": ("pydantic", "openmachine.foundation.*"),
-            # Spec: access imports only openmachine, openmachine.access, openmachine.foundation and openmachine.config.
+            # The access launcher imports only openmachine, openmachine.access, openmachine.foundation and openmachine.config.
             "openmachine.access": (),
             "openmachine.access.git": ("openmachine.foundation.sanitize",),
             "openmachine.access.linux": (),

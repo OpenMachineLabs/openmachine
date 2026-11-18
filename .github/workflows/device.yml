@@ -1,0 +1,103 @@
+name: device
+
+# om, device identity and the log verifier build and test on GitHub-hosted
+# Linux and macOS, with the license check, on every pull request and on main.
+# `device` passes only when every other job does.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: device-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # One test runs the Try page's script in Node.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24.22.1"
+          package-manager-cache: false
+      - name: Format, vet and build om
+        run: |
+          test -z "$(gofmt -l cmd daemon linux test)"
+          go vet ./...
+          go build ./cmd/om
+      - name: Test
+        run: go test -count=1 ./...
+      - name: Test the log verifier
+        run: node --test test/verifier/verify-logs.test.mjs
+
+  python:
+    name: python (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r device/requirements.lock
+      - name: Test device identity and the Linux install script
+        run: |
+          python -m unittest discover -s test/device -p 'test_*.py'
+          python -m unittest discover -s test/linux -p 'test_install_script.py'
+
+  licenses:
+    name: licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Every dependency's license is listed and allowed
+        run: |
+          python -m pip install -r device/requirements.lock -r requirements.lock
+          python scripts/check_licenses.py
+
+  device:
+    name: device
+    if: always()
+    needs: [go, python, licenses]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every device job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: test "$(printf '%s\n' $RESULTS | sort -u)" = success

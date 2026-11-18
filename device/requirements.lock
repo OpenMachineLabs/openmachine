@@ -1,0 +1,12 @@
+# Exact build/runtime resolution for the connector's Python 3.12 bundle.
+# No Core distribution or private module is installed.
+anyio==4.15.1
+cffi==2.1.1
+cryptography==50.0.2
+h11==0.16.0
+httpcore2==2.13.1
+httpx2==2.13.1
+idna==3.20
+pycparser==3.0
+truststore==0.10.4
+typing-extensions==4.16.0

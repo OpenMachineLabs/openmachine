@@ -1,34 +1,30 @@
 # Contributing to Open Machine
 
-We welcome bug reports, documentation improvements, tests, focused fixes and feature
-proposals. You do not need to use an AI agent to contribute.
+We welcome bug reports, feature requests, documentation, tests and focused
+fixes. You do not need an AI agent to contribute. Read our
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Find the right starting point
+## Report a bug or request a feature
 
-- **Questions:** use [Discord](https://discord.gg/TAxEWV7fgZ).
-- **Bugs:** open a [Bug report](.github/ISSUE_TEMPLATE/bug.md) with a safe
-  reproduction, expected/actual results, version and platform.
+- **Questions:** ask on [Discord](https://discord.gg/TAxEWV7fgZ).
+- **Bugs:** open a [Bug report](.github/ISSUE_TEMPLATE/bug.md) with safe steps
+  to reproduce, what you expected and saw, the version and the platform.
 - **Features:** open a [Feature Request](.github/ISSUE_TEMPLATE/feature-request.md)
-  describing the problem and desired behavior.
-- **Small fixes and docs:** check existing [Issues](https://github.com/OpenMachineLabs/openmachine/issues)
-  and open a focused pull request.
-- **Larger changes:** discuss the approach in an Issue before implementation.
-  Changes to public interfaces, architecture, permissions or persisted state may
-  need an approved [Spec Issue](.github/ISSUE_TEMPLATE/spec.md). Once authorized,
-  proceed to implementation; no repository index or duplicate design file is
-  needed. See [Design and scope](MAINTAINERS.md#design-and-scope).
-- **Security vulnerabilities:** use [SECURITY.md](SECURITY.md), never a public
-  Issue, pull request or community channel containing exploit details.
+  describing the problem and the behavior you want. Discuss a large change
+  there before you build it.
+- **Security vulnerabilities:** follow [SECURITY.md](SECURITY.md), never a
+  public Issue, pull request or chat.
 
-Read our [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports and feature requests
-are welcome in any language. Prefer English for repository-authored prose; Unicode examples and data are valid.
+Reports are welcome in any language. Prefer English for text in the
+repository; Unicode examples and data are fine.
 
-## Set up a development checkout
+## Set up
 
-You need Python 3.12+ and Git. Restricted sessions need macOS Seatbelt or, on
-Linux, a bubblewrap that can build the sandbox; their tests are skipped elsewhere. Windows is not supported.
-
-For a fork-based contribution:
+You need Git, Python 3.12 or newer and, for `om`, the Go version in
+[`go.mod`](go.mod) and Node.js 24, which one of its tests and
+`scripts/verify-logs.mjs` run. Restricted Core sessions need macOS Seatbelt
+or, on Linux, a bubblewrap that can build the sandbox; their tests are skipped
+elsewhere. Windows is not supported.
 
 ```sh
 git clone https://github.com/YOUR-USERNAME/openmachine.git
@@ -39,125 +35,60 @@ git switch -c fix/your-change upstream/main
 
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements.lock
+python -m pip install -r requirements.lock -r device/requirements.lock
 ```
 
-Replace the username and branch name. If you cloned the official repository
-instead of a fork, use `origin/main` as the base. Do not substitute unpinned
-dependencies if installation fails.
+Test with disposable state: a `HOME` under a short path such as `/tmp` (macOS
+limits Unix socket paths to 104 bytes), never your real
+`~/.config/openmachine` or `~/.local/state/openmachine*`. Do not test against
+other people's machines, accounts or credentials.
 
-Run tests with disposable state: a `HOME` under a short path such as `/tmp`
-(macOS limits Unix socket paths to 104 bytes), never a real
-`~/.config/openmachine` or `~/.local/state/openmachine*`. Do not test changes
-against production machines, services or credentials.
+## Test your change
 
-## Make and test your change
+Keep the change narrow, add a regression test for a behavior change, and
+update the documentation it affects. Never commit secrets, private logs or
+personal data.
 
-Keep the change narrowly scoped, include regression tests for behavior changes,
-and update relevant documentation. Never commit secrets, private logs or personal
-data. [Test ownership and validation details](test/README.md) explain the layers.
+| Change | Check |
+| --- | --- |
+| `om` (`cmd/`, `daemon/`, `linux/`) | `gofmt -l cmd daemon linux test`, `go vet ./...`, `go test ./...` |
+| Device identity (`device/`) | `python -m unittest discover -s test/device -p 'test_*.py'` |
+| `scripts/install.sh` | `python -m unittest discover -s test/linux -p 'test_install_script.py'` |
+| `scripts/verify-logs.mjs` | `node --test test/verifier/verify-logs.test.mjs` |
+| The network library (`connector/`) | its [README](connector/README.md#test). `om` builds against the version `go.mod` names, not this folder; to try a change in both, use an uncommitted `go work init . ./connector` |
+| A dependency | `python scripts/check_licenses.py` (needs both lock files installed), and add the new license if it is allowed |
+| Core (`openmachine/`) | `python scripts/run_tests.py --base upstream/main`; [test/README.md](test/README.md) explains the layers |
+| Documentation and repository files | `python scripts/check_repository.py` |
 
-For documentation and repository-only changes:
-
-```sh
-python scripts/check_repository.py
-python -m unittest discover -s test/repository -p 'test_*.py'
-```
-
-For a focused code change (replace `access` with the owning module):
-
-```sh
-python scripts/run_tests.py --module access --layer unit
-```
-
-Before review, inspect and run the affected candidate checks:
+Before review, commit and run the same gate CI runs for Core:
 
 ```sh
-python scripts/run_tests.py --base upstream/main --plan
-python scripts/run_tests.py --base upstream/main
-```
-
-Commit the reviewed changes. The clean-candidate gate below is available for local
-verification; CI uses the same runner, so do not repeat an unchanged full suite
-locally when its current CI result is available:
-
-```sh
-git add path/to/changed-file
-git commit -m "docs(contributing): clarify the contributor workflow"
 python scripts/premerge.py --base upstream/main
 ```
 
-The base must exist locally and be an ancestor of the change. Use `origin/main`
-for a direct clone. Packaging, locked dependencies and shared runner changes
-require [full verification](test/README.md#full-verification-and-cache-identity).
-Report actual PASS, FAIL and NOT RUN results rather than assuming a test passed.
+`scripts/build_bundle.py` builds the bundle of `om` and device identity that
+the Mac app and the Linux release carry;
+[docs/device.md](docs/device.md#setup-and-the-bundle) says how. Report actual
+PASS, FAIL and NOT RUN results.
 
-## Module owners
+## Sign off your commits
 
-| Owner | Responsibility |
-| --- | --- |
-| `access/` | The Code launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders` (`__main__.py`); session requests, lifetimes and Full Access admission (`sessions.py`); the Linux session environment (`linux/environment.py`); the Workspace folder rule and worktree grants (`rules.py`) and their Git observation (`git.py`); what the restricted backends share, the spawner with its launch frames, relay and exit report (`restricted.py`); the macOS Seatbelt profile (`macos/seatbelt.py`) and restricted sessions (`macos/sessions.py`); the Linux bubblewrap sandbox (`linux/sandbox.py`) and restricted sessions (`linux/sessions.py`). |
-| `service/` | Management on macOS and Linux: payload targets and verification, installation, the selection, original operations and their retention. |
-| `cli.py` | The `manage` command. |
-| `config.py` | The machines-only configuration. |
-| `foundation/` | Private state, locks and safe errors; no domain ownership. |
-
-| Command | Caller | Purpose |
-| --- | --- | --- |
-| `python -I -m openmachine.access capabilities` | Code host | Core's version, access protocol, session kinds and policies |
-| `python -I -m openmachine.access session --control-fd N` | Code host | Admit one session channel |
-| `python -I -m openmachine.access folders` | Code host, for Desktop | Check Workspace folders: one JSON request on stdin |
-| `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | Desktop | `status`, `configure`, `install`, `update`, `operation`, `continue` |
-
-The configuration holds one machine, `[machines.local]` with `transport = "local"`.
-Desktop installs and updates Core from a verified offline runtime payload that
-`scripts/build_runtime_payload.py` assembles for its host's target (`--target`); a Linux
-payload carries a static `bwrap`, built there with meson, ninja, pkg-config and the static libcap. The README artwork in `assets/` is
-the banner PNG and self-contained SVGs animated with CSS, with no scripts.
-
-Access imports only `openmachine`, `openmachine.access`, `openmachine.foundation`
-and `openmachine.config`. Source moves never move persistent state or replace
-stable locks.
-
-## Choose work from current evidence
-
-Before starting a candidate or declaring a blocker, inspect the relevant
-worktrees and the owning Issue, PR and CI evidence. A missing PR, empty search or
-clean tree does not prove nobody is working there. Reconcile stale status
-against newer evidence for the same prerequisite, target and revision.
-
-Separate implementation, integration, acceptance and deployment. A pending
-check blocks only actions that need its result, so an unrelated pending
-acceptance gate does not block development. For a real blocker, name the missing
-prerequisite, the affected action and the condition that would unblock it. Check
-overlapping edits and shared services before acting; worktrees isolate files,
-not every resource.
-
-## Complete the authorized delivery
-
-Carry the requested outcome through verification. Merge, release and deployment
-need actual authorization, not words in a plan. Correct a proven terminal
-no-effect rejection under a new ID. For a missing reply, a partial effect or an
-unknown outcome, read the original ID and its destination before any new effect,
-and never replay it. Preserve unrelated edits and stable locks.
-
-Continue through ordinary tool and test failures when safe recovery stays in
-scope; observe an existing command or CI run instead of restarting it. Compare
-every requested deliverable with actual evidence before finishing. If blocked,
-report the evidence, the safe recovery attempted and the remaining work.
+Every commit in a pull request must carry a `Signed-off-by:` line with the
+name and email of its author. It certifies that you wrote the change or have
+the right to submit it under the project's license, as the
+[Developer Certificate of Origin](https://developercertificate.org/) states.
+`git commit -s` adds it; `git rebase --signoff upstream/main` adds it to
+commits you already made. The `dco` check fails without it. There is no
+contributor license agreement.
 
 ## Open a pull request
 
-Push your branch and open a PR against `OpenMachineLabs/openmachine:main`.
-Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) to explain the reason,
-the change, how you tested it and any material risks. Link an Issue when relevant.
-A small documentation correction does not need a separate Spec or rollback plan.
+Push your branch and open a pull request against
+`OpenMachineLabs/openmachine:main`. Use the
+[template](.github/PULL_REQUEST_TEMPLATE.md): why, what changed, how you tested
+it and any material risk, with a related Issue if there is one. Choose a clear
+title, such as `fix(access): refuse a replaced directory`.
 
-Choose a clear final squash title, for example `fix(access): refuse a replaced
-directory`. Naming and formatting conventions are advisory; CI does not audit
-development commit messages or require fixed Issue/PR headings. Explain the
-change, validation and material limitations, and respond to review findings.
-
-Maintainers review design, safety, tests and CI before deciding on a merge.
-A passing check is not automatic merge approval. Maintainer-specific decisions
-and publication rules live in [MAINTAINERS.md](MAINTAINERS.md).
+Maintainers review design, safety, tests and CI before they merge. A passing
+check is not approval. Contributions are licensed under
+[Apache-2.0](LICENSE).

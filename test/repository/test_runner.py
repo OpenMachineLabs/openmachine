@@ -86,8 +86,19 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertFalse(plan["runtime_required"])
         self.assertEqual(plan["tests"], [])
 
+    def test_device_changes_are_left_to_the_device_workflow(self):
+        for path in ("daemon/daemon.go", "device/openmachine_device/cli.py", "test/device/test_cli.py",
+                     "test/linux/test_install_script.py", "test/verifier/verify-logs.test.mjs", "go.mod",
+                     "scripts/build_bundle.py", "scripts/verify-logs.mjs"):
+            with self.subTest(path=path):
+                self.write(path, "# changed\n")
+                plan = runner.make_plan(self.root, self.base)
+                self.assertFalse(plan["runtime_required"])
+                self.assertEqual(plan["tests"], [])
+                self.assertEqual(plan["full_reasons"], [])
+
     def test_community_policy_documents_select_repository_checks(self):
-        for path in ("CONTRIBUTING.md", "MAINTAINERS.md", "SECURITY.md",
+        for path in ("CONTRIBUTING.md", "TRADEMARKS.md", "SECURITY.md",
                      "CODE_OF_CONDUCT.md"):
             with self.subTest(path=path):
                 self.write(path, "# Community policy\n")
@@ -113,21 +124,6 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["layers"], [])
         self.assertFalse(any("environment" in stage for stage in result["stages"]))
-
-    def test_skill_library_named_folder_is_selected_by_ownership(self):
-        test = "test/skill-library/example-skill/test_behavior.py"
-        source = "skill-library/example-skill/SKILL.md"
-        self.write(test, "import unittest\nclass Check(unittest.TestCase):\n    def test_example(self): self.assertTrue(True)\n")
-        self.write(source, "---\nname: example-skill\n---\n# Example\n")
-        self.manifest["modules"]["example_skill"] = {
-            "sources": [source], "tests": [test], "boundary_tests": []}
-        self.save_manifest()
-        plan = runner.make_plan(self.root, self.base)
-        self.assertIn(test, plan["tests"])
-        self.assertTrue(plan["runtime_required"])
-        self.assertEqual(plan["environment"], "wheel")
-        with self.assertRaisesRegex(ValueError, "named Skill directory"):
-            runner.test_path("test/skill-library/test_example.py")
 
     def test_repository_fixture_change_does_not_require_product_installation(self):
         self.manifest["support"]["test/support/wire.py"] = ["test/repository/test_rules.py"]

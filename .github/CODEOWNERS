@@ -1,3 +1,2 @@
-# Automatically request reviews from the core maintainer team.
-# Review enforcement is handled separately by the trusted-review-gate.
+# Request a review from the core maintainer team on every change.
 * @OpenMachineLabs/core-maintainers
