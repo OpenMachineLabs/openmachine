@@ -131,8 +131,10 @@ The app's own requests are these two:
   HTTPS from GitHub's or Google's image servers. Its window can load nothing
   else from the network.
 
-It opens the Console's Machines page and sign-in page in your browser; the
-browser makes those requests.
+In your browser it opens the Console's Machines page, its sign-in page and
+the page of a machine `om` lists; the browser makes those requests. It puts
+text on the clipboard only when you copy a listed machine's name or its
+`ssh <alias>.om` command, the latter only with a valid alias.
 
 It never calls the service and holds no credential for it: no device key and no
 token. Device identity proves itself to the service with the device key it
@@ -144,7 +146,8 @@ keeps in `~/.local/state/openmachine-connector`.
 each connection problem: UTC time, app version, a fixed event name and a short
 error code, with no paths, accounts or contents. It is owner-only. At 256 KiB
 it is renamed `connection.log.1`, so at most two files exist. The app never
-reads or sends it; you may send it to the developers yourself.
+reads or sends it; Settings can show it in Finder, and you may send it to the
+developers yourself.
 
 ### Files the app keeps
 
