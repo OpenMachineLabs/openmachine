@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -1042,8 +1043,8 @@ func show(w http.ResponseWriter, status int, title, text, action string) {
 }
 
 // theme is the colors of om's own pages, by the system's theme.
-const theme = `:root{--bg:#fff;--ink:#1f1e1e;--ink2:#3b3938;--muted:#6b6867;--fill:#efedeb;--pill:#e2dfdd;--line:#e2dfdd;--pri:#1f1e1e;--onpri:#fff;--link:#2b59c3}` +
-	`@media(prefers-color-scheme:dark){:root{--bg:#1f1e1e;--ink:#f7f5f4;--ink2:#dad6d5;--muted:#afacab;--fill:#2e2d2d;--pill:#444342;--line:#383737;--pri:#f7f5f4;--onpri:#1f1e1e;--link:#93b4f5}}`
+const theme = `:root{--bg:#fff;--side:#f7f5f4;--ink:#1f1e1e;--ink2:#3b3938;--muted:#6b6867;--fill:#efedeb;--pill:#e2dfdd;--line:#e2dfdd;--pri:#1f1e1e;--onpri:#fff;--link:#2b59c3}` +
+	`@media(prefers-color-scheme:dark){:root{--bg:#1f1e1e;--side:#181717;--ink:#f7f5f4;--ink2:#dad6d5;--muted:#afacab;--fill:#2e2d2d;--pill:#444342;--line:#383737;--pri:#f7f5f4;--onpri:#1f1e1e;--link:#93b4f5}}`
 
 // try serves om's chat page, at the root of 127.0.0.1 and the entry's port:
 // the chat models the address reaches, the one ?model= names chosen, also when
@@ -1087,10 +1088,10 @@ func (l *Local) try(w http.ResponseWriter, r *http.Request) {
 
 // The Try page, around its models: om's page look under the Console's brand
 // header, and the script that streams an answer. It stores nothing.
-const (
-	tryHead = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Try a model · Open Machine</title><style>` + theme +
+var (
+	tryHead = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Try a model · Open Machine</title><style>` + theme + inter +
 		`*{box-sizing:border-box}html,body{height:100%}body{margin:0;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:400 14px/20px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:-.01em;-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}` +
-		`header{flex:none;display:flex;align-items:center;gap:12px;height:56px;padding:0 16px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:10px;font-weight:600;white-space:nowrap}.brand img{flex:none;display:block;width:22px;height:22px;border-radius:6px;background:#090909}` +
+		`header{flex:none;display:flex;align-items:center;gap:12px;height:56px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--side)}.brand{display:flex;align-items:center;gap:10px;font-weight:600;white-space:nowrap}.brand img{flex:none;display:block;width:22px;height:22px;border-radius:6px;background:#090909}` +
 		`.pick{position:relative;margin-left:auto;min-width:0}select{appearance:none;max-width:100%;height:32px;padding:0 32px 0 12px;border:1px solid var(--pill);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;text-overflow:ellipsis}` +
 		`.pick::after{content:"";position:absolute;right:12px;top:12px;width:6px;height:6px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);pointer-events:none}` +
 		`main{flex:1;overflow-y:auto;padding:24px 16px}#log{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:16px}` +
@@ -1194,8 +1195,16 @@ ask.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.s
 // tryPolicy lets the Try page run its own script alone, which reaches only this address.
 var tryPolicy = func() string {
 	sum := sha256.Sum256([]byte(tryScript))
-	return "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'; connect-src 'self'; frame-ancestors 'none'"
+	return "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'; font-src data:; connect-src 'self'; frame-ancestors 'none'"
 }()
+
+// interFont is the Console's Inter, so that the Try page's brand and text match
+// it; inter-OFL.txt is its license.
+//
+//go:embed inter-latin.woff2
+var interFont []byte
+
+var inter = `@font-face{font-family:Inter;font-weight:400 600;src:url(data:font/woff2;base64,` + base64.StdEncoding.EncodeToString(interFont) + `)}`
 
 // mark is the brand mark of the Console's shell.
 const mark = "data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjI5IiBoZWlnaHQ9IjI5IiB2aWV3Qm94PSIwIDAgMjkgMjkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJPZmZpY2lhbCBPTSAmIzE5NDsmIzE4MzsgdmVjdG9yIHRyYWNlZCBmcm9tIHN1cHBsaWVkIGxvZ28iPgo8cGF0aCBpZD0iVmVjdG9yIiBkPSJNNS44NTA4OCAxMy4yNTEyTDUuNjY1ODcgMTQuMjkxOUw1LjY4OSAxNS4wNTVMNS44NzQgMTUuOTMzOEw2LjI5MDI3IDE2Ljg4Mkw2Ljc1Mjc5IDE3LjU1MjZMNy4zNzcxOSAxOC4xNzdMOC4wMjQ3MiAxOC42MTY0TDguOTQ5NzYgMTkuMDA5Nkw5Ljc4MjMgMTkuMTcxNUgxMC42MzhMMTEuMzA4NiAxOS4wNTU4TDEyLjE2NDMgMTguNzU1MkwxMy40MzYyIDE3LjkyMjZMMTQuMTc2MiAxNy4xNTk1TDE1LjEwMTMgMTUuOTMzOEwxNS45MTA3IDE2LjUzNTFMMTYuNDg4OCAxNi44MTI2TDE3LjE1OTUgMTYuOTA1MUwxNy44NTMzIDE2Ljc2NjNMMTguMzM4OSAxNi40ODg4TDE4Ljg3MDggMTUuOTgwMUwyMC4xNDI3IDE0LjM2MTJMMjAuNjA1MyAxMy45NjgxSDIwLjc5MDNMMjAuOTUyMiAxNC4xOTk0VjE4LjEwNzdMMjEuMDY3OCAxOC41MjM5TDIxLjI3NTkgMTguODAxNEwyMS42NDU5IDE5LjAzMjdMMjIuMjkzNSAxOS4xMDIxTDIyLjkxNzkgMTguODAxNEwyMy4xNDkxIDE4LjM4NTJMMjMuMTI2IDEyLjg4MTJMMjIuNzMyOSAxMi4wMjU1TDIyLjI0NzIgMTEuNjA5M0wyMS44MDc4IDExLjQyNDJMMjAuOTI5IDExLjM3OEwyMC4wNzM0IDExLjY3ODZMMTkuNjM0IDEyLjAwMjRMMTcuNDgzMyAxNC4xNTMxTDE3LjA5MDEgMTQuMzYxMkwxMy44MjkzIDExLjEwMDVMMTIuOTk2OCAxMC40Mjk4TDEyLjQ2NDkgMTAuMTUyM0wxMS42Nzg2IDkuODk3OTNMMTEuMDMxMSA5LjgwNTQyTDEwLjAzNjcgOS44Mjg1NUw4LjgxMSAxMC4xMjkyTDcuOTc4NDcgMTAuNTQ1NUw3LjQyMzQ0IDEwLjkzODZMNi41NDQ2NiAxMS44NjM2TDYuMTk3NzcgMTIuNDE4N0w1Ljg1MDg4IDEzLjI1MTJaIiBmaWxsPSJ1cmwoI3BhaW50MF9saW5lYXJfMF8xMSkiLz4KPHBhdGggaWQ9IlZlY3Rvcl8yIiBkPSJNMTAuMDM2NyAxMi4zNDkzSDEwLjkxNTVMMTEuNjA5MyAxMi41NTc0TDEyLjM3MjQgMTMuMDQzMUwxMi45NTA2IDEzLjY0NDNMMTIuOTI3NCAxNC41Njk0TDEyLjUxMTIgMTUuNTYzOEwxMS44MTc0IDE2LjI1NzZMMTEuMDA4IDE2LjYyNzZMMTAuMTI5MiAxNi42NzM4TDkuMzY2MDMgMTYuNDE5NUw4LjY3MjI1IDE1LjgxODJMOC4zMDIyMyAxNS4wMzE5TDguMjU1OTggMTQuMzM4MUw4LjU1NjYyIDEzLjQ1OTNMOS4xMTE2NCAxMi44MTE4TDkuNjg5NzkgMTIuNDQxOEwxMC4wMzY3IDEyLjM0OTNaIiBmaWxsPSIjMDUwNTA1Ii8+CjwvZz4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8wXzExIiB4MT0iNS42NjU4NyIgeTE9IjkuODA1NDIiIHgyPSIxMi4yOTc3IiB5Mj0iMjMuNTYwNCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSJ3aGl0ZSIvPgo8c3RvcCBvZmZzZXQ9IjAuNTUiIHN0b3AtY29sb3I9IiNGQUZBRkEiLz4KPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjQkNCRUMyIi8+CjwvbGluZWFyR3JhZGllbnQ+CjwvZGVmcz4KPC9zdmc+Cg=="
