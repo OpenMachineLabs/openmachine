@@ -54,7 +54,7 @@ def run(arguments: list[str], *, timeout: int = 600, **options) -> subprocess.Co
 
 
 def build_om(bundle: Path, target: str) -> None:
-    """Build om into the bundle, with its modules' license texts under licenses/om."""
+    """Build om into the bundle, with its modules' and its font's license texts under licenses/om."""
     pinned = re.search(r"^go (\d+\.\d+\.\d+)$", (ROOT / "go.mod").read_text(), re.MULTILINE)
     if not pinned:
         raise ValueError("go.mod pins no exact Go toolchain")
@@ -78,6 +78,9 @@ def build_om(bundle: Path, target: str) -> None:
         (notices / module).mkdir(parents=True, exist_ok=True)
         for text in texts:
             shutil.copyfile(text, notices / module / text.name)
+    # The Try page's font, embedded in om.
+    (notices / "Inter").mkdir()
+    shutil.copyfile(ROOT / "daemon/inter-OFL.txt", notices / "Inter/OFL.txt")
 
 
 def inventory(bundle: Path, version: str, python_digest: str) -> dict:
