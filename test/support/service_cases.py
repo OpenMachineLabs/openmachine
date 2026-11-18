@@ -3,9 +3,9 @@
 import json
 from unittest.mock import patch
 
-from openmachine.foundation.state import lease, private_directory, save_json
-from openmachine.service import maintenance
-from openmachine.service import state as service_state
+from openmachine_access.foundation.state import lease, private_directory, save_json
+from openmachine_access.service import maintenance
+from openmachine_access.service import state as service_state
 from test.support.payload_cases import PayloadCaseFixture
 
 FIRST, SECOND = "1" * 32, "2" * 32

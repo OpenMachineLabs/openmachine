@@ -12,7 +12,7 @@ checks and pull requests.
 | --- | --- |
 | `cmd/om`, `daemon/`, `linux/` | `om`: [docs/om.md](docs/om.md) |
 | `device/` | Device identity: [docs/device.md](docs/device.md) |
-| `openmachine/` | Core, the Python access launcher and its management (below) |
+| `access/` | Core: the Python package `openmachine_access`, its access launcher and its management (below) |
 | `connector/` | The network library, a Go module of its own: [connector/README.md](connector/README.md) |
 | `test/` | Go tests in `test/daemon` and `test/linux`, device identity in `test/device`, the wire vectors in `test/vectors` and the log verifier's test in `test/verifier`, Core's layers as [test/README.md](test/README.md) says |
 | `scripts/` | The bundle and Core payload builds, the install script, the log verifier, the repository, license and sign-off checks, Core's test runner and pre-merge gate |
@@ -21,11 +21,11 @@ checks and pull requests.
 Keep every test under `test/`, except `connector/test/`, so that the network
 library builds and tests on its own.
 
-Core's modules:
+Core's modules, in `access/openmachine_access/`:
 
 | Module | Responsibility |
 | --- | --- |
-| `access/` | The launch boundary `python -I -m openmachine.access`: `capabilities`, `session` and `folders`; session requests, lifetimes and Full access admission; the Workspace folder rule and worktree grants; the macOS Seatbelt profile and the Linux bubblewrap sandbox. |
+| `__main__.py`, `sessions.py`, `restricted.py`, `rules.py`, `git.py`, `linux/`, `macos/` | The launch boundary `python -I -m openmachine_access`: `capabilities`, `session` and `folders`; session requests, lifetimes and Full access admission; the Workspace folder rule and worktree grants; the macOS Seatbelt profile and the Linux bubblewrap sandbox. |
 | `service/` | Management on macOS and Linux: payload targets and verification, installation, the selection, original operations and their retention. |
 | `cli.py` | The `manage` command. |
 | `config.py` | The machines-only configuration. |
@@ -33,13 +33,12 @@ Core's modules:
 
 | Command | Caller | Purpose |
 | --- | --- | --- |
-| `python -I -m openmachine.access capabilities` | `om` | Core's version, access protocol, session kinds and policies |
-| `python -I -m openmachine.access session --control-fd N` | `om` | Admit one session channel |
-| `python -I -m openmachine.access folders` | `om`, for the app | Check Workspace folders: one JSON request on stdin |
-| `python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>` | the app, `om` on Linux | `status`, `configure`, `install`, `update`, `operation`, `continue` |
+| `python -I -m openmachine_access capabilities` | `om` | Core's version, access protocol, session kinds and policies |
+| `python -I -m openmachine_access session --control-fd N` | `om` | Admit one session channel |
+| `python -I -m openmachine_access folders` | `om`, for the app | Check Workspace folders: one JSON request on stdin |
+| `python -I -B -m openmachine_access.cli --config C --state-dir S manage --contract 1 <action>` | the app, `om` on Linux | `status`, `configure`, `install`, `update`, `operation`, `continue` |
 
-Access imports only `openmachine`, `openmachine.access`,
-`openmachine.foundation` and `openmachine.config`. The names on disk
+The launch boundary never imports `service` or `cli`. The names on disk
 (`~/.local/state/openmachine*`, `openmachine.service`, `app.openmachine.om`,
 the bundle's `openmachine-connector` product name) are compatibility contracts:
 source moves never rename them.

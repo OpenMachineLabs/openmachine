@@ -11,12 +11,12 @@ import struct
 import subprocess
 import sys
 
-from openmachine.access import restricted, rules, sessions
-from openmachine.access.linux import sandbox
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine_access import restricted, rules, sessions
+from openmachine_access.linux import sandbox
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import lease, private_directory, save_json
 
-SPAWNER = "from openmachine.access.linux import sessions; sessions._spawner()"
+SPAWNER = "from openmachine_access.linux import sessions; sessions._spawner()"
 
 
 def persistent_home(key: str | None) -> tuple[Path, list[Path]]:

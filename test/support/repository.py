@@ -15,9 +15,9 @@ class RepositoryFixture:
         self.git("init", "-q")
         self.files = {
             "README.md": "# Fixture\n",
-            "openmachine/github.py": "VALUE = 1\n",
-            "openmachine/execution.py": "VALUE = 1\n",
-            "openmachine/server.py": "VALUE = 1\n",
+            "access/openmachine_access/github.py": "VALUE = 1\n",
+            "access/openmachine_access/execution.py": "VALUE = 1\n",
+            "access/openmachine_access/server.py": "VALUE = 1\n",
             "test/unit/github/test_values.py": "import unittest\n\nclass Values(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(1, 1)\n",
             "test/component/github/test_calls.py": "import unittest\n\nclass Calls(unittest.TestCase):\n    def test_call(self):\n        self.assertEqual(1, 1)\n",
             "test/resilience/execution/test_process.py": "import unittest\n\nclass Process(unittest.TestCase):\n    def test_process(self):\n        self.assertEqual(1, 1)\n",
@@ -31,16 +31,16 @@ class RepositoryFixture:
             "format": 1,
             "modules": {
                 "github": {
-                    "sources": ["openmachine/github.py"],
+                    "sources": ["access/openmachine_access/github.py"],
                     "tests": ["test/unit/github/test_values.py", "test/component/github/test_calls.py"],
                     "boundary_tests": ["test/component/server/test_dispatch.py"],
                 },
                 "execution": {
-                    "sources": ["openmachine/execution.py"],
+                    "sources": ["access/openmachine_access/execution.py"],
                     "tests": ["test/resilience/execution/test_process.py"], "boundary_tests": [],
                 },
                 "server": {
-                    "sources": ["openmachine/server.py"],
+                    "sources": ["access/openmachine_access/server.py"],
                     "tests": ["test/component/server/test_dispatch.py"], "boundary_tests": [],
                 },
                 "repository": {

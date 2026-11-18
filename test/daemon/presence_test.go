@@ -227,7 +227,7 @@ func TestCoreFolders(t *testing.T) {
 		if err != nil || json.Unmarshal(out, &got) != nil {
 			t.Fatalf("Folders = %s, %v", out, err)
 		}
-		if got.Argv != "-I -m openmachine.access --config C --state-dir S folders" || string(got.Stdin) != string(request) || got.Home != c.Home {
+		if got.Argv != "-I -m openmachine_access --config C --state-dir S folders" || string(got.Stdin) != string(request) || got.Home != c.Home {
 			t.Fatalf("Core ran with %+v", got)
 		}
 	})

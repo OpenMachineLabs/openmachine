@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 SYSTEM_BWRAP = Path("/usr/bin/bwrap")  # Tried first: Ubuntu's AppArmor rules attach to this path.
 # Unreadable in restricted sessions, relative to the account home: credentials, histories, keyrings, browsers.

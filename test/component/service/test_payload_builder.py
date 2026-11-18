@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from openmachine.service import payload
+from openmachine_access.service import payload
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts/build_runtime_payload.py"
 
@@ -39,10 +39,10 @@ class PayloadBuilderTests(unittest.TestCase):
 
     def build(self, *target):
         """Run the producer up to its first download; returns the input URL it fetched, or its exit status."""
-        wheel = self.root / "openmachine-0.2.8-py3-none-any.whl"
+        wheel = self.root / "openmachine_access-0.2.8-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
-            archive.writestr("openmachine-0.2.8.dist-info/METADATA", "Name: openmachine\nVersion: 0.2.8\n")
-            archive.write(payload.__file__, "openmachine/service/payload.py")
+            archive.writestr("openmachine_access-0.2.8.dist-info/METADATA", "Name: openmachine-access\nVersion: 0.2.8\n")
+            archive.write(payload.__file__, "openmachine_access/service/payload.py")
         (self.root / "requirements.lock").write_text("pydantic==2.13.5\n")
         argv = [str(SCRIPT), "--wheel", str(wheel), "--requirements", str(self.root / "requirements.lock"), "--commit", "a" * 40,
                 "--output", str(self.root / "output"), "--cache", str(self.root / "cache"), *target]

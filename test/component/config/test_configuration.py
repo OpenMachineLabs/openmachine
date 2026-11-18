@@ -5,8 +5,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from openmachine.config import TEXT, initialize, load
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.config import TEXT, initialize, load
+from openmachine_access.foundation.sanitize import Fault
 
 
 class ConfigurationTests(unittest.TestCase):

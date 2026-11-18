@@ -22,7 +22,7 @@ SPEC.loader.exec_module(runner)
 
 class TestSelection(RepositoryFixture, unittest.TestCase):
     def test_github_changes_include_declared_boundaries_without_unrelated_processes(self):
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertEqual(self.product_tests(plan), {
             "test/unit/github/test_values.py", "test/component/github/test_calls.py",
@@ -41,13 +41,13 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
 
     def test_support_package_initializer_selects_all_declared_consumers(self):
         self.write("test/support/__init__.py", '"""Support package."""\n')
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         self.manifest["support"]["test/support/wire.py"].append("test/resilience/execution/test_process.py")
         self.save_manifest()
         self.commit()
         self.base = self.git("rev-parse", "HEAD")
         self.write("test/support/__init__.py", '"""Changed support initialization."""\n')
-        self.write("openmachine/github.py", "VALUE = 3\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 3\n")
         self.assertIn("test/resilience/execution/test_process.py", runner.make_plan(self.root, self.base)["tests"])
 
     def test_removing_empty_test_package_needs_no_nonexistent_behavior(self):
@@ -136,7 +136,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.assertEqual(plan["tests"], ["test/repository/test_rules.py"])
 
     def test_unregistered_code_and_tests_fall_back_to_complete_discovery(self):
-        self.write("openmachine/new_module.py", "VALUE = 1\n")
+        self.write("access/openmachine_access/new_module.py", "VALUE = 1\n")
         new = "test/unit/new_module/test_new.py"
         self.write(new, self.files["test/unit/github/test_values.py"])
         plan = runner.make_plan(self.root, self.base)
@@ -149,7 +149,7 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
     def test_new_tests_in_an_existing_directory_inherit_the_owner(self):
         new = "test/unit/github/test_more.py"
         self.write(new, self.files["test/unit/github/test_values.py"])
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertIn(new, plan["tests"])
         self.assertNotIn("test/resilience/execution/test_process.py", plan["tests"])
@@ -157,28 +157,28 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
 
 
     def test_staged_and_unstaged_changes_are_both_selected(self):
-        self.write("openmachine/github.py", "VALUE = 2\n")
-        self.git("add", "openmachine/github.py")
-        self.write("openmachine/execution.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
+        self.git("add", "access/openmachine_access/github.py")
+        self.write("access/openmachine_access/execution.py", "VALUE = 2\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertIn("test/component/github/test_calls.py", plan["tests"])
         self.assertIn("test/resilience/execution/test_process.py", plan["tests"])
 
     def test_staged_change_reverted_only_in_worktree_still_selects_its_owner(self):
-        self.write("openmachine/github.py", "VALUE = 2\n")
-        self.git("add", "openmachine/github.py")
-        self.write("openmachine/github.py", "VALUE = 1\n")
-        self.assertEqual(self.git("diff", "HEAD", "--", "openmachine/github.py"), "")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
+        self.git("add", "access/openmachine_access/github.py")
+        self.write("access/openmachine_access/github.py", "VALUE = 1\n")
+        self.assertEqual(self.git("diff", "HEAD", "--", "access/openmachine_access/github.py"), "")
         plan = runner.make_plan(self.root, self.base)
         self.assertIn("test/component/github/test_calls.py", plan["tests"])
 
     def test_rename_keeps_both_endpoints_and_their_declared_tests(self):
-        self.git("mv", "openmachine/github.py", "openmachine/provider.py")
-        self.manifest["modules"]["github"]["sources"] = ["openmachine/provider.py"]
+        self.git("mv", "access/openmachine_access/github.py", "access/openmachine_access/provider.py")
+        self.manifest["modules"]["github"]["sources"] = ["access/openmachine_access/provider.py"]
         self.save_manifest()
         plan = runner.make_plan(self.root, self.base)
-        self.assertIn("openmachine/github.py", plan["changed_paths"])
-        self.assertIn("openmachine/provider.py", plan["changed_paths"])
+        self.assertIn("access/openmachine_access/github.py", plan["changed_paths"])
+        self.assertIn("access/openmachine_access/provider.py", plan["changed_paths"])
         self.assertNotIn("test/resilience/execution/test_process.py", plan["tests"])
 
     def test_deleted_test_runs_its_retained_owning_behavior(self):
@@ -195,8 +195,8 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         self.manifest["modules"]["execution"]["tests"] = []
         self.manifest["modules"]["execution"]["boundary_tests"] = ["test/repository/test_rules.py"]
         self.save_manifest()
-        self.write("openmachine/execution.py", "VALUE = 2\n")
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/execution.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         for full in (False, True):
             with self.subTest(full=full), self.assertRaisesRegex(ValueError, "no retained behavior coverage"):
                 runner.make_plan(self.root, self.base, full=full)
@@ -204,29 +204,29 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
     def test_a_baseline_may_name_a_layer_the_runner_retired(self):
         retired = "test/contract/old/test_old.py"
         self.write(retired, self.files["test/unit/github/test_values.py"])
-        self.write("openmachine/old.py", "VALUE = 1\n")
-        self.manifest["modules"]["old"] = {"sources": ["openmachine/old.py"], "tests": [retired], "boundary_tests": []}
+        self.write("access/openmachine_access/old.py", "VALUE = 1\n")
+        self.manifest["modules"]["old"] = {"sources": ["access/openmachine_access/old.py"], "tests": [retired], "boundary_tests": []}
         self.save_manifest()
         self.commit()
         self.base = self.git("rev-parse", "HEAD")
-        for path in (retired, "openmachine/old.py"):
+        for path in (retired, "access/openmachine_access/old.py"):
             (self.root / path).unlink()
         del self.manifest["modules"]["old"]
         self.save_manifest()
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         self.assertIn("test/unit/github/test_values.py", runner.make_plan(self.root, self.base)["tests"])
 
     def test_retiring_a_whole_owner_needs_no_coverage_for_what_it_deleted(self):
-        (self.root / "openmachine/execution.py").unlink()
+        (self.root / "access/openmachine_access/execution.py").unlink()
         (self.root / "test/resilience/execution/test_process.py").unlink()
         del self.manifest["modules"]["execution"]
         self.save_manifest()
-        self.write("openmachine/github.py", "VALUE = 2\n")
+        self.write("access/openmachine_access/github.py", "VALUE = 2\n")
         plan = runner.make_plan(self.root, self.base)
         self.assertEqual(self.product_tests(plan), {"test/unit/github/test_values.py", "test/component/github/test_calls.py",
                                                     "test/component/server/test_dispatch.py"})
         # Anything the retired owner left behind is unowned, not retired.
-        self.write("openmachine/execution.py", "VALUE = 1\n")
+        self.write("access/openmachine_access/execution.py", "VALUE = 1\n")
         self.assertEqual(runner.make_plan(self.root, self.base)["scope"], "full")
 
     def test_manifest_only_addition_selects_that_owner_without_a_full_run(self):
@@ -266,13 +266,13 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
         original = copy.deepcopy(self.manifest)
         invalid = []
         value = copy.deepcopy(original)
-        value["modules"]["server"]["sources"].append("openmachine/github.py")
+        value["modules"]["server"]["sources"].append("access/openmachine_access/github.py")
         invalid.append(value)
         value = copy.deepcopy(original)
         value["modules"]["github"]["tests"].append("test/unit/github/test_missing.py")
         invalid.append(value)
         value = copy.deepcopy(original)
-        value["modules"]["github"]["sources"] = ["openmachine/*.py"]
+        value["modules"]["github"]["sources"] = ["access/openmachine_access/*.py"]
         invalid.append(value)
         value = copy.deepcopy(original)
         value["modules"]["github"]["tests"] = []
@@ -298,15 +298,15 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
             runner.make_plan(self.root, full=True, layer="unit")
 
     def test_release_version_bump_verifies_the_complete_candidate(self):
-        self.manifest["modules"]["server"]["sources"].append("openmachine/__init__.py")
+        self.manifest["modules"]["server"]["sources"].append("access/openmachine_access/__init__.py")
         self.save_manifest()
-        self.write("openmachine/__init__.py", '__version__ = "1.0.0"\n')
+        self.write("access/openmachine_access/__init__.py", '__version__ = "1.0.0"\n')
         self.commit()
         release_base = self.git("rev-parse", "HEAD")
-        self.write("openmachine/__init__.py", '__version__ = "1.0.1"\n')
+        self.write("access/openmachine_access/__init__.py", '__version__ = "1.0.1"\n')
         plan = runner.make_plan(self.root, release_base)
         self.assertEqual(plan["scope"], "full")
-        self.assertIn("global verification or dependency change: openmachine/__init__.py", plan["full_reasons"])
+        self.assertIn("global verification or dependency change: access/openmachine_access/__init__.py", plan["full_reasons"])
         self.assertEqual(self.product_tests(plan), {
             "test/unit/github/test_values.py", "test/component/github/test_calls.py",
             "test/resilience/execution/test_process.py", "test/component/server/test_dispatch.py",
@@ -338,20 +338,20 @@ class TestSelection(RepositoryFixture, unittest.TestCase):
 
     def test_installed_loader_excludes_checkout_while_source_unit_loader_uses_it(self):
         path = "test/unit/github/test_values.py"
-        self.write("openmachine/__init__.py", 'VALUE = "source"\n')
+        self.write("access/openmachine_access/__init__.py", 'VALUE = "source"\n')
         with tempfile.TemporaryDirectory(prefix="om-installed-fixture-") as directory:
             installed = Path(directory)
-            (installed / "openmachine").mkdir()
-            (installed / "openmachine" / "__init__.py").write_text('VALUE = "installed"\n')
+            (installed / "openmachine_access").mkdir()
+            (installed / "openmachine_access" / "__init__.py").write_text('VALUE = "installed"\n')
             for source in (False, True):
                 expected = "source" if source else "installed"
-                self.write(path, "import unittest\nimport openmachine\n\n"
+                self.write(path, "import unittest\nimport openmachine_access\n\n"
                            "class Candidate(unittest.TestCase):\n"
                            "    def test_candidate(self):\n"
-                           f"        self.assertEqual(openmachine.VALUE, {expected!r})\n")
+                           f"        self.assertEqual(openmachine_access.VALUE, {expected!r})\n")
                 code = (
                     "import importlib.util,sys\nfrom pathlib import Path\n"
-                    f"sys.path[:0] = {[str(self.root), str(installed)]!r}\n"
+                    f"sys.path[:0] = {[str(self.root), str(self.root / 'access'), str(installed)]!r}\n"
                     f"spec=importlib.util.spec_from_file_location('runner', {str(ROOT / 'scripts/run_tests.py')!r})\n"
                     "runner=importlib.util.module_from_spec(spec)\nspec.loader.exec_module(runner)\n"
                     f"runner.run_files(Path({str(self.root)!r}), [{path!r}], installed={not source!r}, source={source!r})\n")

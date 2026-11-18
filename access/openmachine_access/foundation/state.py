@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 import tempfile
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 
 def private_directory(path: Path) -> Path:

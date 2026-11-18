@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from openmachine.access.linux import environment
+from openmachine_access.linux import environment
 
 
 class LinuxEnvironmentTests(unittest.TestCase):

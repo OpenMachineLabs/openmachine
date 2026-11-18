@@ -6,7 +6,7 @@ import signal
 import subprocess
 import time
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 
 def run(argv: list[str], timeout: float = 30, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:

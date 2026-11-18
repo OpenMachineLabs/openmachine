@@ -7,10 +7,10 @@ from pathlib import Path
 import tempfile
 import zipfile
 
-from openmachine.config import TEXT
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import private_directory
-from openmachine.service import payload
+from openmachine_access.config import TEXT
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import private_directory
+from openmachine_access.service import payload
 
 
 class PayloadCaseFixture(object):
@@ -28,9 +28,9 @@ class PayloadCaseFixture(object):
         path.chmod(0o755)
         (self.source / "python/bin/python3").symlink_to("python3.13")
         (self.source / "wheels").mkdir()
-        self.wheel = self.source / "wheels/openmachine-0.2.8-py3-none-any.whl"
+        self.wheel = self.source / "wheels/openmachine_access-0.2.8-py3-none-any.whl"
         with zipfile.ZipFile(self.wheel, "w") as archive:
-            archive.writestr("openmachine-0.2.8.dist-info/METADATA", "Name: openmachine\nVersion: 0.2.8\n")
+            archive.writestr("openmachine_access-0.2.8.dist-info/METADATA", "Name: openmachine-access\nVersion: 0.2.8\n")
         (self.source / "requirements.lock").write_text("example==1.0\n")
         (self.source / "THIRD_PARTY_NOTICES.md").write_text("Fixture notices.\n")
         self.manifest = {"format": 1, "target": dict(payload.TARGETS[payload.host_target()]),

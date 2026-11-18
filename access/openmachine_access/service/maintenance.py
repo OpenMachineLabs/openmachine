@@ -11,9 +11,9 @@ import sys
 import time
 from typing import Literal
 
-from openmachine.config import initialize, load
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, private_directory, save_json
+from openmachine_access.config import initialize, load
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import lease, private_directory, save_json
 
 from . import install, payload, transition
 from . import state as service_state
@@ -143,7 +143,7 @@ def read_operation(config_path: Path, state: Path, identity: str) -> dict:
 def _spawn(state: Path, identity: str, lock, python: str) -> None:
     # The child inherits this same flock, not a second lock or a reacquisition.
     # DEVNULL avoids both GUI pipe lifetime and unbounded maintenance log files.
-    subprocess.Popen([python, "-I", "-B", "-m", "openmachine.service.maintenance", str(state), identity,
+    subprocess.Popen([python, "-I", "-B", "-m", "openmachine_access.service.maintenance", str(state), identity,
                       str(lock.fileno())], cwd="/", stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=(lock.fileno(),))
 
@@ -243,7 +243,7 @@ def run_operation(state: Path, identity: str, lock_fd: int) -> None:
             # Preparation and selection run in the incoming Core, which owns the state they write.
             python = str(retained / "python/bin/python3")
             os.set_inheritable(lock_fd, True)
-            os.execve(python, [python, "-I", "-B", "-m", "openmachine.service.maintenance", str(state), identity,
+            os.execve(python, [python, "-I", "-B", "-m", "openmachine_access.service.maintenance", str(state), identity,
                                str(lock_fd)], payload.environment())
         if record["phase"] == "retained":
             record = _save(state, record, "preparing")

@@ -7,11 +7,11 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from openmachine.config import TEXT
-from openmachine.foundation.sanitize import Fault
-from openmachine.foundation.state import lease, save_json
-from openmachine.service import maintenance, transition
-from openmachine.service import state as service_state
+from openmachine_access.config import TEXT
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.foundation.state import lease, save_json
+from openmachine_access.service import maintenance, transition
+from openmachine_access.service import state as service_state
 from test.support.service_cases import FIRST, SECOND, ServiceCaseFixture
 
 ENVELOPE = {"management_contract": 1, "capabilities": ["status", "configure", "configure:verify_existing", "install",
@@ -55,7 +55,7 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
         # The entry written at install executes the selected installation's management.
         result = subprocess.run([sys.executable, "-I", after["entry"]["path"], "--contract", "1", "status"],
                                 capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.stdout.splitlines(), ["-I", "-m", "openmachine.cli", "--config", str(self.config),
+        self.assertEqual(result.stdout.splitlines(), ["-I", "-m", "openmachine_access.cli", "--config", str(self.config),
                                                       "--state-dir", str(self.state), "manage", "--contract", "1", "status"])
 
     def test_update_against_a_stale_selection_is_rejected_without_a_record(self):
@@ -108,7 +108,7 @@ class MaintenanceTests(ServiceCaseFixture, unittest.TestCase):
                 patch.object(maintenance.os, "execve", side_effect=Exception("handoff")) as execve, self.assertRaises(Exception):
             maintenance.run_operation(self.state, FIRST, lock.fileno())
         python = self.state / "service/payloads" / self.digest / "python/bin/python3"
-        self.assertEqual(execve.call_args.args[:2], (str(python), [str(python), "-I", "-B", "-m", "openmachine.service.maintenance",
+        self.assertEqual(execve.call_args.args[:2], (str(python), [str(python), "-I", "-B", "-m", "openmachine_access.service.maintenance",
                                                                     str(self.state), FIRST, str(execve.call_args.args[1][-1])]))
         self.assertEqual(self.manage("operation", identity=FIRST)["status"], "continuation_required")
         self.manage("continue", identity=FIRST)

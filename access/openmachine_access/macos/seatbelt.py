@@ -9,7 +9,7 @@ import re
 import stat
 import sys
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 LIBRARY = "/usr/lib/libsandbox.1.dylib"
 MACH_SERVICES = ("com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",

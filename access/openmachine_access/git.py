@@ -10,7 +10,7 @@ import selectors
 import subprocess
 import time
 
-from openmachine.foundation.sanitize import Fault
+from openmachine_access.foundation.sanitize import Fault
 
 MAX_READ = 65536
 MAX_CAPTURE = 1024 * 1024

@@ -6,8 +6,8 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from openmachine.service import install, payload, processes
-from openmachine.service import state as service_state
+from openmachine_access.service import install, payload, processes
+from openmachine_access.service import state as service_state
 from test.support.payload_cases import PayloadCaseFixture
 
 
@@ -23,7 +23,7 @@ class InstallTests(PayloadCaseFixture, unittest.TestCase):
             self.calls.append((argv, options))
             if "venv" in argv:
                 (self.destination / "bin").mkdir(parents=True)
-            stdout = json.dumps({"version": version}) if argv[-2:] == ["openmachine.access", "capabilities"] else ""
+            stdout = json.dumps({"version": version}) if argv[-2:] == ["openmachine_access", "capabilities"] else ""
             return subprocess.CompletedProcess(argv, 1 if failing and failing in argv else 0, stdout, "")
         return patch.object(processes, "run", side_effect=run)
 
@@ -36,7 +36,7 @@ class InstallTests(PayloadCaseFixture, unittest.TestCase):
         self.assertEqual([argv for argv, _ in self.calls], [
             [payload_python, "-I", "-m", "venv", str(self.destination)], [*pip, "-r", str(self.retained / "requirements.lock")],
             [*pip, str(self.retained / self.manifest["core"]["wheel"])], [python, "-I", "-m", "pip", "check"],
-            [python, "-I", "-m", "openmachine.access", "capabilities"]])
+            [python, "-I", "-m", "openmachine_access", "capabilities"]])
         self.assertTrue(all(options["env"] == payload.environment() for _, options in self.calls))
         self.assertEqual(service_state._installed(self.state, self.digest), {
             "identity": self.digest, "version": "0.2.8", "protocol": 1, "state_contract": service_state.STATE_CONTRACT,

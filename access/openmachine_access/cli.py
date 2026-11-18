@@ -1,15 +1,15 @@
-"""Typed Core management: python -I -B -m openmachine.cli --config C --state-dir S manage --contract 1 <action>."""
+"""Typed Core management: python -I -B -m openmachine_access.cli --config C --state-dir S manage --contract 1 <action>."""
 
 import argparse
 import json
 from pathlib import Path
 import sys
 
-from openmachine.service.maintenance import dispatch
+from openmachine_access.service.maintenance import dispatch
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="python -I -B -m openmachine.cli")
+    parser = argparse.ArgumentParser(prog="python -I -B -m openmachine_access.cli")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)

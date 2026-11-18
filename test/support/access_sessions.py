@@ -1,4 +1,4 @@
-"""Drive python -I -m openmachine.access the way the Go host does: request and reply on a control socket."""
+"""Drive python -I -m openmachine_access the way the Go host does: request and reply on a control socket."""
 
 import json
 import os
@@ -15,8 +15,8 @@ import tempfile
 import time
 import uuid
 
-from openmachine.access import restricted, sessions
-from openmachine.access.macos import seatbelt as macos
+from openmachine_access import restricted, sessions
+from openmachine_access.macos import seatbelt as macos
 
 # Restricted homes go under the root-owned sticky temp directory, never the real /Users/Shared, with a name
 # owned by this test process so concurrent runs never share or delete each other's home.
@@ -26,10 +26,10 @@ HOME = SHARED / HOME_NAME.format(uid=os.getuid()) / "home"
 HOMES = sessions.keyed_homes(HOME.parent)  # Where the homes that requests name by key are.
 # Core's copy of om is per user too; each test process keeps its own.
 CLIENT_NAME = f"client-{os.getpid()}"
-BOOT = ("import sys; from pathlib import Path; from openmachine.access import sessions; "
-        "from openmachine.access import restricted; "
+BOOT = ("import sys; from pathlib import Path; from openmachine_access import sessions; "
+        "from openmachine_access import restricted; "
         f"sessions.SHARED = Path({str(SHARED)!r}); sessions.HOME_NAME = {HOME_NAME!r}; restricted.CLIENT_NAME = {CLIENT_NAME!r}; "
-        "from openmachine.access.__main__ import main; sys.exit(main(sys.argv[1:]))")
+        "from openmachine_access.__main__ import main; sys.exit(main(sys.argv[1:]))")
 USER = pwd.getpwuid(os.getuid()).pw_name
 CONNECTION = "100.64.0.2 52144 100.64.0.1 22"
 

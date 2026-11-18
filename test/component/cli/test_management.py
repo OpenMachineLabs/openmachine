@@ -8,7 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from openmachine import cli
+from openmachine_access import cli
 
 BASE = ["openmachine", "--config", "/c/config.toml", "--state-dir", "/s/state", "manage"]
 

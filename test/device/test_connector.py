@@ -155,7 +155,7 @@ class PrivateState(unittest.TestCase):
     def test_bundle_takes_the_repository_version(self):
         from runpy import run_path
         version = run_path(str(ROOT / "scripts/build_bundle.py"))["release_version"]()
-        self.assertEqual(version, run_path(str(ROOT / "openmachine/__init__.py"))["__version__"])
+        self.assertEqual(version, run_path(str(ROOT / "access/openmachine_access/__init__.py"))["__version__"])
 
     def test_bundle_inventory_binds_every_file(self):
         bundle = write_bundle(self.root / "bundle", "0.1.0")

@@ -3,8 +3,8 @@
 import sys
 import unittest
 
-from openmachine.foundation.sanitize import Fault
-from openmachine.service import processes
+from openmachine_access.foundation.sanitize import Fault
+from openmachine_access.service import processes
 
 
 class SubprocessTests(unittest.TestCase):

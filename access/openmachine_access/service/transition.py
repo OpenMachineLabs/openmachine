@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from openmachine.foundation.state import save_json
+from openmachine_access.foundation.state import save_json
 
 from . import state as service_state
 
