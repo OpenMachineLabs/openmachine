@@ -472,13 +472,15 @@ func TestTry(t *testing.T) {
 	for _, want := range []string{"<title>Try a model · Open Machine</title>", `<span>Open Machine</span></span><span class="pick"><select id="model" aria-label="Model">` +
 		option("qwen3:latest", "GPU &lt;01&gt;", "") + option("shared", "GPU &lt;01&gt;", "") + option("local.gguf", "My Laptop", "") + option("shared@laptop", "My Laptop", "") +
 		option("shared@studio", "Studio &lt;1&gt;", " selected") + "</select>", "<h1>Chat with a model</h1>", `placeholder="Ask anything"`, `<button id="send">Send</button>`,
-		`<p class="why">Runs on your machine. Nothing is kept after you close this page.</p>`, "fetch('/v1/chat/completions'"} {
+		`<p class="why">Runs on your machine. Nothing is kept after you close this page.</p>`, "fetch('/v1/chat/completions'",
+		// The Console's own Inter, so the brand looks the same on both pages.
+		"@font-face{font-family:Inter;font-weight:400 600;src:url(data:font/woff2;base64,d09GMg"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page has no %s:\n%s", want, page)
 		}
 	}
 	// Only its own script runs, and reaches only this address.
-	if policy := "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'; connect-src 'self'; frame-ancestors 'none'"; res.StatusCode != 200 ||
+	if policy := "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'; font-src data:; connect-src 'self'; frame-ancestors 'none'"; res.StatusCode != 200 ||
 		res.Header.Get("Content-Type") != "text/html; charset=utf-8" || res.Header.Get("Content-Security-Policy") != policy || res.Header.Get("Cache-Control") != "no-store" || strings.Count(page, "<script") != 1 {
 		t.Errorf("the page = %d %v", res.StatusCode, res.Header)
 	}
