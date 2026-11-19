@@ -235,7 +235,8 @@ class RepositoryChecks(unittest.TestCase):
     def test_device_runs_only_the_jobs_a_change_needs_and_fails_toward_running(self):
         everything = set(DEVICE_JOBS)
         for paths, jobs in [
-            (("README.md", "docs/om.md", "test/README.md", ".github/AGENTS.md", "assets/x.png"), set()),
+            (("README.md", "docs/om.md", "docs/\u4e2d\u6587 notes.md", ".github/AGENTS.md", "assets/x.png"), set()),
+            (("test/README.md",), set()),
             (("access/openmachine_access/cli.py", "test/unit/access/test_x.py", "connector/go.mod"), set()),
             (("daemon/local.go",), {"go", "licenses"}),
             (("test/daemon/x_test.go",), {"go"}),
@@ -261,6 +262,9 @@ class RepositoryChecks(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/device.yml").read_text()
         self.assertIn("    if: always()\n    needs: [changes, go, python, verifier, licenses]\n", workflow)
         self.assertIn('test "$CHANGES" = success', workflow)
+        for job in DEVICE_JOBS:
+            self.assertIn("${{ needs.changes.outputs.%s }}:${{ needs.%s.result }}" % (job, job), workflow)
+        self.assertIn("grep -vxE 'true:success|false:skipped'", workflow)
 
     def test_every_pull_request_commit_is_checked_for_sign_off(self):
         dco = (ROOT / ".github/workflows/dco.yml").read_text()

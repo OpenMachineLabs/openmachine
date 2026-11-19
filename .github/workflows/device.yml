@@ -49,7 +49,7 @@ jobs:
             range="$BEFORE HEAD"
           fi
           # An unlisted path runs every job, so this fails toward running.
-          if [ -z "$range" ] || ! changed=$(git diff --name-only --no-renames $range); then
+          if [ -z "$range" ] || ! changed=$(git -c core.quotePath=false diff --name-only --no-renames $range); then
             changed="(unknown range)"
           fi
           go=false python=false licenses=false verifier=false
@@ -192,10 +192,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # A job passes only when selected and successful, or unselected and skipped.
       - name: The selection ran and every selected job passed
         env:
           CHANGES: ${{ needs.changes.result }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          JOBS: >-
+            ${{ needs.changes.outputs.go }}:${{ needs.go.result }}
+            ${{ needs.changes.outputs.python }}:${{ needs.python.result }}
+            ${{ needs.changes.outputs.verifier }}:${{ needs.verifier.result }}
+            ${{ needs.changes.outputs.licenses }}:${{ needs.licenses.result }}
         run: |
           test "$CHANGES" = success
-          test -z "$(printf '%s\n' $RESULTS | grep -vxE 'success|skipped')"
+          printf '%s\n' $JOBS
+          test -z "$(printf '%s\n' $JOBS | grep -vxE 'true:success|false:skipped')"
