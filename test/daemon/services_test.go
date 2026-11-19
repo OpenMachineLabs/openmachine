@@ -94,10 +94,11 @@ func TestListed(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Listed = %v, want %v", got, want)
 	}
-	// The lowest 64 ports are kept.
+	// The lowest 64 ports are kept. Their PIDs are above any real one, so
+	// none is this process's, which Listed drops as om's.
 	ls = nil
 	for port := 2000; port < 2100; port++ {
-		ls = append(ls, at("127.0.0.1", 4099-port, port, "")) // from 2099 down
+		ls = append(ls, at("127.0.0.1", 4099-port, 1<<22+port, "")) // from 2099 down
 	}
 	listed := daemon.Listed(ls, 50000, 60000)
 	if len(listed) != 64 || listed[0].Addr.Port() != 2000 || listed[63].Addr.Port() != 2063 {
