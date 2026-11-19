@@ -87,10 +87,11 @@ network.
 Until the machine's network node listens, the `status` of the owner-only
 socket says why the last join step failed, for example `network_unavailable`,
 `cloud_unavailable` or `network_unreachable`; `om status` on Linux shows
-Connecting, or Update required. Where its supervisor discards standard error,
-as launchd does, `om` logs to `daemon.log` in its state directory; the network
-node's lines there are rate-limited and carry no keys, URL queries or home
-path.
+Connecting, or Update required. Its `in_use` is true while an SSH connection or
+stream into or out of the machine is open. Where its supervisor discards
+standard error, as launchd does, `om` logs to `daemon.log` in its state
+directory; the network node's lines there are rate-limited and carry no keys,
+URL queries or home path.
 
 ## Pages and models on localhost
 

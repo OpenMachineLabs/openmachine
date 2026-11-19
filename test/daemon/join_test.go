@@ -41,7 +41,8 @@ func enrollCloud(t *testing.T, enroll func(w http.ResponseWriter)) (*httptest.Se
 	return cloud, &enrolled
 }
 
-// status asks the daemon under home why it is not connected.
+// status asks the daemon under home why it is not connected. Its reply also
+// says that no session uses this computer, as none can before it joins.
 func status(t *testing.T, home string) string {
 	t.Helper()
 	c, err := net.Dial("unix", filepath.Join(daemon.StateDir(home), "daemon.sock"))
@@ -53,8 +54,9 @@ func status(t *testing.T, home string) string {
 	var reply struct {
 		Connected bool
 		Reason    string
+		InUse     *bool `json:"in_use"`
 	}
-	if err := json.NewDecoder(c).Decode(&reply); err != nil || reply.Connected {
+	if err := json.NewDecoder(c).Decode(&reply); err != nil || reply.Connected || reply.InUse == nil || *reply.InUse {
 		t.Fatalf("status = %+v, %v", reply, err)
 	}
 	return reply.Reason

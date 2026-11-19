@@ -675,7 +675,8 @@ func (d *daemon) listenProxy() (*net.UnixListener, error) {
 }
 
 // serveProxy answers "dial HOST" with "ok" and the SSH stream, or "error
-// REASON", "status" with one JSON line, "folders" followed by a JSON object up
+// REASON", "status" with one JSON line that also says whether an SSH
+// connection or stream is open (in_use), "folders" followed by a JSON object up
 // to EOF with Core's folder check, and "watch" with the account view as one
 // JSON line now and one after every change, until the client closes, for
 // processes of this user only.
@@ -702,9 +703,9 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 				return
 			}
 			if err == nil && line == "status" {
-				reply := map[string]any{"connected": true}
+				reply := map[string]any{"connected": true, "in_use": d.connected()}
 				if reason := d.authority.Status(); reason != "" {
-					reply = map[string]any{"connected": false, "reason": reason}
+					reply["connected"], reply["reason"] = false, reason
 				}
 				json.NewEncoder(uc).Encode(reply)
 				return
