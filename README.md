@@ -7,6 +7,7 @@
 **Connect your machines and let your AI agent work on any of them, within the limits you set.**
 
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/Website-openmachine.app-141414?style=flat-square" alt="Website"></a>
+<a href="https://openmachine.app/docs"><img src="https://img.shields.io/badge/Docs-openmachine.app%2Fdocs-141414?style=flat-square" alt="Docs"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-43A047?style=flat-square" alt="Apache-2.0 License"></a>
 <a href="https://discord.gg/TAxEWV7fgZ"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&amp;logo=discord&amp;logoColor=white" alt="Join Discord"></a>
@@ -82,6 +83,9 @@ curl -fsSL https://openmachine.app/install.sh | sh -s -- --key omkey_...
 
 Then `om status` shows its state, and `om down` and `om up` take it offline
 and back online.
+
+The [docs](https://openmachine.app/docs) cover installation, permissions, rules
+and troubleshooting in full.
 
 ## What is in this repository
 
