@@ -6,7 +6,9 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,33 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("check_repository", ROOT / "scripts/check_repository.py")
 rules = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(rules)
+RUNNER_SPEC = importlib.util.spec_from_file_location("run_tests", ROOT / "scripts/run_tests.py")
+runner = importlib.util.module_from_spec(RUNNER_SPEC)
+RUNNER_SPEC.loader.exec_module(runner)
+DEVICE_JOBS = ("go", "python", "licenses", "verifier")
+
+
+def select_device_jobs(event: str, *paths: str) -> dict:
+    """Run device.yml's selection step on a commit that adds these paths."""
+    workflow = (ROOT / ".github/workflows/device.yml").read_text()
+    step = workflow.split("      - name: Select the jobs the changed paths need\n", 1)[1]
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n\n", 1)[0])
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+               "EVENT": event, "BEFORE": "", "GITHUB_OUTPUT": str(repo / ".output")}
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(["git", "init", "-q", str(repo)], env=env, check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], env=env, check=True)
+        for path in paths:
+            (repo / path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / path).write_text("change\n")
+        subprocess.run([*git, "add", "--", *paths], env=env, check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "change"], env=env, check=True)
+        subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], cwd=repo, env=env, check=True,
+                       capture_output=True)
+        output = dict(line.split("=", 1) for line in (repo / ".output").read_text().splitlines())
+    return {job for job in DEVICE_JOBS if output[job] == "true"}
 
 
 class RepositoryChecks(unittest.TestCase):
@@ -181,7 +210,7 @@ class RepositoryChecks(unittest.TestCase):
 
     def test_all_workflows_use_explicit_github_hosted_runners(self):
         expected_jobs = {"quality.yml": 2, "connector.yml": 1, "metadata.yml": 1, "labels.yml": 1, "dco.yml": 1,
-                         "device.yml": 4}
+                         "device.yml": 6}
         workflows = {path.name: path.read_text()
                      for path in (ROOT / ".github/workflows").glob("*.yml")}
         self.assertEqual(set(workflows), set(expected_jobs))
@@ -192,16 +221,50 @@ class RepositoryChecks(unittest.TestCase):
                 self.assertIn("persist-credentials: false", workflow)
                 self.assertNotIn("pull_request_target:", workflow)
                 if name == "device.yml":
-                    # Two jobs per hosted runner, named literally in their matrix, the license check and
-                    # `device`, which can be required because it runs on every pull request.
+                    # Two jobs per hosted runner, named literally in their matrix; the selection, the
+                    # verifier, the license check and `device`, which can be required because it always runs.
                     self.assertEqual(workflow.count("    runs-on: " + chr(36) + "{{ matrix.os }}"), 2)
                     self.assertEqual(workflow.count("        os: [ubuntu-24.04, macos-15]"), 2)
-                    self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), 2)
+                    self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), 4)
                     self.assertNotIn(": write", workflow)
                     self.assertNotIn("paths:", workflow)
                 else:
                     self.assertEqual(workflow.count("    runs-on: ubuntu-24.04"), expected_count)
                     self.assertNotIn("runs-on: " + chr(36) + "{{", workflow)
+
+    def test_device_runs_only_the_jobs_a_change_needs_and_fails_toward_running(self):
+        everything = set(DEVICE_JOBS)
+        for paths, jobs in [
+            (("README.md", "docs/om.md", "docs/\u4e2d\u6587 notes.md", ".github/AGENTS.md", "assets/x.png"), set()),
+            (("test/README.md",), set()),
+            (("access/openmachine_access/cli.py", "test/unit/access/test_x.py", "connector/go.mod"), set()),
+            (("daemon/local.go",), {"go", "licenses"}),
+            (("test/daemon/x_test.go",), {"go"}),
+            (("device/openmachine_device/store.py",), {"python"}),
+            (("scripts/install.sh",), {"python"}),
+            (("access/openmachine_access/__init__.py",), {"python"}),
+            (("device/requirements.lock",), {"python", "licenses"}),
+            (("requirements.lock", "THIRD_PARTY_LICENSES.md"), {"licenses"}),
+            (("scripts/verify-logs.mjs",), {"verifier"}),
+            (("test/vectors/logs.json",), {"go", "python", "verifier"}),
+            ((".github/workflows/device.yml",), everything),
+            (("README.md", "new/unknown.txt"), everything),
+        ]:
+            with self.subTest(paths=paths):
+                self.assertEqual(select_device_jobs("pull_request", *paths), jobs)
+        # Core's runner leaves these paths to the device workflow, so each must select a job.
+        for prefix in runner.DEVICE_PATHS:
+            with self.subTest(path=prefix):
+                path = prefix + "x" if prefix.endswith("/") else prefix
+                self.assertTrue(select_device_jobs("pull_request", path))
+        self.assertEqual(select_device_jobs("workflow_dispatch", "README.md"), everything)
+        self.assertEqual(select_device_jobs("push", "README.md"), everything)  # no readable range
+        workflow = (ROOT / ".github/workflows/device.yml").read_text()
+        self.assertIn("    if: always()\n    needs: [changes, go, python, verifier, licenses]\n", workflow)
+        self.assertIn('test "$CHANGES" = success', workflow)
+        for job in DEVICE_JOBS:
+            self.assertIn("${{ needs.changes.outputs.%s }}:${{ needs.%s.result }}" % (job, job), workflow)
+        self.assertIn("grep -vxE 'true:success|false:skipped'", workflow)
 
     def test_every_pull_request_commit_is_checked_for_sign_off(self):
         dco = (ROOT / ".github/workflows/dco.yml").read_text()
