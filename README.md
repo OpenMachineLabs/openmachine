@@ -2,9 +2,9 @@
 
 # Open Machine
 
-### One agent. Every machine. Real execution.
+### Your AI. Your machines.
 
-**Let your coding agent work on every machine you own, with the access you choose.**
+**Connect your machines and let your AI agent work on any of them, within the limits you set.**
 
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/Website-openmachine.app-141414?style=flat-square" alt="Website"></a>
 <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12+"></a>
@@ -32,8 +32,34 @@ server and relays. You choose how far the agent reaches on each machine, and
 GitHub tokens never sit on your machines.
 
 <p align="center">
-  <img src="assets/openmachine-hero.svg" width="1000" alt="Your machines in the Open Machine Console, a coding agent training a model on a GPU machine and opening a pull request, and your connected tools." />
+  <img src="assets/openmachine-demo.webp" width="1000" alt="A coding agent in a terminal reaches build-mac by name, finds and fixes a failing test, pushes and opens pull request #480, while the Open Machine Console shows the machines, then the connection's log of every command, then build-mac's permission." />
 </p>
+
+Works with Claude Code, Codex, Cursor, Gemini CLI and anything that speaks SSH.
+
+## What your agent gets
+
+- **Every machine by name.** `ssh build-mac.om` reaches a machine over the
+  private network, with no ports to open.
+- **The access you choose.** Each machine is **Read only**, **Workspace**
+  (changes only in the folders you choose) or **Full access**.
+- **Rules.** Block the commands you never want run, such as deleting home
+  folders or rewriting Git history. A blocked command never starts, and the
+  agent is told why.
+- **Git without a token.** On Full access machines, agents push and open pull
+  requests through your GitHub connection; the token never reaches the machine.
+- **Your pages and models.** Open a machine's web page at
+  `localhost:11400/<machine>/<port>` and point any app at the models your
+  machines run, at `http://127.0.0.1:11400/v1`.
+- **A record of everything.** Every connection, command and block is recorded
+  and signed by the machine that ran it, and you can check a log export on your
+  own computer.
+
+<p align="center">
+  <img src="assets/openmachine-rules.webp" width="640" alt="The Rules demo: choose a machine and its permission, try a command, and see whether Open Machine allows it or which rule or permission blocks it." />
+</p>
+
+How each works on the machine: [docs/om.md](docs/om.md).
 
 ## Quick start
 
