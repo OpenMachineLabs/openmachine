@@ -1,8 +1,11 @@
 name: device
 
 # om, device identity and the log verifier build and test on GitHub-hosted
-# Linux and macOS, with the license check, on every pull request and on main.
-# `device` passes only when every other job does.
+# Linux and macOS, with the license check. `changes` runs on every pull
+# request and push to main and selects only the jobs the changed paths need; a
+# manual run, or a range it cannot read, runs them all. `device`, the required
+# check, always reports and passes only when `changes` succeeded and every
+# selected job passed.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -18,8 +21,81 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.select.outputs.go }}
+      python: ${{ steps.select.outputs.python }}
+      licenses: ${{ steps.select.outputs.licenses }}
+      verifier: ${{ steps.select.outputs.verifier }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the jobs the changed paths need
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A pull request is checked out as its merge commit; its first parent is the base.
+          range=
+          if [ "$EVENT" = pull_request ]; then
+            range="HEAD^1 HEAD"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            range="$BEFORE HEAD"
+          fi
+          # An unlisted path runs every job, so this fails toward running.
+          if [ -z "$range" ] || ! changed=$(git diff --name-only --no-renames $range); then
+            changed="(unknown range)"
+          fi
+          go=false python=false licenses=false verifier=false
+          while IFS= read -r path; do
+            case "$path" in
+              "") ;;
+              go.mod|go.sum|cmd/*|daemon/*|linux/*)
+                go=true licenses=true ;;  # licenses: the build graph of ./cmd/om
+              device/requirements.lock)
+                python=true licenses=true ;;
+              test/linux/test_install_script.py|scripts/install.sh|device/*|test/device/*)
+                python=true ;;
+              test/daemon/*|test/linux/*)
+                go=true ;;
+              test/vectors/*)
+                go=true python=true verifier=true ;;
+              scripts/verify-logs.mjs|test/verifier/*)
+                verifier=true ;;
+              scripts/build_bundle.py|access/openmachine_access/__init__.py)
+                python=true ;;  # test/device reads the bundle builder and Core's release version
+              requirements.lock|scripts/runtime-inputs.json|scripts/check_licenses.py|THIRD_PARTY_LICENSES.md)
+                licenses=true ;;
+              # Core (the quality workflow), the connector and repository files.
+              access/*|connector/*|test/unit/*|test/component/*|test/resilience/*|test/repository/*|test/support/*)
+                ;;
+              test/__init__.py|test/ownership.json|pyproject.toml|scripts/premerge.py|scripts/run_tests.py)
+                ;;
+              scripts/check_repository.py|scripts/check_dco.py|scripts/build_runtime_payload.py)
+                ;;
+              .github/workflows/device.yml)
+                go=true python=true licenses=true verifier=true ;;
+              .github/*|assets/*|docs/*|*.md|LICENSE|NOTICE|.gitignore)
+                ;;
+              *)
+                go=true python=true licenses=true verifier=true ;;
+            esac
+          done <<EOF
+          $changed
+          EOF
+          printf '%s\n' "$changed"
+          printf 'go=%s\npython=%s\nlicenses=%s\nverifier=%s\n' "$go" "$python" "$licenses" "$verifier" | tee -a "$GITHUB_OUTPUT"
+
   go:
     name: go (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -46,11 +122,11 @@ jobs:
           go build ./cmd/om
       - name: Test
         run: go test -count=1 ./...
-      - name: Test the log verifier
-        run: node --test test/verifier/verify-logs.test.mjs
 
   python:
     name: python (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -70,8 +146,27 @@ jobs:
           python -m unittest discover -s test/device -p 'test_*.py'
           python -m unittest discover -s test/linux -p 'test_install_script.py'
 
+  verifier:
+    name: verifier
+    needs: changes
+    if: needs.changes.outputs.verifier == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24.22.1"
+          package-manager-cache: false
+      - name: Test the log verifier
+        run: node --test test/verifier/verify-logs.test.mjs
+
   licenses:
     name: licenses
+    needs: changes
+    if: needs.changes.outputs.licenses == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -93,11 +188,14 @@ jobs:
   device:
     name: device
     if: always()
-    needs: [go, python, licenses]
+    needs: [changes, go, python, verifier, licenses]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Every device job passed
+      - name: The selection ran and every selected job passed
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: test "$(printf '%s\n' $RESULTS | sort -u)" = success
+        run: |
+          test "$CHANGES" = success
+          test -z "$(printf '%s\n' $RESULTS | grep -vxE 'success|skipped')"
