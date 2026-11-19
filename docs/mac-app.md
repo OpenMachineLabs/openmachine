@@ -22,7 +22,7 @@ The app uses six local interfaces, all defined here:
 
 | Interface | Defined in | The app uses it to |
 | --- | --- | --- |
-| `om`'s owner-only socket, `~/.local/state/openmachine-om/daemon.sock`: `status`, `watch`, `folders` | [`daemon/daemon.go`](../daemon/daemon.go) | show whether this Mac is connected, the machines list, this Mac's permission and your account; check Workspace folders; see whether a session uses this Mac before an automatic update |
+| `om`'s owner-only socket, `~/.local/state/openmachine-om/daemon.sock`: `status`, `watch`, `folders` | [`daemon/daemon.go`](../daemon/daemon.go) | show whether this Mac is connected, the machines list, this Mac's permission and your account; check Workspace folders; see whether an SSH connection or stream is open before an automatic update |
 | Device identity's commands `setup`, `companion` (sign-in, sign-out, `policy`, `remote-access` and reads), `inspect`, `upgrade` | [`device/openmachine_device/cli.py`](../device/openmachine_device/cli.py) | set up, sign in and out, set this Mac's permission, pass on your On or Off, switch bundles |
 | Core's `manage --contract 1`: from the payload the app carries to install and update Core, and while no binding is saved; otherwise from the `manage.py` Core installs | [`access/openmachine_access/cli.py`](../access/openmachine_access/cli.py), [`service/`](../access/openmachine_access/service) | install and update Core, read its status and follow its operations |
 | `remote-access.json` | [`remote_access.py`](../device/openmachine_device/remote_access.py) | pass on your On or Off |
@@ -119,9 +119,8 @@ a file it cannot read safely as Off; `om` follows device identity.
 - With **Automatically check for updates** on, as it is by default, the app
   checks the feed at most once a day; **Check for Updates** in Settings › About
   checks at once.
-- When the feed offers a newer version, the app downloads it, verifies its
-  signature and keeps it in `…/companion/update/`. Settings and the menu bar
-  then offer **Restart to Update**.
+- When the feed offers a newer version, the app downloads it and verifies its
+  signature. Settings and the menu bar then offer **Restart to Update**.
 - Before it installs, the app checks the feed again, checks that the file is
   the one it downloaded, and verifies it again from the bytes it installs. It
   then installs and restarts, and your connection comes back as it was.
@@ -137,9 +136,10 @@ The app posts two kinds of macOS notification; each can be turned off in
 Settings › General:
 
 - **Connection changes**: "This Mac is offline" when, with the connection on,
-  this Mac stays disconnected for 60 seconds, once per drop, and "This Mac is
-  back online" when it reconnects. Turning the connection off, signing out or
-  starting the app posts nothing.
+  this Mac was connected and then stays disconnected for 60 seconds, once per
+  drop, and "This Mac is back online" when it reconnects. Turning the
+  connection off, signing out, changing account or starting the app posts
+  nothing.
 - **Updates**: once per version, when an update is ready and Install updates
   automatically is off.
 
@@ -149,7 +149,7 @@ posts nothing. A notification shows only while the app is not in front.
 
 ### Network
 
-The app's own requests are these two:
+The app's own requests are these:
 
 - It reads the update feed,
   `https://downloads.openmachine.app/mac/preview/latest.json`, as
@@ -192,8 +192,8 @@ the preview app's identifier; `…` below is
 | `…/companion/remote-access.json` | your On or Off |
 | `…/companion/remote-access-owner.json`, `…/companion/remote-access-operations/` | connection operations, by ID |
 | `…/companion/preferences.json` | your notification and update choices, and whether you turned Launch at login off |
-| `…/companion/updates.json` | update records: the downloaded update's version and SHA-256, the last version notified, and each install until it ends |
-| `…/companion/update/` | the downloaded update, until it is installed or replaced |
+| `…/companion/updates.json` | update records: the downloaded update's version and SHA-256 or the last check's or download's error, the last version notified, and each install until it ends |
+| `…/companion/update/` | the downloaded update, until it is installed or replaced, or its download fails |
 | `~/Library/Application Support/OpenMachine/Code/agent.json` | what the agent starts |
 | `~/Library/Logs/co.openmachine.desktop.preview/connection.log` | the diagnostic log |
 | `~/Library/WebKit/co.openmachine.desktop.preview/` | the window's web data |
