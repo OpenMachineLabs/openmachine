@@ -702,9 +702,9 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 				return
 			}
 			if err == nil && line == "status" {
-				reply := map[string]any{"connected": true}
+				reply := map[string]any{"connected": true, "in_use": d.connected()}
 				if reason := d.authority.Status(); reason != "" {
-					reply = map[string]any{"connected": false, "reason": reason}
+					reply["connected"], reply["reason"] = false, reason
 				}
 				json.NewEncoder(uc).Encode(reply)
 				return

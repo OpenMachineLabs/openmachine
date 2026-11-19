@@ -22,7 +22,7 @@ The app uses six local interfaces, all defined here:
 
 | Interface | Defined in | The app uses it to |
 | --- | --- | --- |
-| `om`'s owner-only socket, `~/.local/state/openmachine-om/daemon.sock`: `status`, `watch`, `folders` | [`daemon/daemon.go`](../daemon/daemon.go) | show whether this Mac is connected, the machines list, this Mac's permission and your account; check Workspace folders |
+| `om`'s owner-only socket, `~/.local/state/openmachine-om/daemon.sock`: `status`, `watch`, `folders` | [`daemon/daemon.go`](../daemon/daemon.go) | show whether this Mac is connected, the machines list, this Mac's permission and your account; check Workspace folders; see whether an SSH connection or stream is open before an automatic update |
 | Device identity's commands `setup`, `companion` (sign-in, sign-out, `policy`, `remote-access` and reads), `inspect`, `upgrade` | [`device/openmachine_device/cli.py`](../device/openmachine_device/cli.py) | set up, sign in and out, set this Mac's permission, pass on your On or Off, switch bundles |
 | Core's `manage --contract 1`: from the payload the app carries to install and update Core, and while no binding is saved; otherwise from the `manage.py` Core installs | [`access/openmachine_access/cli.py`](../access/openmachine_access/cli.py), [`service/`](../access/openmachine_access/service) | install and update Core, read its status and follow its operations |
 | `remote-access.json` | [`remote_access.py`](../device/openmachine_device/remote_access.py) | pass on your On or Off |
@@ -51,8 +51,10 @@ app never runs it.
   [Limitation of this preview](#limitation-of-this-preview).
 - Once registered, the agent starts at every login and launchd keeps it
   running, whether your connection is on or off; while it is off, `om` stays
-  offline. When you turn the connection on, the app also asks macOS to open the
-  app at login.
+  offline.
+- The app itself opens at login while **Launch OpenMachine at login** in
+  Settings › General is on, a login item macOS keeps. Turning the connection on
+  turns it on too, unless you turned it off there.
 - It runs only from `/Applications` or `~/Applications`. Opened elsewhere, it
   asks to move itself there: it copies itself, clears the copy's download
   quarantine flag and keeps the copy only if its signature verifies. An older
@@ -112,29 +114,56 @@ a file it cannot read safely as Off; `om` follows device identity.
 
 ### Updates
 
-- The app contains an updater for itself, Core and the bundle. Releases ship it
-  off, with no update address and no signing key: it makes no update request
-  and installs nothing from the network.
-- The menu shows a notice when this repository has a stable release newer than
-  your Core. With the updater off, the notice installs nothing.
+- The app updates itself, Core and the bundle together, from one signed feed
+  whose address and signing key are built into it.
+- With **Automatically check for updates** on, as it is by default, the app
+  checks the feed at most once a day; **Check for Updates** in Settings › About
+  checks at once.
+- When the feed offers a newer version, the app downloads it and verifies its
+  signature. Settings and the menu bar then offer **Restart to Update**.
+- Before it installs, the app checks the feed again, checks that the file is
+  the one it downloaded, and verifies it again from the bytes it installs. It
+  then installs and restarts, and your connection comes back as it was.
+- **Install updates automatically**, off by default, installs a downloaded
+  update without asking, but only while automatic checks are on, `om` reports
+  no open SSH connection or stream, and no setup or connection change is
+  running.
+- An update that stops partway is reviewed from the menu bar.
+
+### Notifications
+
+The app posts two kinds of macOS notification; each can be turned off in
+Settings › General:
+
+- **Connection changes**: "This Mac is offline" when, with the connection on,
+  this Mac was connected and then stays disconnected for 60 seconds, once per
+  drop, and "This Mac is back online" when it reconnects. Turning the
+  connection off, signing out, changing account or starting the app posts
+  nothing.
+- **Updates**: once per version, when an update is ready and Install updates
+  automatically is off.
+
+macOS asks for permission when you click **Turn On…** in Settings or the first
+time a notification is due. While macOS has the app's notifications off, it
+posts nothing. A notification shows only while the app is not in front.
 
 ### Network
 
-The app's own requests are these two:
+The app's own requests are these:
 
-- It reads this repository's latest Release from `api.github.com`: every five
-  minutes until a read succeeds, then once a day. It sends no credentials or
-  cookies, only a User-Agent with the app's version, follows no redirects, and
-  reads only the release's tag, its link and whether it is a draft or a
-  prerelease.
+- It reads the update feed,
+  `https://downloads.openmachine.app/mac/preview/latest.json`, as
+  [Updates](#updates) says, and downloads the update the feed names from
+  `https://downloads.openmachine.app/mac/preview/releases/`.
 - It loads your account picture from the address your account gives, only over
   HTTPS from GitHub's or Google's image servers. Its window can load nothing
   else from the network.
 
-In your browser it opens the Console's Machines page, its sign-in page and
-the page of a machine `om` lists; the browser makes those requests. It puts
-text on the clipboard only when you copy a listed machine's name or its
-`ssh <alias>.om` command, the latter only with a valid alias.
+In your browser it opens the Console's Machines page, its sign-in page, the
+page of a machine `om` lists, and the privacy, terms and support pages of
+`openmachine.app`; the browser makes those requests. It puts text on the
+clipboard only when you copy a listed machine's name, its `ssh <alias>.om`
+command, the latter only with a valid alias, or this Mac's device ID.
 
 It never calls the service and holds no credential for it: no device key and no
 token. Device identity proves itself to the service with the device key it
@@ -162,7 +191,9 @@ the preview app's identifier; `…` below is
 | `…/companion/connector-reference.json` | the bundle in use, by its hash, and the path of the bundle the app carries; IDs of pending setup, sign-in, sign-out, connection operations and bundle switch, and of the account and sign-in they concern |
 | `…/companion/remote-access.json` | your On or Off |
 | `…/companion/remote-access-owner.json`, `…/companion/remote-access-operations/` | connection operations, by ID |
-| `…/companion/updates.json` | update records; not written while the updater is off |
+| `…/companion/preferences.json` | your notification and update choices, and whether you turned Launch at login off |
+| `…/companion/updates.json` | update records: the downloaded update's version and SHA-256 or the last download's error, the last version notified, and each install until it ends |
+| `…/companion/update/` | the downloaded update, until it is installed or replaced, or its download fails |
 | `~/Library/Application Support/OpenMachine/Code/agent.json` | what the agent starts |
 | `~/Library/Logs/co.openmachine.desktop.preview/connection.log` | the diagnostic log |
 | `~/Library/WebKit/co.openmachine.desktop.preview/` | the window's web data |
