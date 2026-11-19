@@ -197,11 +197,12 @@ type Authority struct {
 	policies  map[string]string // each mode as Core reports it: available or why not; nil until Core answers
 	services  []Service         // this machine's listening programs; nil until the first pass
 
-	leased  bool            // the open session holds a lease
-	account json.RawMessage // the last lease's account, kept after its session
-	policy  json.RawMessage // the last lease's target policy
-	devices []ViewDevice    // the last lease's devices, with presence frames applied
-	viewed  chan struct{}   // closed when the view may have changed
+	leased   bool            // the open session holds a lease
+	account  json.RawMessage // the last lease's account, kept after its session
+	policy   json.RawMessage // the last lease's target policy
+	devices  []ViewDevice    // the last lease's devices, with presence frames applied
+	approval *Approval       // the last lease's, display data only
+	viewed   chan struct{}   // closed when the view may have changed
 }
 
 // NewAuthority returns the Code authority of the device registered under
@@ -399,6 +400,13 @@ func (a *Authority) Devices() []ViewDevice {
 	return slices.Clone(a.devices)
 }
 
+// Approval returns the last lease's approval, if any.
+func (a *Authority) Approval() *Approval {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.approval
+}
+
 func (a *Authority) ask() {
 	select {
 	case a.renew <- struct{}{}:
@@ -442,7 +450,41 @@ type message struct {
 	Hosts      []json.RawMessage `json:"hosts"`
 	Account    json.RawMessage   `json:"account"`
 	Devices    []ViewDevice      `json:"devices"`
+	Approval   *Approval         `json:"approval"`
 	ViewDevice                   // of a presence frame
+}
+
+// Approval is a team that has not approved this computer, so that its
+// machines refuse it. It only says why: admission never reads it.
+type Approval struct {
+	Team struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	} `json:"team"`
+	State string `json:"state"`
+}
+
+// reason says why the team's machines refuse this computer: "" without an
+// approval or in a state om does not know.
+func (p *Approval) reason() string {
+	if p == nil {
+		return ""
+	}
+	switch p.State {
+	case "waiting":
+		return p.Team.Name + " hasn’t approved this computer yet. A team admin can approve it in the Console, under Team › Personal machines."
+	case "blocked":
+		return p.Team.Name + " blocked this computer. Ask a team admin."
+	}
+	return ""
+}
+
+// of returns reason when alias names one of the team's machines, else "".
+func (p *Approval) of(alias string) string {
+	if p == nil || !strings.HasSuffix(alias, "."+p.Team.Slug) {
+		return ""
+	}
+	return p.reason()
 }
 
 // lease reads m's lease, taking nothing it does not understand as permission:
@@ -705,8 +747,8 @@ func (a *Authority) acknowledge(ctx context.Context, conn *websocket.Conn, l Lea
 
 // apply has the device close what l, m's lease, no longer permits, unless this
 // epoch and revision were already applied, and then admits under it from
-// start and holds m's account view. It reports whether the lease was applied
-// now, and so is to be acknowledged.
+// start and holds m's account view and approval. It reports whether the lease
+// was applied now, and so is to be acknowledged.
 func (a *Authority) apply(l Lease, m message, start time.Time, ttl time.Duration) bool {
 	key := fmt.Sprint(l.Epoch, "/", l.Revision)
 	a.mu.Lock()
@@ -725,7 +767,7 @@ func (a *Authority) apply(l Lease, m message, start time.Time, ttl time.Duration
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.applied = key
-	a.leased, a.account, a.policy, a.devices = true, m.Account, nil, m.Devices
+	a.leased, a.account, a.policy, a.devices, a.approval = true, m.Account, nil, m.Devices, m.Approval
 	if l.Target != nil {
 		a.policy = l.Target.Policy
 	}

@@ -332,6 +332,9 @@ func (d *daemon) Lease() (*Lease, error) {
 // Devices returns the machines of the last lease's view.
 func (d *daemon) Devices() []ViewDevice { return d.authority.Devices() }
 
+// Approval returns the last lease's approval, if any.
+func (d *daemon) Approval() *Approval { return d.authority.Approval() }
+
 // Services returns this machine's listening programs, as discovery listed
 // them last.
 func (d *daemon) Services() []Service {
@@ -841,6 +844,9 @@ func (d *daemon) dial(host string) (*connector.Conn, error) {
 	}
 	i := slices.IndexFunc(l.Hosts, func(h Host) bool { return slices.Contains(h.Aliases, name) })
 	if i < 0 {
+		if reason := d.authority.Approval().of(name); reason != "" {
+			return nil, fmt.Errorf("%s is not a machine this computer can use: %s", host, reason)
+		}
 		return nil, fmt.Errorf("%s is not a machine this computer can use", host)
 	}
 	node := d.node.Load()

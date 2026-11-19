@@ -40,6 +40,8 @@ type Opener interface {
 	Lease() (*Lease, error)
 	// Devices returns the machines of the last lease's view.
 	Devices() []ViewDevice
+	// Approval returns the last lease's approval, if any.
+	Approval() *Approval
 	// Dial opens an OM SSH stream to the machine alias names, for app, that
 	// going offline closes. ErrUnreachable reports a machine that is offline.
 	Dial(alias, app string) (net.Conn, error)
@@ -619,7 +621,11 @@ func (l *Local) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case refused == nil && got != nil && !got.Reused: // a new stream's first answer is not HTTP
 				show(w, http.StatusBadGateway, "This isn’t a web page", "Port "+port+" on "+name+" doesn’t answer as a web page. Use it as a program instead.", "")
 			default:
-				show(w, http.StatusBadGateway, "Can’t reach "+name, "This computer can’t connect to it.", "")
+				text := "This computer can’t connect to it."
+				if reason := l.o.Approval().of(alias); h == nil && reason != "" {
+					text = html.EscapeString(reason)
+				}
+				show(w, http.StatusBadGateway, "Can’t reach "+name, text, "")
 			}
 		},
 	}).ServeHTTP(w, r)
@@ -884,7 +890,7 @@ func (l *Local) serveModels(w http.ResponseWriter, r *http.Request) {
 		m = find(l.reach(true), model)
 	}
 	if m == nil {
-		refuse(http.StatusNotFound, "No machine this computer reaches has the model "+strconv.Quote(model)+".")
+		refuse(http.StatusNotFound, strings.TrimSpace("No machine this computer reaches has the model "+strconv.Quote(model)+". "+l.o.Approval().reason()))
 		return
 	}
 	id, _ := json.Marshal(m.ID)

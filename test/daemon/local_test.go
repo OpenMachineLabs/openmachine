@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -190,6 +191,7 @@ type computer struct {
 	to      string
 	streams []net.Conn
 	pages   []daemon.Page // as the state file keeps them
+	approve *daemon.Approval
 
 	services []daemon.Service  // its own model servers
 	others   map[string]string // where another machine listens, by alias
@@ -203,7 +205,12 @@ func (c *computer) Lease() (*daemon.Lease, error) {
 	return &l, c.offline
 }
 func (c *computer) Devices() []daemon.ViewDevice { return c.devices }
-func (c *computer) Key() ([]byte, error)         { return []byte(strings.Repeat("k", 32)), nil }
+func (c *computer) Approval() *daemon.Approval {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.approve
+}
+func (c *computer) Key() ([]byte, error) { return []byte(strings.Repeat("k", 32)), nil }
 func (c *computer) Pages() ([]daemon.Page, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -751,6 +758,53 @@ func TestLocalRefusals(t *testing.T) {
 	}
 	if e.asked.Load() != 0 {
 		t.Error("a refused request reached the page")
+	}
+}
+
+// A machine of a team that has not approved this computer says why, on a page of a name of the team no host
+// has and at the models' address; any other name, and a state om does not know, say what they said.
+func TestLocalApproval(t *testing.T) {
+	e := newEntry(t)
+	e.computer.set(func() { e.computer.dial = errors.New("not a machine this computer can use") })
+	const unreachable = "This computer can’t connect to it."
+	waiting, blocked := "Acme &amp; Co hasn’t approved this computer yet. A team admin can approve it in the Console, under Team › Personal machines.",
+		"Acme &amp; Co blocked this computer. Ask a team admin."
+	for _, c := range []struct{ approval, why string }{
+		{`{"team":{"slug":"acme","name":"Acme & Co"},"state":"waiting"}`, waiting},
+		{`{"team":{"slug":"acme","name":"Acme & Co"},"state":"blocked"}`, blocked},
+		{`{"team":{"slug":"acme","name":"Acme & Co"},"state":"paused"}`, ""},
+		{`null`, ""},
+	} {
+		var approve *daemon.Approval
+		if err := json.Unmarshal([]byte(c.approval), &approve); err != nil {
+			t.Fatal(err)
+		}
+		e.computer.set(func() { e.computer.approve = approve })
+		page := unreachable
+		if c.why != "" {
+			page = c.why
+		}
+		for _, p := range []struct{ alias, port, name, text string }{
+			{"gpu-02.acme", "8080", "gpu-02.acme", page},
+			{"gpu-01.acme", "9010", "GPU &lt;01&gt;", unreachable}, // a host has it
+			{"dev-9", "8080", "dev-9", unreachable},
+			{"gpu-02.other", "8080", "gpu-02.other", unreachable},
+		} {
+			host := e.open(p.alias, p.port)
+			res, body := e.do("GET", host, "/", "", "Cookie", e.confirm(host))
+			if want := "<h1>Can’t reach " + p.name + "</h1><p>" + p.text + "</p></main>"; res.StatusCode != 502 || !strings.Contains(body, want) {
+				t.Errorf("with %s, %s = %d, want %q:\n%s", c.approval, p.alias, res.StatusCode, want, body)
+			}
+		}
+		model := `No machine this computer reaches has the model "none".`
+		if c.why != "" {
+			model += " " + html.UnescapeString(c.why)
+		}
+		res, text := e.do("POST", "127.0.0.1:11400", "/v1/chat/completions", `{"model":"none"}`)
+		var refusal struct{ Error struct{ Message string } }
+		if json.Unmarshal([]byte(text), &refusal); res.StatusCode != 404 || refusal.Error.Message != model {
+			t.Errorf("with %s, the model = %d %q, want %q", c.approval, res.StatusCode, text, model)
+		}
 	}
 }
 
