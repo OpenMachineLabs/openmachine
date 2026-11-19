@@ -192,7 +192,7 @@ the preview app's identifier; `…` below is
 | `…/companion/remote-access.json` | your On or Off |
 | `…/companion/remote-access-owner.json`, `…/companion/remote-access-operations/` | connection operations, by ID |
 | `…/companion/preferences.json` | your notification and update choices, and whether you turned Launch at login off |
-| `…/companion/updates.json` | update records: the downloaded update's version and SHA-256 or the last check's or download's error, the last version notified, and each install until it ends |
+| `…/companion/updates.json` | update records: the downloaded update's version and SHA-256 or the last download's error, the last version notified, and each install until it ends |
 | `…/companion/update/` | the downloaded update, until it is installed or replaced, or its download fails |
 | `~/Library/Application Support/OpenMachine/Code/agent.json` | what the agent starts |
 | `~/Library/Logs/co.openmachine.desktop.preview/connection.log` | the diagnostic log |
