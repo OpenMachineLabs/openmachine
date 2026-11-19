@@ -3,7 +3,9 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -203,6 +205,32 @@ func TestHosts(t *testing.T) {
 		"gpu-01.other.om": "error gpu-01.other.om is not a machine this computer can use\n"} {
 		if got := dial(host); got != want {
 			t.Errorf("dial %s = %q, want %q", host, got, want)
+		}
+	}
+	// A name of a team that has not approved this computer, and no host has, says why; any other name, a
+	// state om does not know, null and a lease without the field say what they said.
+	for i, c := range []struct{ approval, why string }{
+		{`{"team":{"slug":"acme","name":"Acme Robotics"},"state":"waiting"}`, ": Acme Robotics hasn’t approved this computer yet. A team admin can approve it in the Console, under Team › Personal machines."},
+		{`null`, ""},
+		{`{"team":{"slug":"acme","name":"Acme Robotics"},"state":"blocked"}`, ": Acme Robotics blocked this computer. Ask a team admin."},
+		{``, ""},
+		{`{"team":{"slug":"acme","name":"Acme Robotics"},"state":"paused"}`, ""},
+	} {
+		revision := fmt.Sprint("r", i+3)
+		p.changed()
+		f := frame(p.renewal(), revision, 60000, lease)
+		if c.approval != "" {
+			f["approval"] = json.RawMessage(c.approval)
+		}
+		p.write(f)
+		p.applied(t, revision)
+		for host, want := range map[string]string{"gpu-02.acme.om": "error gpu-02.acme.om is not a machine this computer can use" + c.why + "\n",
+			"gpu-01.acme.om":  joining,
+			"dev-mac.om":      "error dev-mac.om is not a machine this computer can use\n",
+			"gpu-01.other.om": "error gpu-01.other.om is not a machine this computer can use\n"} {
+			if got := dial(host); got != want {
+				t.Errorf("with %s, dial %s = %q, want %q", c.approval, host, got, want)
+			}
 		}
 	}
 }
