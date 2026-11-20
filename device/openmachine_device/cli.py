@@ -71,7 +71,10 @@ async def remove(store: Store, *, local_only: bool = False) -> dict:
         device = config.get("device")
         others = [stored for stored in config.get("devices", []) if stored != device]
         live = not local_only and session and not session.get("ended")
-        flight = await in_flight(store, Cloud(config["server"]), session) if live else None
+        flight = None
+        if live:
+            async with Cloud(config["server"]) as cloud:
+                flight = await in_flight(store, cloud, session)
         if flight and flight["device_id"] not in {stored["device_id"] for stored in config.get("devices", [])}:
             others.append(flight)
         if not device and not others:
@@ -79,11 +82,11 @@ async def remove(store: Store, *, local_only: bool = False) -> dict:
         elif local_only:
             result["cloud_revocation"] = "unverified"
         else:
-            cloud = Cloud(config["server"])
-            if device and not config.get("revoked"):
-                await unpair(store, cloud)
-            for stored in others:
-                await revoke(store, cloud, stored)
+            async with Cloud(config["server"]) as cloud:
+                if device and not config.get("revoked"):
+                    await unpair(store, cloud)
+                for stored in others:
+                    await revoke(store, cloud, stored)
             result["cloud_revocation"] = "verified"
     except (ConnectorError, OSError) as error:
         result["errors"]["cloud_revocation"] = diagnostic(error)
@@ -122,7 +125,9 @@ async def command(args) -> dict:
                 from .setup import act
                 return await act(store, args.action, value, service.bundle_source())
             from .companion import Companion
-            return await Companion(store).act(args.action, value)
+            companion = Companion(store)
+            async with companion.cloud:
+                return await companion.act(args.action, value)
         if args.command == "upgrade":
             if args.automatic:
                 if args.operation_id or not args.bundle or not args.expected_current or not args.expected_target:

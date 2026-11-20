@@ -214,7 +214,10 @@ class NativeEnrollment(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(config["enabled"])
         await self.sign_out()
         self.assertFalse(self.store.read("config.json")["enabled"])
+        calls = len(self.cloud.calls)
         await self.start_login("b" * 32)
+        # The sign-out is on record as ended, so signing in again asks Cloud only to create the new sign-in.
+        self.assertEqual([path for path, _ in self.cloud.calls[calls:]], ["/api/native-sessions"])
         self.assertEqual(len(self.keys()), 2)
         self.assertEqual(self.store.read("native-session.json")["listed"], [config["device"]["key_fingerprint"]])
         self.assertEqual(self.approve(), device)
