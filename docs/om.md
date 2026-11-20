@@ -153,13 +153,18 @@ deletes the queue's oldest file, and Cloud records the gap as lost records.
 Sessions reach GitHub through the account's GitHub connection. No token is on
 the machine, and `gh` is not used.
 
-- Only a session whose source's `allow` has `github` gets the routing. A shell
-  or exec session then gets process-scoped Git configuration in its
-  environment, from a Core that lists `github` as `https`: remotes spelled
+- Each shell or exec session, from a Core that lists `github` as `include`,
+  gets the broker, its capability and one Git `include.path` in its
+  environment, naming its own file in `github-routing` in `om`'s state. The
+  file holds process-scoped Git configuration: remotes spelled
   `https://github.com/`, `git@github.com:` or `ssh://git@github.com/` go to the
   machine's loopback broker, with `om git-credential` as the only credential
-  helper. No global or repository configuration changes. Under Full access the
-  user's own credentials still work for anything that bypasses the routing.
+  helper. It exists only while the source's `allow` has `github`, so a lease
+  turns routing on or off in open sessions; each Git process reads it as it
+  starts, and the broker refuses, without asking Cloud, a session whose source
+  has no `github`. Restricted work reads the folder and writes nothing there.
+  No global or repository configuration changes. Under Full access the user's
+  own credentials still work for anything that bypasses the routing.
 - The broker serves TLS with a key made in memory at each start, which the
   routing pins, so whatever else later holds its port fails the handshake. A
   Git whose libcurl cannot pin ignores the pin.
@@ -175,6 +180,21 @@ the machine, and `gh` is not used.
   failure but a refusal is reported as an unknown outcome and never retried.
 - `om github` creates, views and lists pull requests and reads checks and
   statuses; nothing else.
+- A team's machine may need its person's approval. In a terminal
+  (`om git-credential` and `om github` read their standard error) `om` shows
+  the number to choose and waits up to 5 minutes; a team's push is held whole,
+  shown the number as `remote:` lines and sent again once approved. Otherwise,
+  as for an agent, it prints Cloud's message and fails at once. The broker asks
+  Cloud about one request at a time, at most 20 times a minute.
+- A person's computer holds their session on a team's machine while a socket
+  `dial` to it lasts: it posts when the dial starts, every 2 minutes, and ends
+  the session a minute after the last dial ends. After Cloud declines, it posts
+  again only after the next change.
+- While a `watch` client is connected to a person's computer, the view's
+  `github` holds their waiting requests, each with `expires_at` on this
+  computer's clock, and new notices, read at most every 10 seconds and at once
+  after a decision. The socket line `github {"request":…,"decision":…,"choice":…}`
+  answers one JSON line, `{"result":…}` or `{"error":{"code":…,"message":…}}`.
 
 ## Linux
 
