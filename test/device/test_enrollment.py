@@ -3,6 +3,7 @@
 import copy
 import io
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import time
@@ -17,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from openmachine_device.cli import command, parser
 from openmachine_device.cloud import Cloud
-from openmachine_device.companion import Companion
+from openmachine_device.companion import Companion, computer_name
 from openmachine_device.errors import ConnectorError
 from openmachine_device.store import Identity, ORIGIN, Store, hardware_id, key_file, key_fingerprint
 
@@ -165,6 +166,11 @@ class NativeEnrollment(unittest.IsolatedAsyncioTestCase):
 
     def request(self, identity="a" * 32, **fields):
         return {"operation_id": identity, "expected_binding": self.companion.binding(), **fields}
+
+    async def test_names_a_new_device_by_this_computers_name(self):
+        with patch("openmachine_device.companion.computer_name", return_value=" Ada’s MacBook Pro "):
+            await self.companion.act("login", self.request())
+        self.assertEqual(self.cloud.calls[0][1]["device_name"], "Ada’s MacBook Pro")
 
     async def start_login(self, identity="a" * 32):
         return await self.companion.act("login", self.request(identity, device_name="My Mac"))
@@ -935,6 +941,25 @@ class NativeEnrollment(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.read("config.json")["device"]["device_id"], device)
         self.assertEqual((await self.companion.recover(old["operation_id"]))["status"], "unknown")
         self.assertEqual(self.companion.operation(old["operation_id"]), old)
+
+
+class ComputerName(unittest.TestCase):
+    def test_a_mac_reads_its_computer_name_and_falls_back_to_the_host_name(self):
+        with (patch("openmachine_device.companion.sys.platform", "darwin"),
+              patch("openmachine_device.companion.socket.gethostname", return_value="Ada-1.local"),
+              patch("openmachine_device.companion.subprocess.run",
+                    return_value=SimpleNamespace(stdout="Ada’s MacBook Pro\n")) as run):
+            self.assertEqual(computer_name(), "Ada’s MacBook Pro")
+            self.assertEqual(run.call_args.args[0], ["/usr/sbin/scutil", "--get", "ComputerName"])
+            run.return_value = SimpleNamespace(stdout="\n")
+            self.assertEqual(computer_name(), "Ada-1.local")
+            run.side_effect = subprocess.CalledProcessError(1, "scutil")
+            self.assertEqual(computer_name(), "Ada-1.local")
+        with (patch("openmachine_device.companion.sys.platform", "linux"),
+              patch("openmachine_device.companion.socket.gethostname", return_value="build-box"),
+              patch("openmachine_device.companion.subprocess.run") as run):
+            self.assertEqual(computer_name(), "build-box")
+            run.assert_not_called()
 
 
 if __name__ == "__main__":
