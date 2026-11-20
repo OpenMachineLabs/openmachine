@@ -14,7 +14,7 @@ import sys
 import time
 import unittest
 
-from openmachine_access import sessions
+from openmachine_access import rules, sessions
 from openmachine_access.linux import sandbox
 from openmachine_access.macos import seatbelt as macos
 from test.support.access_sessions import CLIENT_NAME, CONNECTION, HOME, HOMES, USER, SessionFixture, members
@@ -22,6 +22,9 @@ from test.support.access_sessions import CLIENT_NAME, CONNECTION, HOME, HOMES, U
 DENIED = "not permitted"
 IDENTITY = ("GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=Fixture "
             "GIT_COMMITTER_EMAIL=fixture@example.invalid")
+
+# A routing file of the host's routing folder, which a Full Access session's Git reads as the host left it.
+ROUTED = str(rules.GITHUB_ROUTING / ("a" * 32))
 
 # Sessions take the account's home from the password database, whatever $HOME the caller has.
 ACCOUNT_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
@@ -37,6 +40,12 @@ def detached(name):
 
 @unittest.skipUnless(macos.lifetime_unavailable_reason() is None, "requires the macOS Seatbelt lifetime backend")
 class RestrictedSessionTests(SessionFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.routes = self.state / "github-routing"  # The host's routing folder, here inside a control path.
+        self.routes.mkdir()
+        self.prelude = f"from openmachine_access import rules as _r; _r.GITHUB_ROUTING = _r.Path({str(self.routes)!r}); "
+
     def test_commands_are_confined_and_report_their_exit(self):
         outside = self.root / "outside"
         outside.mkdir()
@@ -52,10 +61,12 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         self.assertFalse((outside / "x").exists())
 
     def routing(self, client):
-        broker = "https://127.0.0.1:41234"
+        """The session's routing file, as the host writes it, and its routing."""
+        broker, path = "https://127.0.0.1:41234", self.routes / ("a" * 32)
+        path.write_text(f'[credential "{broker}"]\n\thelper = "!\'{client}\' git-credential"\n')
+        path.chmod(0o644)
         return {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
-                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
-                "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
+                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": str(path)}}
 
     def clients(self):
         """Two om clients, each beside another program, in a directory the profile denies."""
@@ -91,7 +102,7 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
         out, err = self.admitted(lifetime, f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; "
                                  f"{first.parent}/other; ln {stable} $HOME/linked; echo x >> {stable}", prelude, first)
         self.assertIn("OM_BROKER=https://127.0.0.1:41234\nOM_BROKER_CAPABILITY=" + "c" * 43, out)
-        self.assertIn(f"GIT_CONFIG_VALUE_0=!'{first}' git-credential", out)
+        self.assertIn(f"GIT_CONFIG_VALUE_0={self.routes / ('a' * 32)}", out)
         self.assertRegex(out, rf"PATH={stable.parent}:\S+\n")
         self.assertIn("om-a hi", out)
         self.assertNotIn("other-a", out)
@@ -150,6 +161,21 @@ class RestrictedSessionTests(SessionFixture, unittest.TestCase):
             reply = json.loads(control.makefile("rb").readline() or b"{}")
         out, _ = paused.communicate(timeout=60)
         self.assertEqual((reply.get("status"), out), ("admitted", b"paused\n"), reply)
+
+    def test_restricted_work_reads_the_routing_folder_and_changes_nothing_there(self):
+        (client, _), prelude = self.clients()
+        github = self.routing(client)
+        path = Path(github["environment"]["GIT_CONFIG_VALUE_0"])
+        text = path.read_text()
+        (self.state / "secret").write_text("private\n")
+        subprocess.run(["git", "init", "-q", self.root / "repo"], check=True)
+        out, err = self.admitted(self.lifetime(), (
+            f"git config --get credential.https://127.0.0.1:41234.helper; ls {self.routes}; "
+            f"git -C {self.root / 'repo'} status --short && echo status; echo x >> {path}; "
+            f"echo x > {self.routes}/new; rm -f {path}; mv {path} $HOME/moved; cat {self.state}/secret"), prelude, client)
+        self.assertEqual(out.splitlines(), [f"!'{client}' git-credential", path.name, "status"], err)
+        self.assertEqual(err.count(DENIED), 5, err)
+        self.assertEqual((path.read_text(), os.listdir(self.routes)), (text, [path.name]))
 
     def test_a_client_removed_before_core_copies_it_has_no_effect(self):
         """As when an update removes an old client: it passed its check, then vanished before the copy."""
@@ -572,11 +598,11 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         client.chmod(0o755)
         broker = "https://127.0.0.1:41234"
         github = {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
-                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1048576"}}
-        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_BROKER $GIT_CONFIG_KEY_0; om ok",
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": ROUTED}}
+        reply, code, out, err = self.session(self.lifetime(), "full_access", "echo $OM_BROKER $GIT_CONFIG_VALUE_0; om ok",
                                              github=github)
         self.assertEqual((reply["status"], code), ("admitted", 0), err)
-        self.assertEqual(out.splitlines(), [f"{broker} http.{broker}.postBuffer", "client ok"])
+        self.assertEqual(out.splitlines(), [f"{broker} {ROUTED}", "client ok"])
 
     def test_a_link_at_the_persistent_home_name_never_refuses_a_full_session(self):
         """/Users/Shared is world-writable and sticky: another local user may create this user's home name
@@ -590,7 +616,7 @@ class FullAccessSessionTests(SessionFixture, unittest.TestCase):
         self.addCleanup(HOME.parent.unlink)
         broker = "https://127.0.0.1:41234"
         github = {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
-                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"http.{broker}.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}
+                  "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": ROUTED}}
         reply, code, out, err = self.session(self.lifetime(), "full_access", "om", github=github)
         self.assertEqual((reply["status"], code, out), ("admitted", 0, "client\n"), err)
 

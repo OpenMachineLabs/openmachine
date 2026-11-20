@@ -45,7 +45,8 @@ def _restricted_profile(scope: "rules.Scope | None", state: Path, runtime: Path,
     denied, exceptions = seatbelt.read_denials(rules.account_home())
     control = list(dict.fromkeys([*rules.control_paths(state), state]))
     return seatbelt.profile(home=home, others=others, folders=[] if scope is None else scope.grants(), private=runtime,
-                            control=control, denied=denied, exceptions=exceptions, executable=restricted._stable_client())
+                            control=control, denied=denied, exceptions=exceptions, executable=restricted._stable_client(),
+                            routing=Path(os.path.realpath(rules.GITHUB_ROUTING)))
 
 
 def _admit_restricted(request: sessions.SessionRequest, account, state: Path) -> tuple:
@@ -62,17 +63,19 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
         record = restricted._record(lifetime, request)
         home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
         # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. Each
-        # instance may run Core's copy of om, except instances started before that copy existed: a
-        # routed session starts a new instance once there, which cannot see the earlier one's jobs.
+        # instance may run Core's copy of om and read the routing folder, except instances started before:
+        # a routed session starts a new instance once there, which cannot see the earlier one's jobs.
         newest = record["instances"][-1] if record["instances"] else None
-        usable = newest and restricted._spawner_alive(newest) and (stable is None or newest.get("client") == str(stable))
+        usable = newest and restricted._spawner_alive(newest) and (
+            stable is None or newest.get("client") == str(stable) and newest.get("routing"))
         instance = newest if usable else None
         if instance is None:
             # Folders and worktrees are fixed when an instance starts; later sessions reuse them.
             text = _restricted_profile(scope, state, runtime, home, others)
             # Publish the marker before anything starts, so a failed save, a lost launcher or a stalled
             # spawner never leaves a running instance that no record names.
-            instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None, "client": str(restricted._stable_client())}
+            instance = {"marker": uuid.uuid4().hex, "pid": None, "start": None, "client": str(restricted._stable_client()),
+                        "routing": True}
             record["instances"].append(instance)
             lifetime.save(record)
             instance.update(_start_spawner(lifetime, text, runtime, instance["marker"]))

@@ -193,11 +193,13 @@ def protection(roots: dict[Path, list[Path]]) -> list[str]:
             + [item for path in readonly for item in ("--ro-bind", str(path), str(path))])
 
 
-def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], private: Path, client: Path) -> list[str]:
+def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], private: Path, client: Path,
+              routing: Path | None) -> list[str]:
     """One instance's bubblewrap arguments: read the machine except what is hidden, the denied areas and
     Core's control paths, and write only the sandbox home, the Workspace roots, the lifetime's directory
     in the runtime tree and its own /tmp and /run. roots maps each writable folder and worktree to its
-    .git entries; client is the directory of Core's copy of the om client."""
+    .git entries; client is the directory of Core's copy of the om client; routing, the host's routing
+    folder, is read only."""
     found = _base()
     for path in (path for pattern in GPU for path in glob.glob(pattern)):
         found += ["--dev-bind", path, path]
@@ -209,6 +211,8 @@ def arguments(*, home: Path, roots: dict[Path, list[Path]], hidden: list[Path], 
     # spawner can run.
     python = [Path(os.path.realpath(item)) for item in (sys.prefix, sys.base_prefix, *sys.path) if os.path.isdir(item)]
     exposed = dict.fromkeys(python, "--ro-bind") | {client: "--ro-bind", private: "--bind", home: "--bind"}
+    if routing:
+        exposed[routing] = "--ro-bind"
     for path in sorted(exposed):
         if path.is_relative_to("/tmp") or path.is_relative_to("/run"):
             found += [exposed[path], str(path), str(path)]

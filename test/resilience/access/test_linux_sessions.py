@@ -67,8 +67,9 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.account = self.root / "account"
         self.account.mkdir()
         self.home = sandbox.home(self.account) / "home"
+        self.routes = self.state / "github-routing"  # The host's routing folder, here inside a control path.
         self.prelude = ("from pathlib import Path as _P\nfrom openmachine_access import rules as _r\n"
-                        f"_r.account_home = lambda: _P({str(self.account)!r})\n")
+                        f"_r.account_home = lambda: _P({str(self.account)!r})\n_r.GITHUB_ROUTING = _P({str(self.routes)!r})\n")
 
     def instances(self, lifetime):
         return json.loads((self.state / "code" / lifetime / "record.json").read_text())["instances"]
@@ -243,19 +244,26 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertNotIn(segment, out.split())
 
     def routing(self, client):
-        broker = "https://127.0.0.1:41234"
+        """The session's routing file, as the host writes it, and its routing."""
+        broker, path = "https://127.0.0.1:41234", self.routes / ("a" * 32)
+        self.routes.mkdir(exist_ok=True)
+        path.write_text(f'[credential "{broker}"]\n\thelper = "!\'{client}\' git-credential"\n')
+        path.chmod(0o644)
         return {"client": str(client), "environment": {"OM_BROKER": broker, "OM_BROKER_CAPABILITY": "c" * 43,
-                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"credential.{broker}.helper",
-                "GIT_CONFIG_VALUE_0": f"!'{client}' git-credential"}}
+                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": str(path)}}
 
-    def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
+    def clients(self):
+        """Two om clients, each in a denied area, so only Core's copy can run."""
         clients = []
-        for name in ("a", "b"):  # Each in a denied area, so only Core's copy can run.
+        for name in ("a", "b"):
             (self.account / ".ssh" / name).mkdir(parents=True, mode=0o755)
             clients.append(self.account / ".ssh" / name / "om")
             clients[-1].write_text(f"#!/bin/sh\necho om-{name} \"$@\"\n")
             clients[-1].chmod(0o755)
-        first, second = clients
+        return clients
+
+    def test_github_routing_runs_cores_copy_of_the_client_in_the_lifetimes_one_instance(self):
+        first, second = self.clients()
         lifetime, stable = self.lifetime(), sandbox.runtime(self.account) / CLIENT_NAME / "om"
         reply, code, out, err = self.session(lifetime, command=(
             f"env | grep -E '^(OM_BROKER|GIT_CONFIG_)' | LC_ALL=C sort; echo PATH=$PATH; om hi; {first}; echo x >> {stable}; "
@@ -274,6 +282,26 @@ class BubblewrapSessionTests(SessionFixture, unittest.TestCase):
         self.assertEqual(out.split(), ["om-b", "same"], err)
         self.assertEqual(self.session(lifetime, command="env | grep -c OM_BROKER")[2], "0\n")
         self.assertEqual(len(self.instances(lifetime)), 1)
+
+    def test_restricted_work_reads_the_routing_folder_mounted_from_its_instances_start(self):
+        client, _ = self.clients()
+        lifetime = self.lifetime()
+        self.assertEqual(self.session(lifetime)[0]["status"], "admitted")  # An instance from before the folder existed
+        github = self.routing(client)
+        path = Path(github["environment"]["GIT_CONFIG_VALUE_0"])
+        text = path.read_text()
+        (self.state / "secret").write_text("private\n")
+        subprocess.run(["git", "init", "-q", self.root / "repo"], check=True)
+        reply, code, out, err = self.session(lifetime, command=(
+            f"git config --get credential.https://127.0.0.1:41234.helper; ls {self.routes}; "
+            f"git -C {self.root / 'repo'} status --short && echo status; echo x >> {path}; "
+            f"echo x > {self.routes}/new; rm -f {path}; cat {self.state}/secret"), github=github)
+        self.assertEqual(reply["status"], "admitted", reply)
+        self.assertEqual(out.splitlines(), [f"!'{client}' git-credential", path.name, "status"], err)
+        self.assertEqual((err.count(READ_ONLY), err.count(MISSING)), (3, 1), err)
+        self.assertEqual((path.read_text(), os.listdir(self.routes)), (text, [path.name]))
+        # A routed session started an instance that mounts the folder; the earlier one has none.
+        self.assertEqual([item.get("routing") for item in self.instances(lifetime)], [False, True])
 
     def instance_directory(self, lifetime):
         return sandbox.runtime(self.account) / restricted.digest(lifetime)[:12]

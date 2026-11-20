@@ -121,7 +121,7 @@ class SandboxArgumentTests(unittest.TestCase):
         for path in (home, private, private.parent / "client"):
             path.mkdir(parents=True, exist_ok=True)
         return sandbox.arguments(home=home, roots=roots, hidden=[self.root / "state"], private=private,
-                                 client=private.parent / "client")
+                                 client=private.parent / "client", routing=None)
 
     def test_an_instance_writes_only_its_home_its_folders_and_its_lifetime_directory(self):
         folder, state = self.root / "folder", self.root / "state"

@@ -118,7 +118,8 @@ class GitHubClientTests(unittest.TestCase):
         request = sessions.parse(json.dumps({"protocol": 4, "user": "dev", "lifetime": "l", "policy": "full_access", "kind": "shell",
             "connection": "127.0.0.1 1 127.0.0.1 22",
             "github": {"client": str(client), "environment": {"OM_BROKER": "https://127.0.0.1:1", "OM_BROKER_CAPABILITY": "c" * 43,
-                       "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://127.0.0.1:1.postBuffer", "GIT_CONFIG_VALUE_0": "1"}}}).encode())
+                       "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "include.path",
+                       "GIT_CONFIG_VALUE_0": str(rules.GITHUB_ROUTING / ("a" * 32))}}}).encode())
         return sessions._client(request)
 
     def refused(self, client):
