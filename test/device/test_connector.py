@@ -440,7 +440,6 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
             ("POST", path, 403, b'{"error":{"code":"key_invalid"}}', "device_not_authorized"),
         ]
         client_type = httpx.AsyncClient
-        cloud = Cloud(ORIGIN)
         for method, route, response_status, response_body, expected in cases:
             async def app(scope, receive, send):
                 self.assertEqual(scope["method"], method)
@@ -453,7 +452,8 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
             with self.subTest(method=method, route=route, status=response_status, body=response_body), \
                     patch("openmachine_device.cloud.httpx.AsyncClient", side_effect=client), \
                     self.assertRaises(ConnectorError) as observed:
-                await cloud.request(method, route, body=b"{}")
+                async with Cloud(ORIGIN) as cloud:  # a Cloud keeps its client: one per case
+                    await cloud.request(method, route, body=b"{}")
             self.assertEqual(observed.exception.code, expected)
 
     async def test_a_connection_that_never_opened_is_tried_once_more_over_ipv4_only(self):
@@ -532,7 +532,7 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
     async def test_a_skewed_clock_is_corrected_once_and_never_read_as_revocation(self):
         """Cloud's time from native_clock_skew signs the one retry; a second skew stays that error."""
         client_type = httpx.AsyncClient
-        cloud, key = Cloud(ORIGIN), Identity(Ed25519PrivateKey.from_private_bytes(bytes(range(32))))
+        key = Identity(Ed25519PrivateKey.from_private_bytes(bytes(range(32))))
         session = {"challenge_id": "s" * 43, "challenge": "challenge-value"}
         server_time = int(time.time()) + 3600
         for corrected in (True, False):
@@ -546,7 +546,7 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
                 await send({"type": "http.response.body", "body": json.dumps(body).encode()})
             def client(**kwargs):
                 return client_type(transport=httpx.ASGITransport(app=app), **kwargs)
-            cloud.offset = 0
+            cloud = Cloud(ORIGIN)  # a Cloud keeps its client and its offset: one per case
             with self.subTest(corrected=corrected), patch("openmachine_device.cloud.httpx.AsyncClient", side_effect=client):
                 if corrected:
                     self.assertEqual(await cloud.native("/api/native-sessions/" + "s" * 43 + "/status", session, {}, key), {"status": "pending"})
