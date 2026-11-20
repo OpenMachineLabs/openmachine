@@ -127,6 +127,8 @@ type Device interface {
 	// asked for it in the Console, with the one-time secret Cloud issued, and
 	// reports whether it started.
 	Move(secret string) bool
+	// Changed is told each change Cloud announces, before the lease that follows.
+	Changed()
 }
 
 // Refusal is a machine's refusal of the Workspace folder at Index of its
@@ -202,6 +204,7 @@ type Authority struct {
 	policy   json.RawMessage // the last lease's target policy
 	devices  []ViewDevice    // the last lease's devices, with presence frames applied
 	approval *Approval       // the last lease's, display data only
+	github   json.RawMessage // the person's GitHub requests and notices, as last read; nil before
 	viewed   chan struct{}   // closed when the view may have changed
 }
 
@@ -389,8 +392,27 @@ func (a *Authority) View() ([]byte, <-chan struct{}) {
 			devices[i].State = "unknown"
 		}
 	}
-	b, _ := json.Marshal(map[string]any{"live": a.leased, "device_id": a.deviceID, "account": a.account, "policy": a.policy, "devices": devices})
+	b, _ := json.Marshal(map[string]any{"live": a.leased, "device_id": a.deviceID, "account": a.account, "policy": a.policy, "devices": devices,
+		"github": a.github})
 	return append(b, '\n'), a.viewed
+}
+
+// GitHub sets the view's github: the person's waiting GitHub requests and new notices.
+func (a *Authority) GitHub(view json.RawMessage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.github = view
+	a.touch()
+}
+
+// Person reports whether the last lease's account is a person's, not a team's.
+func (a *Authority) Person() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var account struct {
+		Provider string `json:"provider"`
+	}
+	return json.Unmarshal(a.account, &account) == nil && account.Provider != "" && account.Provider != "team"
 }
 
 // Devices returns the machines of the last lease's view.
@@ -673,6 +695,7 @@ func (a *Authority) read(ctx context.Context, conn *websocket.Conn, mu *sync.Mut
 		switch m.Type {
 		case "changed":
 			a.ask()
+			a.device.Changed()
 			continue
 		case "presence":
 			continue
@@ -813,7 +836,7 @@ func proof(ctx context.Context, client *http.Client, origin, deviceID string, ke
 	err = json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&ch)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK && ch.Error != "" {
-		return nil, &cloudError{res.StatusCode, ch.Error, ch.Message}
+		return nil, &cloudError{Status: res.StatusCode, Code: ch.Error, Message: ch.Message}
 	}
 	if res.StatusCode != http.StatusOK || err != nil {
 		return nil, fmt.Errorf("native: challenge: %s: %v", res.Status, err)

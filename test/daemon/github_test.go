@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type scriptedCloud struct {
 	tickets []map[string]any // ticket request bodies
 	account string           // the account each ticket reports
 	ttl     time.Duration    // of each ticket
+	team    bool             // each ticket is a team operation's
 	git     func(w http.ResponseWriter, r *http.Request)
 	paths   []string
 }
@@ -45,10 +47,10 @@ func (c *scriptedCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&body)
 		c.mu.Lock()
 		c.tickets = append(c.tickets, body)
-		n, account, ttl := len(c.tickets), c.account, c.ttl
+		n, account, ttl, team := len(c.tickets), c.account, c.ttl, c.team
 		c.mu.Unlock()
 		json.NewEncoder(w).Encode(map[string]any{"v": 1, "ticket": fmt.Sprint("ticket-", n), "ttl_ms": ttl.Milliseconds(),
-			"account": map[string]any{"id": account, "github_id": 7, "revision": 1, "login": "dev"}})
+			"account": map[string]any{"id": account, "github_id": 7, "revision": 1, "login": "dev"}, "team": team})
 	default:
 		c.mu.Lock()
 		git := c.git
@@ -69,13 +71,14 @@ func newBroker(t *testing.T, cloud *scriptedCloud, mode string) (*daemon.Broker,
 	return b, capability, end
 }
 
-// openBroker starts a broker against cloud and opens session s, completed with fixed revisions,
-// returning what closes its connection too.
-func openBroker(t *testing.T, cloud *scriptedCloud, s daemon.GitSession) (*daemon.Broker, string, func(), func()) {
+// openBroker starts a broker against cloud and opens session s, completed with fixed revisions, its
+// source's allow having github unless s says, returning what closes its connection too.
+func openBroker(t *testing.T, cloud http.Handler, s daemon.GitSession) (*daemon.Broker, string, func(), func()) {
 	srv := httptest.NewServer(cloud)
 	t.Cleanup(srv.Close)
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
-	b, err := daemon.NewBroker(srv.URL, "dev_target", key, srv.Client(), filepath.Join(t.TempDir(), "proofs"))
+	dir := t.TempDir()
+	b, err := daemon.NewBroker(srv.URL, "dev_target", key, srv.Client(), filepath.Join(dir, "proofs"), filepath.Join(dir, "routing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +86,12 @@ func openBroker(t *testing.T, cloud *scriptedCloud, s daemon.GitSession) (*daemo
 	done := make(chan struct{})
 	s.Source, s.SourceGrantRevision, s.TargetGrant, s.TargetGrantRevision, s.PolicyRevision = "dev_source", 1, "grant", 1, 2
 	s.Live, s.Done = func() error { return nil }, done
+	if s.GitHub == nil {
+		s.GitHub = func() bool { return true }
+	}
+	if s.Client == "" {
+		s.Client = "/opt/om/om"
+	}
 	capability, end := b.Open(s)
 	return b, capability, end, sync.OnceFunc(func() { close(done) })
 }
@@ -134,13 +143,13 @@ func v1(t *testing.T, b *daemon.Broker, capability, path string, body []byte) (i
 
 // proofFile is where a session's routing tells om to find its proof.
 func proofFile(b *daemon.Broker, capability string) string {
-	env := b.Environment(capability, "/opt/om")
-	for k, v := range env {
-		if v == "credential."+b.URL+"."+daemon.ProofsKey {
-			return filepath.Join(env[strings.Replace(k, "KEY", "VALUE", 1)], capability)
-		}
-	}
-	return ""
+	return filepath.Join(routedValue(b, capability, "credential."+b.URL+"."+daemon.ProofsKey), capability)
+}
+
+// routedValue is key's last value in the routing file of the session whose capability it is, as Git reads it.
+func routedValue(b *daemon.Broker, capability, key string) string {
+	out, _ := exec.Command("git", "config", "--file", b.Environment(capability)["GIT_CONFIG_VALUE_0"], "--get", key).Output()
+	return strings.TrimSuffix(string(out), "\n")
 }
 
 func TestBrokerAsksFullAccessForAProofOnlyUnsandboxedWorkCanRead(t *testing.T) {
@@ -156,7 +165,8 @@ func TestBrokerAsksFullAccessForAProofOnlyUnsandboxedWorkCanRead(t *testing.T) {
 	}
 	session := func(mode string) (string, func()) {
 		return b.Open(daemon.GitSession{Source: "dev_source", SourceGrantRevision: 1, TargetGrant: "grant", TargetGrantRevision: 1,
-			PolicyRevision: 2, Mode: mode, Live: func() error { return nil }, Done: make(chan struct{})})
+			PolicyRevision: 2, Mode: mode, Client: "/opt/om/om", Live: func() error { return nil }, GitHub: func() bool { return true },
+			Done: make(chan struct{})})
 	}
 	other, endOther := session("full_access")
 	defer endOther()
@@ -193,15 +203,18 @@ func TestBrokerAsksFullAccessForAProofOnlyUnsandboxedWorkCanRead(t *testing.T) {
 	}
 }
 
-func TestARestartedBrokerHasANewKeyAndNoEarlierProofs(t *testing.T) {
+func TestARestartedBrokerHasANewKeyAndNoEarlierProofsOrRouting(t *testing.T) {
 	dir := t.TempDir()
-	proofs := filepath.Join(dir, "proofs")
+	proofs, routing := filepath.Join(dir, "proofs"), filepath.Join(dir, "routing")
 	os.MkdirAll(proofs, 0o700)
 	os.WriteFile(filepath.Join(proofs, strings.Repeat("c", 43)), []byte(strings.Repeat("p", 43)), 0o600)
+	os.MkdirAll(routing, 0o700)
+	os.WriteFile(filepath.Join(routing, strings.Repeat("a", 32)), []byte("[http]\n"), 0o644)
+	os.WriteFile(filepath.Join(routing, ".new-1"), nil, 0o600)
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
 	start := func() *daemon.Broker {
 		t.Helper()
-		b, err := daemon.NewBroker("http://127.0.0.1:1", "dev_target", key, http.DefaultClient, proofs)
+		b, err := daemon.NewBroker("http://127.0.0.1:1", "dev_target", key, http.DefaultClient, proofs, routing)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,8 +229,10 @@ func TestARestartedBrokerHasANewKeyAndNoEarlierProofs(t *testing.T) {
 		return err == nil
 	}
 	first := start()
-	if entries, _ := os.ReadDir(proofs); len(entries) != 0 {
-		t.Fatalf("an earlier run's proofs remain: %v", entries)
+	for _, d := range []string{proofs, routing} {
+		if entries, _ := os.ReadDir(d); len(entries) != 0 {
+			t.Fatalf("an earlier run's files remain in %s: %v", d, entries)
+		}
 	}
 	if fi, err := os.Stat(proofs); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("proofs directory = %v %v", fi, err)
@@ -231,12 +246,12 @@ func TestARestartedBrokerHasANewKeyAndNoEarlierProofs(t *testing.T) {
 	if second.Pin == first.Pin || reaches(first.Pin, second) || !reaches(second.Pin, second) {
 		t.Fatalf("a restarted broker pins %s, was %s", second.Pin, first.Pin)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-		t.Fatalf("the broker stored more than its proofs: %v", entries)
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Fatalf("the broker stored more than its proofs and routing: %v", entries)
 	}
 }
 
-// fakeBroker serves h over TLS as a session's broker, with the session's routing pinning its key,
+// fakeBroker serves h over TLS as a session's broker, with the session's routing file pinning its key,
 // then the routing entries extra.
 func fakeBroker(t *testing.T, h http.Handler, extra ...[2]string) *httptest.Server {
 	srv := httptest.NewUnstartedServer(h)
@@ -244,14 +259,32 @@ func fakeBroker(t *testing.T, h http.Handler, extra ...[2]string) *httptest.Serv
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	sum := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
-	entries := append([][2]string{{"http." + srv.URL + ".pinnedPubkey", "sha256//" + base64.StdEncoding.EncodeToString(sum[:])}}, extra...)
 	t.Setenv("OM_BROKER", srv.URL)
-	t.Setenv("GIT_CONFIG_COUNT", fmt.Sprint(len(entries)))
-	for i, e := range entries {
-		t.Setenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i), e[0])
-		t.Setenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), e[1])
-	}
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "include.path")
+	t.Setenv("GIT_CONFIG_VALUE_0", filepath.Join(t.TempDir(), "routing"))
+	route(t, append([][2]string{{"http." + srv.URL + ".pinnedPubkey", "sha256//" + base64.StdEncoding.EncodeToString(sum[:])}}, extra...)...)
 	return srv
+}
+
+// routedPin is the pin the routing file the environment names holds for broker.
+func routedPin(t *testing.T, broker string) string {
+	out, err := exec.Command("git", "config", "--file", os.Getenv("GIT_CONFIG_VALUE_0"), "--get", "http."+broker+".pinnedPubkey").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSuffix(string(out), "\n")
+}
+
+// route writes the routing file the environment names, with entries.
+func route(t *testing.T, entries ...[2]string) {
+	t.Helper()
+	os.Remove(os.Getenv("GIT_CONFIG_VALUE_0"))
+	for _, e := range entries {
+		if out, err := exec.Command("git", "config", "--file", os.Getenv("GIT_CONFIG_VALUE_0"), "--add", e[0], e[1]).CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %v %s", e[0], err, out)
+		}
+	}
 }
 
 func TestOmTalksOnlyToTheBrokerItsRoutingPins(t *testing.T) {
@@ -273,7 +306,7 @@ func TestOmTalksOnlyToTheBrokerItsRoutingPins(t *testing.T) {
 		t.Fatalf("the pinned server = %q, asked %d", out, asked.Load())
 	}
 	// A job's routing after its broker restarted: the address now answers with another key.
-	t.Setenv("GIT_CONFIG_VALUE_0", b.Pin)
+	route(t, [2]string{"http." + impostor.URL + ".pinnedPubkey", b.Pin})
 	out, errout := get()
 	if out != "quit=1\n" || !strings.Contains(errout, "not the one the session's routing pins") {
 		t.Fatalf("another key = %q %q", out, errout)
@@ -282,7 +315,11 @@ func TestOmTalksOnlyToTheBrokerItsRoutingPins(t *testing.T) {
 	if code := daemon.GitHub([]string{"pr", "list", "--repo", "owner/app"}, &pr, &prErr); code == 0 || !strings.Contains(prErr.String(), "pins") {
 		t.Fatalf("om github with another key = %d %q", code, prErr.String())
 	}
-	// An earlier version's plain routing, and routing without a pin, reach nothing either.
+	// An earlier version's plain routing, routing without a pin, and none at all reach nothing either.
+	route(t)
+	if out, _ := get(); out != "quit=1\n" {
+		t.Fatalf("an empty routing file = %q", out)
+	}
 	t.Setenv("GIT_CONFIG_COUNT", "0")
 	if out, _ := get(); out != "quit=1\n" {
 		t.Fatalf("no pin = %q", out)
@@ -540,7 +577,7 @@ func TestOneSessionCannotTakeEveryCommandSlot(t *testing.T) {
 		t.Fatalf("one command too many = %d", status)
 	}
 	other, _ := b.Open(daemon.GitSession{Source: "dev_source", SourceGrantRevision: 1, TargetGrant: "grant", TargetGrantRevision: 1,
-		PolicyRevision: 2, Mode: "read_only", Live: func() error { return nil }, Done: make(chan struct{})})
+		PolicyRevision: 2, Mode: "read_only", Live: func() error { return nil }, GitHub: func() bool { return true }, Done: make(chan struct{})})
 	if status, _ := credential(t, b, other, "github.com/owner/app"); status != 200 {
 		t.Fatalf("another session = %d", status)
 	}
@@ -561,9 +598,8 @@ func TestGitCredentialSendsOnlyItsOwnProofFromItsRouting(t *testing.T) {
 		io.WriteString(w, `{"username":"om","password":"op-credential"}`)
 	}))
 	t.Setenv("OM_BROKER_CAPABILITY", capability)
-	t.Setenv("GIT_CONFIG_COUNT", "2")
-	t.Setenv("GIT_CONFIG_KEY_1", "credential."+srv.URL+"."+daemon.ProofsKey)
-	t.Setenv("GIT_CONFIG_VALUE_1", dir)
+	pin := [2]string{"http." + srv.URL + ".pinnedPubkey", routedPin(t, srv.URL)}
+	route(t, pin, [2]string{"credential." + srv.URL + "." + daemon.ProofsKey, dir})
 	get := func() string {
 		var out, errout bytes.Buffer
 		daemon.GitCredential([]string{"get"}, strings.NewReader("protocol=https\nhost="+strings.TrimPrefix(srv.URL, "https://")+"\npath=github.com/o/r\n\n"), &out, &errout)
@@ -582,7 +618,7 @@ func TestGitCredentialSendsOnlyItsOwnProofFromItsRouting(t *testing.T) {
 	if out := get(); out != "username=om\npassword=op-credential\n" || len(sent) != 3 || sent[2] != proof {
 		t.Fatalf("own proof = %q, sent %q", out, sent)
 	}
-	t.Setenv("GIT_CONFIG_COUNT", "1") // the pin alone
+	route(t, pin) // the pin alone
 	if out := get(); out != "quit=1\n" || len(sent) != 4 {
 		t.Fatalf("without a proofs directory = %q, sent %q", out, sent)
 	}

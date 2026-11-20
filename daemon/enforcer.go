@@ -127,6 +127,12 @@ func (d *daemon) Apply(l Lease) {
 	for _, c := range closing {
 		c.ssh.Close()
 	}
+	d.githubMu.Lock()
+	gh := d.github
+	d.githubMu.Unlock()
+	if gh != nil {
+		gh.broker.Reroute()
+	}
 	if node := d.node.Load(); node != nil {
 		go node.Revalidate()
 	}

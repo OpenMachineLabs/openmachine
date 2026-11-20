@@ -76,7 +76,7 @@ func (c Core) command(ctx context.Context, args ...string) *exec.Cmd {
 // coreCapabilities is what Core's access launcher says it supports.
 type coreCapabilities struct {
 	Protocol int               `json:"protocol"`
-	GitHub   string            `json:"github"`        // https: it takes a session's Git routing to a TLS broker
+	GitHub   string            `json:"github"`        // include: it takes a session's Git routing to a TLS broker as a file in GitHubRouting
 	Client   string            `json:"github_client"` // its own copy of om, which restricted sessions run
 	Version  string            `json:"version"`       // Core's version
 	Policies map[string]string `json:"policies"`      // each mode: available, or why Core cannot enforce it
