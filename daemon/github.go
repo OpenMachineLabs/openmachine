@@ -205,7 +205,7 @@ type Broker struct {
 	ops      map[string]*operation  // by credential
 	tickets  map[ticketKey]*sharedTicket
 	waits    map[string]*waiting  // by request
-	asked    map[string]time.Time // the requests Cloud refused this broker's calls for, until they expire
+	asked    map[string]time.Time // when each request Cloud refused this broker's calls for expires, kept a minute more
 	calls    []time.Time          // Cloud wait calls begun in the last minute, oldest first
 	queued   []*waiting           // requests held for one of them
 	freed    chan struct{}        // closed when one was taken
@@ -928,7 +928,7 @@ func (b *Broker) asks(e *cloudError) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	maps.DeleteFunc(b.asked, func(_ string, until time.Time) bool { return time.Now().After(until) })
+	maps.DeleteFunc(b.asked, func(_ string, until time.Time) bool { return time.Since(until) > time.Minute })
 	b.asked[e.Request] = time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
 }
 
@@ -970,8 +970,12 @@ func (b *Broker) wait(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	until, ok := b.asked[in.Request]
 	b.mu.Unlock()
-	if !ok || time.Now().After(until) {
+	switch {
+	case !ok:
 		fail(w, http.StatusNotFound, "github_request_unavailable", "This request is not waiting for this device.")
+		return
+	case time.Now().After(until):
+		fail(w, http.StatusForbidden, "github_request_expired", requestExpired)
 		return
 	}
 	ctx, cancel := g.context(r.Context())
