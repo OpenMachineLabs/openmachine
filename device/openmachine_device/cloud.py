@@ -36,65 +36,79 @@ def error_code(value: bytes) -> tuple[str | None, dict]:
     return (error.get("code"), error) if isinstance(error, dict) else (None, {})
 
 
+def new_client(**options) -> httpx.AsyncClient:
+    return httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=15, **options)
+
+
 class Cloud:
+    """Cloud's requests in one process share one client, so they reuse its TLS connection; use it with async with."""
+
     def __init__(self, server: str):
         self.server = origin(server)
         self.offset = 0  # Cloud's clock minus this computer's, once Cloud reported a skew
+        self.client = None  # opened by the first request
+
+    async def __aenter__(self) -> "Cloud":
+        return self
+
+    async def __aexit__(self, *_) -> None:
+        if self.client:
+            await self.client.aclose()
+            self.client = None
 
     async def request(self, method: str, path: str, *, body: bytes = b"", headers: dict | None = None) -> dict:
         if not path.startswith("/api/") or "?" in path or "#" in path:
             raise ConnectorError("invalid_route", "The connector selected an invalid Cloud route.")
         try:
             try:
-                return await self.exchange(method, path, body, headers, None)
+                self.client = self.client or new_client()
+                return await self.exchange(self.client, method, path, body, headers)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 # No connection, so no request byte was sent. A network may offer an IPv6 route that
                 # cannot reach Cloud; try once more over IPv4 only.
-                return await self.exchange(method, path, body, headers, httpx.AsyncHTTPTransport(local_address=IPV4))
+                async with new_client(transport=httpx.AsyncHTTPTransport(local_address=IPV4)) as fallback:
+                    return await self.exchange(fallback, method, path, body, headers)
         except (httpx.TransportError, TimeoutError):
             raise ConnectorError("cloud_unavailable", "Cloud could not be reached. No successful operation was assumed.") from None
         except (ValueError, UnicodeError):
             raise ConnectorError("invalid_cloud_response", "Cloud returned an invalid response.") from None
 
-    async def exchange(self, method: str, path: str, body: bytes, headers: dict | None,
-                       transport: httpx.AsyncHTTPTransport | None) -> dict:
-        async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=15,
-                                     **({"transport": transport} if transport else {})) as client:
-            async with client.stream(method, self.server + path, content=body,
-                    headers={"Content-Type": "application/json", **(headers or {})}) as response:
-                value = bytearray()
-                async for chunk in response.aiter_bytes():
-                    value.extend(chunk)
-                    if len(value) > MAX_REPLY_BYTES:
-                        raise ConnectorError("cloud_response_limit", "Cloud returned an oversized response.")
-                if response.status_code >= 300:
-                    codes = {401: "device_not_authorized", 403: "device_not_authorized", 404: "device_not_found",
-                             409: "cloud_conflict", 410: "challenge_expired" if path.startswith("/api/devices/") else "native_login_expired",
-                             429: "cloud_busy"}
-                    code = codes.get(response.status_code, "cloud_unavailable")
-                    reported, detail = error_code(value)
-                    if path.startswith("/api/native-sessions/") and response.status_code == 404:
-                        # Only Cloud's own answer proves the session is gone; any other 404 proves nothing.
-                        code = "native_session_unavailable" if reported == "native_session_unavailable" else "cloud_unavailable"
-                    if (method == "POST" and response.status_code == 409 and reported == "native_login_active"
-                            and re.fullmatch(r"/api/native-sessions/[A-Za-z0-9_-]{43}/cancel", path)):
-                        # Only this explicit rejection proves that browser
-                        # approval won cancellation; other errors retain
-                        # their generic mapping and cannot trigger sign-out.
-                        code = "native_login_active"
-                    if (reported in {"policy_conflict", "invalid_policy", "device_mismatch", "native_session_inactive"}
-                            and re.fullmatch(r"/api/native-sessions/[A-Za-z0-9_-]{43}/policy", path)):
-                        code = reported  # Desktop acts on these
-                    if path == "/api/native-sessions" and reported in KEY_REFUSALS:
-                        code = reported
-                    if (response.status_code == 400 and reported == "native_clock_skew" and path.startswith("/api/native-sessions")
-                            and type(detail.get("server_time")) is int):
-                        raise ClockSkew(detail["server_time"])
-                    raise ConnectorError(code, "Cloud did not accept the request. The original operation was preserved.")
-                decoded = json.loads(value)
-                if not isinstance(decoded, dict):
-                    raise ValueError("Expected an object")
-                return decoded
+    async def exchange(self, client: httpx.AsyncClient, method: str, path: str, body: bytes, headers: dict | None) -> dict:
+        async with client.stream(method, self.server + path, content=body,
+                headers={"Content-Type": "application/json", **(headers or {})}) as response:
+            value = bytearray()
+            async for chunk in response.aiter_bytes():
+                value.extend(chunk)
+                if len(value) > MAX_REPLY_BYTES:
+                    raise ConnectorError("cloud_response_limit", "Cloud returned an oversized response.")
+            if response.status_code >= 300:
+                codes = {401: "device_not_authorized", 403: "device_not_authorized", 404: "device_not_found",
+                         409: "cloud_conflict", 410: "challenge_expired" if path.startswith("/api/devices/") else "native_login_expired",
+                         429: "cloud_busy"}
+                code = codes.get(response.status_code, "cloud_unavailable")
+                reported, detail = error_code(value)
+                if path.startswith("/api/native-sessions/") and response.status_code == 404:
+                    # Only Cloud's own answer proves the session is gone; any other 404 proves nothing.
+                    code = "native_session_unavailable" if reported == "native_session_unavailable" else "cloud_unavailable"
+                if (method == "POST" and response.status_code == 409 and reported == "native_login_active"
+                        and re.fullmatch(r"/api/native-sessions/[A-Za-z0-9_-]{43}/cancel", path)):
+                    # Only this explicit rejection proves that browser
+                    # approval won cancellation; other errors retain
+                    # their generic mapping and cannot trigger sign-out.
+                    code = "native_login_active"
+                if (reported in {"policy_conflict", "invalid_policy", "device_mismatch", "native_session_inactive"}
+                        and re.fullmatch(r"/api/native-sessions/[A-Za-z0-9_-]{43}/policy", path)):
+                    code = reported  # Desktop acts on these
+                if path == "/api/native-sessions" and reported in KEY_REFUSALS:
+                    code = reported
+                if (response.status_code == 400 and reported == "native_clock_skew" and path.startswith("/api/native-sessions")
+                        and type(detail.get("server_time")) is int):
+                    raise ClockSkew(detail["server_time"])
+                raise ConnectorError(code, "Cloud did not accept the request. The original operation was preserved.")
+            decoded = json.loads(value)
+            if not isinstance(decoded, dict):
+                raise ValueError("Expected an object")
+            return decoded
 
     async def native(self, path: str, session: dict, value, signer: Identity, stored: tuple[Identity, ...] = ()) -> dict:
         """A native session request signed with its time; a skewed clock is corrected once.

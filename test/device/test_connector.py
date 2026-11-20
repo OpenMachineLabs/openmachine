@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -151,6 +152,25 @@ class PrivateState(unittest.TestCase):
         self.assertEqual(set(manifest), {"format", "companion_protocol", "setup_protocol", "connection_protocol",
                                          "product", "version", "platform", "architecture", "python_archive_sha256",
                                          "files", "links"})
+
+    def test_bundle_bytecode_is_reproducible_and_read_by_a_run_that_writes_none(self):
+        from runpy import run_path
+        compile_bytecode = run_path(str(ROOT / "scripts/build_bundle.py"))["compile_bytecode"]
+        built = []
+        for name in ("first", "second"):  # two staging directories, as two builds use
+            bundle = self.root / name
+            for source in ("app/module.py", "python/lib/python3.12/library.py", "python/lib/python3.12/site-packages/pip.py"):
+                (bundle / source).parent.mkdir(parents=True, exist_ok=True)
+                (bundle / source).write_text("VALUE = 1\n")
+            compile_bytecode(Path(sys.executable), bundle)
+            built.append({path.relative_to(bundle).parent.parent.as_posix(): path.read_bytes() for path in bundle.rglob("*.pyc")})
+        self.assertEqual(built[0], built[1])
+        self.assertEqual(set(built[0]), {"app", "python/lib/python3.12"})  # pip is not run
+        for bytecode in built[0].values():
+            self.assertEqual(int.from_bytes(bytecode[4:8], "little"), 0b11)  # checked against the source's hash
+        run = subprocess.run([sys.executable, "-I", "-B", "-v", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import module",
+                              str(bundle / "app")], capture_output=True, text=True, check=True)
+        self.assertRegex(run.stderr, r"__pycache__/module\.[^ ]+\.pyc matches ")
 
     def test_bundle_takes_the_repository_version(self):
         from runpy import run_path
@@ -420,7 +440,6 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
             ("POST", path, 403, b'{"error":{"code":"key_invalid"}}', "device_not_authorized"),
         ]
         client_type = httpx.AsyncClient
-        cloud = Cloud(ORIGIN)
         for method, route, response_status, response_body, expected in cases:
             async def app(scope, receive, send):
                 self.assertEqual(scope["method"], method)
@@ -433,7 +452,8 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
             with self.subTest(method=method, route=route, status=response_status, body=response_body), \
                     patch("openmachine_device.cloud.httpx.AsyncClient", side_effect=client), \
                     self.assertRaises(ConnectorError) as observed:
-                await cloud.request(method, route, body=b"{}")
+                async with Cloud(ORIGIN) as cloud:  # a Cloud keeps its client: one per case
+                    await cloud.request(method, route, body=b"{}")
             self.assertEqual(observed.exception.code, expected)
 
     async def test_a_connection_that_never_opened_is_tried_once_more_over_ipv4_only(self):
@@ -487,10 +507,32 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(attempts[0])
         self.assertIsInstance(attempts[1], httpx.AsyncHTTPTransport)
 
+    async def test_one_cloud_sends_its_requests_over_one_connection_and_closes_it(self):
+        """A sign-in's requests pay for one connection and TLS handshake, not one each."""
+        connections, closed = [], asyncio.Event()
+        async def serve(reader, writer):
+            connections.append(writer)
+            try:
+                while True:
+                    head = await reader.readuntil(b"\r\n\r\n")
+                    await reader.readexactly(int(re.search(rb"(?i)\r\ncontent-length: *(\d+)", head)[1]))
+                    writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+                    await writer.drain()
+            except asyncio.IncompleteReadError:
+                closed.set()
+                writer.close()
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        async with server:
+            async with Cloud(f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}") as cloud:
+                for _ in range(3):
+                    self.assertEqual(await cloud.request("POST", "/api/devices/device-A/challenge", body=b"{}"), {})
+                self.assertEqual(len(connections), 1)
+            await asyncio.wait_for(closed.wait(), 5)
+
     async def test_a_skewed_clock_is_corrected_once_and_never_read_as_revocation(self):
         """Cloud's time from native_clock_skew signs the one retry; a second skew stays that error."""
         client_type = httpx.AsyncClient
-        cloud, key = Cloud(ORIGIN), Identity(Ed25519PrivateKey.from_private_bytes(bytes(range(32))))
+        key = Identity(Ed25519PrivateKey.from_private_bytes(bytes(range(32))))
         session = {"challenge_id": "s" * 43, "challenge": "challenge-value"}
         server_time = int(time.time()) + 3600
         for corrected in (True, False):
@@ -504,7 +546,7 @@ class CloudTransport(unittest.IsolatedAsyncioTestCase):
                 await send({"type": "http.response.body", "body": json.dumps(body).encode()})
             def client(**kwargs):
                 return client_type(transport=httpx.ASGITransport(app=app), **kwargs)
-            cloud.offset = 0
+            cloud = Cloud(ORIGIN)  # a Cloud keeps its client and its offset: one per case
             with self.subTest(corrected=corrected), patch("openmachine_device.cloud.httpx.AsyncClient", side_effect=client):
                 if corrected:
                     self.assertEqual(await cloud.native("/api/native-sessions/" + "s" * 43 + "/status", session, {}, key), {"status": "pending"})

@@ -99,6 +99,16 @@ def inventory(bundle: Path, version: str, python_digest: str) -> dict:
             "python_archive_sha256": python_digest, "files": files, "links": links}
 
 
+def compile_bytecode(python: Path, bundle: Path) -> None:
+    """Compiles the modules the bundle runs, its packages and the standard library but not pip. Callers run
+    python -I -B, which only stops writing bytecode: without it, every process compiles each module it imports.
+    Checked by source hash, not mtime, the files are reproducible, survive a copy and never outlive a changed
+    source; their recorded paths are relative to the bundle."""
+    library = bundle / "python/lib/python3.12"
+    run([str(python), "-I", "-m", "compileall", "-q", "-f", "--invalidation-mode", "checked-hash", "-s", str(bundle),
+         "-x", re.escape(str(library / "site-packages")), str(bundle / "app"), str(library)])
+
+
 def app_shell(application: Path, version: str) -> None:
     contents = application / "Contents"
     executable = contents / "MacOS/OpenMachineConnector"
@@ -166,6 +176,7 @@ def build(args) -> Path:
             'sys.path.insert(0, str(Path(__file__).resolve().parent / "app"))\n'
             'from openmachine_device.cli import main\nmain()\n')
         run([str(python), "-I", str(bundle / "entry.py"), "--help"], timeout=15)
+        compile_bytecode(python, bundle)  # after the bundle's last Python run, which may write bytecode
         build_om(bundle, args.target)
         if args.sign_identity:
             for path in sorted(bundle.rglob("*"), reverse=True):
