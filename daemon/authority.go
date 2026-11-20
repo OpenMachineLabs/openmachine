@@ -745,6 +745,9 @@ func (a *Authority) read(ctx context.Context, conn *websocket.Conn, mu *sync.Mut
 		if a.apply(l, m, start, ttl) { // acknowledged only after it closed what it must
 			go a.acknowledge(ctx, conn, l)
 		}
+		if !leased { // a session's first lease: changes made while none was open went unannounced
+			a.device.Changed()
+		}
 	}
 }
 

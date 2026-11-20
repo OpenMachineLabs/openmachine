@@ -35,7 +35,8 @@ type hold struct {
 	held    bool          // the last opening post answered held: true
 	open    bool          // an opening post may have opened a session the closing one has not ended
 	refused bool          // answered held: false
-	again   bool          // Changed while a post was in flight
+	closing bool          // the post in flight is a closing one
+	again   bool          // Changed, or a dial began, while a post was in flight
 	next    time.Time     // the earliest next opening post: HoldEvery after the last one's answer
 }
 
@@ -57,7 +58,10 @@ func (h *Holds) Dial(target string) (<-chan struct{}, func()) {
 		h.targets[target] = t
 	}
 	t.dials++
-	if !t.held && !t.refused && t.posting == nil && !time.Now().Before(t.next) {
+	switch {
+	case t.closing: // the session opens again once that post ends
+		t.again = true
+	case !t.held && !t.refused && t.posting == nil && !time.Now().Before(t.next):
 		h.send(target, t, true)
 	}
 	wait := posted
@@ -76,16 +80,19 @@ func (h *Holds) Dial(target string) (<-chan struct{}, func()) {
 	}
 }
 
-// Changed lifts every held: false and posts again for each machine a dial lasts to.
+// Changed lifts every held: false and posts again for each such machine a dial lasts to.
 func (h *Holds) Changed() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for target, t := range h.targets {
-		t.refused = false
-		if t.posting != nil {
+		switch {
+		case t.posting != nil:
 			t.again = true
-		} else if t.dials > 0 {
+		case t.refused && t.dials > 0:
+			t.refused = false
 			h.send(target, t, true)
+		default:
+			t.refused = false
 		}
 	}
 }
@@ -118,10 +125,11 @@ func (h *Holds) Run(ctx context.Context) {
 	}
 }
 
-// send posts for target under h.mu.
+// send posts for target under h.mu. Its channel closes once the post, and the opening post that
+// follows when it ended a session or was refused while it was in flight, have ended.
 func (h *Holds) send(target string, t *hold, open bool) {
 	done := make(chan struct{})
-	t.posting = done
+	t.posting, t.closing = done, !open
 	t.open = t.open || open
 	go func() {
 		held, err := h.post(target, open)
@@ -135,14 +143,18 @@ func (h *Holds) send(target string, t *hold, open bool) {
 		default:
 			t.held, t.open, t.refused = false, false, true
 		}
-		t.posting = nil
-		close(done)
+		t.posting, t.closing = nil, false
+		again := t.again && t.dials > 0 && (t.refused || !open)
 		if t.again {
 			t.again, t.refused = false, false
-			if t.dials > 0 {
-				h.send(target, t, true)
-			}
 		}
+		if !again {
+			close(done)
+			return
+		}
+		h.send(target, t, true)
+		next := t.posting
+		go func() { <-next; close(done) }()
 	}()
 }
 
@@ -190,17 +202,6 @@ func (d *daemon) watching() func() {
 	}
 }
 
-// unread reads the requests when none has been read yet, as when the view's
-// account arrived after its watch client.
-func (d *daemon) unread() {
-	d.requests.mu.Lock()
-	none := d.requests.after == 0
-	d.requests.mu.Unlock()
-	if none {
-		d.readRequests(false)
-	}
-}
-
 // readRequests reads the person's requests while a watch client is connected
 // and the view's account is a person: at once when now, else no sooner than
 // RequestsEvery after the last read, one read serving every trigger before it.
@@ -226,7 +227,12 @@ func (d *daemon) readRequestsNow() {
 	g.reading.Lock()
 	defer g.reading.Unlock()
 	g.mu.Lock()
-	g.timer, g.last = nil, time.Now()
+	g.timer = nil
+	if g.watchers == 0 || !d.authority.Person() { // the watch closed, or the account changed, since
+		g.mu.Unlock()
+		return
+	}
+	g.last = time.Now()
 	after := g.after
 	g.mu.Unlock()
 	var r struct {
@@ -251,10 +257,10 @@ func (d *daemon) readRequestsNow() {
 		r.Notices = []json.RawMessage{}
 	}
 	view, _ := json.Marshal(map[string]any{"requests": r.Requests, "notices": r.Notices})
-	d.authority.GitHub(view)
 	g.mu.Lock()
 	g.after = r.Now
 	g.mu.Unlock()
+	d.authority.GitHub(view)
 }
 
 // decide answers the socket line github {"request","decision","choice"} with
@@ -270,15 +276,15 @@ func (d *daemon) decide(uc *net.UnixConn, line string) []byte {
 	var reply struct {
 		Result string `json:"result"`
 	}
-	err := json.Unmarshal([]byte(line), &c)
-	if err == nil {
-		body := map[string]any{"v": 1, "request": c.Request, "decision": c.Decision}
-		if c.Choice != "" {
-			body["choice"] = c.Choice
-		}
-		err = d.post(context.Background(), "github/decide", body, &reply)
-		d.readRequests(true)
+	if json.Unmarshal([]byte(line), &c) != nil {
+		return []byte(`{"error":{"code":"invalid_fields","message":"send the request, the decision and the choice"}}` + "\n")
 	}
+	body := map[string]any{"v": 1, "request": c.Request, "decision": c.Decision}
+	if c.Choice != "" {
+		body["choice"] = c.Choice
+	}
+	err := d.post(context.Background(), "github/decide", body, &reply)
+	d.readRequests(true)
 	var out any = reply
 	var ce *cloudError
 	switch {

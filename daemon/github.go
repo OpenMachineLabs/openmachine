@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -30,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -202,10 +204,11 @@ type Broker struct {
 	sessions map[string]*gitSession // by capability
 	ops      map[string]*operation  // by credential
 	tickets  map[ticketKey]*sharedTicket
-	waits    map[string]*waiting // by request
-	calls    []time.Time         // Cloud wait calls begun in the last minute, oldest first
-	queued   []*waiting          // requests held for one of them
-	freed    chan struct{}       // closed when one was taken
+	waits    map[string]*waiting  // by request
+	asked    map[string]time.Time // the requests Cloud refused this broker's calls for, until they expire
+	calls    []time.Time          // Cloud wait calls begun in the last minute, oldest first
+	queued   []*waiting           // requests held for one of them
+	freed    chan struct{}        // closed when one was taken
 }
 
 // NewBroker starts the broker of the device registered under deviceID with key, at the Cloud origin,
@@ -241,7 +244,7 @@ func NewBroker(origin, deviceID string, key ed25519.PrivateKey, client *http.Cli
 	}
 	b := &Broker{URL: "https://" + ln.Addr().String(), Pin: pin, origin: origin, deviceID: deviceID, key: key, client: client, proofs: proofs,
 		routes: routes, sessions: map[string]*gitSession{}, ops: map[string]*operation{}, tickets: map[ticketKey]*sharedTicket{},
-		waits: map[string]*waiting{}, freed: make(chan struct{})}
+		waits: map[string]*waiting{}, asked: map[string]time.Time{}, freed: make(chan struct{})}
 	b.srv = &http.Server{Handler: b, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10, ErrorLog: log.New(io.Discard, "", 0),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 		// HTTP/1.1 only: a refusal may answer before git has sent its whole request, then drain the rest.
@@ -622,6 +625,10 @@ func (b *Broker) ticket(ctx context.Context, op *operation) (string, error) {
 		"binding": map[string]any{"source": s.Source, "source_grant_revision": s.SourceGrantRevision, "target_grant_id": s.TargetGrant,
 			"target_grant_revision": s.TargetGrantRevision, "policy_revision": s.PolicyRevision}}, &r)
 	if err != nil {
+		var ce *cloudError
+		if errors.As(err, &ce) {
+			b.asks(ce)
+		}
 		return "", err
 	}
 	if r.Ticket == "" || r.TTL < 1 || (op.account != nil && r.Account != *op.account) {
@@ -760,9 +767,11 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	answered := false // a team's push that waits for its person has had its answer and the lines that say so
+	var resent *counted
 	for {
 		if held != nil { // read anew each time: the transport may still be reading an earlier send
-			body = io.NewSectionReader(held, 0, length)
+			resent = &counted{r: io.NewSectionReader(held, 0, length)}
+			body = resent
 		}
 		target := b.origin + "/api/devices/" + b.deviceID + "/code/github/git/" + m[1] + "/" + m[2] + "/" + endpoint
 		if endpoint == "info/refs" {
@@ -786,6 +795,8 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 		res, err := b.client.Do(req)
 		if err != nil {
 			switch over, read, _ := sent.state(); {
+			case resent != nil && resent.n.Load() == 0: // a held push Cloud never read changed nothing
+				refusal(http.StatusBadGateway, "Open Machine could not reach Cloud; nothing was changed")
 			case push && over:
 				refusal(http.StatusBadGateway, fmt.Sprintf("this push exceeded Open Machine's %d MiB limit and was cut, so %s", maxPush>>20, unknownOutcome))
 			case push && read > 0: // GitHub acts once a whole pack, or deletions alone, arrived, before the body ends
@@ -827,6 +838,7 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 		if e.Message == "" {
 			e.Message = fmt.Sprintf("Cloud answered %d", res.StatusCode)
 		}
+		b.asks(&e.cloudError)
 		if held != nil && e.Code == "github_approval_required" && slices.Contains(head, "side-band-64k") {
 			if message := b.approval(ctx, w, op, &e.cloudError, &answered); message != "" {
 				refusal(http.StatusForbidden, message)
@@ -844,12 +856,25 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 		}
 		// Once Cloud may have a push's commands, only its explicit no-effect refusal is a known
 		// outcome; its own unknown outcome says what it read back from GitHub.
-		if _, read, _ := sent.state(); push && read > 0 && e.Effect != "known_no_effect" && e.Code != "github_outcome_unknown" {
+		if _, read, _ := sent.state(); push && read > 0 && (resent == nil || resent.n.Load() > 0) &&
+			e.Effect != "known_no_effect" && e.Code != "github_outcome_unknown" {
 			e.Message = unknownPush
 		}
 		refusal(status, e.Message)
 		return
 	}
+}
+
+// counted is a held push as one send reads it.
+type counted struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *counted) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
 }
 
 // approval answers a side-band push of a team operation that Cloud refused until its person
@@ -890,10 +915,21 @@ func (b *Broker) approved(ctx context.Context, e *cloudError) string {
 		case ctx.Err() != nil:
 			return "this SSH session has ended, and its GitHub access with it"
 		case errors.As(err, &ce) && final(ce):
-			return ce.Message
+			return cmp.Or(ce.Message, fmt.Sprintf("Cloud answered %d", ce.Status))
 		}
 	}
 	return requestExpired
+}
+
+// asks keeps the request a refusal e names as one this broker may wait on, until it expires.
+func (b *Broker) asks(e *cloudError) {
+	if e.Code != "github_approval_required" || !requestID.MatchString(e.Request) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	maps.DeleteFunc(b.asked, func(_ string, until time.Time) bool { return time.Now().After(until) })
+	b.asked[e.Request] = time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
 }
 
 // final reports whether Cloud's refusal ends a wait: any but a failure (429 and 5xx), which is asked again.
@@ -929,6 +965,13 @@ func (b *Broker) wait(w http.ResponseWriter, r *http.Request) {
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&in) != nil || !requestID.MatchString(in.Request) {
 		fail(w, http.StatusBadRequest, "invalid_fields", "send the request")
+		return
+	}
+	b.mu.Lock()
+	until, ok := b.asked[in.Request]
+	b.mu.Unlock()
+	if !ok || time.Now().After(until) {
+		fail(w, http.StatusNotFound, "github_request_unavailable", "This request is not waiting for this device.")
 		return
 	}
 	ctx, cancel := g.context(r.Context())

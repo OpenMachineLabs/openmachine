@@ -166,11 +166,14 @@ func brokerCall(broker, path string, body, out any, timeout time.Duration) (int,
 // routed returns the value of key in the session's routing: the file its environment has Git
 // include, as the daemon wrote it, or "" without one.
 func routed(key string) string {
-	if os.Getenv("GIT_CONFIG_COUNT") != "1" || os.Getenv("GIT_CONFIG_KEY_0") != "include.path" {
-		return ""
+	n, _ := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	for i := range min(n, 16) { // the session's own include is first, whatever its work adds
+		if os.Getenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i)) == "include.path" {
+			out, _ := exec.Command("git", "config", "--file", os.Getenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)), "--get", key).Output()
+			return strings.TrimSuffix(string(out), "\n")
+		}
 	}
-	out, _ := exec.Command("git", "config", "--file", os.Getenv("GIT_CONFIG_VALUE_0"), "--get", key).Output()
-	return strings.TrimSuffix(string(out), "\n")
+	return ""
 }
 
 var proofValue = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)

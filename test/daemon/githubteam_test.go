@@ -330,6 +330,10 @@ func TestRefusedOrExpiredApproval(t *testing.T) {
 		{"denied", "om: The request was denied. Nothing reached GitHub.\n", 300,
 			answers(`{"error":"github_request_denied","message":"The request was denied. Nothing reached GitHub.","effect":"known_no_effect"}`)},
 		{"expired", "om: Nobody approved within 5 minutes. Nothing reached GitHub. Run the command again.\n", 1, answers("waiting")},
+		{"unavailable", "om: This request is not waiting for this device.\n", 300, func(n int, w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"github_request_unavailable","message":"This request is not waiting for this device.","effect":"known_no_effect"}`)
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			cloud := &teamCloud{scriptedCloud: &scriptedCloud{account: strings.Repeat("a", 32), ttl: 15 * time.Minute}, expiry: c.expiry, wait: c.wait}
@@ -571,8 +575,14 @@ func TestBrokerWaitsAfterAFailure(t *testing.T) {
 		}
 		answers("approved")(n, w, r)
 	}
+	cloud.asks.Store(1)
 	b, capability, _, _ := openBroker(t, cloud, daemon.GitSession{Mode: "read_only"})
 	wait, _ := json.Marshal(map[string]string{"request": request})
+	if status, out := v1(t, b, capability, "/v1/wait", wait); status != 404 || !strings.Contains(out, `"error":"github_request_unavailable"`) {
+		t.Fatalf("a request Cloud named to no call here = %d %s", status, out)
+	}
+	body, _ := json.Marshal(map[string]any{"path": "github.com/owner/app"})
+	v1(t, b, capability, "/v1/credential", body)
 	if status, _ := v1(t, b, capability, "/v1/wait", wait); status != 502 {
 		t.Fatalf("a failed call = %d", status)
 	}
@@ -652,6 +662,21 @@ func TestHolds(t *testing.T) {
 	_, end3 := h.Dial("slow")
 	end3()
 	next("slow false", 2500*time.Millisecond)
+	// A dial during the closing post opens the session again once it ends, and waits for that.
+	reopened, endSlow := h.Dial("slow")
+	release <- struct{}{}
+	next("slow true", time.Second)
+	select {
+	case <-reopened:
+		t.Fatal("the dial answered before its session opened again")
+	case <-time.After(200 * time.Millisecond):
+	}
+	release <- struct{}{}
+	<-reopened
+	h.Changed() // a held session is not posted again on a change
+	none(500 * time.Millisecond)
+	endSlow()
+	next("slow false", 2500*time.Millisecond)
 	release <- struct{}{}
 	none(1500 * time.Millisecond)
 	// held: false: nothing more, whatever dials, until a change, which posts for the dials that last.
@@ -723,7 +748,7 @@ func TestDesktopRequests(t *testing.T) {
 	c, origin, bodies := githubCloud(t, func(w http.ResponseWriter) {
 		if wrong.Load() {
 			w.WriteHeader(http.StatusForbidden)
-			io.WriteString(w, `{"error":"github_request_wrong","message":"The wrong number was chosen.","effect":"known_no_effect"}`)
+			io.WriteString(w, `{"error":"github_person_required","message":"Only a device of a person’s own account answers GitHub requests.","effect":"known_no_effect"}`)
 			return
 		}
 		io.WriteString(w, result)
@@ -817,8 +842,11 @@ func TestDesktopRequests(t *testing.T) {
 		t.Fatalf("the read after a decision waited %v", after.Sub(read))
 	}
 	wrong.Store(true)
-	if answer := decide(`{"request":"r1","decision":"deny"}`); answer != `{"error":{"code":"github_request_wrong","message":"The wrong number was chosen."}}`+"\n" {
+	if answer := decide(`{"request":"r1","decision":"deny"}`); answer != `{"error":{"code":"github_person_required","message":"Only a device of a person’s own account answers GitHub requests."}}`+"\n" {
 		t.Fatalf("refused decision = %q", answer)
+	}
+	if answer := decide(`{"request":`); answer != `{"error":{"code":"invalid_fields","message":"send the request, the decision and the choice"}}`+"\n" {
+		t.Fatalf("a malformed line = %q", answer)
 	}
 	next(`github/decide {"decision":"deny","request":"r1","v":1}`, time.Second)
 	next(`github/requests {"after":300,"v":1}`, time.Second)
@@ -827,8 +855,13 @@ func TestDesktopRequests(t *testing.T) {
 	for len(github.Notices) == 0 {
 		json.Unmarshal(view()["github"], &github)
 	}
-	// With no watch client, nothing is read.
+	// With no watch client, nothing is read, not even a read scheduled while one was connected.
+	p.changed()
+	next(`github/requests {"after":400,"v":1}`, time.Second)
+	p.changed()
+	time.Sleep(200 * time.Millisecond)
 	conn.Close()
+	none(2500 * time.Millisecond)
 	p.changed()
 	none(2500 * time.Millisecond)
 }

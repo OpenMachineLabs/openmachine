@@ -742,7 +742,6 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 				defer d.watching()()
 				var last []byte
 				for {
-					d.unread()
 					view, changed := d.authority.View()
 					if !bytes.Equal(view, last) {
 						if _, err := uc.Write(view); err != nil {
