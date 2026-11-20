@@ -3,6 +3,7 @@
 import re
 import secrets
 import socket
+import subprocess
 import sys
 import time
 
@@ -20,6 +21,20 @@ ACTIONS = {
 }
 # A move's sign-in is approved by its request or never: this long bounds how late a lost request can still arrive.
 MOVE_SECONDS = 60
+
+
+def computer_name() -> str:
+    """A new device's name: on a Mac the Computer Name the person set in Sharing, not the network host name macOS
+    derives from it, such as Name-1.local; elsewhere, or when it is unreadable, the host name. Cloud counts a name's
+    80 characters in UTF-16, so a longer one is cut there, never inside a character."""
+    name = ""
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["/usr/sbin/scutil", "--get", "ComputerName"], capture_output=True, text=True,
+                                  timeout=10, check=True).stdout.strip()
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            name = ""
+    return (name or socket.gethostname()).encode("utf-16-le")[:160].decode("utf-16-le", "ignore").strip()
 
 
 def configuration(config: dict) -> str:
@@ -513,7 +528,7 @@ class Companion:
                         observed["verification_uri"] = self.cloud.server + "/native-login?id=" + observed["session_id"]
                     return observed
             # Cloud names a moved machine as the device it leaves.
-            name = value.get("device_name", socket.gethostname()[:80] or "This computer")
+            name = value["device_name"] if "device_name" in value else computer_name() or "This computer"
             if not isinstance(name, str) or not name.strip() or len(name) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in name):
                 raise ConnectorError("invalid_device_name", "Use a device name with 1 to 80 printable characters.")
             # An unreadable ID refuses sign-in; a Linux machine without one gets it here.
