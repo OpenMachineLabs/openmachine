@@ -168,7 +168,7 @@ class NativeEnrollment(unittest.IsolatedAsyncioTestCase):
         return {"operation_id": identity, "expected_binding": self.companion.binding(), **fields}
 
     async def test_names_a_new_device_by_this_computers_name(self):
-        with patch("openmachine_device.companion.computer_name", return_value=" Ada’s MacBook Pro "):
+        with patch("openmachine_device.companion.computer_name", return_value="Ada’s MacBook Pro"):
             await self.companion.act("login", self.request())
         self.assertEqual(self.cloud.calls[0][1]["device_name"], "Ada’s MacBook Pro")
 
@@ -951,6 +951,8 @@ class ComputerName(unittest.TestCase):
                     return_value=SimpleNamespace(stdout="Ada’s MacBook Pro\n")) as run):
             self.assertEqual(computer_name(), "Ada’s MacBook Pro")
             self.assertEqual(run.call_args.args[0], ["/usr/sbin/scutil", "--get", "ComputerName"])
+            run.return_value = SimpleNamespace(stdout="a" + "😀" * 50)
+            self.assertEqual(computer_name(), "a" + "😀" * 39)
             run.return_value = SimpleNamespace(stdout="\n")
             self.assertEqual(computer_name(), "Ada-1.local")
             run.side_effect = subprocess.CalledProcessError(1, "scutil")
