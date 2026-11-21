@@ -4,7 +4,7 @@
 
 ### Your AI. Your machines.
 
-**Connect your machines and let your AI agent work on any of them, within the limits you set.**
+**Let your AI agent work on your real machines, within limits each machine enforces.**
 
 <a href="https://openmachine.app"><img src="https://img.shields.io/badge/Website-openmachine.app-141414?style=flat-square" alt="Website"></a>
 <a href="https://openmachine.app/docs"><img src="https://img.shields.io/badge/Docs-openmachine.app%2Fdocs-141414?style=flat-square" alt="Docs"></a>
@@ -23,14 +23,17 @@
 
 <br />
 
-Your coding agent already works on this machine. Open Machine lets it work on
-all of them: train on the GPU machine, build on the workstation, test on the
-spare Mac, with each machine's results coming back to you.
+An agent with a shell can do anything its user can. Open Machine lets your
+coding agent train on the GPU machine, build on the workstation and test on the
+spare Mac, while you decide what it may do on each: which commands it must
+never run, which folders it may change and whether it may push.
 
-**Under your control.** Machines connect peer-to-peer over encrypted WireGuard,
-using the open-source Tailscale client with Open Machine's own coordination
-server and relays. You choose how far the agent reaches on each machine, and
-GitHub tokens never sit on your machines.
+**Enforced on the machine.** `om` and Core on each machine check every new
+session against your choices, and fail closed: without a current lease from the
+service, which lasts at most 60 seconds, a machine admits nothing new. The
+private network itself is built on Tailscale's open-source protocol: the
+[network library](connector/README.md) runs Tailscale's `tsnet` library against
+Open Machine's own coordination server and relays.
 
 <p align="center">
   <img src="assets/openmachine-demo.webp" width="1000" alt="A coding agent in a terminal reaches build-mac by name, finds and fixes a failing test, pushes and opens pull request #480, while the Open Machine Console shows the machines, then the connection's log of every command, then build-mac's permission." />
@@ -40,27 +43,30 @@ Works with Claude Code, Codex, Cursor, Gemini CLI and anything that speaks SSH.
 
 ## What your agent gets
 
-- **Every machine by name.** `ssh build-mac.om` reaches a machine over the
-  private network, with no ports to open.
-- **The access you choose.** Each machine is **Read only**, **Workspace**
-  (changes only in the folders you choose) or **Full access**.
 - **Rules.** Block the commands you never want run, such as deleting home
   folders or rewriting Git history. A blocked command never starts, and the
   agent is told why.
+- **The access you choose.** Each machine is **Read only**, **Workspace**
+  (changes only in the folders you choose) or **Full access**. Read only and
+  Workspace sessions run sandboxed, in macOS Seatbelt or Linux bubblewrap;
+  Full access is not sandboxed.
 - **Git without a token.** On Full access machines, agents push and open pull
   requests through your GitHub connection; the token never reaches the machine.
-- **Your pages and models.** Open a machine's web page at
-  `localhost:11400/<machine>/<port>` and point any app at the models your
-  machines run, at `http://127.0.0.1:11400/v1`.
 - **A record of everything.** Every connection, command and block is recorded
   and signed by the machine that ran it, and you can check a log export on your
   own computer.
+- **Your pages and models.** Open a machine's web page at
+  `localhost:11400/<machine>/<port>` and point any app at the models your
+  machines run, at `http://127.0.0.1:11400/v1`.
+- **Every machine by name.** `ssh build-mac.om` reaches a machine over the
+  private network, with no ports to open.
 
 <p align="center">
   <img src="assets/openmachine-rules.webp" width="640" alt="The Rules demo: choose a machine and its permission, try a command, and see whether Open Machine allows it or which rule or permission blocks it." />
 </p>
 
-How each works on the machine: [docs/om.md](docs/om.md).
+How each works on the machine: [docs/om.md](docs/om.md); what it does not
+guarantee: [SECURITY.md](SECURITY.md).
 
 ## Quick start
 
@@ -95,15 +101,13 @@ Everything that decides what happens on your machine is open source, here:
 | --- | --- | --- |
 | `om` | [`cmd/om`](cmd/om), [`daemon/`](daemon), [`linux/`](linux) | Joins the private network, serves OM SSH, matches rules, records logs, relays Git to GitHub without a token on the machine; on Linux, also installs, updates and runs the product. See [docs/om.md](docs/om.md). |
 | Device identity | [`device/`](device) | This machine's key, sign-in and sign-out, its permission, and the bundle it runs. See [docs/device.md](docs/device.md). |
-| Core | [`access/`](access) | Starts each session with the access you chose: Read only or Workspace, sandboxed with macOS Seatbelt or Linux bubblewrap, or Full access, which is not sandboxed. |
+| Core | [`access/`](access) | Starts each session with the access you chose. |
 | Network library | [`connector/`](connector) | Joins one device to the private network; a Go module of its own. |
 
 Closed source, run by us:
 
 - **The Mac app**: sign-in, settings and installation on macOS. What it does and does not do: [docs/mac-app.md](docs/mac-app.md).
 - **The service**: accounts, teams, policy and rule authoring, the coordination server and relays, log storage, and the Console.
-
-What the engine does and does not guarantee is in [SECURITY.md](SECURITY.md).
 
 ## Build and test
 
