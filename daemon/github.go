@@ -71,6 +71,22 @@ func approvalLines(number string) string {
 	return "Open Machine needs your approval.\nChoose " + number + " in Desktop or the Console.\nWaiting up to 5 minutes…\n"
 }
 
+// waitingLine is what a command run again without a terminal, as by an agent that passed the number
+// on, shows as it waits.
+func waitingLine(number string) string {
+	return "Waiting for the user to choose " + number + " in Desktop or the Console…\n"
+}
+
+// StillEvery is how often a wait says it still waits, so that an agent's silence timeout never ends
+// it and an agent whose command was stopped learns why; tests shorten it.
+var StillEvery = time.Minute
+
+// stillLine says a wait still lasts, with until's minutes left.
+func stillLine(number string, until time.Time) string {
+	return fmt.Sprintf("Still waiting for %s, %d min left. If this command stops, run it again.\n", number,
+		(time.Until(until)+time.Minute-1)/time.Minute)
+}
+
 // ownerRepo is OWNER/REPO, optionally with .git, capturing both names.
 const ownerRepo = `([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?`
 
@@ -886,28 +902,40 @@ func (b *Broker) approval(ctx context.Context, w http.ResponseWriter, op *operat
 		w.Header().Set("Cache-Control", "no-store")
 		*answered = true
 	}
-	text := e.Message + "\n"
-	if op.interactive {
-		text = approvalLines(e.Number)
+	say := func(text string) {
+		for line := range strings.Lines(text) {
+			payload := append([]byte{2}, line...)
+			fmt.Fprintf(w, "%04x%s", len(payload)+4, payload)
+		}
+		http.NewResponseController(w).Flush()
 	}
-	for line := range strings.Lines(text) {
-		payload := append([]byte{2}, line...)
-		fmt.Fprintf(w, "%04x%s", len(payload)+4, payload)
-	}
-	http.NewResponseController(w).Flush()
-	if !op.interactive {
+	switch {
+	case op.interactive:
+		say(approvalLines(e.Number))
+	case e.Again:
+		say(waitingLine(e.Number))
+	default:
+		say(e.Message + "\n")
 		return "approval needed"
 	}
-	return b.approved(ctx, e)
+	return b.approved(ctx, e, say)
 }
 
 // approved waits until Cloud answers the request e names, sharing each wait with every command
-// waiting on it, and returns "" when its person approved it, else why it ends: Cloud's refusal,
-// the session ending, or the request expiring.
-func (b *Broker) approved(ctx context.Context, e *cloudError) string {
+// waiting on it, saying each StillEvery that it still waits, and returns "" when its person approved
+// it, else why it ends: Cloud's refusal, the session ending, or the request expiring.
+func (b *Broker) approved(ctx context.Context, e *cloudError, say func(string)) string {
 	deadline := time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
-	for time.Now().Before(deadline) {
-		state, err := b.await(ctx, e.Request, deadline)
+	for said := time.Now(); time.Now().Before(deadline); {
+		if time.Since(said) >= StillEvery {
+			say(stillLine(e.Number, deadline))
+			said = time.Now()
+		}
+		until := said.Add(StillEvery) // the call in flight goes on, and the next await shares it
+		if deadline.Before(until) {
+			until = deadline
+		}
+		state, err := b.await(ctx, e.Request, until)
 		var ce *cloudError
 		switch {
 		case state == "approved":
@@ -921,7 +949,8 @@ func (b *Broker) approved(ctx context.Context, e *cloudError) string {
 	return requestExpired
 }
 
-// asks keeps the request a refusal e names as one this broker may wait on, until it expires.
+// asks keeps the request a refusal e names as one this broker may wait on, until it expires, and
+// marks e Again when it already was one.
 func (b *Broker) asks(e *cloudError) {
 	if e.Code != "github_approval_required" || !requestID.MatchString(e.Request) {
 		return
@@ -929,6 +958,8 @@ func (b *Broker) asks(e *cloudError) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	maps.DeleteFunc(b.asked, func(_ string, until time.Time) bool { return time.Since(until) > time.Minute })
+	until, ok := b.asked[e.Request]
+	e.Again = ok && time.Now().Before(until)
 	b.asked[e.Request] = time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
 }
 

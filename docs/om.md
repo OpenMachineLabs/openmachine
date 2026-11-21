@@ -184,8 +184,11 @@ the machine, and `gh` is not used.
   (`om git-credential` and `om github` read their standard error) `om` shows
   the number to choose and waits up to 5 minutes; a team's push is held whole,
   shown the number as `remote:` lines and sent again once approved. Otherwise,
-  as for an agent, it prints Cloud's message and fails at once. The broker asks
-  Cloud about one request at a time, at most 20 times a minute.
+  as for an agent, it prints Cloud's message and fails at once; run again while
+  the request waits, it waits too and goes on once approved, so the agent needs
+  no word that the person chose. Every wait says each minute that it still
+  waits. The broker asks Cloud about one request at a time, at most 20 times a
+  minute.
 - A person's computer holds their session on a team's machine while a socket
   `dial` to it lasts: it posts when the dial starts, every 2 minutes, and ends
   the session a minute after the last dial ends. After Cloud declines, it posts

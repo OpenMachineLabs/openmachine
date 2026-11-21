@@ -29,6 +29,9 @@ func TestOmProcess(t *testing.T) {
 	if os.Getenv("OM_TEST_PROCESS") != "1" {
 		return
 	}
+	if every, err := time.ParseDuration(os.Getenv("OM_TEST_STILL_EVERY")); err == nil {
+		daemon.StillEvery = every
+	}
 	args := os.Args[slices.Index(os.Args, "--")+1:]
 	os.Exit(daemon.GitCredential(args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -49,9 +52,9 @@ func omClient(t *testing.T) string {
 const (
 	request     = "0123456789abcdef0123456789abcdef"
 	readMessage = "Open Machine needs the user’s approval to use owner/app.\nTell the user: choose 42 in Desktop or the Console.\n" +
-		"The number works for 5 minutes. When they have, run this command again."
+		"The number works for 5 minutes. Then run this command again at once: it waits until they have."
 	pushMessage = "Open Machine needs the user’s approval to push to main.\nTell the user: choose 57 in Desktop or the Console.\n" +
-		"The number works for 5 minutes. When they have, run this command again."
+		"The number works for 5 minutes. Then run this command again at once: it waits until they have."
 )
 
 // approvalRequired writes Cloud's refusal of a use that waits for its person, numbered number.
@@ -310,12 +313,28 @@ func TestApprovalInATerminal(t *testing.T) {
 // TestApprovalForAnAgent: without a terminal, as for an AI agent, om shows Cloud's own words and fails at once.
 func TestApprovalForAnAgent(t *testing.T) {
 	cloud := &teamCloud{scriptedCloud: &scriptedCloud{account: strings.Repeat("a", 32), ttl: 15 * time.Minute, git: advertise},
-		expiry: 300, wait: answers("approved")}
+		expiry: 300, wait: func(n int, w http.ResponseWriter, r *http.Request) {
+			if n < 3 {
+				time.Sleep(300 * time.Millisecond)
+				answers("waiting")(n, w, r)
+				return
+			}
+			answers("approved")(n, w, r)
+		}}
 	cloud.asks.Store(1)
 	b, capability, _, _ := openBroker(t, cloud, daemon.GitSession{Mode: "full_access", Client: omClient(t)})
-	out, errout, err := git(t, sessionEnv(t, b, capability), t.TempDir(), nil, "ls-remote", "https://github.com/owner/app")
+	env := append(sessionEnv(t, b, capability), "OM_TEST_STILL_EVERY=250ms")
+	out, errout, err := git(t, env, t.TempDir(), nil, "ls-remote", "https://github.com/owner/app")
 	if err == nil || out != "" || !strings.HasPrefix(errout, readMessage+"\n") || cloud.waits.Load() != 0 || cloud.asks.Load() != 0 {
 		t.Fatalf("ls-remote = %q %v %q; %d waits", out, err, errout, cloud.waits.Load())
+	}
+	// Run again at once, as the message says: it waits, saying so, and goes on once the person approves,
+	// with nobody telling the agent.
+	cloud.asks.Store(1)
+	out, errout, err = git(t, env, t.TempDir(), nil, "ls-remote", "https://github.com/owner/app")
+	want := "Waiting for the user to choose 42 in Desktop or the Console…\nStill waiting for 42, 5 min left. If this command stops, run it again.\n"
+	if err != nil || out == "" || !strings.HasPrefix(errout, want) || strings.Contains(errout, "Tell the user") || cloud.waits.Load() != 3 {
+		t.Fatalf("run again = %q %v %q; %d waits", out, err, errout, cloud.waits.Load())
 	}
 }
 
@@ -354,9 +373,9 @@ func TestRefusedOrExpiredApproval(t *testing.T) {
 	}
 }
 
-// TestOmGithubWaitsOnlyInATerminal: om github waits for the approval in a terminal and then makes its call
+// TestOmGithubWaits: om github waits for the approval in a terminal and then makes its call
 // once more; for an agent it shows Cloud's words and fails.
-func TestOmGithubWaitsOnlyInATerminal(t *testing.T) {
+func TestOmGithubWaits(t *testing.T) {
 	var calls atomic.Int32
 	cloud := &teamCloud{scriptedCloud: &scriptedCloud{account: strings.Repeat("a", 32), ttl: 15 * time.Minute, git: func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -372,12 +391,46 @@ func TestOmGithubWaitsOnlyInATerminal(t *testing.T) {
 		t.Fatalf("for an agent = %d %q", code, errout.String())
 	}
 	cloud.asks.Store(1)
+	errout.Reset()
+	if code := daemon.GitHub([]string{"pr", "list", "--repo", "owner/app"}, &out, &errout); code != 0 ||
+		errout.String() != "Waiting for the user to choose 42 in Desktop or the Console…\n" || calls.Load() != 1 {
+		t.Fatalf("for an agent, run again = %d %q", code, errout.String())
+	}
+	cloud.asks.Store(1)
 	master, slave := terminalPair(t)
 	shown := screen(master, slave)
-	code := daemon.GitHub([]string{"pr", "list", "--repo", "owner/app"}, &out, slave)
+	code := daemon.GitHub([]string{"pr", "list", "--repo", "owner/app2"}, &out, slave) // not the ticket just minted
 	if text := shown(); code != 0 || text != "Open Machine needs your approval.\nChoose 42 in Desktop or the Console.\nWaiting up to 5 minutes…\n" ||
-		calls.Load() != 1 || cloud.waits.Load() != 1 {
+		calls.Load() != 2 || cloud.waits.Load() != 2 {
 		t.Fatalf("in a terminal = %d %q, %d calls", code, text, calls.Load())
+	}
+}
+
+// TestOmGithubPullLookupAsks: pr view's lookup of the branch's pull request is asked about like any
+// call, so an agent is told the number at once and a rerun waits.
+func TestOmGithubPullLookupAsks(t *testing.T) {
+	cloud := &teamCloud{scriptedCloud: &scriptedCloud{account: strings.Repeat("a", 32), ttl: 15 * time.Minute, git: func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"result":[{"number":7}]}`)
+	}}, expiry: 300, wait: answers("approved")}
+	b, capability, _, _ := openBroker(t, cloud, daemon.GitSession{Mode: "read_only"})
+	for k, v := range b.Environment(capability) {
+		t.Setenv(k, v)
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q", "-b", "topic").CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	t.Chdir(dir)
+	cloud.asks.Store(1)
+	var out, errout bytes.Buffer
+	if code := daemon.GitHub([]string{"pr", "view", "--repo", "owner/app"}, &out, &errout); code != 1 || errout.String() != readMessage+"\n" {
+		t.Fatalf("for an agent = %d %q", code, errout.String())
+	}
+	cloud.asks.Store(1)
+	errout.Reset()
+	if code := daemon.GitHub([]string{"pr", "view", "--repo", "owner/app"}, &out, &errout); code != 0 ||
+		errout.String() != "Waiting for the user to choose 42 in Desktop or the Console…\n" || cloud.waits.Load() != 1 {
+		t.Fatalf("run again = %d %q", code, errout.String())
 	}
 }
 
@@ -385,8 +438,8 @@ func TestOmGithubWaitsOnlyInATerminal(t *testing.T) {
 var pushResult = pkt("\x01"+pkt("unpack ok\n")+pkt("ok refs/heads/main\n")+"0000") + "0000"
 
 // pushCloud is a team operation's Cloud that refuses pushes until the person approves, as approve
-// scripts it (the nth push from 1), and keeps each push's body.
-func pushCloud(approve func(n int) bool) (*teamCloud, *[][]byte) {
+// scripts it (the nth push from 1), and the bodies of the pushes it got.
+func pushCloud(approve func(n int) bool) (*teamCloud, func() [][]byte) {
 	var bodies [][]byte
 	var mu sync.Mutex
 	cloud := &teamCloud{scriptedCloud: &scriptedCloud{account: strings.Repeat("a", 32), ttl: 15 * time.Minute, team: true}, expiry: 300}
@@ -407,7 +460,7 @@ func pushCloud(approve func(n int) bool) (*teamCloud, *[][]byte) {
 		w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
 		io.WriteString(w, pushResult)
 	}
-	return cloud, &bodies
+	return cloud, func() [][]byte { mu.Lock(); defer mu.Unlock(); return slices.Clone(bodies) }
 }
 
 // repository makes a repository of one commit on main whose origin is the GitHub repository owner/app.
@@ -434,7 +487,7 @@ func noHeldPush(t *testing.T, b *daemon.Broker, capability string) {
 // remote lines, the broker waits, sends the same push again and git shows GitHub's result. A second refusal,
 // as when an identical push used the approval first, shows a new number. The held push is then gone.
 func TestTeamPushWaitsInATerminal(t *testing.T) {
-	cloud, bodies := pushCloud(func(n int) bool { return n == 3 })
+	cloud, pushes := pushCloud(func(n int) bool { return n == 3 })
 	cloud.wait = answers("approved")
 	b, capability, _, _ := openBroker(t, cloud, daemon.GitSession{Mode: "full_access", Client: omClient(t)})
 	env := sessionEnv(t, b, capability)
@@ -449,24 +502,43 @@ func TestTeamPushWaitsInATerminal(t *testing.T) {
 	if err != nil || !strings.Contains(text, lines("57")+lines("58")) || !strings.Contains(text, "main -> main") || strings.Contains(text, "Tell the user") {
 		t.Fatalf("push = %v; terminal %q", err, text)
 	}
-	if len(*bodies) != 3 || !bytes.Equal((*bodies)[0], (*bodies)[2]) || !bytes.Equal((*bodies)[1], (*bodies)[2]) || cloud.waits.Load() != 2 {
-		t.Fatalf("Cloud got %d pushes, %d waits", len(*bodies), cloud.waits.Load())
+	if got := pushes(); len(got) != 3 || !bytes.Equal(got[0], got[2]) || !bytes.Equal(got[1], got[2]) || cloud.waits.Load() != 2 {
+		t.Fatalf("Cloud got %d pushes, %d waits", len(pushes()), cloud.waits.Load())
 	}
 	noHeldPush(t, b, capability)
 }
 
 // TestTeamPushForAnAgent: without a terminal the push fails at once with Cloud's words as remote lines.
 func TestTeamPushForAnAgent(t *testing.T) {
-	cloud, bodies := pushCloud(func(int) bool { return false })
-	cloud.wait = answers("approved")
+	saved := daemon.StillEvery
+	daemon.StillEvery = 200 * time.Millisecond
+	t.Cleanup(func() { daemon.StillEvery = saved })
+	cloud, pushes := pushCloud(func(n int) bool { return n == 3 })
+	cloud.wait = func(n int, w http.ResponseWriter, r *http.Request) {
+		if n == 1 {
+			time.Sleep(300 * time.Millisecond)
+			answers("waiting")(n, w, r)
+			return
+		}
+		answers("approved")(n, w, r)
+	}
 	b, capability, _, _ := openBroker(t, cloud, daemon.GitSession{Mode: "full_access", Client: omClient(t)})
 	env := sessionEnv(t, b, capability)
-	_, errout, err := git(t, env, repository(t, env), nil, "push", "origin", "main")
+	dir := repository(t, env)
+	_, errout, err := git(t, env, dir, nil, "push", "origin", "main")
 	errout = plain(errout)
-	if err == nil || len(*bodies) != 1 || cloud.waits.Load() != 0 ||
+	if err == nil || len(pushes()) != 1 || cloud.waits.Load() != 0 ||
 		!strings.Contains(errout, "remote: "+strings.ReplaceAll(pushMessage, "\n", "\nremote: ")+"\n") ||
 		!strings.Contains(errout, "remote: om: approval needed\n") {
-		t.Fatalf("push = %v %q; %d pushes, %d waits", err, errout, len(*bodies), cloud.waits.Load())
+		t.Fatalf("push = %v %q; %d pushes, %d waits", err, errout, len(pushes()), cloud.waits.Load())
+	}
+	// Run again at once, it waits, saying so in remote lines, and the push goes through once approved.
+	_, errout, err = git(t, env, dir, nil, "push", "origin", "main")
+	errout = plain(errout)
+	if err != nil || len(pushes()) != 3 || cloud.waits.Load() != 2 || strings.Contains(errout, "Tell the user") ||
+		!strings.Contains(errout, "remote: Waiting for the user to choose 58 in Desktop or the Console…\n"+
+			"remote: Still waiting for 58, 5 min left. If this command stops, run it again.\n") || !strings.Contains(errout, "main -> main") {
+		t.Fatalf("push again = %v %q; %d pushes, %d waits", err, errout, len(pushes()), cloud.waits.Load())
 	}
 	noHeldPush(t, b, capability)
 }

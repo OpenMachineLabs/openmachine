@@ -53,7 +53,7 @@ func GitCredential(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	ask := map[string]any{"path": request["path"], "interactive": terminal(stderr)}
 	status, err := brokerCall(broker, "/v1/credential", ask, &reply, brokerTimeout)
 	if err == nil && reply.Error == "github_approval_required" {
-		if !terminal(stderr) {
+		if !terminal(stderr) && !reply.Again {
 			fmt.Fprintln(stderr, reply.Message)
 			fmt.Fprintln(stdout, "quit=1")
 			return 0
@@ -78,6 +78,7 @@ func GitCredential(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 type brokerRefusal struct {
 	Error, Message, Request, Number string
 	ExpiresIn                       int64 `json:"expires_in"`
+	Again                           bool  // the request was refused here before and still waits
 }
 
 // terminal reports whether w is a terminal, where a person reads the command's output and can wait
@@ -91,21 +92,32 @@ func terminal(w io.Writer) bool {
 	return ok
 }
 
-// approve shows the person in the terminal the number to choose and waits, through the broker,
-// until the request r names is approved (""), refused or expired (what to show after "om: ").
+// approve shows the number to choose to the person in the terminal, or that it waits to a command run
+// again without one, and waits, through the broker, until the request r names is approved (""),
+// refused or expired (what to show after "om: "), saying each StillEvery that it still waits.
 func approve(broker string, r brokerRefusal, stderr io.Writer) string {
-	io.WriteString(stderr, approvalLines(r.Number))
+	if terminal(stderr) {
+		io.WriteString(stderr, approvalLines(r.Number))
+	} else {
+		io.WriteString(stderr, waitingLine(r.Number))
+	}
 	deadline := time.Now().Add(time.Duration(r.ExpiresIn) * time.Second)
+	said := time.Now()
 	for left := time.Until(deadline); left > 0; left = time.Until(deadline) {
+		if time.Since(said) >= StillEvery {
+			io.WriteString(stderr, stillLine(r.Number, deadline))
+			said = time.Now()
+		}
+		next := said.Add(StillEvery) // a call cut off then leaves the broker's own Cloud call going
 		var reply struct {
 			State string
 			brokerRefusal
 		}
-		status, err := brokerCall(broker, "/v1/wait", map[string]string{"request": r.Request}, &reply, min(left, brokerTimeout))
+		status, err := brokerCall(broker, "/v1/wait", map[string]string{"request": r.Request}, &reply, min(left, brokerTimeout, time.Until(next)))
 		switch {
-		case err != nil && time.Now().Before(deadline):
+		case err != nil && time.Now().Before(next) && time.Now().Before(deadline):
 			return "the Open Machine Code service did not answer: " + err.Error()
-		case err != nil:
+		case err != nil: // cut off for the next line, or at the deadline
 		case status == http.StatusOK && reply.State == "approved":
 			return ""
 		case status != http.StatusOK && status != http.StatusTooManyRequests && status != http.StatusBadGateway:
@@ -296,7 +308,9 @@ func GitHub(args []string, stdout, stderr io.Writer) int {
 				return fail("pr view takes a pull request number")
 			}
 			number = n
-		} else if number = openPull(repository, branch()); number == 0 {
+		} else if n, exit := openPull(broker, repository, branch(), stderr); exit >= 0 {
+			return exit
+		} else if number = n; number == 0 {
 			return fail("no open pull request has the current branch as its head; give its number")
 		}
 		call = map[string]any{"operation": "pull_view", "number": number}
@@ -322,18 +336,9 @@ func GitHub(args []string, stdout, stderr io.Writer) int {
 		Effect string          `json:"effect"`
 		brokerRefusal
 	}
-	ask := map[string]any{"repository": repository, "call": call}
-	status, err := brokerCall(broker, "/v1/github", ask, &reply, brokerTimeout)
-	if err == nil && reply.Error == "github_approval_required" {
-		if !terminal(stderr) {
-			fmt.Fprintln(stderr, reply.Message)
-			return 1
-		}
-		if message := approve(broker, reply.brokerRefusal, stderr); message != "" {
-			return fail(message)
-		}
-		reply.brokerRefusal = brokerRefusal{}
-		status, err = brokerCall(broker, "/v1/github", ask, &reply, brokerTimeout)
+	status, err, exit := githubCall(broker, map[string]any{"repository": repository, "call": call}, &reply, stderr)
+	if exit >= 0 {
+		return exit
 	}
 	if err != nil || status != http.StatusOK {
 		message := cmp.Or(reply.Message, "the Open Machine Code service did not answer")
@@ -360,19 +365,43 @@ func gitOutput(args ...string) (string, error) {
 }
 
 // openPull returns the number of the one open pull request whose head is branch, or 0.
-func openPull(repository, branch string) int {
+func openPull(broker, repository, branch string, stderr io.Writer) (int, int) {
 	if branch == "" {
-		return 0
+		return 0, -1
 	}
 	var reply struct {
 		Result []struct{ Number int } `json:"result"`
 	}
-	status, err := brokerCall(os.Getenv("OM_BROKER"), "/v1/github", map[string]any{"repository": repository,
-		"call": map[string]any{"v": 1, "operation": "pull_list", "state": "open", "head": branch, "base": nil}}, &reply, brokerTimeout)
-	if err != nil || status != http.StatusOK || len(reply.Result) != 1 {
-		return 0
+	status, err, exit := githubCall(broker, map[string]any{"repository": repository,
+		"call": map[string]any{"v": 1, "operation": "pull_list", "state": "open", "head": branch, "base": nil}}, &reply, stderr)
+	if exit >= 0 || err != nil || status != http.StatusOK || len(reply.Result) != 1 {
+		return 0, exit
 	}
-	return reply.Result[0].Number
+	return reply.Result[0].Number, -1
+}
+
+// githubCall posts ask to the broker's /v1/github and decodes the last reply into out, through the
+// person's approval when Cloud asks for it. It returns that reply's status, and the exit code when
+// the approval ended the command, else -1.
+func githubCall(broker string, ask, out any, stderr io.Writer) (int, error, int) {
+	var raw json.RawMessage
+	var r brokerRefusal
+	status, err := brokerCall(broker, "/v1/github", ask, &raw, brokerTimeout)
+	if err == nil && json.Unmarshal(raw, &r) == nil && r.Error == "github_approval_required" {
+		if !terminal(stderr) && !r.Again {
+			fmt.Fprintln(stderr, r.Message)
+			return status, nil, 1
+		}
+		if message := approve(broker, r, stderr); message != "" {
+			fmt.Fprintf(stderr, "om: %s\n", message)
+			return status, nil, 1
+		}
+		status, err = brokerCall(broker, "/v1/github", ask, &raw, brokerTimeout)
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, out)
+	}
+	return status, err, -1
 }
 
 type pullResult struct {

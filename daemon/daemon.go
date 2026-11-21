@@ -932,6 +932,7 @@ type cloudError struct {
 	Request   string `json:"request,omitempty"`
 	Number    string `json:"number,omitempty"`
 	ExpiresIn int64  `json:"expires_in,omitempty"`
+	Again     bool   `json:"again,omitempty"` // the broker refused the same request before, which still waits
 }
 
 func (e *cloudError) Error() string {
