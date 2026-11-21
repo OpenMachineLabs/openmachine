@@ -34,7 +34,8 @@ class ProfileTests(unittest.TestCase):
             path.mkdir(parents=True)
         arguments = dict(home=home, others=[self.root / "homes"], folders=[writable, worktree], private=self.root / "T/omc/lifetime",
                          control=[self.root / "state"], denied=[self.root / "home/Library"],
-                         exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om")
+                         exceptions=[self.root / "home/Library/Developer"], executable=self.root / "omc/om",
+                         routing=self.root / "state/routing")
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(**arguments)
             # Protection is by name: a .git file changes nothing, and nested Git dirs that exist gain only
@@ -50,7 +51,7 @@ class ProfileTests(unittest.TestCase):
             self.assertNotIn('qu"ote', nested)
             with self.assertRaises(Fault) as caught:
                 seatbelt.profile(home=home, others=[], folders=[self.root / 'quote"d'], private=self.root, control=[],
-                                 denied=[], exceptions=[], executable=self.root / "omc/om")
+                                 denied=[], exceptions=[], executable=self.root / "omc/om", routing=self.root / "r")
             self.assertEqual(caught.exception.code, "scope_unsupported")
         lines = text.splitlines()
         self.assertEqual(lines[:2], ["(version 1)", "(deny default)"])
@@ -86,7 +87,9 @@ class ProfileTests(unittest.TestCase):
                 f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (require-all (require-any '
                 f'(subpath "{self.root / "homes"}")) (require-not (subpath "{home}"))))',
                 f'(allow file-read-metadata (literal "{self.root / "homes"}"))',
-                f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))']
+                f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))',
+                # Last: the routing folder, inside the control paths, is read and nothing more.
+                f'(allow file-read* file-read-data (subpath "{self.root / "state/routing"}"))']
         self.assertEqual(lines[lines.index(freeze):], [freeze, *tail])
         self.assertNotIn(".git", "".join(line for line in lines if "literal" in line))
         # Files and data directories only inside the nested Git dirs that exist, never beside or in place of them.
@@ -122,14 +125,14 @@ class ProfileTests(unittest.TestCase):
         client, denied = self.root / "home/Library/om/om", self.root / "home/Library"
         with patch.object(seatbelt, "user_temp", return_value=self.root / "T"):
             text = seatbelt.profile(home=self.root / "H", others=[], folders=[], private=self.root / "T/p", control=[self.root / "state"],
-                                    denied=[denied], exceptions=[], executable=client)
+                                    denied=[denied], exceptions=[], executable=client, routing=self.root / "r")
         allow = f'(allow file-read* process-exec (literal "{client}"))'
         lines = text.splitlines()
         self.assertLess(lines.index(f'(deny file-read* process-exec (subpath "{denied}") (subpath "{self.root / "T"}"))'),
                         lines.index(allow))
         # It only reads and runs the client: it names no write operation the Git and control denials must cover.
         self.assertLess(lines.index(allow), lines.index(f'(deny file-write-create file-write-unlink (regex #"{seatbelt.NESTED_GIT_REGEX}"))'))
-        self.assertEqual(lines[-1], f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))')
+        self.assertEqual(lines[-2], f'(deny file-read* file-read-data {seatbelt.WRITES} process-exec (subpath "{self.root / "state"}"))')
 
     def test_protected_names_cover_git_entries_worktrees_and_submodules_but_not_refs(self):
         pattern = re.compile(seatbelt.PROTECTED_REGEX)

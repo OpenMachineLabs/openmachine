@@ -42,11 +42,14 @@ def _admit_restricted(request: sessions.SessionRequest, account, state: Path) ->
     with lifetime.lock():
         record = restricted._record(lifetime, request)
         home, others = persistent_home(request.home)  # Made only for a request its lifetime takes.
-        # The lifetime's directory in the runtime tree, bound into its instance: the spawner listens in it.
-        private = private_directory(sandbox.runtime(rules.account_home()) / restricted.digest(request.lifetime)[:12])
-        # Every instance binds the lifetime's one spawner socket, so only the newest is reachable.
+        # The lifetime's directory in the runtime tree, bound into its instance: the spawner listens in it. The
+        # tree is made private first, as the client's copy, made later in it, requires.
+        private = private_directory(private_directory(sandbox.runtime(rules.account_home())) / restricted.digest(request.lifetime)[:12])
+        # Every instance binds the lifetime's one spawner socket, so only the newest is reachable. A routed
+        # session needs an instance that reads the routing folder.
         newest = record["instances"][-1] if record["instances"] else None
-        instance = newest if newest and restricted._spawner_alive(newest) else None
+        instance = newest if newest and restricted._spawner_alive(newest) and (
+            request.github is None or newest.get("routing")) else None
         connection = None
         if instance:
             try:
@@ -171,9 +174,14 @@ def _start_instance(bubblewrap: Path, scope: "rules.Scope | None", state: Path, 
                     raise Fault("scope_unsupported", f"{path} cannot be created to protect it. Make the folder "
                                 "writable, or change it in the Console.", effect="known_no_effect") from error
             hidden = [*sandbox.read_denials(rules.account_home()), *rules.control_paths(state), state, *others]
-            arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client)
+            # The routing folder is mounted only if it is there when the instance starts.
+            routing = Path(os.path.realpath(rules.GITHUB_ROUTING))
+            routing = routing if routing.is_dir() else None
+            arguments = sandbox.arguments(home=home, roots=roots, hidden=hidden, private=private, client=client,
+                                          routing=routing)
             instance, release = _start_spawner(
                 [str(bubblewrap), *arguments, "--", sys.executable, "-I", "-c", SPAWNER], private)
+            instance["routing"] = routing is not None
             known["instances"].append(instance)
             save_json(record, known)
         except BaseException as error:

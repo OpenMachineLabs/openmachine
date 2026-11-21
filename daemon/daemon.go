@@ -31,8 +31,12 @@ import (
 )
 
 // StateDir is the daemon's private state under home. Core denies it, and the
-// Connector's state beside it, to restricted sessions.
+// Connector's state beside it, to restricted sessions, but for GitHubRouting,
+// which they read.
 func StateDir(home string) string { return filepath.Join(home, ".local/state/openmachine-om") }
+
+// GitHubRouting is the folder of sessions' Git routing in the state.
+const GitHubRouting = "github-routing"
 
 const (
 	codePort   = 22
@@ -64,6 +68,8 @@ type daemon struct {
 	github    *githubRouting // the broker, or nil until Core answers and without its support
 	foldersMu sync.Mutex     // folder checks run one at a time
 	keyMu     sync.Mutex     // open_key is made once
+	holds     *Holds         // the person's GitHub sessions on the team's machines dialed
+	requests  githubRequests
 
 	mu        sync.Mutex
 	applied   *Lease
@@ -167,6 +173,14 @@ func run(ctx context.Context, core Core, id *Identity, st *state) error {
 	d := &daemon{id: id, state: st, device: own, core: core, user: u.Username, signer: signer, log: OpenLog(own.path("log"), id.DeviceID, id.Key),
 		netlog: newNetLog(core.Home), coreRead: make(chan struct{}), conns: map[*conn]struct{}{}, streams: map[io.Closer]struct{}{}, lifetimes: map[binding]*lifetime{}}
 	d.allowed.Store(&map[string]bool{})
+	d.holds = NewHolds(func(target string, open bool) (bool, error) {
+		var r struct {
+			Held bool `json:"held"`
+		}
+		err := d.post(context.Background(), "code/github/session", map[string]any{"v": 1, "target": target, "open": open}, &r)
+		return r.Held, err
+	})
+	go d.holds.Run(ctx)
 	if err := d.loadLifetimes(); err != nil {
 		return err
 	}
@@ -292,13 +306,13 @@ func (d *daemon) route(caps coreCapabilities) {
 	if err == nil {
 		client, err = filepath.EvalSymlinks(client)
 	}
-	if caps.GitHub != "https" || err != nil {
+	if caps.GitHub != "include" || err != nil {
 		if err != nil {
 			log.Printf("native: GitHub broker: %v", err)
 		}
 		return
 	}
-	b, err := NewBroker(d.id.Origin, d.id.DeviceID, d.id.Key, CloudClient, d.state.path("github-proofs"))
+	b, err := NewBroker(d.id.Origin, d.id.DeviceID, d.id.Key, CloudClient, d.state.path("github-proofs"), d.state.path(GitHubRouting))
 	if err != nil {
 		log.Printf("native: GitHub broker: %v", err)
 		return
@@ -348,7 +362,11 @@ func (d *daemon) Services() []Service {
 // serveProxy does for ssh: named for app and held in d.streams, so that going
 // offline closes it.
 func (d *daemon) Dial(alias, app string) (net.Conn, error) {
-	target, err := d.dial(alias + ".om")
+	host, err := d.host(alias + ".om")
+	if err != nil {
+		return nil, err
+	}
+	target, err := d.dial(alias+".om", host)
 	if err != nil {
 		return nil, err
 	}
@@ -679,9 +697,10 @@ func (d *daemon) listenProxy() (*net.UnixListener, error) {
 
 // serveProxy answers "dial HOST" with "ok" and the SSH stream, or "error
 // REASON", "status" with one JSON line, "folders" followed by a JSON object up
-// to EOF with Core's folder check, and "watch" with the account view as one
-// JSON line now and one after every change, until the client closes, for
-// processes of this user only.
+// to EOF with Core's folder check, "watch" with the account view as one
+// JSON line now and one after every change, until the client closes, and
+// "github" with Cloud's answer to the person's decision, for processes of this
+// user only.
 func (d *daemon) serveProxy(ln *net.UnixListener) {
 	for {
 		uc, err := ln.AcceptUnix()
@@ -712,10 +731,15 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 				json.NewEncoder(uc).Encode(reply)
 				return
 			}
+			if decision, ok := strings.CutPrefix(line, "github "); err == nil && ok {
+				uc.Write(d.decide(uc, decision))
+				return
+			}
 			if err == nil && line == "watch" {
 				uc.SetDeadline(time.Time{})
 				gone := make(chan struct{})
 				go func() { io.Copy(io.Discard, r); close(gone) }()
+				defer d.watching()()
 				var last []byte
 				for {
 					view, changed := d.authority.View()
@@ -732,11 +756,18 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 					}
 				}
 			}
-			host, ok := strings.CutPrefix(line, "dial ")
+			name, ok := strings.CutPrefix(line, "dial ")
 			if err != nil || !ok {
 				return
 			}
-			target, err := d.dial(host)
+			host, err := d.host(name)
+			if err != nil {
+				fmt.Fprintf(uc, "error %s\n", err)
+				return
+			}
+			held, end := d.hold(host.DeviceID)
+			defer end()
+			target, err := d.dial(name, host)
 			if err != nil {
 				fmt.Fprintf(uc, "error %s\n", err)
 				return
@@ -754,6 +785,10 @@ func (d *daemon) serveProxy(ln *net.UnixListener) {
 				target.Close()
 				fmt.Fprintf(uc, "error %s\n", disconnected("this computer"))
 				return
+			}
+			select { // its GitHub session's post, briefly
+			case <-held:
+			case <-time.After(HoldWait):
 			}
 			uc.SetDeadline(time.Time{})
 			if _, err := io.WriteString(uc, "ok\n"); err != nil {
@@ -826,34 +861,38 @@ func (d *daemon) Folders(l Lease) *Refusal {
 	return &Refusal{"folders_unavailable", 0}
 }
 
-// dial connects to a device this one may reach, by an alias its lease's hosts
-// give it, at its verified node key: an unknown, revoked or offline
-// target fails, with no DNS or local fallback, and fails at once while Cloud
-// is known to be unavailable.
-func (d *daemon) dial(host string) (*connector.Conn, error) {
+// host is the device this one may reach by an alias its lease's hosts give it:
+// an unknown or revoked one fails, with no DNS or local fallback, and fails at
+// once while Cloud is known to be unavailable.
+func (d *daemon) host(host string) (Host, error) {
 	name, ok := strings.CutSuffix(strings.ToLower(host), ".om")
 	if !ok {
-		return nil, fmt.Errorf("%s is not an Open Machine host", host)
+		return Host{}, fmt.Errorf("%s is not an Open Machine host", host)
 	}
 	l, err := d.lease("this computer")
 	if err != nil {
-		return nil, err
+		return Host{}, err
 	}
 	if name == "" { // the configuration's catch-all
-		return nil, errors.New("that .om name is not a machine this computer can use")
+		return Host{}, errors.New("that .om name is not a machine this computer can use")
 	}
 	i := slices.IndexFunc(l.Hosts, func(h Host) bool { return slices.Contains(h.Aliases, name) })
 	if i < 0 {
 		if reason := d.authority.Approval().of(name); reason != "" {
-			return nil, fmt.Errorf("%s is not a machine this computer can use: %s", host, reason)
+			return Host{}, fmt.Errorf("%s is not a machine this computer can use: %s", host, reason)
 		}
-		return nil, fmt.Errorf("%s is not a machine this computer can use", host)
+		return Host{}, fmt.Errorf("%s is not a machine this computer can use", host)
 	}
+	return l.Hosts[i], nil
+}
+
+// dial connects to target, named host, at its verified node key: an offline
+// one fails.
+func (d *daemon) dial(host string, target Host) (*connector.Conn, error) {
 	node := d.node.Load()
 	if node == nil {
 		return nil, errors.New("the Code service is still joining the private network")
 	}
-	target := l.Hosts[i]
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	st, err := node.Status(ctx)
@@ -884,10 +923,16 @@ func (d *daemon) dial(host string) (*connector.Conn, error) {
 	return c, nil
 }
 
-// cloudError is a request Cloud refused.
+// cloudError is a request Cloud refused; one that waits for its person's approval names the
+// request, the number to choose and the seconds left.
 type cloudError struct {
-	Status        int
-	Code, Message string
+	Status    int    `json:"-"`
+	Code      string `json:"error"`
+	Message   string `json:"message"`
+	Request   string `json:"request,omitempty"`
+	Number    string `json:"number,omitempty"`
+	ExpiresIn int64  `json:"expires_in,omitempty"`
+	Again     bool   `json:"again,omitempty"` // the broker refused the same request before, which still waits
 }
 
 func (e *cloudError) Error() string {
@@ -929,9 +974,10 @@ func signedPost(ctx context.Context, client *http.Client, origin, deviceID strin
 		return err
 	}
 	if res.StatusCode != http.StatusOK {
-		var e struct{ Error, Message string }
-		json.Unmarshal(b, &e)
-		return &cloudError{res.StatusCode, e.Error, e.Message}
+		e := &cloudError{}
+		json.Unmarshal(b, e)
+		e.Status = res.StatusCode
+		return e
 	}
 	return json.Unmarshal(b, out)
 }

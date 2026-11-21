@@ -798,8 +798,8 @@ func (s *session) launch(kind, command string) (err error) {
 		return err
 	}
 	req.Lifetime = lt.ID
-	var gh *githubRouting // SFTP runs no git, and only a source Cloud allows it gets the routing
-	if kind != "sftp" && slices.Contains(adm.source.Allow, "github") {
+	var gh *githubRouting // SFTP runs no git; the routing follows whether Cloud allows the source GitHub
+	if kind != "sftp" {
 		gh = d.githubRouting()
 	}
 	// Full Access runs the daemon's own om; a restricted sandbox may run only Core's copy,
@@ -815,7 +815,7 @@ func (s *session) launch(kind, command string) (err error) {
 		b, c := adm.binding, s.c
 		capability, end := gh.broker.Open(GitSession{Source: b.Source, SourceGrantRevision: b.SourceGrantRevision,
 			TargetGrant: b.TargetGrant, TargetGrantRevision: b.TargetGrantRevision, PolicyRevision: b.PolicyRevision,
-			Mode: adm.policy.Mode, Visit: v.ID(), Done: c.done, Live: func() error {
+			Mode: adm.policy.Mode, Visit: v.ID(), Client: run, Done: c.done, Live: func() error {
 				d.mu.Lock()
 				err := d.admissible(c)
 				d.mu.Unlock()
@@ -823,12 +823,20 @@ func (s *session) launch(kind, command string) (err error) {
 					err = disconnected("the target")
 				}
 				return err
+			}, GitHub: func() bool {
+				d.mu.Lock()
+				defer d.mu.Unlock()
+				if d.applied == nil {
+					return false
+				}
+				i := slices.IndexFunc(d.applied.Sources, func(s Source) bool { return s.DeviceID == b.Source })
+				return i >= 0 && slices.Contains(d.applied.Sources[i].Allow, "github")
 			}})
 		if s.endGitHub != nil {
 			s.endGitHub() // an earlier request of this channel that did not start its command
 		}
 		s.endGitHub = end
-		req.GitHub = &coreGitHub{Environment: gh.broker.Environment(capability, run), Client: gh.client}
+		req.GitHub = &coreGitHub{Environment: gh.broker.Environment(capability), Client: gh.client}
 	}
 	var stdio [3]*os.File
 	if s.master != nil {

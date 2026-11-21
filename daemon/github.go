@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -19,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -29,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -51,7 +54,38 @@ const (
 	maxTickets  = 1024
 	// callDeadline bounds one om github call, its ticket included, under the CLI's 90 seconds.
 	callDeadline = 75 * time.Second
+	// A request that waits for its person's approval is asked about at most once at a time, 20
+	// seconds after a failed call began, and the machine's calls stay within 20 a minute.
+	waitRetry = 20 * time.Second
+	maxWaits  = 20
 )
+
+// notRouted is why a session whose source's allow has no github gets nothing from the broker.
+const notRouted = "GitHub does not go through Open Machine in this session"
+
+// requestExpired is Cloud's text when nobody approved a request in time, which om shows too.
+const requestExpired = "Nobody approved within 5 minutes. Nothing reached GitHub. Run the command again."
+
+// approvalLines is what a person waiting in a terminal is shown.
+func approvalLines(number string) string {
+	return "Open Machine needs your approval.\nChoose " + number + " in Desktop or the Console.\nWaiting up to 5 minutes…\n"
+}
+
+// waitingLine is what a command run again without a terminal, as by an agent that passed the number
+// on, shows as it waits.
+func waitingLine(number string) string {
+	return "Waiting for the user to choose " + number + " in Desktop or the Console…\n"
+}
+
+// StillEvery is how often a wait says it still waits, so that an agent's silence timeout never ends
+// it and an agent whose command was stopped learns why; tests shorten it.
+var StillEvery = time.Minute
+
+// stillLine says a wait still lasts, with until's minutes left.
+func stillLine(number string, until time.Time) string {
+	return fmt.Sprintf("Still waiting for %s, %d min left. If this command stops, run it again.\n", number,
+		(time.Until(until)+time.Minute-1)/time.Minute)
+}
 
 // ownerRepo is OWNER/REPO, optionally with .git, capturing both names.
 const ownerRepo = `([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?`
@@ -61,11 +95,13 @@ var (
 	githubRemote = regexp.MustCompile(`^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)` + ownerRepo + `/?$`)
 	brokerPath   = regexp.MustCompile(`^/github\.com/` + ownerRepo + `/(info/refs|git-upload-pack|git-receive-pack)$`)
 	credentialAt = regexp.MustCompile(`^github\.com/` + ownerRepo + `/?$`)
+	requestID    = regexp.MustCompile(`^[0-9a-f]{32}$`)
 )
 
 // GitSession is what one admitted SSH session may do with GitHub: the binding and policy it was
-// admitted under. Live reports whether it may start new GitHub work; Done closes when its
-// connection ends, which stops its requests in flight.
+// admitted under, and the om it runs. Live reports whether it may start new GitHub work, and GitHub
+// whether its source's allow has github now; Done closes when its connection ends, which stops its
+// requests in flight.
 type GitSession struct {
 	Source              string
 	SourceGrantRevision int64
@@ -74,13 +110,16 @@ type GitSession struct {
 	PolicyRevision      int64
 	Mode                string // read_only, workspace or full_access
 	Visit               string // the session's connection in the log, which Cloud's records of its Git name
+	Client              string // the om the session runs as its credential helper
 	Live                func() error
+	GitHub              func() bool
 	Done                <-chan struct{}
 }
 
 type gitSession struct {
 	GitSession
 	closed   chan struct{}
+	route    string // its routing file
 	proof    string // what a Full Access session also sends, read from the file only unsandboxed work can read
 	proofErr error  // why that file could not be written
 }
@@ -93,6 +132,9 @@ func (g *gitSession) live() error {
 	case <-g.closed:
 		return errors.New("this SSH session has ended, and its GitHub access with it")
 	default:
+	}
+	if !g.GitHub() {
+		return errors.New(notRouted)
 	}
 	return g.Live()
 }
@@ -113,16 +155,18 @@ func (g *gitSession) context(parent context.Context) (context.Context, context.C
 
 // operation is one Git command's or om github call's access to one repository.
 type operation struct {
-	session    *gitSession
-	repository string // owner/name, lowercase
-	actions    []string
-	refused    string // why the actions exclude push
-	expires    time.Time
+	session     *gitSession
+	repository  string // owner/name, lowercase
+	actions     []string
+	refused     string // why the actions exclude push
+	interactive bool   // a person reads the command's output in a terminal, and can wait for an approval
+	expires     time.Time
 
 	mu      sync.Mutex
 	ticket  string
 	until   time.Time
 	account *accountPin // pinned by the first ticket: a default change never redirects the command
+	team    bool        // its tickets are for a team's machine, whose person may need to approve a push
 }
 
 type accountPin struct {
@@ -138,6 +182,7 @@ type sharedTicket struct {
 	ticket        string
 	minted, until time.Time
 	account       accountPin
+	team          bool
 }
 
 // Broker is the target's Code GitHub broker: a loopback endpoint for the Git
@@ -157,6 +202,10 @@ type sharedTicket struct {
 // it starts, never stored, and every client pins it: Git through its routing, om by the same
 // routing. Whatever else answers there, a later broker too, fails the handshake before a request is
 // sent, and Git fails closed.
+//
+// A session's routing is a file Git includes at every command, named in its environment, so that it
+// follows the source's allow while the session lasts: the file exists only while that allow has github.
+// Restricted work may read the routing folder, never write it; a file holds no secret.
 type Broker struct {
 	URL              string // https://127.0.0.1:PORT
 	Pin              string // sha256//BASE64 of its key, Git's http.pinnedPubkey form
@@ -164,17 +213,25 @@ type Broker struct {
 	key              ed25519.PrivateKey
 	client           *http.Client
 	srv              *http.Server
-	proofs           string
+	proofs, routes   string
 
+	routing  sync.Mutex // one routing file is written or removed at a time
 	mu       sync.Mutex
 	sessions map[string]*gitSession // by capability
 	ops      map[string]*operation  // by credential
 	tickets  map[ticketKey]*sharedTicket
+	waits    map[string]*waiting  // by request
+	asked    map[string]time.Time // when each request Cloud refused this broker's calls for expires, kept a minute more
+	calls    []time.Time          // Cloud wait calls begun in the last minute, oldest first
+	queued   []*waiting           // requests held for one of them
+	freed    chan struct{}        // closed when one was taken
 }
 
 // NewBroker starts the broker of the device registered under deviceID with key, at the Cloud origin,
-// keeping Full Access sessions' proofs in the owner-only directory proofs, emptied first.
-func NewBroker(origin, deviceID string, key ed25519.PrivateKey, client *http.Client, proofs string) (*Broker, error) {
+// keeping Full Access sessions' proofs and pushes that wait for an approval in the owner-only
+// directory proofs, emptied first, and sessions' routing in the directory routes, whose files are
+// removed. routes itself stays: a restricted lifetime started earlier holds it.
+func NewBroker(origin, deviceID string, key ed25519.PrivateKey, client *http.Client, proofs, routes string) (*Broker, error) {
 	cert, pin, err := brokerCertificate()
 	if err != nil {
 		return nil, err
@@ -185,12 +242,25 @@ func NewBroker(origin, deviceID string, key ed25519.PrivateKey, client *http.Cli
 	if err := os.MkdirAll(proofs, 0o700); err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(routes, 0o700); err != nil {
+		return nil, err
+	}
+	left, err := os.ReadDir(routes)
+	for _, e := range left {
+		if err == nil {
+			err = os.Remove(filepath.Join(routes, e.Name()))
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	b := &Broker{URL: "https://" + ln.Addr().String(), Pin: pin, origin: origin, deviceID: deviceID, key: key, client: client, proofs: proofs,
-		sessions: map[string]*gitSession{}, ops: map[string]*operation{}, tickets: map[ticketKey]*sharedTicket{}}
+		routes: routes, sessions: map[string]*gitSession{}, ops: map[string]*operation{}, tickets: map[ticketKey]*sharedTicket{},
+		waits: map[string]*waiting{}, asked: map[string]time.Time{}, freed: make(chan struct{})}
 	b.srv = &http.Server{Handler: b, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10, ErrorLog: log.New(io.Discard, "", 0),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 		// HTTP/1.1 only: a refusal may answer before git has sent its whole request, then drain the rest.
@@ -249,10 +319,13 @@ func PinnedClient(pin string, timeout time.Duration) *http.Client {
 // Close stops the broker.
 func (b *Broker) Close() error { return b.srv.Close() }
 
-// Open registers an admitted session and returns its capability, and a function that ends the
-// session's GitHub access, called when the session ends.
+// Open registers an admitted session, writing its routing if its source's allow has github, and
+// returns its capability, and a function that ends the session's GitHub access, called when the
+// session ends.
 func (b *Broker) Open(s GitSession) (string, func()) {
-	g, capability := &gitSession{GitSession: s, closed: make(chan struct{})}, secret()
+	id := make([]byte, 16)
+	rand.Read(id)
+	g, capability := &gitSession{GitSession: s, closed: make(chan struct{}), route: filepath.Join(b.routes, fmt.Sprintf("%x", id))}, secret()
 	file := filepath.Join(b.proofs, capability)
 	if s.Mode == "full_access" {
 		g.proof = secret()
@@ -268,6 +341,7 @@ func (b *Broker) Open(s GitSession) (string, func()) {
 	b.mu.Lock()
 	b.sessions[capability] = g
 	b.mu.Unlock()
+	b.route(g)
 	var once sync.Once
 	return capability, func() {
 		once.Do(func() {
@@ -283,21 +357,90 @@ func (b *Broker) Open(s GitSession) (string, func()) {
 			}
 			b.mu.Unlock()
 			close(g.closed)
+			b.route(g)
 		})
 	}
 }
 
-// Environment is a session's Git routing: process-scoped configuration, never a global or
-// repository edit, that sends github.com remotes over HTTPS or SSH to this broker, with client's
-// git-credential as their only credential helper, the capability it uses and, for om alone
-// (Git ignores the key), where a Full Access session finds its proof.
-func (b *Broker) Environment(capability, client string) map[string]string {
-	pairs := [][2]string{
+// Reroute writes or removes each session's routing as its source's allow now has github or not.
+func (b *Broker) Reroute() {
+	b.mu.Lock()
+	sessions := slices.Collect(maps.Values(b.sessions))
+	b.mu.Unlock()
+	for _, g := range sessions {
+		b.route(g)
+	}
+}
+
+// route writes g's routing file while g is open and its source's allow has github, else removes it.
+// The file is replaced whole, so Git reads either all of it or none.
+func (b *Broker) route(g *gitSession) {
+	b.routing.Lock()
+	defer b.routing.Unlock()
+	select {
+	case <-g.closed:
+		os.Remove(g.route)
+		return
+	default:
+	}
+	if !g.GitHub() {
+		os.Remove(g.route)
+		return
+	}
+	f, err := os.CreateTemp(b.routes, ".new-*")
+	if err == nil {
+		_, err = f.Write(gitConfig(b.pairs(g.Client)))
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err == nil {
+			err = os.Chmod(f.Name(), 0o644)
+		}
+		if err == nil {
+			err = os.Rename(f.Name(), g.route)
+		}
+		if err != nil {
+			os.Remove(f.Name())
+		}
+	}
+	if err != nil {
+		log.Printf("native: a session's GitHub routing: %v", err)
+	}
+}
+
+// gitConfig is pairs in Git's configuration file syntax, each in its own section, with the
+// subsection and the value quoted.
+func gitConfig(pairs [][2]string) []byte {
+	escape := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	var b bytes.Buffer
+	for _, p := range pairs {
+		i, j := strings.IndexByte(p[0], '.'), strings.LastIndexByte(p[0], '.')
+		fmt.Fprintf(&b, "[%s \"%s\"]\n\t%s = \"%s\"\n", p[0][:i], escape.Replace(p[0][i+1:j]), p[0][j+1:], escape.Replace(p[1]))
+	}
+	return b.Bytes()
+}
+
+// Environment is the environment of the session whose capability it is: the broker, the capability
+// and the absolute path of the session's routing, which Git includes in every command.
+func (b *Broker) Environment(capability string) map[string]string {
+	b.mu.Lock()
+	route := b.sessions[capability].route
+	b.mu.Unlock()
+	return map[string]string{"OM_BROKER": b.URL, "OM_BROKER_CAPABILITY": capability, "GIT_CONFIG_COUNT": "1",
+		"GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": route}
+}
+
+// pairs is a session's Git routing: process-scoped configuration, never a global or repository
+// edit, that sends github.com remotes over HTTPS or SSH to this broker, with client's git-credential
+// as their only credential helper and, for om alone (Git ignores the key), where a Full Access
+// session finds its proof.
+func (b *Broker) pairs(client string) [][2]string {
+	return [][2]string{
 		{"url." + b.URL + "/github.com/.insteadOf", "https://github.com/"},
 		{"url." + b.URL + "/github.com/.insteadOf", "git@github.com:"},
 		{"url." + b.URL + "/github.com/.insteadOf", "ssh://git@github.com/"},
 		// No certificate authority vouches for the broker: its pinned key does, and a server without it
-		// fails the handshake. The pin is a hash, which a session reading this environment cannot use.
+		// fails the handshake. The pin is a hash, which a session reading this file cannot use.
 		{"http." + b.URL + ".sslVerify", "false"},
 		{"http." + b.URL + ".pinnedPubkey", b.Pin},
 		{"http." + b.URL + ".proxy", ""},        // straight to it: a proxy from the environment reaches its own loopback
@@ -308,11 +451,6 @@ func (b *Broker) Environment(capability, client string) map[string]string {
 		{"http." + b.URL + ".postBuffer", strconv.Itoa(maxPush)},
 		{"credential." + b.URL + "." + ProofsKey, b.proofs},
 	}
-	env := map[string]string{"OM_BROKER": b.URL, "OM_BROKER_CAPABILITY": capability, "GIT_CONFIG_COUNT": strconv.Itoa(len(pairs))}
-	for i, p := range pairs {
-		env[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)], env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)] = p[0], p[1]
-	}
-	return env
 }
 
 // ProofsKey names, under credential.<broker>, the directory of Full Access proofs.
@@ -335,6 +473,8 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.credential(w, r)
 	case r.URL.Path == "/v1/github" && r.Method == http.MethodPost:
 		b.github(w, r)
+	case r.URL.Path == "/v1/wait" && r.Method == http.MethodPost:
+		b.wait(w, r)
 	case strings.HasPrefix(r.URL.Path, "/github.com/"):
 		b.git(w, r)
 	default:
@@ -352,9 +492,17 @@ func refuse(w http.ResponseWriter, status int, message string) {
 
 // fail answers a /v1 request in the shape of Cloud's refusals.
 func fail(w http.ResponseWriter, status int, code, message string) {
+	answer(w, &cloudError{Status: status, Code: code, Message: message})
+}
+
+// answer passes on e, a refusal of no effect, with an approval's fields.
+func answer(w http.ResponseWriter, e *cloudError) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": code, "message": message, "effect": "known_no_effect"})
+	w.WriteHeader(e.Status)
+	json.NewEncoder(w).Encode(struct {
+		*cloudError
+		Effect string `json:"effect"`
+	}{e, "known_no_effect"})
 }
 
 func (b *Broker) session(r *http.Request) (*gitSession, error) {
@@ -409,7 +557,8 @@ func (b *Broker) credential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Path string `json:"path"`
+		Path        string `json:"path"`
+		Interactive bool   `json:"interactive"`
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
 		fail(w, http.StatusBadRequest, "invalid_fields", "send the remote's path")
@@ -420,7 +569,7 @@ func (b *Broker) credential(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "github_repository_unsupported", "Open Machine routes only github.com/OWNER/REPOSITORY remotes")
 		return
 	}
-	op := &operation{session: g, repository: strings.ToLower(m[1] + "/" + m[2]), expires: time.Now().Add(operationTTL)}
+	op := &operation{session: g, repository: strings.ToLower(m[1] + "/" + m[2]), interactive: in.Interactive, expires: time.Now().Add(operationTTL)}
 	op.actions, op.refused = allowed(g)
 	ctx, cancel := g.context(r.Context())
 	defer cancel()
@@ -452,7 +601,7 @@ func (b *Broker) credential(w http.ResponseWriter, r *http.Request) {
 func cloudFailure(w http.ResponseWriter, err error) {
 	var ce *cloudError
 	if errors.As(err, &ce) && ce.Status >= 400 && ce.Status < 500 {
-		fail(w, ce.Status, ce.Code, ce.Message)
+		answer(w, ce)
 		return
 	}
 	fail(w, http.StatusBadGateway, "cloud_unavailable", "Open Machine could not reach Cloud; nothing was changed")
@@ -476,7 +625,7 @@ func (b *Broker) ticket(ctx context.Context, op *operation) (string, error) {
 		t := b.tickets[key]
 		b.mu.Unlock()
 		if t != nil && time.Since(t.minted) < ticketReuse && time.Until(t.until) > ticketMargin {
-			op.ticket, op.until, op.account = t.ticket, t.until, &t.account
+			op.ticket, op.until, op.account, op.team = t.ticket, t.until, &t.account, t.team
 			return op.ticket, nil
 		}
 	}
@@ -484,6 +633,7 @@ func (b *Broker) ticket(ctx context.Context, op *operation) (string, error) {
 		Ticket  string     `json:"ticket"`
 		TTL     int64      `json:"ttl_ms"`
 		Account accountPin `json:"account"`
+		Team    bool       `json:"team"`
 	}
 	minted := time.Now()
 	err := signedPost(ctx, b.client, b.origin, b.deviceID, b.key, "code/github/ticket", map[string]any{"v": 1,
@@ -491,12 +641,16 @@ func (b *Broker) ticket(ctx context.Context, op *operation) (string, error) {
 		"binding": map[string]any{"source": s.Source, "source_grant_revision": s.SourceGrantRevision, "target_grant_id": s.TargetGrant,
 			"target_grant_revision": s.TargetGrantRevision, "policy_revision": s.PolicyRevision}}, &r)
 	if err != nil {
+		var ce *cloudError
+		if errors.As(err, &ce) {
+			b.asks(ce)
+		}
 		return "", err
 	}
 	if r.Ticket == "" || r.TTL < 1 || (op.account != nil && r.Account != *op.account) {
 		return "", errors.New("native: Cloud answered with another GitHub account")
 	}
-	op.ticket, op.until, op.account = r.Ticket, minted.Add(time.Duration(r.TTL)*time.Millisecond), &r.Account
+	op.ticket, op.until, op.account, op.team = r.Ticket, minted.Add(time.Duration(r.TTL)*time.Millisecond), &r.Account, r.Team
 	b.mu.Lock()
 	for k, t := range b.tickets {
 		if time.Since(t.minted) >= ticketReuse {
@@ -504,7 +658,7 @@ func (b *Broker) ticket(ctx context.Context, op *operation) (string, error) {
 		}
 	}
 	if fresh && len(b.tickets) < maxTickets {
-		b.tickets[key] = &sharedTicket{op.ticket, minted, op.until, r.Account}
+		b.tickets[key] = &sharedTicket{op.ticket, minted, op.until, r.Account, r.Team}
 	}
 	b.mu.Unlock()
 	return op.ticket, nil
@@ -594,55 +748,123 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := op.session.context(r.Context())
 	defer cancel()
-	ticket, err := b.ticket(ctx, op)
-	if err != nil {
+	unticketed := func(err error) {
 		var ce *cloudError
 		message := "Open Machine could not reach Cloud; nothing was changed"
 		if errors.As(err, &ce) && ce.Message != "" {
 			message = ce.Message
 		}
 		refusal(http.StatusBadGateway, message)
-		return
 	}
-	target := b.origin + "/api/devices/" + b.deviceID + "/code/github/git/" + m[1] + "/" + m[2] + "/" + endpoint
-	if endpoint == "info/refs" {
-		target += "?service=" + service
-	}
-	req, err := http.NewRequestWithContext(ctx, r.Method, target, body)
+	ticket, err := b.ticket(ctx, op)
 	if err != nil {
-		refuse(w, http.StatusBadRequest, "unsupported Git request")
+		unticketed(err)
 		return
 	}
-	if body != nil {
-		req.ContentLength = r.ContentLength
-	}
-	for _, h := range []string{"Content-Type", "Accept", "Content-Encoding", "Git-Protocol", "User-Agent"} {
-		if v := r.Header.Get(h); v != "" {
-			req.Header.Set(h, v)
+	op.mu.Lock()
+	team := op.team
+	op.mu.Unlock()
+	length := r.ContentLength
+	var held *os.File // a team's push, held whole so it can be sent again once its person approves it
+	if push && team && r.Method == http.MethodPost {
+		if held, err = os.CreateTemp(b.proofs, "push-*"); err != nil {
+			refusal(http.StatusInternalServerError, "Open Machine could not hold this push; nothing was sent")
+			return
+		}
+		defer os.Remove(held.Name())
+		defer held.Close()
+		if length, err = io.Copy(held, sent); err != nil {
+			if over, _, _ := sent.state(); over {
+				refusal(http.StatusRequestEntityTooLarge, fmt.Sprintf("the request exceeds Open Machine's %d MiB limit; nothing was sent", maxPush>>20))
+			} else {
+				refusal(http.StatusInternalServerError, "Open Machine could not hold this push; nothing was sent")
+			}
+			return
 		}
 	}
-	req.Header.Set("Authorization", "Bearer "+ticket)
-	req.Header.Set("X-OM-Visit", op.session.Visit)
-	res, err := b.client.Do(req)
-	if err != nil {
-		switch over, read, _ := sent.state(); {
-		case push && over:
-			refusal(http.StatusBadGateway, fmt.Sprintf("this push exceeded Open Machine's %d MiB limit and was cut, so %s", maxPush>>20, unknownOutcome))
-		case push && read > 0: // GitHub acts once a whole pack, or deletions alone, arrived, before the body ends
-			refusal(http.StatusBadGateway, unknownPush)
-		case over: // a fetch changes nothing
-			refusal(http.StatusRequestEntityTooLarge, fmt.Sprintf("the request exceeds Open Machine's %d MiB limit; nothing was changed", sent.max>>20))
-		default:
-			refusal(http.StatusBadGateway, "Open Machine could not reach Cloud; nothing was changed")
+	answered := false // a team's push that waits for its person has had its answer and the lines that say so
+	var resent *counted
+	for {
+		if held != nil { // read anew each time: the transport may still be reading an earlier send
+			resent = &counted{r: io.NewSectionReader(held, 0, length)}
+			body = resent
 		}
-		return
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		var e struct{ Error, Message, Effect string }
+		target := b.origin + "/api/devices/" + b.deviceID + "/code/github/git/" + m[1] + "/" + m[2] + "/" + endpoint
+		if endpoint == "info/refs" {
+			target += "?service=" + service
+		}
+		req, err := http.NewRequestWithContext(ctx, r.Method, target, body)
+		if err != nil {
+			refuse(w, http.StatusBadRequest, "unsupported Git request")
+			return
+		}
+		if body != nil {
+			req.ContentLength = length
+		}
+		for _, h := range []string{"Content-Type", "Accept", "Content-Encoding", "Git-Protocol", "User-Agent"} {
+			if v := r.Header.Get(h); v != "" {
+				req.Header.Set(h, v)
+			}
+		}
+		req.Header.Set("Authorization", "Bearer "+ticket)
+		req.Header.Set("X-OM-Visit", op.session.Visit)
+		res, err := b.client.Do(req)
+		if err != nil {
+			switch over, read, _ := sent.state(); {
+			case resent != nil && resent.n.Load() == 0: // a held push Cloud never read changed nothing
+				refusal(http.StatusBadGateway, "Open Machine could not reach Cloud; nothing was changed")
+			case push && over:
+				refusal(http.StatusBadGateway, fmt.Sprintf("this push exceeded Open Machine's %d MiB limit and was cut, so %s", maxPush>>20, unknownOutcome))
+			case push && read > 0: // GitHub acts once a whole pack, or deletions alone, arrived, before the body ends
+				refusal(http.StatusBadGateway, unknownPush)
+			case over: // a fetch changes nothing
+				refusal(http.StatusRequestEntityTooLarge, fmt.Sprintf("the request exceeds Open Machine's %d MiB limit; nothing was changed", sent.max>>20))
+			default:
+				refusal(http.StatusBadGateway, "Open Machine could not reach Cloud; nothing was changed")
+			}
+			return
+		}
+		defer res.Body.Close()
+		if res.StatusCode == http.StatusOK {
+			if endpoint == "git-receive-pack" { // the push's result, whole or outcome unknown; its advertisement streams
+				reply, err := io.ReadAll(io.LimitReader(res.Body, maxGitResult+1))
+				if err != nil || len(reply) > maxGitResult || !probe && !completePkts(reply) {
+					refusal(http.StatusBadGateway, unknownPush)
+					return
+				}
+				if _, _, done := sent.state(); !done { // Cloud refused the refs before reading the pack git still sends
+					http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
+					sent.drain()
+				}
+				w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
+				w.Header().Set("Cache-Control", "no-store")
+				w.Write(reply)
+				return
+			}
+			w.Header().Set("Content-Type", res.Header.Get("Content-Type"))
+			w.Header().Set("Cache-Control", "no-store")
+			copyFlushing(w, res.Body)
+			return
+		}
+		var e struct {
+			cloudError
+			Effect string `json:"effect"`
+		}
 		json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&e)
 		if e.Message == "" {
 			e.Message = fmt.Sprintf("Cloud answered %d", res.StatusCode)
+		}
+		b.asks(&e.cloudError)
+		if held != nil && e.Code == "github_approval_required" && slices.Contains(head, "side-band-64k") {
+			if message := b.approval(ctx, w, op, &e.cloudError, &answered); message != "" {
+				refusal(http.StatusForbidden, message)
+				return
+			}
+			if ticket, err = b.ticket(ctx, op); err != nil {
+				unticketed(err)
+				return
+			}
+			continue
 		}
 		status := res.StatusCode
 		if status == http.StatusUnauthorized {
@@ -650,30 +872,241 @@ func (b *Broker) git(w http.ResponseWriter, r *http.Request) {
 		}
 		// Once Cloud may have a push's commands, only its explicit no-effect refusal is a known
 		// outcome; its own unknown outcome says what it read back from GitHub.
-		if _, read, _ := sent.state(); push && read > 0 && e.Effect != "known_no_effect" && e.Error != "github_outcome_unknown" {
+		if _, read, _ := sent.state(); push && read > 0 && (resent == nil || resent.n.Load() > 0) &&
+			e.Effect != "known_no_effect" && e.Code != "github_outcome_unknown" {
 			e.Message = unknownPush
 		}
 		refusal(status, e.Message)
 		return
 	}
-	if endpoint == "git-receive-pack" { // the push's result, whole or outcome unknown; its advertisement streams
-		reply, err := io.ReadAll(io.LimitReader(res.Body, maxGitResult+1))
-		if err != nil || len(reply) > maxGitResult || !probe && !completePkts(reply) {
-			refusal(http.StatusBadGateway, unknownPush)
-			return
-		}
-		if _, _, done := sent.state(); !done { // Cloud refused the refs before reading the pack git still sends
-			http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
-			sent.drain()
-		}
+}
+
+// counted is a held push as one send reads it.
+type counted struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (c *counted) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+// approval answers a side-band push of a team operation that Cloud refused until its person
+// approves it, e. In a terminal it says so in band 2, waits, and returns "" once the push may be
+// sent again; otherwise it passes Cloud's message on in band 2. Else it returns the refusal to show.
+func (b *Broker) approval(ctx context.Context, w http.ResponseWriter, op *operation, e *cloudError, answered *bool) string {
+	if !*answered {
 		w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
 		w.Header().Set("Cache-Control", "no-store")
-		w.Write(reply)
+		*answered = true
+	}
+	say := func(text string) {
+		for line := range strings.Lines(text) {
+			payload := append([]byte{2}, line...)
+			fmt.Fprintf(w, "%04x%s", len(payload)+4, payload)
+		}
+		http.NewResponseController(w).Flush()
+	}
+	switch {
+	case op.interactive:
+		say(approvalLines(e.Number))
+	case e.Again:
+		say(waitingLine(e.Number))
+	default:
+		say(e.Message + "\n")
+		return "approval needed"
+	}
+	return b.approved(ctx, e, say)
+}
+
+// approved waits until Cloud answers the request e names, sharing each wait with every command
+// waiting on it, saying each StillEvery that it still waits, and returns "" when its person approved
+// it, else why it ends: Cloud's refusal, the session ending, or the request expiring.
+func (b *Broker) approved(ctx context.Context, e *cloudError, say func(string)) string {
+	deadline := time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
+	for said := time.Now(); time.Now().Before(deadline); {
+		if time.Since(said) >= StillEvery {
+			say(stillLine(e.Number, deadline))
+			said = time.Now()
+		}
+		until := said.Add(StillEvery) // the call in flight goes on, and the next await shares it
+		if deadline.Before(until) {
+			until = deadline
+		}
+		state, err := b.await(ctx, e.Request, until)
+		var ce *cloudError
+		switch {
+		case state == "approved":
+			return ""
+		case ctx.Err() != nil:
+			return "this SSH session has ended, and its GitHub access with it"
+		case errors.As(err, &ce) && final(ce):
+			return cmp.Or(ce.Message, fmt.Sprintf("Cloud answered %d", ce.Status))
+		}
+	}
+	return requestExpired
+}
+
+// asks keeps the request a refusal e names as one this broker may wait on, until it expires, and
+// marks e Again when it already was one.
+func (b *Broker) asks(e *cloudError) {
+	if e.Code != "github_approval_required" || !requestID.MatchString(e.Request) {
 		return
 	}
-	w.Header().Set("Content-Type", res.Header.Get("Content-Type"))
-	w.Header().Set("Cache-Control", "no-store")
-	copyFlushing(w, res.Body)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	maps.DeleteFunc(b.asked, func(_ string, until time.Time) bool { return time.Since(until) > time.Minute })
+	until, ok := b.asked[e.Request]
+	e.Again = ok && time.Now().Before(until)
+	b.asked[e.Request] = time.Now().Add(time.Duration(e.ExpiresIn) * time.Second)
+}
+
+// final reports whether Cloud's refusal ends a wait: any but a failure (429 and 5xx), which is asked again.
+func final(e *cloudError) bool {
+	return e.Status >= 400 && e.Status < 500 && e.Status != http.StatusTooManyRequests
+}
+
+// waiting is one request whose commands wait for its person's approval.
+type waiting struct {
+	since  time.Time // when its first command began to wait: its place in line
+	failed time.Time // when its last failed Cloud call began
+	ended  time.Time // when its last Cloud call ended
+	call   *waitCall // the Cloud call in flight, or nil
+}
+
+// waitCall is one Cloud wait call and, once done is closed, its answer.
+type waitCall struct {
+	done  chan struct{}
+	state string
+	err   error
+}
+
+// wait answers om's /v1/wait: Cloud's next answer to the session's request, {state} while it waits or
+// once approved, or its refusal.
+func (b *Broker) wait(w http.ResponseWriter, r *http.Request) {
+	g, err := b.session(r)
+	if err != nil {
+		unavailable(w, err)
+		return
+	}
+	var in struct {
+		Request string `json:"request"`
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&in) != nil || !requestID.MatchString(in.Request) {
+		fail(w, http.StatusBadRequest, "invalid_fields", "send the request")
+		return
+	}
+	b.mu.Lock()
+	until, ok := b.asked[in.Request]
+	b.mu.Unlock()
+	switch {
+	case !ok:
+		fail(w, http.StatusNotFound, "github_request_unavailable", "This request is not waiting for this device.")
+		return
+	case time.Now().After(until):
+		fail(w, http.StatusForbidden, "github_request_expired", requestExpired)
+		return
+	}
+	ctx, cancel := g.context(r.Context())
+	defer cancel()
+	state, err := b.await(ctx, in.Request, time.Now().Add(callDeadline))
+	if err != nil {
+		cloudFailure(w, err)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"state": state})
+}
+
+// await returns Cloud's answer to the wait call for request in flight, or to the next one, which it
+// starts, or ctx's error once ctx ends or deadline passes first.
+func (b *Broker) await(ctx context.Context, request string, deadline time.Time) (string, error) {
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	b.mu.Lock()
+	q := b.waits[request]
+	if q == nil {
+		for id, o := range b.waits {
+			if o.call == nil && time.Since(o.ended) > time.Minute {
+				delete(b.waits, id)
+			}
+		}
+		q = &waiting{since: time.Now()}
+		b.waits[request] = q
+	}
+	c := q.call
+	if c == nil {
+		c = &waitCall{done: make(chan struct{})}
+		q.call = c
+		go b.callWait(request, q, c)
+	}
+	b.mu.Unlock()
+	select {
+	case <-c.done:
+		return c.state, c.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// callWait makes c, request's Cloud wait call: 20 seconds after a failed one began at the earliest,
+// and within the machine's 20 a minute.
+func (b *Broker) callWait(request string, q *waiting, c *waitCall) {
+	b.mu.Lock()
+	failed := q.failed
+	b.mu.Unlock()
+	if !failed.IsZero() {
+		time.Sleep(time.Until(failed.Add(waitRetry)))
+	}
+	b.slot(q)
+	began := time.Now()
+	var r struct {
+		State string `json:"state"`
+	}
+	err := signedPost(context.Background(), b.client, b.origin, b.deviceID, b.key, "code/github/wait", map[string]any{"v": 1, "request": request}, &r)
+	if err == nil && r.State != "waiting" && r.State != "approved" {
+		err = fmt.Errorf("native: Cloud answered a request's wait with %q", r.State)
+	}
+	var ce *cloudError
+	b.mu.Lock()
+	q.failed, q.ended, q.call = time.Time{}, time.Now(), nil
+	if err != nil && !(errors.As(err, &ce) && final(ce)) {
+		q.failed = began
+	}
+	b.mu.Unlock()
+	c.state, c.err = r.State, err
+	close(c.done)
+}
+
+// slot holds q's next Cloud wait call until the machine has made fewer than 20 in the last minute
+// and no request that began to wait before q's is held for one.
+func (b *Broker) slot(q *waiting) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.queued = append(b.queued, q)
+	for {
+		now := time.Now()
+		b.calls = slices.DeleteFunc(b.calls, func(t time.Time) bool { return now.Sub(t) >= time.Minute })
+		first := !slices.ContainsFunc(b.queued, func(o *waiting) bool { return o.since.Before(q.since) })
+		if first && len(b.calls) < maxWaits {
+			b.calls = append(b.calls, now)
+			b.queued = slices.DeleteFunc(b.queued, func(o *waiting) bool { return o == q })
+			close(b.freed)
+			b.freed = make(chan struct{})
+			return
+		}
+		freed, next := b.freed, time.Minute
+		if len(b.calls) >= maxWaits {
+			next = time.Minute - now.Sub(b.calls[0])
+		}
+		b.mu.Unlock()
+		select {
+		case <-freed:
+		case <-time.After(next):
+		}
+		b.mu.Lock()
+	}
 }
 
 const (

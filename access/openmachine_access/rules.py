@@ -70,6 +70,11 @@ class Scope:
         return found
 
 
+# The host's folder of Git routing files, one per routed session: restricted work reads it, inside the denied
+# control paths, and writes nothing there.
+GITHUB_ROUTING = DEFAULT_STATE.parent / "openmachine-om" / "github-routing"
+
+
 def control_paths(state: Path) -> tuple[Path, ...]:
     """Core, Connector and Code host configuration and state; denied to restricted work even inside a folder."""
     candidates = [state, DEFAULT_CONFIG.parent, DEFAULT_STATE, DEFAULT_STATE.parent / "openmachine-connector",

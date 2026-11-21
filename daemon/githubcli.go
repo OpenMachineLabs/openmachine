@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // GitCredential is om git-credential, a session's only Git credential helper for its broker
@@ -44,8 +46,24 @@ func GitCredential(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintln(stdout, "quit=1")
 		return 0
 	}
-	var reply struct{ Username, Password, Message string }
-	status, err := brokerCall(broker, "/v1/credential", map[string]string{"path": request["path"]}, &reply)
+	var reply struct {
+		Username, Password string
+		brokerRefusal
+	}
+	ask := map[string]any{"path": request["path"], "interactive": terminal(stderr)}
+	status, err := brokerCall(broker, "/v1/credential", ask, &reply, brokerTimeout)
+	if err == nil && reply.Error == "github_approval_required" {
+		if !terminal(stderr) && !reply.Again {
+			fmt.Fprintln(stderr, reply.Message)
+			fmt.Fprintln(stdout, "quit=1")
+			return 0
+		}
+		if message := approve(broker, reply.brokerRefusal, stderr); message != "" {
+			return quit(message)
+		}
+		reply.brokerRefusal = brokerRefusal{}
+		status, err = brokerCall(broker, "/v1/credential", ask, &reply, brokerTimeout)
+	}
 	switch {
 	case err != nil:
 		return quit("the Open Machine Code service did not answer: " + err.Error())
@@ -56,17 +74,73 @@ func GitCredential(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 	return 0
 }
 
+// brokerRefusal is a broker's refusal, with what an approval needs.
+type brokerRefusal struct {
+	Error, Message, Request, Number string
+	ExpiresIn                       int64 `json:"expires_in"`
+	Again                           bool  // the request was refused here before and still waits
+}
+
+// terminal reports whether w is a terminal, where a person reads the command's output and can wait
+// for an approval; an AI agent's output is not.
+func terminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if ok {
+		_, err := unix.IoctlGetTermios(int(f.Fd()), getTermios)
+		ok = err == nil
+	}
+	return ok
+}
+
+// approve shows the number to choose to the person in the terminal, or that it waits to a command run
+// again without one, and waits, through the broker, until the request r names is approved (""),
+// refused or expired (what to show after "om: "), saying each StillEvery that it still waits.
+func approve(broker string, r brokerRefusal, stderr io.Writer) string {
+	if terminal(stderr) {
+		io.WriteString(stderr, approvalLines(r.Number))
+	} else {
+		io.WriteString(stderr, waitingLine(r.Number))
+	}
+	deadline := time.Now().Add(time.Duration(r.ExpiresIn) * time.Second)
+	said := time.Now()
+	for left := time.Until(deadline); left > 0; left = time.Until(deadline) {
+		if time.Since(said) >= StillEvery {
+			io.WriteString(stderr, stillLine(r.Number, deadline))
+			said = time.Now()
+		}
+		next := said.Add(StillEvery) // a call cut off then leaves the broker's own Cloud call going
+		var reply struct {
+			State string
+			brokerRefusal
+		}
+		status, err := brokerCall(broker, "/v1/wait", map[string]string{"request": r.Request}, &reply, min(left, brokerTimeout, time.Until(next)))
+		switch {
+		case err != nil && time.Now().Before(next) && time.Now().Before(deadline):
+			return "the Open Machine Code service did not answer: " + err.Error()
+		case err != nil: // cut off for the next line, or at the deadline
+		case status == http.StatusOK && reply.State == "approved":
+			return ""
+		case status != http.StatusOK && status != http.StatusTooManyRequests && status != http.StatusBadGateway:
+			return cmp.Or(reply.Message, "Open Machine refused this Git command")
+		}
+	}
+	return requestExpired
+}
+
+// brokerTimeout bounds one broker call, under which the broker answers.
+const brokerTimeout = 90 * time.Second
+
 // brokerCall posts one JSON request to the session's broker with its capability and decodes the
-// JSON reply, whatever its status. It reaches only the server holding the key the session's routing
-// pins, as Git does. A Full Access session also sends its proof when the broker asks: the file named
-// after its capability in the directory its own routing names, which only unsandboxed work can
-// read. Nothing in a reply chooses what is read or sent.
-func brokerCall(broker, path string, body, out any) (int, error) {
+// JSON reply, whatever its status, within timeout. It reaches only the server holding the key the
+// session's routing pins, as Git does. A Full Access session also sends its proof when the broker
+// asks: the file named after its capability in the directory its own routing names, which only
+// unsandboxed work can read. Nothing in a reply chooses what is read or sent.
+func brokerCall(broker, path string, body, out any, timeout time.Duration) (int, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return 0, err
 	}
-	client := PinnedClient(routed("http."+broker+".pinnedPubkey"), 90*time.Second)
+	client := PinnedClient(routed("http."+broker+".pinnedPubkey"), timeout)
 	capability := os.Getenv("OM_BROKER_CAPABILITY")
 	send := func(proof string) (int, []byte, error) {
 		req, err := http.NewRequest(http.MethodPost, broker+path, bytes.NewReader(raw))
@@ -101,13 +175,14 @@ func brokerCall(broker, path string, body, out any) (int, error) {
 	return status, json.Unmarshal(reply, out)
 }
 
-// routed returns the value of key in the session's process-scoped Git configuration, as the daemon
-// set it.
+// routed returns the value of key in the session's routing: the file its environment has Git
+// include, as the daemon wrote it, or "" without one.
 func routed(key string) string {
 	n, _ := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
-	for i := range min(n, 16) {
-		if os.Getenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i)) == key {
-			return os.Getenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i))
+	for i := range min(n, 16) { // the session's own include is first, whatever its work adds
+		if os.Getenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i)) == "include.path" {
+			out, _ := exec.Command("git", "config", "--file", os.Getenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)), "--get", key).Output()
+			return strings.TrimSuffix(string(out), "\n")
 		}
 	}
 	return ""
@@ -147,8 +222,13 @@ They use this computer's Open Machine GitHub connection through the SSH session;
 // through its broker and the account's GitHub connection in Cloud. There is no merge,
 // workflow dispatch, release or other call, and no gh or token.
 func GitHub(args []string, stdout, stderr io.Writer) int {
-	if os.Getenv("OM_BROKER") == "" {
+	broker := os.Getenv("OM_BROKER")
+	if broker == "" {
 		fmt.Fprintln(stderr, "om: run om github inside an Open Machine SSH session")
+		return 1
+	}
+	if routed("http."+broker+".pinnedPubkey") == "" {
+		fmt.Fprintf(stderr, "om: %s\n", notRouted)
 		return 1
 	}
 	words := strings.Join(args[:min(2, len(args))], " ")
@@ -228,7 +308,9 @@ func GitHub(args []string, stdout, stderr io.Writer) int {
 				return fail("pr view takes a pull request number")
 			}
 			number = n
-		} else if number = openPull(repository, branch()); number == 0 {
+		} else if n, exit := openPull(broker, repository, branch(), stderr); exit >= 0 {
+			return exit
+		} else if number = n; number == 0 {
 			return fail("no open pull request has the current branch as its head; give its number")
 		}
 		call = map[string]any{"operation": "pull_view", "number": number}
@@ -250,11 +332,14 @@ func GitHub(args []string, stdout, stderr io.Writer) int {
 	}
 	call["v"] = 1
 	var reply struct {
-		Result         json.RawMessage `json:"result"`
-		Message, Error string
-		Effect         string `json:"effect"`
+		Result json.RawMessage `json:"result"`
+		Effect string          `json:"effect"`
+		brokerRefusal
 	}
-	status, err := brokerCall(os.Getenv("OM_BROKER"), "/v1/github", map[string]any{"repository": repository, "call": call}, &reply)
+	status, err, exit := githubCall(broker, map[string]any{"repository": repository, "call": call}, &reply, stderr)
+	if exit >= 0 {
+		return exit
+	}
 	if err != nil || status != http.StatusOK {
 		message := cmp.Or(reply.Message, "the Open Machine Code service did not answer")
 		if err != nil {
@@ -280,19 +365,43 @@ func gitOutput(args ...string) (string, error) {
 }
 
 // openPull returns the number of the one open pull request whose head is branch, or 0.
-func openPull(repository, branch string) int {
+func openPull(broker, repository, branch string, stderr io.Writer) (int, int) {
 	if branch == "" {
-		return 0
+		return 0, -1
 	}
 	var reply struct {
 		Result []struct{ Number int } `json:"result"`
 	}
-	status, err := brokerCall(os.Getenv("OM_BROKER"), "/v1/github", map[string]any{"repository": repository,
-		"call": map[string]any{"v": 1, "operation": "pull_list", "state": "open", "head": branch, "base": nil}}, &reply)
-	if err != nil || status != http.StatusOK || len(reply.Result) != 1 {
-		return 0
+	status, err, exit := githubCall(broker, map[string]any{"repository": repository,
+		"call": map[string]any{"v": 1, "operation": "pull_list", "state": "open", "head": branch, "base": nil}}, &reply, stderr)
+	if exit >= 0 || err != nil || status != http.StatusOK || len(reply.Result) != 1 {
+		return 0, exit
 	}
-	return reply.Result[0].Number
+	return reply.Result[0].Number, -1
+}
+
+// githubCall posts ask to the broker's /v1/github and decodes the last reply into out, through the
+// person's approval when Cloud asks for it. It returns that reply's status, and the exit code when
+// the approval ended the command, else -1.
+func githubCall(broker string, ask, out any, stderr io.Writer) (int, error, int) {
+	var raw json.RawMessage
+	var r brokerRefusal
+	status, err := brokerCall(broker, "/v1/github", ask, &raw, brokerTimeout)
+	if err == nil && json.Unmarshal(raw, &r) == nil && r.Error == "github_approval_required" {
+		if !terminal(stderr) && !r.Again {
+			fmt.Fprintln(stderr, r.Message)
+			return status, nil, 1
+		}
+		if message := approve(broker, r, stderr); message != "" {
+			fmt.Fprintf(stderr, "om: %s\n", message)
+			return status, nil, 1
+		}
+		status, err = brokerCall(broker, "/v1/github", ask, &raw, brokerTimeout)
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, out)
+	}
+	return status, err, -1
 }
 
 type pullResult struct {

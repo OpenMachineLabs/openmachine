@@ -135,9 +135,10 @@ def nested_git_dirs(git_dir: Path) -> list[Path]:
 
 
 def profile(*, home: Path, others: list[Path], folders: list[Path], private: Path, control: list[Path],
-            denied: list[Path], exceptions: list[Path], executable: Path) -> str:
+            denied: list[Path], exceptions: list[Path], executable: Path, routing: Path) -> str:
     """Generate one profile: read the machine except denied areas, write only the sandbox home, the
-    Workspace folders and the private tree, and run only the named executable inside a denied area.
+    Workspace folders and the private tree, and run only the named executable inside a denied area. The
+    routing folder, inside the control paths, is read only.
     others holds every other sandbox home, and the home may lie in one of them: nothing there but the
     home is read or written, inside a Workspace folder too.
 
@@ -223,7 +224,8 @@ def profile(*, home: Path, others: list[Path], folders: list[Path], private: Pat
               f"{_filters('subpath', others)}) (require-not (subpath {_literal(home)}))))",
               # realpath stats the directory above a keyed home; none of these is listed.
               f"(allow file-read-metadata {_filters('literal', others)})",
-              f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})"]
+              f"(deny file-read* file-read-data {WRITES} process-exec {_filters('subpath', control)})",
+              f"(allow file-read* file-read-data (subpath {_literal(routing)}))"]
     return "\n".join(lines) + "\n"
 
 

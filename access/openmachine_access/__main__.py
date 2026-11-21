@@ -46,7 +46,7 @@ def capabilities() -> dict:
         reason = seatbelt.lifetime_unavailable_reason()
     confined = "available" if reason is None else reason
     # github names the routing form Core takes, so a host and Core that disagree on it route nothing.
-    value = {"version": __version__, "protocol": sessions.PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "https",
+    value = {"version": __version__, "protocol": sessions.PROTOCOL, "kinds": ["shell", "exec", "sftp"], "github": "include",
              "policies": {"full_access": "available", "read_only": confined, "workspace": confined}}
     if reason is None:
         value["github_client"] = str(restricted._stable_client())  # what restricted sessions' Git routing runs

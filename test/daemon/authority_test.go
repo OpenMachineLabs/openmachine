@@ -152,8 +152,9 @@ func TestLease(t *testing.T) {
 		c, e, a := start(t)
 		p := c.presence()
 		first := p.renewal()
-		p.changed() // asks for a second renewal at once
+		p.changed() // asks for a second renewal at once, and tells the device
 		second := p.renewal()
+		waitFor(t, 5*time.Second, "the device told of the change", func() bool { return e.changes.Load() == 1 })
 		p.lease(second, "new", 60000, granted("s"))
 		e.want(t, "apply new")
 		p.applied(t, "new")
@@ -488,6 +489,7 @@ type enforcer struct {
 	folders func() *daemon.Refusal       // its folder check, if any
 	applied atomic.Pointer[daemon.Lease] // the lease it was last given
 	updates atomic.Bool                  // its update, or its move, starts
+	changes atomic.Int32                 // changed frames it was told
 	log     *daemon.Log                  // the device's log
 }
 
@@ -500,6 +502,8 @@ func (e *enforcer) Move(secret string) bool {
 	e.events <- "move " + secret
 	return e.updates.Load()
 }
+
+func (e *enforcer) Changed() { e.changes.Add(1) }
 
 func (e *enforcer) Folders(daemon.Lease) *daemon.Refusal {
 	if e.folders == nil {

@@ -565,7 +565,7 @@ func TestWatch(t *testing.T) {
 			`"core_version":null,"team":{"slug":"acme","name":"Acme"}}`, state)
 	}
 	view := func(live bool, account, policy string, devices ...string) string {
-		return fmt.Sprintf(`{"account":%s,"device_id":"dev_watch","devices":[%s],"live":%t,"policy":%s}`, account, strings.Join(devices, ","), live, policy)
+		return fmt.Sprintf(`{"account":%s,"device_id":"dev_watch","devices":[%s],"github":null,"live":%t,"policy":%s}`, account, strings.Join(devices, ","), live, policy)
 	}
 	want(view(false, "null", "null")) // before the first lease
 

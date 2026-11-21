@@ -18,10 +18,9 @@ VALID = {"protocol": 4, "user": "dev", "lifetime": "life-1", "policy": "read_onl
          "connection": "100.64.0.2 52144 100.64.0.1 22"}
 FOLDERS = ["/Users/dev/code", "/Users/dev/Documents/notes"]
 BROKER = "https://127.0.0.1:41234"
-ROUTING = {"OM_BROKER": BROKER, "OM_BROKER_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "3",
-           "GIT_CONFIG_KEY_0": f"url.{BROKER}/github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
-           "GIT_CONFIG_KEY_1": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_1": "",
-           "GIT_CONFIG_KEY_2": f"credential.{BROKER}.helper", "GIT_CONFIG_VALUE_2": "!'/opt/om/om' git-credential"}
+FILE = str(rules.GITHUB_ROUTING / ("0123456789abcdef" * 2))
+ROUTING = {"OM_BROKER": BROKER, "OM_BROKER_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": "1",
+           "GIT_CONFIG_KEY_0": "include.path", "GIT_CONFIG_VALUE_0": FILE}
 GITHUB = {"environment": ROUTING, "client": "/opt/om/om"}
 
 
@@ -57,46 +56,34 @@ class RequestTests(unittest.TestCase):
         with self.assertRaises(Fault):
             sessions.parse(b" " * (sessions.MAX_REQUEST + 1))
 
-    def test_github_routing_carries_exactly_its_variables_with_bounded_values(self):
+    def test_github_routing_carries_exactly_its_variables_and_one_file_of_the_routing_folder(self):
         self.assertEqual(self.parse(VALID | {"github": GITHUB}).github.environment, ROUTING)
         self.assertIsNone(self.parse(VALID).github)
+        folder = str(rules.GITHUB_ROUTING)
         changes = [{"PATH": "/tmp"}, {"LD_PRELOAD": "x"}, {"OM_BROKER_OTHER": "x"}, {"OM_BROKER": "https://localhost:41234"},
                    {"OM_BROKER": "http://127.0.0.1:41234"}, {"OM_BROKER": "https://127.0.0.1:0"},
-                   {"OM_BROKER_CAPABILITY": "short"}, {"GIT_CONFIG_COUNT": "4"}, {"GIT_CONFIG_COUNT": "0"}, {"GIT_CONFIG_COUNT": "03"},
-                   {"GIT_CONFIG_KEY_0": "core.fsmonitor"}, {"GIT_CONFIG_KEY_0": "credential.helper"},
-                   {"GIT_CONFIG_KEY_0": "url.https://example.com/.insteadOf"}, {"GIT_CONFIG_KEY_1": f"credential.{BROKER}x.helper"},
-                   {"GIT_CONFIG_VALUE_0": "line\nbreak"}, {"GIT_CONFIG_VALUE_0": "x" * 1025}, {"GIT_CONFIG_KEY_9": "x"}]
+                   {"OM_BROKER": "https://127.0.0.1:65536"}, {"OM_BROKER_CAPABILITY": "short"},
+                   {"GIT_CONFIG_COUNT": "2"}, {"GIT_CONFIG_COUNT": "0"}, {"GIT_CONFIG_COUNT": "01"},
+                   {"GIT_CONFIG_KEY_0": "include.Path"}, {"GIT_CONFIG_KEY_0": "includeIf.onbranch:x.path"},
+                   {"GIT_CONFIG_KEY_0": f"credential.{BROKER}.helper"}, {"GIT_CONFIG_KEY_1": "x", "GIT_CONFIG_VALUE_1": "x"},
+                   *({"GIT_CONFIG_VALUE_0": value} for value in (
+                       "0123456789abcdef" * 2, f"{folder}/../{'a' * 32}", f"{folder}/./{'a' * 32}", f"{folder}//{'a' * 32}",
+                       f"{folder}/{'a' * 31}", f"{folder}/{'A' * 32}", f"{folder}/{'a' * 32}/", f"{folder}/x/{'a' * 32}",
+                       f"{folder}x/{'a' * 32}", f"/tmp/{'a' * 32}", f"{folder}/{'a' * 32}\n"))]
         for change in changes:
             with self.subTest(change=change), self.assertRaises(Fault) as caught:
                 self.parse(VALID | {"github": GITHUB | {"environment": ROUTING | change}})
             self.assertEqual((caught.exception.code, caught.exception.effect), ("request_invalid", "known_no_effect"))
+        self.assertEqual(self.parse(VALID | {"github": GITHUB | {"environment": ROUTING | {"OM_BROKER": "https://127.0.0.1:65535"}}})
+                         .github.environment["OM_BROKER"], "https://127.0.0.1:65535")
         missing = dict(ROUTING)
-        del missing["GIT_CONFIG_VALUE_2"]
+        del missing["GIT_CONFIG_VALUE_0"]
         for github in ({"environment": missing, "client": "/opt/om/om"}, GITHUB | {"client": "om"},
                        GITHUB | {"client": "/opt/om/../om"}, GITHUB | {"client": "/opt/o:m/om"},
                        GITHUB | {"client": "/opt/om/om\0"}, GITHUB | {"client": "/opt/om/om\x7f"},
                        GITHUB | {"extra": 1}):
             with self.subTest(github=github), self.assertRaises(Fault):
                 self.parse(VALID | {"github": github})
-        # A broker elsewhere than loopback over TLS is refused even when every key names it.
-        for broker, accepted in (("https://127.0.0.1:65535", True), ("https://127.0.0.1:65536", False),
-                                 ("http://127.0.0.1:41234", False)):
-            github = GITHUB | {"environment": {name: value.replace(BROKER, broker) for name, value in ROUTING.items()}}
-            if accepted:
-                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["OM_BROKER"], broker)
-            else:
-                with self.subTest(broker=broker), self.assertRaises(Fault):
-                    self.parse(VALID | {"github": github})
-        # Up to eleven Git entries: the host's pinned-key routing needs all of them.
-        for count in (11, 12):
-            entries = {f"GIT_CONFIG_{kind}_{index}": f"http.{BROKER}.sslVerify" if kind == "KEY" else "false"
-                       for index in range(count) for kind in ("KEY", "VALUE")}
-            github = GITHUB | {"environment": {"OM_BROKER": BROKER, "OM_BROKER_CAPABILITY": "c" * 43, "GIT_CONFIG_COUNT": str(count)} | entries}
-            if count == 11:
-                self.assertEqual(self.parse(VALID | {"github": github}).github.environment["GIT_CONFIG_COUNT"], "11")
-            else:
-                with self.assertRaises(Fault):
-                    self.parse(VALID | {"github": github})
 
     def test_capabilities_report_the_core_version_om_records(self):
         version = capabilities()["version"]
@@ -110,7 +97,7 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(policies, {"full_access": "available", "read_only": "platform_unsupported",
                                     "workspace": "platform_unsupported"})
         self.assertEqual(capabilities()["protocol"], 4)
-        self.assertEqual(capabilities()["github"], "https")
+        self.assertEqual(capabilities()["github"], "include")
         with patch.object(macos, "lifetime_unavailable_reason", return_value="platform_unsupported"):
             self.assertNotIn("github_client", capabilities())
         with patch.object(macos, "lifetime_unavailable_reason", return_value=None), \

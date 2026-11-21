@@ -41,10 +41,10 @@ class Terminal(BaseModel):
 
 
 # A session's routing to its host's GitHub broker: these exact variables, the broker on loopback over TLS
-# (the routing pins its key, so whatever else holds the port after the broker fails Git closed), Git keys
-# scoped to that broker, and values bounded to printable text.
+# (the routing pins its key, so whatever else holds the port after the broker fails Git closed), and one Git
+# include of the session's own routing file, directly in the host's routing folder.
 BROKER = r"https://127\.0\.0\.1:[1-9][0-9]{0,4}"
-GITHUB_COUNT = 11
+ROUTING = ("OM_BROKER", "OM_BROKER_CAPABILITY", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0")
 
 
 class GitHub(BaseModel):
@@ -52,23 +52,22 @@ class GitHub(BaseModel):
     Core's copy (github_client in capabilities)."""
     model_config = ConfigDict(extra="forbid", strict=True)
     environment: Annotated[dict[str, Annotated[str, Field(pattern=r"^[\x20-\x7e]{0,1024}$")]],
-                           Field(min_length=5, max_length=3 + 2 * GITHUB_COUNT)]
+                           Field(min_length=len(ROUTING), max_length=len(ROUTING))]
     client: Annotated[str, Field(min_length=2, max_length=1024)]
 
     @model_validator(mode="after")
     def _routing(self):
-        environment, broker = self.environment, self.environment.get("OM_BROKER", "")
-        count = environment.get("GIT_CONFIG_COUNT", "")
-        if (not re.fullmatch(BROKER, broker) or int(broker.rsplit(":", 1)[1]) > 65535
-                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment.get("OM_BROKER_CAPABILITY", ""))
-                or not re.fullmatch(r"[1-9][0-9]?", count) or int(count) > GITHUB_COUNT):
-            raise ValueError("github routing needs a loopback broker, a capability and a Git configuration count")
-        pairs = [(f"GIT_CONFIG_KEY_{index}", f"GIT_CONFIG_VALUE_{index}") for index in range(int(count))]
-        if set(environment) != {"OM_BROKER", "OM_BROKER_CAPABILITY", "GIT_CONFIG_COUNT", *(name for pair in pairs for name in pair)}:
+        environment = self.environment
+        if set(environment) != set(ROUTING):
             raise ValueError("github routing carries exactly its own variables")
-        scoped = re.compile(rf"url\.{re.escape(broker)}/[\x21-\x7e]*\.insteadOf|(credential|http)\.{re.escape(broker)}\.[A-Za-z]{{1,32}}")
-        if not all(scoped.fullmatch(environment[key]) for key, _ in pairs):
-            raise ValueError("github routing configures only its broker")
+        broker, routing = environment["OM_BROKER"], environment["GIT_CONFIG_VALUE_0"]
+        if (not re.fullmatch(BROKER, broker) or int(broker.rsplit(":", 1)[1]) > 65535
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", environment["OM_BROKER_CAPABILITY"])):
+            raise ValueError("github routing needs a loopback broker and a capability")
+        if (environment["GIT_CONFIG_COUNT"] != "1" or environment["GIT_CONFIG_KEY_0"] != "include.path"
+                or routing != os.path.join(rules.GITHUB_ROUTING, os.path.basename(routing))
+                or not re.fullmatch(r"[0-9a-f]{32}", os.path.basename(routing))):
+            raise ValueError("github routing includes one file of the host's routing folder")
         if (not os.path.isabs(self.client) or os.path.normpath(self.client) != self.client
                 or any(char in self.client for char in ':\0"\\') or any(ord(char) < 32 or ord(char) == 127 for char in self.client)):
             raise ValueError("github routing names its client by an exact absolute path")
